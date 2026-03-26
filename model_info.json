@@ -1,0 +1,9 @@
+{
+  "model_name": "gemma3:latest",
+  "training_version": "2.0",
+  "last_reset": "2026-03-26T20:01:31.236168",
+  "context_window": 4096,
+  "max_response_tokens": 2048,
+  "metadata_extraction": true,
+  "enhanced_search": true
+}

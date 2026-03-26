@@ -1,0 +1,33 @@
+BENEDIKT SCHAECHNER - PERSÖNLICHE INFORMATIONEN
+
+Name: Benedikt Schäechner
+Beruf: Software Entwickler
+Standort: Schweiz
+Programmiersprachen: Python, JavaScript, TypeScript, Java
+Interessen: Künstliche Intelligenz, Webentwicklung, Machine Learning
+
+PROJEKTE
+
+Aktuelle Projekte:
+- Lokale AI-Chat-Anwendung mit Ollama
+- Webentwicklung mit modernen Frameworks
+- Machine Learning Experimente
+
+ERFAHRUNG
+
+- Mehrjährige Erfahrung in der Softwareentwicklung
+- Fokus auf Backend- und Full-Stack-Entwicklung
+- Erfahrung mit Cloud-Technologien und Containern
+
+PREFERENZEN
+
+- Bevorzugt Python für Backend-Entwicklung
+- Nutzt gerne React für Frontend
+- Interessiert an neuen AI-Technologien
+- Arbeitet gerne mit Docker und Git
+
+KONTAKT
+
+- Arbeitet gerne im Team
+- Offen für neue Herausforderungen
+- Lernt gerne neue Technologien kennen

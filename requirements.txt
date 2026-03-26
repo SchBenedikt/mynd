@@ -1,0 +1,17 @@
+Flask==2.3.3
+Flask-CORS==4.0.0
+requests==2.31.0
+Ollama==0.4.1
+python-dotenv==1.0.0
+caldav==0.11.0
+vobject==0.9.6.1
+lxml==4.9.3
+beautifulsoup4==4.12.2
+nltk==3.8.1
+scikit-learn==1.3.2
+numpy==1.24.3
+pandas==2.0.3
+sentence-transformers==2.2.2
+torch==2.0.1
+transformers==4.35.2
+faiss-cpu==1.7.4

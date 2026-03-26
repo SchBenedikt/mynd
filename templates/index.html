@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat Assistant</title>
+    <style>
+        :root {
+            --primary: #1a1a1a;
+            --secondary: #f8f9fa;
+            --accent: #0066ff;
+            --text: #333333;
+            --text-light: #666666;
+            --border: #e1e4e8;
+            --success: #22c55e;
+            --error: #ef4444;
+            --shadow: rgba(0, 0, 0, 0.08);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+            background: var(--secondary);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            line-height: 1.5;
+        }
+
+        .chat-container {
+            width: 92%;
+            max-width: 900px;
+            height: 92vh;
+            max-height: 700px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 24px var(--shadow);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .chat-header {
+            background: var(--primary);
+            color: white;
+            padding: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .chat-header h1 {
+            font-size: 1.25rem;
+            font-weight: 500;
+            letter-spacing: -0.025em;
+        }
+
+        .status-indicators {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+            font-weight: 400;
+            opacity: 0.9;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+
+        .status-dot.disconnected {
+            background: var(--error);
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            background: var(--secondary);
+        }
+
+        .message {
+            margin-bottom: 16px;
+            display: flex;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-content {
+            max-width: 75%;
+            padding: 12px 16px;
+            border-radius: 8px;
+            word-wrap: break-word;
+            font-size: 0.925rem;
+            line-height: 1.6;
+        }
+
+        .message.user .message-content {
+            background: var(--accent);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.ai .message-content {
+            background: white;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 4px;
+        }
+
+        .typing-indicator {
+            display: none;
+            padding: 12px 16px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            border-bottom-left-radius: 4px;
+            max-width: 75%;
+        }
+
+        .typing-indicator span {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-light);
+            margin: 0 2px;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-6px); }
+        }
+
+        .chat-input {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid var(--border);
+        }
+
+        .input-container {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        #messageInput {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            outline: none;
+            font-size: 0.925rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            background: var(--secondary);
+        }
+
+        #messageInput:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
+        }
+
+        #sendButton {
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            width: 44px;
+            height: 44px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        #sendButton:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 102, 255, 0.2);
+        }
+
+        #sendButton:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .error-message {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: var(--error);
+            padding: 12px;
+            border-radius: 6px;
+            margin: 10px;
+            font-size: 0.875rem;
+        }
+
+        .context-info {
+            font-size: 0.75rem;
+            color: var(--text-light);
+            margin-top: 6px;
+            font-style: italic;
+            opacity: 0.8;
+        }
+
+        .knowledge-panel {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 16px;
+            max-height: 320px;
+            overflow-y: auto;
+        }
+
+        .knowledge-panel h3 {
+            margin: 0 0 16px 0;
+            color: var(--text);
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tab-button {
+            padding: 10px 16px;
+            border: none;
+            background: transparent;
+            border-radius: 6px 6px 0 0;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+            font-weight: 400;
+            color: var(--text-light);
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab-button:hover {
+            color: var(--text);
+            background: var(--secondary);
+        }
+
+        .tab-button.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+            font-weight: 500;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: var(--text);
+            font-size: 0.875rem;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.875rem;
+            background: var(--secondary);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
+        }
+
+        .load-button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .load-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 102, 255, 0.2);
+        }
+
+        .load-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .config-button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .config-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(26, 26, 26, 0.15);
+        }
+
+        .progress-container {
+            margin: 20px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s ease;
+            border-radius: 4px;
+        }
+
+        .progress-text {
+            text-align: center;
+            margin-top: 8px;
+            font-weight: 500;
+            color: var(--text);
+            font-size: 0.875rem;
+        }
+
+        .status-info {
+            background: var(--secondary);
+            padding: 16px;
+            border-radius: 6px;
+            margin: 16px 0;
+            border: 1px solid var(--border);
+        }
+
+        .status-info p {
+            margin: 6px 0;
+            font-size: 0.875rem;
+            color: var(--text);
+        }
+
+        .status-info strong {
+            color: var(--primary);
+        }
+
+        .stop-button {
+            background: var(--error);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .stop-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+        }
+
+        .error-log {
+            margin-top: 20px;
+            padding: 16px;
+            background: #fef2f2;
+            border-radius: 6px;
+            border: 1px solid #fecaca;
+        }
+
+        .error-log h4 {
+            color: var(--error);
+            margin: 0 0 12px 0;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .error-log div {
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 0.75rem;
+            color: var(--error);
+        }
+
+        .knowledge-info {
+            margin-top: 16px;
+            padding: 12px;
+            background: var(--secondary);
+            border-radius: 6px;
+            font-size: 0.875rem;
+            border: 1px solid var(--border);
+        }
+
+        .knowledge-info.success {
+            background: #f0fdf4;
+            color: var(--success);
+            border-color: #bbf7d0;
+        }
+
+        .knowledge-info.error {
+            background: #fef2f2;
+            color: var(--error);
+            border-color: #fecaca;
+        }
+
+        @media (max-width: 600px) {
+            .chat-container {
+                width: 96%;
+                height: 96vh;
+                border-radius: 8px;
+            }
+
+            .message-content {
+                max-width: 85%;
+            }
+
+            .chat-header h1 {
+                font-size: 1.125rem;
+            }
+
+            .status-indicators {
+                flex-direction: column;
+                gap: 6px;
+            }
+
+            .knowledge-panel {
+                margin: 12px;
+                padding: 16px;
+            }
+
+            .tabs {
+                flex-wrap: wrap;
+                gap: 4px;
+            }
+
+            .tab-button {
+                font-size: 0.75rem;
+                padding: 8px 12px;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>AI Assistant</h1>
+            <div class="status-indicators">
+                <div class="status" id="ollamaStatus">
+                    <span class="status-dot" id="ollamaDot"></span>
+                    <span>Ollama</span>
+                </div>
+                <div class="status" id="knowledgeStatus">
+                    <span class="status-dot" id="knowledgeDot"></span>
+                    <span>Knowledge</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="knowledge-panel" id="knowledgePanel">
+            <h3>Knowledge Base</h3>
+            
+            <div class="tab-container">
+                <div class="tabs">
+                    <button class="tab-button active" onclick="showTab('nextcloud', this)">Nextcloud</button>
+                    <button class="tab-button" onclick="showTab('local', this)">Local</button>
+                    <button class="tab-button" onclick="showTab('indexing', this)">Indexing</button>
+                    <button class="tab-button" onclick="showTab('graph', this)">Graph</button>
+                </div>
+                
+                <div class="tab-content active" id="nextcloud-tab">
+                    <div class="form-group">
+                        <label>Nextcloud URL:</label>
+                        <input type="url" id="nextcloudUrl" placeholder="https://your-nextcloud.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Username:</label>
+                        <input type="text" id="nextcloudUsername" placeholder="username">
+                    </div>
+                    <div class="form-group">
+                        <label>Password:</label>
+                        <input type="password" id="nextcloudPassword" placeholder="password">
+                    </div>
+                    <div class="form-group">
+                        <label>Directory (optional):</label>
+                        <input type="text" id="nextcloudPath" placeholder="/" value="/">
+                    </div>
+                    <div class="button-group">
+                        <button onclick="saveNextcloudConfig()" class="config-button">Save Config</button>
+                        <button onclick="startIndexing()" class="load-button">Start Indexing</button>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="local-tab">
+                    <div class="form-group">
+                        <label>Local Directory:</label>
+                        <input type="text" id="localPath" placeholder="/path/to/documents">
+                    </div>
+                    <button onclick="loadLocalKnowledge()" class="load-button">Load Local Documents</button>
+                </div>
+                
+                <div class="tab-content" id="indexing-tab">
+                    <h4>Indexing Status</h4>
+                    <div class="progress-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                        </div>
+                        <div class="progress-text" id="progressText">0%</div>
+                    </div>
+                    
+                    <div class="status-info">
+                        <p><strong>Status:</strong> <span id="indexingStatus">Idle</span></p>
+                        <p><strong>Current File:</strong> <span id="currentFile">-</span></p>
+                        <p><strong>Processed Files:</strong> <span id="processedFiles">0</span> / <span id="totalFiles">0</span></p>
+                        <p><strong>Elapsed Time:</strong> <span id="elapsedTime">0s</span></p>
+                        <p><strong>Errors:</strong> <span id="errorCount">0</span></p>
+                    </div>
+                    
+                    <div class="button-group">
+                        <button onclick="startIndexing()" class="load-button" id="startButton">Start Indexing</button>
+                        <button onclick="stopIndexing()" class="stop-button" id="stopButton">Stop Indexing</button>
+                    </div>
+                    
+                    <div class="error-log" id="errorLog" style="display: none;">
+                        <h4>Error Log:</h4>
+                        <div id="errorList"></div>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="graph-tab">
+                    <h4>Knowledge Graph Visualization</h4>
+                    <p style="margin-bottom: 15px; color: var(--text-light);">
+                        Interactive visualization of your knowledge base. Explore connections between documents and chunks.
+                    </p>
+                    <div class="button-group">
+                        <button onclick="openKnowledgeGraph()" class="load-button">Open Graph</button>
+                        <button onclick="window.open('/knowledge-graph', '_blank')" class="config-button">New Tab</button>
+                    </div>
+                    
+                    <div class="knowledge-info" style="margin-top: 15px;">
+                        <p><strong>Features:</strong></p>
+                        <ul style="margin: 10px 0; padding-left: 20px; color: var(--text-light);">
+                            <li>Search function for chunks and documents</li>
+                            <li>Interactive nodes with details</li>
+                            <li>Zoom and pan navigation</li>
+                            <li>Real-time statistics</li>
+                            <li>SVG export</li>
+                            <li>Physics simulation</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="knowledge-info" id="knowledgeInfo">
+                <p>No knowledge base loaded</p>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="message ai">
+                <div class="message-content">
+                    Hello! I'm your personal AI assistant. I can help you and have access to information about you. How can I help you today?
+                </div>
+            </div>
+        </div>
+
+        <div class="typing-indicator" id="typingIndicator">
+            <span></span>
+            <span></span>
+            <span></span>
+        </div>
+
+        <div class="chat-input">
+            <div class="input-container">
+                <input type="text" id="messageInput" placeholder="Type your message..." autocomplete="off">
+                <button id="sendButton">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chat App mit Non-Blocking Verbesserungen
+        class ChatApp {
+            constructor() {
+                this.chatMessages = document.getElementById('chatMessages');
+                this.messageInput = document.getElementById('messageInput');
+                this.sendButton = document.getElementById('sendButton');
+                this.typingIndicator = document.getElementById('typingIndicator');
+                
+                this.init();
+            }
+
+            init() {
+                this.sendButton.addEventListener('click', () => this.sendMessage());
+                this.messageInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                });
+
+                // Non-Blocking Status-Updates
+                this.checkStatus();
+                this.loadKnowledge();
+                
+                // UI-Interaktionen verbessern
+                this.setupUIOptimizations();
+            }
+            
+            setupUIOptimizations() {
+                // Prevent UI blocking during heavy operations
+                if ('requestIdleCallback' in window) {
+                    requestIdleCallback(() => {
+                        this.optimizeUI();
+                    });
+                }
+            }
+            
+            optimizeUI() {
+                // Optimize scrolling performance
+                this.chatMessages.style.scrollBehavior = 'smooth';
+                
+                // Prevent layout thrashing
+                this.chatMessages.style.willChange = 'scroll-position';
+            }
+
+            async checkStatus() {
+                // Parallel statt sequentielle requests
+                const [ollamaResponse, knowledgeResponse] = await Promise.allSettled([
+                    fetch('/api/ollama/status'),
+                    fetch('/api/knowledge/status')
+                ]);
+                
+                // Ollama Status
+                if (ollamaResponse.status === 'fulfilled') {
+                    try {
+                        const ollamaData = await ollamaResponse.value.json();
+                        const ollamaDot = document.getElementById('ollamaDot');
+                        if (ollamaData.connected) {
+                            ollamaDot.classList.remove('disconnected');
+                        } else {
+                            ollamaDot.classList.add('disconnected');
+                        }
+                    } catch (error) {
+                        document.getElementById('ollamaDot').classList.add('disconnected');
+                    }
+                } else {
+                    document.getElementById('ollamaDot').classList.add('disconnected');
+                }
+
+                // Knowledge Status
+                if (knowledgeResponse.status === 'fulfilled') {
+                    try {
+                        const knowledgeData = await knowledgeResponse.value.json();
+                        const knowledgeDot = document.getElementById('knowledgeDot');
+                        if (knowledgeData.chunks_loaded > 0) {
+                            knowledgeDot.classList.remove('disconnected');
+                        } else {
+                            knowledgeDot.classList.add('disconnected');
+                        }
+                    } catch (error) {
+                        document.getElementById('knowledgeDot').classList.add('disconnected');
+                    }
+                } else {
+                    document.getElementById('knowledgeDot').classList.add('disconnected');
+                }
+            }
+
+            async loadKnowledge() {
+                try {
+                    const response = await fetch('/api/knowledge/load', {
+                        method: 'POST'
+                    });
+                    const data = await response.json();
+                    console.log('Wissensbasis geladen:', data);
+                } catch (error) {
+                    console.error('Fehler beim Laden der Wissensbasis:', error);
+                }
+            }
+
+            async sendMessage() {
+                const message = this.messageInput.value.trim();
+                if (!message) return;
+
+                this.addMessage(message, 'user');
+                this.messageInput.value = '';
+                this.showTypingIndicator();
+                this.sendButton.disabled = true;
+
+                // Non-Blocking Chat mit Timeout
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s Timeout
+                    
+                    const response = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ message }),
+                        signal: controller.signal
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.addMessage(data.response, 'ai', data.context_used);
+                    } else {
+                        const data = await response.json();
+                        this.addMessage(`Fehler: ${data.error}`, 'ai');
+                    }
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        this.addMessage('Anfrage timeout. Bitte versuche es erneut.', 'ai');
+                    } else {
+                        this.addMessage('Verbindungsfehler. Bitte versuche es später erneut.', 'ai');
+                    }
+                } finally {
+                    this.hideTypingIndicator();
+                    this.sendButton.disabled = false;
+                    this.messageInput.focus();
+                }
+            }
+
+            addMessage(content, sender, usedContext = false) {
+                // Request Animation Frame für flüssige UI-Updates
+                requestAnimationFrame(() => {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = `message ${sender}`;
+
+                    const contentDiv = document.createElement('div');
+                    contentDiv.className = 'message-content';
+                    contentDiv.textContent = content;
+
+                    messageDiv.appendChild(contentDiv);
+
+                    if (usedContext && sender === 'ai') {
+                        const contextInfo = document.createElement('div');
+                        contextInfo.className = 'context-info';
+                        contextInfo.textContent = '*Basierend auf persönlichen Informationen';
+                        contentDiv.appendChild(contextInfo);
+                    }
+
+                    this.chatMessages.appendChild(messageDiv);
+                    
+                    // Non-Blocking Scroll mit RAF
+                    requestAnimationFrame(() => {
+                        this.scrollToBottom();
+                    });
+                });
+            }
+
+            showTypingIndicator() {
+                this.typingIndicator.style.display = 'block';
+                this.scrollToBottom();
+            }
+
+            hideTypingIndicator() {
+                this.typingIndicator.style.display = 'none';
+            }
+
+            scrollToBottom() {
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            }
+        }
+
+        // Tab-Funktionen
+        function showTab(tabName, buttonElement) {
+            // Tab-Buttons umschalten
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Aktiven Button setzen
+            if (buttonElement) {
+                buttonElement.classList.add('active');
+            }
+            
+            // Tab-Inhalte umschalten
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            const targetTab = document.getElementById(tabName + '-tab');
+            if (targetTab) {
+                targetTab.classList.add('active');
+            }
+        }
+
+        // Konfiguration speichern
+        async function saveNextcloudConfig() {
+            const url = document.getElementById('nextcloudUrl').value;
+            const username = document.getElementById('nextcloudUsername').value;
+            const password = document.getElementById('nextcloudPassword').value;
+            const path = document.getElementById('nextcloudPath').value;
+            
+            if (!url || !username || !password) {
+                updateKnowledgeInfo('Bitte alle Felder ausfüllen', 'error');
+                return;
+            }
+            
+            const button = event.target;
+            button.disabled = true;
+            button.textContent = 'Speichern...';
+            
+            try {
+                const response = await fetch('/api/indexing/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        username: username,
+                        password: password,
+                        path: path
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    updateKnowledgeInfo('Konfiguration gespeichert', 'success');
+                } else {
+                    updateKnowledgeInfo(`Fehler: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                updateKnowledgeInfo(`Verbindungsfehler: ${error.message}`, 'error');
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Konfiguration speichern';
+            }
+        }
+
+        // Indexierung starten - verbessert mit Auto-Config und Non-Blocking
+        async function startIndexing() {
+            const button = document.getElementById('startButton');
+            const originalText = button.textContent;
+            
+            button.disabled = true;
+            button.textContent = 'Starte...';
+            
+            try {
+                // Versuche Indexierung mit gespeicherter Konfiguration zu starten
+                const response = await fetch('/api/indexing/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({}) // Leerer Body - verwendet gespeicherte Konfiguration
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    updateKnowledgeInfo('Indexierung wurde gestartet', 'success');
+                    // Zum Indexing-Tab wechseln
+                    const indexingTab = document.querySelector('[onclick*="indexing"]');
+                    if (indexingTab) {
+                        showTab('indexing', indexingTab);
+                    }
+                    // Progress-Updates starten
+                    startProgressUpdates();
+                } else {
+                    updateKnowledgeInfo(`Fehler: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                updateKnowledgeInfo(`Verbindungsfehler: ${error.message}`, 'error');
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+
+        // Indexierung stoppen
+        async function stopIndexing() {
+            try {
+                const response = await fetch('/api/indexing/stop', {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    updateKnowledgeInfo('Indexierung wurde gestoppt', 'success');
+                } else {
+                    updateKnowledgeInfo(`Fehler: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                updateKnowledgeInfo(`Verbindungsfehler: ${error.message}`, 'error');
+            }
+        }
+
+        // Progress-Updates - verbessert mit Non-Blocking
+        let progressInterval = null;
+        let isUpdating = false;
+        
+        function startProgressUpdates() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+            
+            // Kürzere Intervalle für flüssigere UI
+            progressInterval = setInterval(() => {
+                if (!isUpdating) {
+                    updateProgress();
+                }
+            }, 500); // 500ms statt 1000ms
+        }
+        
+        function stopProgressUpdates() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+        }
+        
+        async function updateProgress() {
+            if (isUpdating) return;
+            isUpdating = true;
+            
+            try {
+                // Timeout für Request um Blockierung zu vermeiden
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 2000);
+                
+                const response = await fetch('/api/indexing/progress', {
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    updateProgressUI(data);
+                    
+                    // Stoppen wenn abgeschlossen
+                    if (data.status === 'completed' || data.status === 'error') {
+                        stopProgressUpdates();
+                    }
+                }
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    console.error('Error getting progress:', error);
+                }
+            } finally {
+                isUpdating = false;
+            }
+        }
+        
+        function updateProgressUI(progress) {
+            // Request Animation Frame für flüssigere UI-Updates
+            requestAnimationFrame(() => {
+                // Progress bar
+                const progressFill = document.getElementById('progressFill');
+                const progressText = document.getElementById('progressText');
+                
+                progressFill.style.width = progress.progress_percentage + '%';
+                progressText.textContent = Math.round(progress.progress_percentage) + '%';
+                
+                // Status
+                document.getElementById('indexingStatus').textContent = progress.status;
+                document.getElementById('currentFile').textContent = progress.current_file || '-';
+                document.getElementById('processedFiles').textContent = progress.processed_files;
+                document.getElementById('totalFiles').textContent = progress.total_files;
+                document.getElementById('elapsedTime').textContent = formatTime(progress.elapsed_time);
+                document.getElementById('errorCount').textContent = progress.errors.length;
+                
+                // Buttons
+                const startButton = document.getElementById('startButton');
+                const stopButton = document.getElementById('stopButton');
+                
+                if (progress.is_running) {
+                    startButton.disabled = true;
+                    stopButton.disabled = false;
+                } else {
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                }
+                
+                // Fehler anzeigen
+                if (progress.errors.length > 0) {
+                    document.getElementById('errorLog').style.display = 'block';
+                    document.getElementById('errorList').innerHTML = progress.errors.map(error => `<div>${error}</div>`).join('');
+                } else {
+                    document.getElementById('errorLog').style.display = 'none';
+                }
+                
+                // Wissensbasis-Status aktualisieren
+                if (progress.status === 'completed') {
+                    updateKnowledgeInfo(`Indexierung abgeschlossen: ${progress.processed_files} Dateien verarbeitet`, 'success');
+                    updateKnowledgeStatus();
+                } else if (progress.status === 'error') {
+                    updateKnowledgeInfo(`Indexierung fehlgeschlagen: ${progress.error_message}`, 'error');
+                }
+            });
+        }
+        
+        function formatTime(seconds) {
+            if (seconds < 60) {
+                return Math.round(seconds) + 's';
+            } else if (seconds < 3600) {
+                return Math.round(seconds / 60) + 'm';
+            } else {
+                return Math.round(seconds / 3600) + 'h';
+            }
+        }
+
+        // Knowledge Graph öffnen
+        function openKnowledgeGraph() {
+            window.open('/knowledge-graph', '_blank');
+        }
+
+        // Konfiguration laden
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/indexing/config');
+                const data = await response.json();
+                
+                if (response.ok && data.url) {
+                    document.getElementById('nextcloudUrl').value = data.url || '';
+                    document.getElementById('nextcloudUsername').value = data.username || '';
+                    document.getElementById('nextcloudPath').value = data.path || '/';
+                    // Passwort wird aus Sicherheitsgründen nicht geladen
+                }
+            } catch (error) {
+                console.error('Error loading config:', error);
+            }
+        }
+
+        // Lokale Ladefunktion
+        async function loadLocalKnowledge() {
+            const path = document.getElementById('localPath').value;
+            
+            if (!path) {
+                updateKnowledgeInfo('Bitte Verzeichnispfad eingeben', 'error');
+                return;
+            }
+            
+            const button = event.target;
+            button.disabled = true;
+            button.textContent = 'Lade...';
+            
+            try {
+                const response = await fetch('/api/knowledge/load-local', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        directory_path: path
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    updateKnowledgeInfo(
+                        `Erfolgreich geladen: ${data.chunks_loaded} Chunks aus ${data.documents_processed} Dokumenten`,
+                        'success'
+                    );
+                    updateKnowledgeStatus();
+                } else {
+                    updateKnowledgeInfo(`Fehler: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                updateKnowledgeInfo(`Verbindungsfehler: ${error.message}`, 'error');
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Lokale Dokumente laden';
+            }
+        }
+
+        function updateKnowledgeInfo(message, type = '') {
+            const info = document.getElementById('knowledgeInfo');
+            info.className = 'knowledge-info ' + type;
+            info.innerHTML = `<p>${message}</p>`;
+        }
+
+        async function updateKnowledgeStatus() {
+            try {
+                const response = await fetch('/api/knowledge/sources');
+                const data = await response.json();
+                
+                const knowledgeDot = document.getElementById('knowledgeDot');
+                if (data.total_chunks > 0) {
+                    knowledgeDot.classList.remove('disconnected');
+                } else {
+                    knowledgeDot.classList.add('disconnected');
+                }
+            } catch (error) {
+                console.error('Error updating knowledge status:', error);
+            }
+        }
+
+        // App initialisieren
+        document.addEventListener('DOMContentLoaded', () => {
+            new ChatApp();
+            
+            // Konfiguration laden
+            loadConfig();
+            
+            // Progress-Updates starten falls Indexierung läuft
+            updateProgress();
+        });
+    </script>
+</body>
+</html>
