@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Graph Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        :root {
+            --primary: #1a1a1a;
+            --secondary: #f8f9fa;
+            --accent: #0066ff;
+            --text: #333333;
+            --text-light: #666666;
+            --border: #e1e4e8;
+            --success: #22c55e;
+            --error: #ef4444;
+            --shadow: rgba(0, 0, 0, 0.08);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+            margin: 0;
+            padding: 24px;
+            background: var(--secondary);
+            min-height: 100vh;
+            color: var(--text);
+        }
+
+        .graph-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 24px var(--shadow);
+            padding: 24px;
+            margin: 0 auto;
+            max-width: 1200px;
+            border: 1px solid var(--border);
+        }
+
+        .graph-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .graph-title {
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--primary);
+            letter-spacing: -0.025em;
+        }
+
+        .graph-controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .control-button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        .control-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 102, 255, 0.2);
+        }
+
+        .control-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #graph {
+            width: 100%;
+            height: 600px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--secondary);
+        }
+
+        .node {
+            cursor: pointer;
+            stroke: white;
+            stroke-width: 2px;
+        }
+
+        .node:hover {
+            stroke-width: 3px;
+        }
+
+        .link {
+            stroke: var(--text-light);
+            stroke-opacity: 0.4;
+        }
+
+        .node-label {
+            font-size: 11px;
+            font-weight: 500;
+            fill: var(--text);
+            pointer-events: none;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: var(--primary);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.825rem;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 1000;
+            box-shadow: 0 4px 12px var(--shadow);
+        }
+
+        .stats-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-top: 24px;
+        }
+
+        .stat-card {
+            background: var(--secondary);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .stat-label {
+            font-size: 0.825rem;
+            color: var(--text-light);
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .legend {
+            display: flex;
+            gap: 16px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+            color: var(--text);
+        }
+
+        .legend-color {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+        }
+
+        .search-box {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.875rem;
+            width: 200px;
+            background: var(--secondary);
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-light);
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 16px;
+            }
+
+            .graph-container {
+                padding: 16px;
+                margin: 0;
+            }
+
+            .graph-header {
+                flex-direction: column;
+                gap: 16px;
+                align-items: flex-start;
+            }
+
+            .graph-controls {
+                flex-wrap: wrap;
+            }
+
+            #graph {
+                height: 400px;
+            }
+
+            .stats-panel {
+                grid-template-columns: 1fr;
+            }
+
+            .search-box {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="graph-container">
+        <div class="graph-header">
+            <h1 class="graph-title">Knowledge Graph</h1>
+            <input type="text" class="search-box" id="searchBox" placeholder="Search...">
+        </div>
+
+        <div class="graph-controls">
+            <button class="control-button" onclick="resetZoom()">Reset Zoom</button>
+            <button class="control-button" onclick="togglePhysics()">Toggle Physics</button>
+            <button class="control-button" onclick="exportGraph()">Export</button>
+            <button class="control-button" onclick="refreshData()">Refresh Data</button>
+        </div>
+
+        <svg id="graph"></svg>
+
+        <div class="stats-panel">
+            <div class="stat-card">
+                <div class="stat-label">Total Chunks</div>
+                <div class="stat-value" id="totalChunks">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Document Sources</div>
+                <div class="stat-value" id="documentSources">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Connections</div>
+                <div class="stat-value" id="connections">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Visible Nodes</div>
+                <div class="stat-value" id="visibleNodes">0</div>
+            </div>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background: #3b82f6;"></div>
+                <span>Document</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #10b981;"></div>
+                <span>Text Chunk</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #f59e0b;"></div>
+                <span>PDF</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ef4444;"></div>
+                <span>PowerPoint</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #8b5cf6;"></div>
+                <span>Other Formats</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        class KnowledgeGraph {
+            constructor() {
+                this.svg = d3.select("#graph");
+                this.width = 1000;
+                this.height = 600;
+                this.data = { nodes: [], links: [] };
+                this.simulation = null;
+                this.physicsEnabled = true;
+                
+                this.init();
+            }
+
+            async init() {
+                this.setupSVG();
+                await this.loadData();
+                this.createGraph();
+                this.setupInteractions();
+                this.updateStats();
+            }
+
+            setupSVG() {
+                const container = this.svg.node().parentElement;
+                const rect = container.getBoundingClientRect();
+                this.width = rect.width;
+                this.height = 600;
+
+                this.svg
+                    .attr("width", this.width)
+                    .attr("height", this.height);
+
+                // Clear existing content
+                this.svg.selectAll("*").remove();
+
+                // Create main group
+                this.g = this.svg.append("g");
+
+                // Add zoom behavior
+                const zoom = d3.zoom()
+                    .scaleExtent([0.1, 4])
+                    .on("zoom", (event) => {
+                        this.g.attr("transform", event.transform);
+                    });
+
+                this.svg.call(zoom);
+            }
+
+            async loadData() {
+                try {
+                    const response = await fetch('/api/knowledge/graph-data');
+                    const graphData = await response.json();
+                    
+                    this.data = this.processData(graphData);
+                } catch (error) {
+                    console.error('Error loading graph data:', error);
+                    this.data = { nodes: [], links: [] };
+                }
+            }
+
+            processData(rawData) {
+                const nodes = [];
+                const links = [];
+                const documentGroups = {};
+
+                // Create document nodes
+                rawData.sources.forEach((source, index) => {
+                    const docId = `doc_${index}`;
+                    const color = this.getColorByType(source.type);
+                    
+                    documentGroups[source.file] = {
+                        id: docId,
+                        name: source.file,
+                        type: source.type,
+                        color: color,
+                        chunks: []
+                    };
+                    
+                    nodes.push(documentGroups[source.file]);
+                });
+
+                // Create chunk nodes and links
+                rawData.chunks.forEach((chunk, index) => {
+                    const chunkId = `chunk_${index}`;
+                    const source = rawData.sources[index % rawData.sources.length];
+                    const docGroup = documentGroups[source.file];
+                    
+                    // Chunk node
+                    nodes.push({
+                        id: chunkId,
+                        name: `Chunk ${index + 1}`,
+                        type: 'chunk',
+                        content: chunk.substring(0, 100) + '...',
+                        fullContent: chunk,
+                        size: Math.min(Math.max(chunk.length / 10, 5), 20),
+                        color: this.lightenColor(docGroup.color, 0.3)
+                    });
+
+                    // Link to document
+                    links.push({
+                        source: docGroup.id,
+                        target: chunkId,
+                        value: 1
+                    });
+
+                    docGroup.chunks.push(chunkId);
+                });
+
+                // Create inter-chunk connections based on content similarity
+                for (let i = 0; i < rawData.chunks.length; i++) {
+                    for (let j = i + 1; j < rawData.chunks.length; j++) {
+                        const similarity = this.calculateSimilarity(
+                            rawData.chunks[i], 
+                            rawData.chunks[j]
+                        );
+                        
+                        if (similarity > 0.3) { // Threshold for connection
+                            links.push({
+                                source: `chunk_${i}`,
+                                target: `chunk_${j}`,
+                                value: similarity * 3
+                            });
+                        }
+                    }
+                }
+
+                return { nodes, links };
+            }
+
+            calculateSimilarity(text1, text2) {
+                const words1 = new Set(text1.toLowerCase().split(/\s+/));
+                const words2 = new Set(text2.toLowerCase().split(/\s+/));
+                
+                const intersection = new Set([...words1].filter(x => words2.has(x)));
+                const union = new Set([...words1, ...words2]);
+                
+                return intersection.size / union.size;
+            }
+
+            getColorByType(type) {
+                const colors = {
+                    '.pdf': '#667eea',
+                    '.docx': '#10b981',
+                    '.doc': '#10b981',
+                    '.pptx': '#f59e0b',
+                    '.ppt': '#f59e0b',
+                    '.txt': '#ef4444',
+                    '.md': '#ef4444',
+                    '.html': '#ef4444'
+                };
+                return colors[type] || '#8b5cf6';
+            }
+
+            lightenColor(color, factor) {
+                const num = parseInt(color.replace("#", ""), 16);
+                const amt = Math.round(2.55 * factor * 100);
+                const R = (num >> 16) + amt;
+                const G = (num >> 8 & 0x00FF) + amt;
+                const B = (num & 0x0000FF) + amt;
+                return "#" + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
+                    (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 +
+                    (B < 255 ? B < 1 ? 0 : B : 255))
+                    .toString(16).slice(1);
+            }
+
+            createGraph() {
+                // Create force simulation
+                this.simulation = d3.forceSimulation(this.data.nodes)
+                    .force("link", d3.forceLink(this.data.links)
+                        .id(d => d.id)
+                        .distance(d => 50 / d.value))
+                    .force("charge", d3.forceManyBody().strength(-300))
+                    .force("center", d3.forceCenter(this.width / 2, this.height / 2))
+                    .force("collision", d3.forceCollide().radius(d => d.size + 5));
+
+                // Create links
+                this.link = this.g.append("g")
+                    .selectAll("line")
+                    .data(this.data.links)
+                    .enter().append("line")
+                    .attr("class", "link")
+                    .attr("stroke-width", d => Math.sqrt(d.value));
+
+                // Create nodes
+                this.node = this.g.append("g")
+                    .selectAll("circle")
+                    .data(this.data.nodes)
+                    .enter().append("circle")
+                    .attr("class", "node")
+                    .attr("r", d => d.size || 10)
+                    .attr("fill", d => d.color)
+                    .call(this.drag());
+
+                // Create labels
+                this.label = this.g.append("g")
+                    .selectAll("text")
+                    .data(this.data.nodes.filter(d => d.type !== 'chunk'))
+                    .enter().append("text")
+                    .attr("class", "node-label")
+                    .attr("dx", 15)
+                    .attr("dy", 4)
+                    .text(d => d.name.length > 20 ? d.name.substring(0, 20) + "..." : d.name);
+
+                // Update positions on tick
+                this.simulation.on("tick", () => {
+                    this.link
+                        .attr("x1", d => d.source.x)
+                        .attr("y1", d => d.source.y)
+                        .attr("x2", d => d.target.x)
+                        .attr("y2", d => d.target.y);
+
+                    this.node
+                        .attr("cx", d => d.x)
+                        .attr("cy", d => d.y);
+
+                    this.label
+                        .attr("x", d => d.x)
+                        .attr("y", d => d.y);
+                });
+            }
+
+            drag() {
+                return d3.drag()
+                    .on("start", (event, d) => {
+                        if (!event.active) this.simulation.alphaTarget(0.3).restart();
+                        d.fx = d.x;
+                        d.fy = d.y;
+                    })
+                    .on("drag", (event, d) => {
+                        d.fx = event.x;
+                        d.fy = event.y;
+                    })
+                    .on("end", (event, d) => {
+                        if (!event.active) this.simulation.alphaTarget(0);
+                        d.fx = null;
+                        d.fy = null;
+                    });
+            }
+
+            setupInteractions() {
+                const tooltip = document.getElementById('tooltip');
+
+                // Node interactions
+                this.node
+                    .on("mouseover", (event, d) => {
+                        const content = d.type === 'chunk' ? d.fullContent : d.name;
+                        tooltip.innerHTML = `
+                            <strong>${d.name}</strong><br>
+                            ${d.type === 'chunk' ? content : `Type: ${d.type}<br>Chunks: ${d.chunks?.length || 0}`}
+                        `;
+                        tooltip.style.opacity = 1;
+                        tooltip.style.left = (event.pageX + 10) + 'px';
+                        tooltip.style.top = (event.pageY - 10) + 'px';
+                    })
+                    .on("mouseout", () => {
+                        tooltip.style.opacity = 0;
+                    })
+                    .on("click", (event, d) => {
+                        if (d.type === 'chunk') {
+                            this.showChunkDetails(d);
+                        }
+                    });
+
+                // Search functionality
+                document.getElementById('searchBox').addEventListener('input', (e) => {
+                    this.searchNodes(e.target.value);
+                });
+            }
+
+            searchNodes(query) {
+                if (!query) {
+                    this.node.style("opacity", 1);
+                    this.link.style("opacity", 0.6);
+                    return;
+                }
+
+                const lowerQuery = query.toLowerCase();
+                const matchingNodes = this.data.nodes.filter(d => 
+                    d.name.toLowerCase().includes(lowerQuery) ||
+                    (d.content && d.content.toLowerCase().includes(lowerQuery))
+                );
+
+                this.node.style("opacity", d => 
+                    matchingNodes.includes(d) ? 1 : 0.2
+                );
+
+                this.link.style("opacity", d => 
+                    matchingNodes.includes(d.source) || matchingNodes.includes(d.target) ? 0.6 : 0.1
+                );
+            }
+
+            showChunkDetails(chunk) {
+                const modal = document.createElement('div');
+                modal.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                    max-width: 600px;
+                    max-height: 80vh;
+                    overflow-y: auto;
+                    z-index: 2000;
+                `;
+
+                modal.innerHTML = `
+                    <h3>${chunk.name}</h3>
+                    <p style="margin-top: 10px; line-height: 1.6;">${chunk.fullContent}</p>
+                    <button onclick="this.parentElement.remove()" style="
+                        margin-top: 15px;
+                        padding: 8px 16px;
+                        background: #667eea;
+                        color: white;
+                        border: none;
+                        border-radius: 6px;
+                        cursor: pointer;
+                    ">Schließen</button>
+                `;
+
+                document.body.appendChild(modal);
+            }
+
+            updateStats() {
+                const chunks = this.data.nodes.filter(n => n.type === 'chunk');
+                const documents = this.data.nodes.filter(n => n.type !== 'chunk');
+                
+                document.getElementById('totalChunks').textContent = chunks.length;
+                document.getElementById('totalDocuments').textContent = documents.length;
+                document.getElementById('totalConnections').textContent = this.data.links.length;
+                
+                const avgSize = chunks.length > 0 
+                    ? Math.round(chunks.reduce((sum, c) => sum + (c.fullContent?.length || 0), 0) / chunks.length)
+                    : 0;
+                document.getElementById('avgChunkSize').textContent = avgSize;
+            }
+
+            togglePhysics() {
+                this.physicsEnabled = !this.physicsEnabled;
+                if (this.physicsEnabled) {
+                    this.simulation.alpha(0.3).restart();
+                } else {
+                    this.simulation.stop();
+                }
+            }
+
+            resetZoom() {
+                this.svg.transition().duration(750).call(
+                    d3.zoom().transform,
+                    d3.zoomIdentity
+                );
+            }
+
+            exportGraph() {
+                const svgData = this.svg.node().outerHTML;
+                const blob = new Blob([svgData], { type: 'image/svg+xml' });
+                const url = URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'knowledge-graph.svg';
+                a.click();
+                
+                URL.revokeObjectURL(url);
+            }
+
+            async refreshData() {
+                await this.loadData();
+                this.svg.selectAll("*").remove();
+                this.createGraph();
+                this.setupInteractions();
+                this.updateStats();
+            }
+        }
+
+        // Global functions for button controls
+        let graph;
+
+        function resetZoom() {
+            graph.resetZoom();
+        }
+
+        function togglePhysics() {
+            graph.togglePhysics();
+        }
+
+        function exportGraph() {
+            graph.exportGraph();
+        }
+
+        function refreshData() {
+            graph.refreshData();
+        }
+
+        // Initialize graph when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            graph = new KnowledgeGraph();
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            graph.setupSVG();
+            graph.simulation
+                .force("center", d3.forceCenter(graph.width / 2, graph.height / 2))
+                .alpha(0.3).restart();
+        });
+    </script>
+</body>
+</html>
