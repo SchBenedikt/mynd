@@ -13,7 +13,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata = {
-  title: "NextMind",
+  title: "MYND",
   description: "Next.js UI fuer deine lokale AI-Anwendung"
 };
 
