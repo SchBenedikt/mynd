@@ -1,284 +1,355 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de" data-theme="classic">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chat Assistant</title>
+    <title>NextMind - Second Brain</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM_Plex_Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --primary: #1a1a1a;
-            --secondary: #f8f9fa;
-            --accent: #0066ff;
-            --text: #333333;
-            --text-light: #666666;
-            --border: #e1e4e8;
-            --success: #22c55e;
-            --error: #ef4444;
-            --shadow: rgba(0, 0, 0, 0.08);
+            --bg-1: #f6f2e8;
+            --bg-2: #f0e6d6;
+            --ink: #17140f;
+            --muted: #5b5347;
+            --line: rgba(23, 20, 15, 0.14);
+            --brand: #0f7c5f;
+            --brand-2: #d76b2d;
+            --chip-bg: #fff8ec;
+            --chip-hover: #fff1dc;
+            --input-bg: rgba(255, 252, 247, 0.78);
+            --bubble-user: #e9fff6;
+            --bubble-assistant: #ffffff;
+            --font-space-grotesk: 'Space Grotesk', sans-serif;
+            --font-mono: 'IBM Plex Mono', monospace;
+        }
+
+        body[data-theme="ocean"] {
+            --bg-1: #eef4ff;
+            --bg-2: #dce8ff;
+            --ink: #121826;
+            --muted: #566074;
+            --line: rgba(18, 24, 38, 0.14);
+            --brand: #2f63ff;
+            --brand-2: #15b79e;
+            --chip-bg: #f4f8ff;
+            --chip-hover: #eaf2ff;
+            --input-bg: rgba(255, 255, 255, 0.82);
+            --bubble-user: #eaf2ff;
+            --bubble-assistant: #ffffff;
+        }
+
+        body[data-theme="graphite"] {
+            --bg-1: #f3f3f3;
+            --bg-2: #e7e7e7;
+            --ink: #181818;
+            --muted: #555555;
+            --line: rgba(24, 24, 24, 0.15);
+            --brand: #424242;
+            --brand-2: #8a6f50;
+            --chip-bg: #f8f8f8;
+            --chip-hover: #efefef;
+            --input-bg: rgba(248, 248, 248, 0.78);
+            --bubble-user: #e8e8e8;
+            --bubble-assistant: #ffffff;
         }
 
         * {
-            margin: 0;
-            padding: 0;
             box-sizing: border-box;
         }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
-            background: var(--secondary);
-            color: var(--text);
-            height: 100vh;
-            display: flex;
-            line-height: 1.5;
+        html, body {
+            margin: 0;
+            width: 100%;
+            height: 100%;
             overflow: hidden;
         }
 
-        .chat-container {
+        body {
+            color: var(--ink);
+            font-family: var(--font-space-grotesk), sans-serif;
+            background: radial-gradient(1200px 520px at -10% -20%, #fff8d9 0%, transparent 60%),
+                        radial-gradient(900px 420px at 110% 10%, #ffd7be 0%, transparent 55%),
+                        linear-gradient(145deg, var(--bg-1), var(--bg-2));
+        }
+
+        .container {
             width: 100%;
-            height: 100vh;
-            background: white;
+            height: 100%;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
-            border: none;
         }
 
-        .chat-header {
-            background: var(--primary);
-            color: white;
-            padding: 24px;
+        /* === TOPBAR === */
+        .topbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 58px;
             display: flex;
+            align-items: center;
             justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border);
+            gap: 0.7rem;
+            padding: 0.6rem 0.95rem;
+            border-bottom: 1px solid var(--line);
+            backdrop-filter: blur(8px);
+            background: rgba(255, 252, 247, 0.48);
+            z-index: 30;
         }
 
-        .chat-header h1 {
-            font-size: 1.25rem;
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .icon-btn {
+            border: 1px solid var(--line);
+            background: var(--chip-bg);
+            color: var(--ink);
+            border-radius: 999px;
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+
+        .icon-btn:hover {
+            background: var(--chip-hover);
+            border-color: var(--brand);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            font-size: 1rem;
             font-weight: 500;
-            letter-spacing: -0.025em;
         }
 
-        .status-indicators {
+        .brand-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--brand), var(--brand-2));
+            border-radius: 8px;
             display: flex;
-            gap: 20px;
             align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 700;
+            font-size: 1.1rem;
         }
 
-        .status {
+        .status-badge {
             display: flex;
             align-items: center;
-            gap: 8px;
-            font-size: 0.875rem;
-            font-weight: 400;
-            opacity: 0.9;
+            gap: 0.4rem;
+            padding: 0.3rem 0.6rem;
+            background: var(--chip-bg);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            font-size: 0.75rem;
+            color: var(--muted);
         }
 
         .status-dot {
             width: 6px;
             height: 6px;
             border-radius: 50%;
-            background: var(--success);
+            background: #888;
         }
 
-        .status-dot.disconnected {
-            background: var(--error);
+        .status-dot.ok {
+            background: var(--brand);
         }
 
-        .chat-messages {
+        .status-dot.error {
+            background: #ef4444;
+        }
+
+        /* === MAIN CONTENT === */
+        .main {
             flex: 1;
-            padding: 24px;
-            overflow-y: auto;
-            background: var(--secondary);
-        }
-
-        .message {
-            margin-bottom: 16px;
             display: flex;
-            animation: fadeIn 0.2s ease-out;
+            margin-top: 58px;
+            overflow: hidden;
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
+        /* === SIDEBAR === */
+        .sidebar {
+            width: 0;
+            background: var(--bg-2);
+            border-right: 1px solid var(--line);
+            overflow: hidden;
+            transition: width 0.3s ease;
+            z-index: 20;
         }
 
-        .message.user {
-            justify-content: flex-end;
+        .sidebar.open {
+            width: 360px;
         }
 
-        .message-content {
-            max-width: 75%;
-            padding: 12px 16px;
-            border-radius: 8px;
-            word-wrap: break-word;
-            font-size: 0.925rem;
-            line-height: 1.6;
+        .sidebar-content {
+            width: 360px;
+            height: 100%;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
         }
 
-        .message.user .message-content {
-            background: var(--accent);
-            color: white;
-            border-bottom-right-radius: 4px;
-        }
-
-        .message.ai .message-content {
-            background: white;
-            color: var(--text);
-            border: 1px solid var(--border);
-            border-bottom-left-radius: 4px;
-        }
-
-        .typing-indicator {
-            display: none;
-            padding: 12px 16px;
-            background: white;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            border-bottom-left-radius: 4px;
-            max-width: 75%;
-        }
-
-        .typing-indicator span {
-            display: inline-block;
+        .sidebar-content::-webkit-scrollbar {
             width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: var(--text-light);
-            margin: 0 2px;
-            animation: typing 1.4s infinite;
         }
 
-        .typing-indicator span:nth-child(2) {
-            animation-delay: 0.2s;
-        }
-
-        .typing-indicator span:nth-child(3) {
-            animation-delay: 0.4s;
-        }
-
-        @keyframes typing {
-            0%, 60%, 100% { transform: translateY(0); }
-            30% { transform: translateY(-6px); }
-        }
-
-        .chat-input {
-            padding: 20px;
-            background: white;
-            border-top: 1px solid var(--border);
-        }
-
-        .input-container {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-
-        #messageInput {
-            flex: 1;
-            padding: 12px 16px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            outline: none;
-            font-size: 0.925rem;
-            transition: border-color 0.2s, box-shadow 0.2s;
-            background: var(--secondary);
-        }
-
-        #messageInput:focus {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
-        }
-
-        #sendButton {
-            background: var(--accent);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            width: 44px;
-            height: 44px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: transform 0.15s, box-shadow 0.15s;
-        }
-
-        #sendButton:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0, 102, 255, 0.2);
-        }
-
-        #sendButton:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .error-message {
-            background: #fef2f2;
-            border: 1px solid #fecaca;
-            color: var(--error);
-            padding: 12px;
-            border-radius: 6px;
-            margin: 10px;
-            font-size: 0.875rem;
-        }
-
-        .context-info {
-            font-size: 0.75rem;
-            color: var(--text-light);
-            margin-top: 6px;
-            font-style: italic;
-            opacity: 0.8;
-        }
-
-        .knowledge-panel {
-            background: white;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 24px;
-            margin: 20px;
-            max-height: 400px;
-            overflow-y: auto;
-        }
-
-        .knowledge-panel h3 {
-            margin: 0 0 16px 0;
-            color: var(--text);
-            font-size: 1rem;
-            font-weight: 500;
-        }
-
-        .tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 16px;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .tab-button {
-            padding: 10px 16px;
-            border: none;
+        .sidebar-content::-webkit-scrollbar-track {
             background: transparent;
-            border-radius: 6px 6px 0 0;
+        }
+
+        .sidebar-content::-webkit-scrollbar-thumb {
+            background: var(--line);
+            border-radius: 3px;
+        }
+
+        .sidebar-content::-webkit-scrollbar-thumb:hover {
+            background: var(--muted);
+        }
+
+        .sidebar-section {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+        }
+
+        .section-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .input-group label {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--muted);
+        }
+
+        .input-group input, .input-group select {
+            padding: 0.5rem 0.75rem;
+            background: var(--input-bg);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: var(--ink);
+            font-family: var(--font-space-grotesk);
+            font-size: 0.9rem;
+            transition: border 0.2s;
+        }
+
+        .input-group input:focus, .input-group select:focus {
+            outline: none;
+            border-color: var(--brand);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            flex: 1;
+            min-width: 80px;
+            padding: 0.5rem 1rem;
+            background: var(--chip-bg);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            color: var(--ink);
+            font-size: 0.85rem;
+            font-weight: 500;
             cursor: pointer;
             transition: all 0.2s;
-            font-size: 0.875rem;
-            font-weight: 400;
-            color: var(--text-light);
+        }
+
+        .btn:hover {
+            background: var(--chip-hover);
+            border-color: var(--brand);
+        }
+
+        .btn.primary {
+            background: var(--brand);
+            color: white;
+            border-color: var(--brand);
+        }
+
+        .btn.primary:hover {
+            opacity: 0.9;
+        }
+
+        .status-text {
+            font-size: 0.8rem;
+            color: var(--muted);
+            padding: 0.5rem;
+            background: var(--chip-bg);
+            border-radius: 4px;
+            border-left: 3px solid var(--brand);
+        }
+
+        .status-text.error {
+            border-left-color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+
+        /* === TABS === */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 0.8rem;
+            margin-bottom: 1rem;
+            overflow-x: auto;
+        }
+
+        .tab-btn {
+            padding: 0.5rem 1rem;
+            background: transparent;
+            border: none;
             border-bottom: 2px solid transparent;
-        }
-
-        .tab-button:hover {
-            color: var(--text);
-            background: var(--secondary);
-        }
-
-        .tab-button.active {
-            color: var(--accent);
-            border-bottom-color: var(--accent);
+            color: var(--muted);
+            font-size: 0.85rem;
             font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .tab-btn:hover {
+            color: var(--ink);
+        }
+
+        .tab-btn.active {
+            color: var(--brand);
+            border-bottom-color: var(--brand);
         }
 
         .tab-content {
@@ -289,1384 +360,852 @@
             display: block;
         }
 
-        .form-group {
-            margin-bottom: 16px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 6px;
-            font-weight: 500;
-            color: var(--text);
-            font-size: 0.875rem;
-        }
-
-        .form-group input {
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            font-size: 0.875rem;
-            background: var(--secondary);
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-
-        .form-group input:focus {
-            outline: none;
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
-        }
-
-        .load-button {
-            background: var(--accent);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: transform 0.15s, box-shadow 0.15s;
-        }
-
-        .load-button:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0, 102, 255, 0.2);
-        }
-
-        .load-button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .button-group {
-            display: flex;
-            gap: 8px;
-            margin-top: 16px;
-        }
-
-        .config-button {
-            background: var(--primary);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: transform 0.15s, box-shadow 0.15s;
-        }
-
-        .config-button:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(26, 26, 26, 0.15);
-        }
-
-        .progress-container {
-            margin: 20px 0;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: var(--border);
-            border-radius: 4px;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: var(--accent);
-            transition: width 0.3s ease;
-            border-radius: 4px;
-        }
-
-        .progress-text {
-            text-align: center;
-            margin-top: 8px;
-            font-weight: 500;
-            color: var(--text);
-            font-size: 0.875rem;
-        }
-
-        .status-info {
-            background: var(--secondary);
-            padding: 16px;
-            border-radius: 6px;
-            margin: 16px 0;
-            border: 1px solid var(--border);
-        }
-
-        .status-info p {
-            margin: 6px 0;
-            font-size: 0.875rem;
-            color: var(--text);
-        }
-
-        .status-info strong {
-            color: var(--primary);
-        }
-
-        .stop-button {
-            background: var(--error);
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: transform 0.15s, box-shadow 0.15s;
-        }
-
-        .stop-button:hover:not(:disabled) {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
-        }
-
-        .error-log {
-            margin-top: 20px;
-            padding: 16px;
-            background: #fef2f2;
-            border-radius: 6px;
-            border: 1px solid #fecaca;
-        }
-
-        .error-log h4 {
-            color: var(--error);
-            margin: 0 0 12px 0;
-            font-size: 0.875rem;
-            font-weight: 500;
-        }
-
-        .error-log div {
-            max-height: 150px;
-            overflow-y: auto;
-            font-size: 0.75rem;
-            color: var(--error);
-        }
-
-        .knowledge-info {
-            margin-top: 16px;
-            padding: 12px;
-            background: var(--secondary);
-            border-radius: 6px;
-            font-size: 0.875rem;
-            border: 1px solid var(--border);
-        }
-
-        .knowledge-info.success {
-            background: #f0fdf4;
-            color: var(--success);
-            border-color: #bbf7d0;
-        }
-
-        .knowledge-info.error {
-            background: #fef2f2;
-            color: var(--error);
-            border-color: #fecaca;
-        }
-
-        .desktop-layout {
-            display: flex;
-            flex: 1;
-            overflow: hidden;
-        }
-        
-        .main-content {
+        /* === CHAT AREA === */
+        .chat-area {
             flex: 1;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
-        
-        .knowledge-sidebar {
-            width: 380px;
-            background: var(--secondary);
-            border-left: 1px solid var(--border);
-            overflow-y: auto;
-            display: none;
+
+        /* === LANDING VIEW === */
+        .landing {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            gap: 2rem;
+            text-align: center;
         }
-        
-        .knowledge-sidebar.collapsible {
-            display: block;
+
+        .landing-header {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            max-width: 500px;
         }
-        
-        @media (min-width: 1200px) {
-            .desktop-layout {
-                display: flex;
-            }
-            
-            .knowledge-sidebar {
-                display: block;
-            }
-            
-            .knowledge-panel {
-                margin: 0;
-                border-radius: 0;
-                border: none;
-                height: 100%;
-                max-height: none;
-            }
+
+        .landing-header h2 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin: 0;
+            color: var(--ink);
         }
-        
-        .toggle-sidebar {
-            display: none;
-            background: var(--accent);
+
+        .landing-header p {
+            font-size: 1.1rem;
+            color: var(--muted);
+            margin: 0;
+        }
+
+        .input-wrapper {
+            width: 100%;
+            max-width: 500px;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .input-wrapper input {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            background: var(--input-bg);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            color: var(--ink);
+            font-family: var(--font-space-grotesk);
+            font-size: 1rem;
+            transition: border 0.2s;
+        }
+
+        .input-wrapper input:focus {
+            outline: none;
+            border-color: var(--brand);
+        }
+
+        .input-wrapper button {
+            width: 44px;
+            height: 44px;
+            border-radius: 999px;
+            background: var(--brand);
             color: white;
             border: none;
-            padding: 8px 12px;
-            border-radius: 6px;
             cursor: pointer;
-            font-size: 0.875rem;
-            margin-right: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
         }
-        
-        @media (min-width: 1200px) {
-            .toggle-sidebar {
-                display: block;
-            }
+
+        .input-wrapper button:hover {
+            opacity: 0.9;
         }
-        
-        @media (min-width: 1200px) {
-            .chat-messages {
-                padding: 32px;
+
+        /* === CONVERSATION VIEW === */
+        .conversation {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 1.5rem;
+            gap: 1.5rem;
+            overflow-y: auto;
+        }
+
+        .messages {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            overflow-y: auto;
+            padding-right: 0.5rem;
+        }
+
+        .messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .messages::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .messages::-webkit-scrollbar-thumb {
+            background: var(--line);
+            border-radius: 3px;
+        }
+
+        .message {
+            display: flex;
+            gap: 0.75rem;
+            animation: slideIn 0.3s ease;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.user .bubble {
+            background: var(--bubble-user);
+            color: var(--ink);
+            border-radius: 18px 18px 4px 18px;
+        }
+
+        .message.assistant .bubble {
+            background: var(--bubble-assistant);
+            color: var(--ink);
+            border: 1px solid var(--line);
+            border-radius: 18px 18px 18px 4px;
+        }
+
+        .bubble {
+            max-width: 70%;
+            padding: 0.75rem 1rem;
+            word-wrap: break-word;
+            line-height: 1.4;
+            font-size: 0.95rem;
+        }
+
+        .thinking-indicator {
+            display: flex;
+            gap: 0.4rem;
+            align-items: center;
+            padding: 0.75rem 1rem;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--muted);
+            animation: bounce 1.4s infinite;
+        }
+
+        .dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes bounce {
+            0%, 60%, 100% { opacity: 0.3; }
+            30% { opacity: 1; }
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
             }
-            
-            .message-content {
-                max-width: 70%;
-                font-size: 1rem;
-            }
-            
-            .chat-header {
-                padding: 32px;
-            }
-            
-            .chat-header h1 {
-                font-size: 1.5rem;
-            }
-            
-            .chat-input {
-                padding: 24px;
+            to {
+                opacity: 1;
+                transform: translateY(0);
             }
         }
 
-        @media (max-width: 1199px) {
-            .desktop-layout {
-                flex-direction: column;
-            }
-            
-            .knowledge-sidebar {
-                width: 100%;
-                border-left: none;
-                border-top: 1px solid var(--border);
-                display: none;
-            }
-            
-            .toggle-sidebar {
-                display: block;
-            }
-            
-            .main-content {
-                width: 100%;
-            }
+        /* === COMPOSER === */
+        .composer {
+            display: flex;
+            gap: 0.5rem;
+            padding: 1rem;
+            border-top: 1px solid var(--line);
+            background: var(--bg-1);
         }
 
-        @media (max-width: 600px) {
-            .message-content {
+        .composer input {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            background: var(--input-bg);
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            color: var(--ink);
+            font-family: var(--font-space-grotesk);
+            font-size: 0.95rem;
+            transition: border 0.2s;
+        }
+
+        .composer input:focus {
+            outline: none;
+            border-color: var(--brand);
+        }
+
+        .composer button {
+            width: 44px;
+            height: 44px;
+            border-radius: 999px;
+            background: var(--brand);
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .composer button:hover {
+            opacity: 0.9;
+        }
+
+        .composer button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* === THEME SELECTOR === */
+        .theme-selector {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .theme-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .theme-btn.classic {
+            background: #d4a574;
+        }
+
+        .theme-btn.ocean {
+            background: #4fa3ff;
+        }
+
+        .theme-btn.graphite {
+            background: #808080;
+        }
+
+        .theme-btn.active {
+            border-color: var(--ink);
+            transform: scale(1.1);
+        }
+
+        /* === RESPONSIVE === */
+        @media (max-width: 768px) {
+            .landing-header h2 {
+                font-size: 1.8rem;
+            }
+
+            .bubble {
                 max-width: 85%;
             }
 
-            .chat-header h1 {
-                font-size: 1.125rem;
+            .sidebar.open {
+                width: 100%;
+                position: fixed;
+                height: 100%;
+                top: 58px;
+                left: 0;
             }
 
-            .status-indicators {
-                flex-direction: column;
-                gap: 6px;
-            }
-
-            .knowledge-panel {
-                margin: 12px;
-                padding: 16px;
-            }
-
-            .tabs {
-                flex-wrap: wrap;
-                gap: 4px;
-            }
-
-            .tab-button {
-                font-size: 0.75rem;
-                padding: 8px 12px;
-            }
-
-            .button-group {
-                flex-direction: column;
+            .main {
+                position: relative;
             }
         }
     </style>
 </head>
 <body>
-    <div class="chat-container">
-        <div class="chat-header">
-            <div style="display: flex; align-items: center;">
-                <button class="toggle-sidebar" onclick="toggleSidebar()">
-                    <i class="fas fa-bars"></i> Knowledge
+    <!-- TOPBAR -->
+    <div class="topbar">
+        <div class="topbar-left">
+            <button class="icon-btn" id="sidebarToggle" title="Menü">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="brand">
+                <div class="brand-icon">🧠</div>
+                <div>NextMind</div>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <div class="status-badge">
+                <span class="status-dot ok" id="statusDot"></span>
+                <span id="statusText">Checking...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN LAYOUT -->
+    <div class="main">
+        <!-- SIDEBAR -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-content">
+                <!-- TAB NAVIGATION -->
+                <div class="tabs">
+                    <button class="tab-btn active" onclick="showSettingTab('ai', event)">🤖 AI</button>
+                    <button class="tab-btn" onclick="showSettingTab('nextcloud', event)">☁️ Nextcloud</button>
+                    <button class="tab-btn" onclick="showSettingTab('indexing', event)">📊 Indexing</button>
+                    <button class="tab-btn" onclick="showSettingTab('graph', event)">🔗 Graph</button>
+                    <button class="tab-btn" onclick="showSettingTab('sources', event)">📂 Sources</button>
+                </div>
+
+                <!-- AI TAB -->
+                <div class="tab-content active" id="tab-ai">
+                    <div class="sidebar-section">
+                        <div class="section-title">🤖 AI Configuration</div>
+                        
+                        <div class="input-group">
+                            <label>Protocol</label>
+                            <select id="aiProtocol" onchange="updateAIPreview()">
+                                <option value="http">http</option>
+                                <option value="https">https</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label>Host</label>
+                            <input type="text" id="aiHost" placeholder="127.0.0.1" oninput="updateAIPreview()">
+                        </div>
+
+                        <div class="input-group">
+                            <label>Port</label>
+                            <input type="number" id="aiPort" min="1" max="65535" value="11434" oninput="updateAIPreview()">
+                        </div>
+
+                        <div class="input-group">
+                            <label>Base URL</label>
+                            <input type="text" id="aiBaseUrl" readonly style="background: var(--chip-bg);">
+                        </div>
+
+                        <div class="input-group">
+                            <label>Model</label>
+                            <select id="aiModel">
+                                <option value="">Loading...</option>
+                            </select>
+                        </div>
+
+                        <div id="aiStatus" class="status-text"></div>
+
+                        <div class="button-group">
+                            <button class="btn" onclick="saveAIConfig()">Save</button>
+                            <button class="btn" onclick="loadOllamaModels()">Reload</button>
+                        </div>
+
+                        <div class="input-group">
+                            <label>Test Prompt</label>
+                            <input type="text" id="aiTestPrompt" placeholder="Test your AI...">
+                        </div>
+                        <button class="btn primary" onclick="testAIConfig()" style="width: 100%;">Test AI</button>
+                    </div>
+                </div>
+
+                <!-- NEXTCLOUD TAB -->
+                <div class="tab-content" id="tab-nextcloud">
+                    <div class="sidebar-section">
+                        <div class="section-title">☁️ Nextcloud</div>
+                        
+                        <div class="input-group">
+                            <label>URL</label>
+                            <input type="url" id="nextcloudUrl" placeholder="https://your-nextcloud.com">
+                        </div>
+
+                        <div class="input-group">
+                            <label>Username</label>
+                            <input type="text" id="nextcloudUsername" placeholder="username">
+                        </div>
+
+                        <div class="input-group">
+                            <label>Password</label>
+                            <input type="password" id="nextcloudPassword" placeholder="password">
+                        </div>
+
+                        <div class="input-group">
+                            <label>Directory</label>
+                            <input type="text" id="nextcloudPath" placeholder="/" value="/">
+                        </div>
+
+                        <div class="button-group">
+                            <button class="btn" onclick="saveNextcloudConfig()">Save</button>
+                            <button class="btn" onclick="startIndexing()">Index Now</button>
+                        </div>
+
+                        <div id="nextcloudStatus" class="status-text" style="margin-top: 1rem;"></div>
+                    </div>
+                </div>
+
+                <!-- INDEXING TAB -->
+                <div class="tab-content" id="tab-indexing">
+                    <div class="sidebar-section">
+                        <div class="section-title">📊 Indexing Status</div>
+                        
+                        <div class="input-group">
+                            <label>Progress</label>
+                            <div style="background: var(--chip-bg); border-radius: 4px; overflow: hidden; height: 8px;">
+                                <div id="progressBar" style="width: 0%; height: 100%; background: var(--brand); transition: width 0.3s;"></div>
+                            </div>
+                            <small id="progressPercent">0%</small>
+                        </div>
+
+                        <div class="input-group" style="gap: 0.3rem;">
+                            <label style="font-weight: 600;">Status</label>
+                            <p id="indexingStatus" style="margin: 0; font-size: 0.9rem; color: var(--muted);">Idle</p>
+                            <p id="indexingStats" style="margin: 0.3rem 0 0 0; font-size: 0.8rem; color: var(--muted);">-</p>
+                        </div>
+
+                        <div class="button-group">
+                            <button class="btn" onclick="startIndexing()">Start</button>
+                            <button class="btn" onclick="stopIndexing()">Stop</button>
+                        </div>
+
+                        <div id="indexingInfo" class="status-text" style="margin-top: 1rem;"></div>
+                    </div>
+                </div>
+
+                <!-- GRAPH TAB -->
+                <div class="tab-content" id="tab-graph">
+                    <div class="sidebar-section">
+                        <div class="section-title">🔗 Knowledge Graph</div>
+                        
+                        <p style="font-size: 0.9rem; color: var(--muted); margin: 0.5rem 0;">
+                            Interactive visualization of your knowledge base
+                        </p>
+
+                        <div class="button-group">
+                            <button class="btn primary" onclick="openKnowledgeGraph()" style="width: 100%;">Open Graph</button>
+                        </div>
+
+                        <div id="graphStatus" class="status-text" style="margin-top: 1rem;"></div>
+                    </div>
+                </div>
+
+                <!-- SOURCES & THEME TAB -->
+                <div class="tab-content" id="tab-sources">
+                    <div class="sidebar-section">
+                        <div class="section-title">📂 Message Sources</div>
+                        <div class="input-group" style="gap: 0.5rem;">
+                            <label style="margin-bottom: 0.3rem;">
+                                <input type="radio" name="source" value="auto" checked> Auto
+                            </label>
+                            <label>
+                                <input type="radio" name="source" value="files"> Files
+                            </label>
+                            <label>
+                                <input type="radio" name="source" value="photos"> Photos
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="sidebar-section">
+                        <div class="section-title">🎨 Theme</div>
+                        <div class="theme-selector">
+                            <button class="theme-btn classic active" onclick="setTheme('classic')"></button>
+                            <button class="theme-btn ocean" onclick="setTheme('ocean')"></button>
+                            <button class="theme-btn graphite" onclick="setTheme('graphite')"></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CHAT AREA -->
+        <div class="chat-area">
+            <!-- LANDING VIEW -->
+            <div class="landing" id="landing">
+                <div class="landing-header">
+                    <h2>What's on your mind?</h2>
+                    <p>Ask anything about your knowledge base or get creative answers powered by AI.</p>
+                </div>
+                <div class="input-wrapper">
+                    <input type="text" id="landingInput" placeholder="Ask a question..." onkeypress="if(event.key==='Enter') sendMessage(this.value, 'landing')">
+                    <button onclick="sendMessage(document.getElementById('landingInput').value, 'landing')">
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- CONVERSATION VIEW (hidden initially) -->
+            <div class="conversation" id="conversation" style="display: none;">
+                <div class="messages" id="messages"></div>
+            </div>
+
+            <!-- COMPOSER (hidden initially) -->
+            <div class="composer" id="composer" style="display: none;">
+                <input type="text" id="composerInput" placeholder="Your message here..." onkeypress="if(event.key==='Enter' && !event.ctrlKey) sendMessage(this.value, 'composer')">
+                <button onclick="sendMessage(document.getElementById('composerInput').value, 'composer')">
+                    <i class="fas fa-arrow-right"></i>
                 </button>
-                <h1>AI Assistant</h1>
             </div>
-            <div class="status-indicators">
-                <div class="status" id="ollamaStatus">
-                    <span class="status-dot" id="ollamaDot"></span>
-                    <span>Ollama</span>
-                </div>
-                <div class="status" id="knowledgeStatus">
-                    <span class="status-dot" id="knowledgeDot"></span>
-                    <span>Knowledge</span>
-                </div>
-            </div>
-        </div>
-        
-        <div class="desktop-layout">
-            <div class="main-content">
-                <div class="chat-messages" id="chatMessages">
-                    <div class="message ai">
-                        <div class="message-content">
-                            Hello! I'm your personal AI assistant. I can help you and have access to information about you. How can I help you today?
-                        </div>
-                    </div>
-                </div>
-
-                <div class="typing-indicator" id="typingIndicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
-
-                <div class="chat-input">
-                    <div class="input-container">
-                        <input type="text" id="messageInput" placeholder="Type your message..." autocomplete="off">
-                        <button id="sendButton">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <line x1="22" y1="2" x2="11" y2="13"></line>
-                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="knowledge-sidebar" id="knowledgeSidebar">
-                <div class="knowledge-panel">
-                    <h3>Knowledge Base</h3>
-                    
-                    <div class="tab-container">
-                        <div class="tabs">
-                            <button class="tab-button" onclick="showTab('ai', this)">AI</button>
-                            <button class="tab-button active" onclick="showTab('nextcloud', this)">Nextcloud</button>
-                            <button class="tab-button" onclick="showTab('local', this)">Local</button>
-                            <button class="tab-button" onclick="showTab('indexing', this)">Indexing</button>
-                            <button class="tab-button" onclick="showTab('graph', this)">Graph</button>
-                        </div>
-
-                        <div class="tab-content" id="ai-tab">
-                            <div class="form-group">
-                                <label>Provider:</label>
-                                <input type="text" value="Ollama" disabled>
-                            </div>
-                            <div class="form-group">
-                                <label>Protokoll:</label>
-                                <select id="aiProtocol" onchange="updateAIBaseUrlPreview()">
-                                    <option value="http" selected>http</option>
-                                    <option value="https">https</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Ollama Host:</label>
-                                <input type="text" id="aiHost" placeholder="127.0.0.1" value="127.0.0.1" oninput="updateAIBaseUrlPreview()">
-                            </div>
-                            <div class="form-group">
-                                <label>Ollama Port:</label>
-                                <input type="number" id="aiPort" min="1" max="65535" value="11434" placeholder="11434" oninput="updateAIBaseUrlPreview()">
-                            </div>
-                            <div class="form-group">
-                                <label>Ollama Base URL (auto):</label>
-                                <input type="url" id="aiBaseUrl" placeholder="http://127.0.0.1:11434" readonly>
-                            </div>
-                            <div class="form-group">
-                                <label>Verfügbare Modelle:</label>
-                                <select id="aiModelSelect" onchange="selectAIModel()">
-                                    <option value="">Modelle werden geladen...</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label>Model (manuell):</label>
-                                <input type="text" id="aiModel" placeholder="gemma3:latest">
-                            </div>
-                            <div class="form-group">
-                                <label>Test-Prompt (optional):</label>
-                                <input type="text" id="aiTestPrompt" placeholder="Antworte nur mit: OK">
-                            </div>
-                            <div class="button-group">
-                                <button onclick="saveAIConfig()" class="config-button" id="saveAiConfigButton">AI speichern</button>
-                                <button onclick="loadAIConfig()" class="load-button">Neu laden</button>
-                                <button onclick="loadOllamaModels()" class="load-button">Modelle aktualisieren</button>
-                                <button onclick="testAIConfig()" class="load-button" id="testAiButton">AI testen</button>
-                            </div>
-                            <div class="knowledge-info" id="aiConfigInfo" style="margin-top: 12px;">
-                                <p>AI-Konfiguration noch nicht geladen</p>
-                            </div>
-                        </div>
-                        
-                        <div class="tab-content active" id="nextcloud-tab">
-                            <div class="form-group">
-                                <label>Nextcloud URL:</label>
-                                <input type="url" id="nextcloudUrl" placeholder="https://your-nextcloud.com">
-                            </div>
-                            <div class="form-group">
-                                <label>Username:</label>
-                                <input type="text" id="nextcloudUsername" placeholder="username">
-                            </div>
-                            <div class="form-group">
-                                <label>Password:</label>
-                                <input type="password" id="nextcloudPassword" placeholder="password">
-                            </div>
-                            <div class="form-group">
-                                <label>Directory (optional):</label>
-                                <input type="text" id="nextcloudPath" placeholder="/" value="/">
-                            </div>
-                            <div class="button-group">
-                                <button onclick="saveNextcloudConfig()" class="config-button">Save Config</button>
-                                <button onclick="startIndexing()" class="load-button">Start Indexing</button>
-                            </div>
-                        </div>
-                        
-                        <div class="tab-content" id="local-tab">
-                            <div class="form-group">
-                                <label>Local Directory:</label>
-                                <input type="text" id="localPath" placeholder="/path/to/documents">
-                            </div>
-                            <button onclick="loadLocalKnowledge()" class="load-button">Load Local Documents</button>
-                        </div>
-                        
-                        <div class="tab-content" id="indexing-tab">
-                            <h4>Indexing Status</h4>
-                            <div class="progress-container">
-                                <div class="progress-bar">
-                                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
-                                </div>
-                                <div class="progress-text" id="progressText">0%</div>
-                            </div>
-                            
-                            <div class="status-info">
-                                <p><strong>Status:</strong> <span id="indexingStatus">Idle</span></p>
-                                <p><strong>Current File:</strong> <span id="currentFile">-</span></p>
-                                <p><strong>Processed Files:</strong> <span id="processedFiles">0</span> / <span id="totalFiles">0</span></p>
-                                <p><strong>Elapsed Time:</strong> <span id="elapsedTime">0s</span></p>
-                                <p><strong>Errors:</strong> <span id="errorCount">0</span></p>
-                            </div>
-                            
-                            <div class="button-group">
-                                <button onclick="startIndexing()" class="load-button" id="startButton">Start Indexing</button>
-                                <button onclick="stopIndexing()" class="stop-button" id="stopButton">Stop Indexing</button>
-                            </div>
-                            
-                            <div class="error-log" id="errorLog" style="display: none;">
-                                <h4>Error Log:</h4>
-                                <div id="errorList"></div>
-                            </div>
-                        </div>
-                        
-                        <div class="tab-content" id="graph-tab">
-                            <h4>Knowledge Graph Visualization</h4>
-                            <p style="margin-bottom: 15px; color: var(--text-light);">
-                                Interactive visualization of your knowledge base. Explore connections between documents and chunks.
-                            </p>
-                            <div class="button-group">
-                                <button onclick="openKnowledgeGraph()" class="load-button">Open Graph</button>
-                                <button onclick="window.open('/knowledge-graph', '_blank')" class="config-button">New Tab</button>
-                            </div>
-                            
-                            <div class="knowledge-info" style="margin-top: 15px;">
-                                <p><strong>Features:</strong></p>
-                                <ul style="margin: 10px 0; padding-left: 20px; color: var(--text-light);">
-                                    <li>Search function for chunks and documents</li>
-                                    <li>Interactive nodes with details</li>
-                                    <li>Zoom and pan navigation</li>
-                                    <li>Real-time statistics</li>
-                                    <li>SVG export</li>
-                                    <li>Physics simulation</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="knowledge-info" id="knowledgeInfoSidebar">
-                        <p>No knowledge base loaded</p>
-                    </div>
-                </div>
-            </div>
-        </div>
         </div>
     </div>
 
     <script>
-        // Chat App mit Non-Blocking Verbesserungen
-        class ChatApp {
-            constructor() {
-                this.chatMessages = document.getElementById('chatMessages');
-                this.messageInput = document.getElementById('messageInput');
-                this.sendButton = document.getElementById('sendButton');
-                this.typingIndicator = document.getElementById('typingIndicator');
-                
-                this.init();
-            }
+        // === STATE ===
+        let currentTheme = localStorage.getItem('theme') || 'classic';
+        let isThinking = false;
+        let messages = [];
+        let progressInterval = null;
 
-            init() {
-                this.sendButton.addEventListener('click', () => this.sendMessage());
-                this.messageInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        this.sendMessage();
-                    }
-                });
+        // === INITIALIZATION ===
+        document.addEventListener('DOMContentLoaded', () => {
+            setTheme(currentTheme);
+            loadAIConfig();
+            loadOllamaModels();
+            updateStatus();
+            setInterval(updateStatus, 8000);
+        });
 
-                // Non-Blocking Status-Updates
-                this.checkStatus();
-                this.loadKnowledge();
-                
-                // UI-Interaktionen verbessern
-                this.setupUIOptimizations();
-            }
+        // === SIDEBAR TOGGLE ===
+        document.getElementById('sidebarToggle').addEventListener('click', () => {
+            document.getElementById('sidebar').classList.toggle('open');
+        });
+
+        // === TABS ===
+        function showSettingTab(tabName, event) {
+            event.preventDefault();
             
-            setupUIOptimizations() {
-                // Prevent UI blocking during heavy operations
-                if ('requestIdleCallback' in window) {
-                    requestIdleCallback(() => {
-                        this.optimizeUI();
-                    });
-                }
-            }
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
             
-            optimizeUI() {
-                // Optimize scrolling performance
-                this.chatMessages.style.scrollBehavior = 'smooth';
-                
-                // Prevent layout thrashing
-                this.chatMessages.style.willChange = 'scroll-position';
-            }
-
-            async checkStatus() {
-                // Parallel statt sequentielle requests
-                const [ollamaResponse, knowledgeResponse] = await Promise.allSettled([
-                    fetch('/api/ollama/status'),
-                    fetch('/api/knowledge/status')
-                ]);
-                
-                // Ollama Status
-                if (ollamaResponse.status === 'fulfilled') {
-                    try {
-                        const ollamaData = await ollamaResponse.value.json();
-                        const ollamaDot = document.getElementById('ollamaDot');
-                        if (ollamaData.connected) {
-                            ollamaDot.classList.remove('disconnected');
-                        } else {
-                            ollamaDot.classList.add('disconnected');
-                        }
-                    } catch (error) {
-                        document.getElementById('ollamaDot').classList.add('disconnected');
-                    }
-                } else {
-                    document.getElementById('ollamaDot').classList.add('disconnected');
-                }
-
-                // Knowledge Status
-                if (knowledgeResponse.status === 'fulfilled') {
-                    try {
-                        const knowledgeData = await knowledgeResponse.value.json();
-                        const knowledgeDot = document.getElementById('knowledgeDot');
-                        if (knowledgeData.chunks_loaded > 0) {
-                            knowledgeDot.classList.remove('disconnected');
-                        } else {
-                            knowledgeDot.classList.add('disconnected');
-                        }
-                    } catch (error) {
-                        document.getElementById('knowledgeDot').classList.add('disconnected');
-                    }
-                } else {
-                    document.getElementById('knowledgeDot').classList.add('disconnected');
-                }
-            }
-
-            async loadKnowledge() {
-                try {
-                    const response = await fetch('/api/knowledge/load', {
-                        method: 'POST'
-                    });
-                    const data = await response.json();
-                    console.log('Wissensbasis geladen:', data);
-                } catch (error) {
-                    console.error('Fehler beim Laden der Wissensbasis:', error);
-                }
-            }
-
-            async sendMessage() {
-                const message = this.messageInput.value.trim();
-                if (!message) return;
-
-                this.addMessage(message, 'user');
-                this.messageInput.value = '';
-                this.showTypingIndicator();
-                this.sendButton.disabled = true;
-
-                // Non-Blocking Chat mit Timeout
-                try {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s Timeout
-                    
-                    const response = await fetch('/api/chat', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ message }),
-                        signal: controller.signal
-                    });
-
-                    clearTimeout(timeoutId);
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        this.addMessage(data.response, 'ai', data.context_used);
-                    } else {
-                        const data = await response.json();
-                        this.addMessage(`Fehler: ${data.error}`, 'ai');
-                    }
-                } catch (error) {
-                    if (error.name === 'AbortError') {
-                        this.addMessage('Anfrage timeout. Bitte versuche es erneut.', 'ai');
-                    } else {
-                        this.addMessage('Verbindungsfehler. Bitte versuche es später erneut.', 'ai');
-                    }
-                } finally {
-                    this.hideTypingIndicator();
-                    this.sendButton.disabled = false;
-                    this.messageInput.focus();
-                }
-            }
-
-            addMessage(content, sender, usedContext = false) {
-                // Request Animation Frame für flüssige UI-Updates
-                requestAnimationFrame(() => {
-                    const messageDiv = document.createElement('div');
-                    messageDiv.className = `message ${sender}`;
-
-                    const contentDiv = document.createElement('div');
-                    contentDiv.className = 'message-content';
-                    contentDiv.textContent = content;
-
-                    messageDiv.appendChild(contentDiv);
-
-                    if (usedContext && sender === 'ai') {
-                        const contextInfo = document.createElement('div');
-                        contextInfo.className = 'context-info';
-                        contextInfo.textContent = '*Basierend auf persönlichen Informationen';
-                        contentDiv.appendChild(contextInfo);
-                    }
-
-                    this.chatMessages.appendChild(messageDiv);
-                    
-                    // Non-Blocking Scroll mit RAF
-                    requestAnimationFrame(() => {
-                        this.scrollToBottom();
-                    });
-                });
-            }
-
-            showTypingIndicator() {
-                this.typingIndicator.style.display = 'block';
-                this.scrollToBottom();
-            }
-
-            hideTypingIndicator() {
-                this.typingIndicator.style.display = 'none';
-            }
-
-            scrollToBottom() {
-                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
-            }
-        }
-
-        // Tab-Funktionen
-        function showTab(tabName, buttonElement) {
-            // Tab-Buttons umschalten
-            document.querySelectorAll('.tab-button').forEach(btn => {
+            // Deactivate all buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
             
-            // Aktiven Button setzen
-            if (buttonElement) {
-                buttonElement.classList.add('active');
+            // Show selected tab
+            const tab = document.getElementById(`tab-${tabName}`);
+            if (tab) {
+                tab.classList.add('active');
             }
             
-            // Tab-Inhalte umschalten
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.remove('active');
+            // Activate button
+            event.target.classList.add('active');
+            
+            // Start progress updates if indexing tab
+            if (tabName === 'indexing') {
+                updateProgress();
+            }
+        }
+
+        // === THEME ===
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            currentTheme = theme;
+            document.querySelectorAll('.theme-btn').forEach(btn => {
+                btn.classList.remove('active');
             });
-            const targetTab = document.getElementById(tabName + '-tab');
-            if (targetTab) {
-                targetTab.classList.add('active');
-            }
+            document.querySelector(`.theme-btn.${theme}`).classList.add('active');
         }
 
-        // Konfiguration speichern
-        async function saveNextcloudConfig() {
-            const url = document.getElementById('nextcloudUrl').value;
-            const username = document.getElementById('nextcloudUsername').value;
-            const password = document.getElementById('nextcloudPassword').value;
-            const path = document.getElementById('nextcloudPath').value;
-            
-            if (!url || !username || !password) {
-                updateKnowledgeInfo('Bitte alle Felder ausfüllen', 'error');
-                return;
-            }
-            
-            const button = event.target;
-            button.disabled = true;
-            button.textContent = 'Speichern...';
-            
-            try {
-                const response = await fetch('/api/indexing/config', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        url: url,
-                        username: username,
-                        password: password,
-                        path: path
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    updateKnowledgeInfo('Konfiguration gespeichert', 'success');
-                } else {
-                    updateKnowledgeInfo(`Fehler: ${data.error}`, 'error');
-                }
-            } catch (error) {
-                updateKnowledgeInfo(`Verbindungsfehler: ${error.message}`, 'error');
-            } finally {
-                button.disabled = false;
-                button.textContent = 'Konfiguration speichern';
-            }
-        }
-
-        // Indexierung starten - verbessert mit Auto-Config und Non-Blocking
-        async function startIndexing() {
-            const button = document.getElementById('startButton');
-            const originalText = button.textContent;
-            
-            button.disabled = true;
-            button.textContent = 'Starte...';
-            
-            try {
-                // Versuche Indexierung mit gespeicherter Konfiguration zu starten
-                const response = await fetch('/api/indexing/start', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({}) // Leerer Body - verwendet gespeicherte Konfiguration
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    updateKnowledgeInfo('Indexierung wurde gestartet', 'success');
-                    // Zum Indexing-Tab wechseln
-                    const indexingTab = document.querySelector('[onclick*="indexing"]');
-                    if (indexingTab) {
-                        showTab('indexing', indexingTab);
-                    }
-                    // Progress-Updates starten
-                    startProgressUpdates();
-                } else {
-                    updateKnowledgeInfo(`Fehler: ${data.error}`, 'error');
-                }
-            } catch (error) {
-                updateKnowledgeInfo(`Verbindungsfehler: ${error.message}`, 'error');
-            } finally {
-                button.disabled = false;
-                button.textContent = originalText;
-            }
-        }
-
-        // Indexierung stoppen
-        async function stopIndexing() {
-            try {
-                const response = await fetch('/api/indexing/stop', {
-                    method: 'POST'
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    updateKnowledgeInfo('Indexierung wurde gestoppt', 'success');
-                } else {
-                    updateKnowledgeInfo(`Fehler: ${data.error}`, 'error');
-                }
-            } catch (error) {
-                updateKnowledgeInfo(`Verbindungsfehler: ${error.message}`, 'error');
-            }
-        }
-
-        // Progress-Updates - verbessert mit Non-Blocking
-        let progressInterval = null;
-        let isUpdating = false;
-        
-        function startProgressUpdates() {
-            if (progressInterval) {
-                clearInterval(progressInterval);
-            }
-            
-            // Kürzere Intervalle für flüssigere UI
-            progressInterval = setInterval(() => {
-                if (!isUpdating) {
-                    updateProgress();
-                }
-            }, 500); // 500ms statt 1000ms
-        }
-        
-        function stopProgressUpdates() {
-            if (progressInterval) {
-                clearInterval(progressInterval);
-                progressInterval = null;
-            }
-        }
-        
-        async function updateProgress() {
-            if (isUpdating) return;
-            isUpdating = true;
-            
-            try {
-                // Timeout für Request um Blockierung zu vermeiden
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 2000);
-                
-                const response = await fetch('/api/indexing/progress', {
-                    signal: controller.signal
-                });
-                
-                clearTimeout(timeoutId);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    updateProgressUI(data);
-                    
-                    // Stoppen wenn abgeschlossen
-                    if (data.status === 'completed' || data.status === 'error') {
-                        stopProgressUpdates();
-                    }
-                }
-            } catch (error) {
-                if (error.name !== 'AbortError') {
-                    console.error('Error getting progress:', error);
-                }
-            } finally {
-                isUpdating = false;
-            }
-        }
-        
-        function updateProgressUI(progress) {
-            // Request Animation Frame für flüssigere UI-Updates
-            requestAnimationFrame(() => {
-                // Progress bar
-                const progressFill = document.getElementById('progressFill');
-                const progressText = document.getElementById('progressText');
-                
-                progressFill.style.width = progress.progress_percentage + '%';
-                progressText.textContent = Math.round(progress.progress_percentage) + '%';
-                
-                // Status
-                document.getElementById('indexingStatus').textContent = progress.status;
-                document.getElementById('currentFile').textContent = progress.current_file || '-';
-                document.getElementById('processedFiles').textContent = progress.processed_files;
-                document.getElementById('totalFiles').textContent = progress.total_files;
-                document.getElementById('elapsedTime').textContent = formatTime(progress.elapsed_time);
-                document.getElementById('errorCount').textContent = progress.errors.length;
-                
-                // Buttons
-                const startButton = document.getElementById('startButton');
-                const stopButton = document.getElementById('stopButton');
-                
-                if (progress.is_running) {
-                    startButton.disabled = true;
-                    stopButton.disabled = false;
-                } else {
-                    startButton.disabled = false;
-                    stopButton.disabled = true;
-                }
-                
-                // Fehler anzeigen
-                if (progress.errors.length > 0) {
-                    document.getElementById('errorLog').style.display = 'block';
-                    document.getElementById('errorList').innerHTML = progress.errors.map(error => `<div>${error}</div>`).join('');
-                } else {
-                    document.getElementById('errorLog').style.display = 'none';
-                }
-                
-                // Wissensbasis-Status aktualisieren
-                if (progress.status === 'completed') {
-                    updateKnowledgeInfo(`Indexierung abgeschlossen: ${progress.processed_files} Dateien verarbeitet`, 'success');
-                    updateKnowledgeStatus();
-                } else if (progress.status === 'error') {
-                    updateKnowledgeInfo(`Indexierung fehlgeschlagen: ${progress.error_message}`, 'error');
-                }
-            });
-        }
-        
-        function formatTime(seconds) {
-            if (seconds < 60) {
-                return Math.round(seconds) + 's';
-            } else if (seconds < 3600) {
-                return Math.round(seconds / 60) + 'm';
-            } else {
-                return Math.round(seconds / 3600) + 'h';
-            }
-        }
-
-        // Knowledge Graph öffnen
-        function openKnowledgeGraph() {
-            window.open('/knowledge-graph', '_blank');
-        }
-
-        // Konfiguration laden
-        async function loadConfig() {
-            try {
-                const response = await fetch('/api/indexing/config');
-                const data = await response.json();
-                
-                if (response.ok && data.url) {
-                    document.getElementById('nextcloudUrl').value = data.url || '';
-                    document.getElementById('nextcloudUsername').value = data.username || '';
-                    document.getElementById('nextcloudPath').value = data.path || '/';
-                    // Passwort wird aus Sicherheitsgründen nicht geladen
-                }
-            } catch (error) {
-                console.error('Error loading config:', error);
-            }
+        // === AI CONFIG ===
+        function updateAIPreview() {
+            const protocol = document.getElementById('aiProtocol').value;
+            const host = document.getElementById('aiHost').value || '127.0.0.1';
+            const port = document.getElementById('aiPort').value;
+            const baseUrl = `${protocol}://${host}:${port}`;
+            document.getElementById('aiBaseUrl').value = baseUrl;
         }
 
         async function loadAIConfig() {
             try {
-                const response = await fetch('/api/ai/config');
-                const data = await response.json();
-
-                if (response.ok) {
-                    const baseParts = parseBaseUrlParts(data.base_url || '');
-                    document.getElementById('aiProtocol').value = baseParts.protocol;
-                    document.getElementById('aiHost').value = baseParts.host;
-                    document.getElementById('aiPort').value = baseParts.port;
-                    updateAIBaseUrlPreview();
-                    document.getElementById('aiModel').value = data.model || '';
-                    await loadOllamaModels(data.model || '');
-                    updateAIConfigInfo(
-                        `Aktiv: ${data.model} @ ${data.base_url} (${data.connected ? 'verbunden' : 'nicht verbunden'})`,
-                        data.connected ? 'success' : 'error'
-                    );
-                } else {
-                    updateAIConfigInfo(`Fehler: ${data.error || 'Unbekannter Fehler'}`, 'error');
-                }
-            } catch (error) {
-                updateAIConfigInfo(`Verbindungsfehler: ${error.message}`, 'error');
-            }
-        }
-
-        function selectAIModel() {
-            const modelSelect = document.getElementById('aiModelSelect');
-            const modelInput = document.getElementById('aiModel');
-
-            if (modelSelect && modelInput && modelSelect.value) {
-                modelInput.value = modelSelect.value;
-            }
-        }
-
-        async function loadOllamaModels(preferredModel = '') {
-            const modelSelect = document.getElementById('aiModelSelect');
-            if (!modelSelect) return;
-
-            modelSelect.disabled = true;
-            modelSelect.innerHTML = '';
-
-            const loadingOption = document.createElement('option');
-            loadingOption.value = '';
-            loadingOption.textContent = 'Modelle werden geladen...';
-            modelSelect.appendChild(loadingOption);
-
-            try {
-                const response = await fetch('/api/ollama/models');
-                const data = await response.json();
-
-                let models = Array.isArray(data.models) ? data.models.slice() : [];
-                const currentModel = preferredModel || document.getElementById('aiModel').value.trim() || data.current_model || '';
-
-                if (currentModel && !models.includes(currentModel)) {
-                    models.unshift(currentModel);
-                }
-
-                modelSelect.innerHTML = '';
-
-                if (!models.length) {
-                    const emptyOption = document.createElement('option');
-                    emptyOption.value = '';
-                    emptyOption.textContent = 'Keine Modelle gefunden';
-                    modelSelect.appendChild(emptyOption);
-                    modelSelect.disabled = true;
-
-                    if (data.error) {
-                        updateAIConfigInfo(`Modelle konnten nicht geladen werden: ${data.error}`, 'error');
-                    }
-                    return;
-                }
-
-                models.forEach((modelName) => {
-                    const option = document.createElement('option');
-                    option.value = modelName;
-                    option.textContent = modelName;
-                    modelSelect.appendChild(option);
-                });
-
-                if (currentModel && models.includes(currentModel)) {
-                    modelSelect.value = currentModel;
-                } else {
-                    modelSelect.selectedIndex = 0;
-                    selectAIModel();
-                }
-
-                modelSelect.disabled = false;
-            } catch (error) {
-                modelSelect.innerHTML = '';
-                const errorOption = document.createElement('option');
-                errorOption.value = '';
-                errorOption.textContent = 'Modell-Liste nicht erreichbar';
-                modelSelect.appendChild(errorOption);
-                modelSelect.disabled = true;
-                updateAIConfigInfo(`Modelle konnten nicht geladen werden: ${error.message}`, 'error');
+                const res = await fetch('/api/ai/config');
+                const config = await res.json();
+                const url = new URL(config.base_url);
+                document.getElementById('aiProtocol').value = url.protocol.replace(':', '');
+                document.getElementById('aiHost').value = url.hostname;
+                document.getElementById('aiPort').value = url.port || 11434;
+                document.getElementById('aiModel').value = config.model;
+                updateAIPreview();
+                document.getElementById('aiStatus').innerHTML = '✓ Config loaded';
+            } catch (err) {
+                console.error('Error loading config:', err);
             }
         }
 
         async function saveAIConfig() {
-            const protocol = document.getElementById('aiProtocol').value.trim() || 'http';
-            const hostInput = document.getElementById('aiHost').value.trim();
-            const portInput = document.getElementById('aiPort').value.trim() || '11434';
-            const model = document.getElementById('aiModel').value.trim();
-            const button = document.getElementById('saveAiConfigButton');
-
-            const host = sanitizeHost(hostInput);
-            if (!host) {
-                updateAIConfigInfo('Bitte einen gültigen Host angeben.', 'error');
-                return;
-            }
-
-            document.getElementById('aiHost').value = host;
-
-            const port = parseInt(portInput, 10);
-            if (!Number.isInteger(port) || port < 1 || port > 65535) {
-                updateAIConfigInfo('Ungültiger Port. Erlaubt sind 1-65535.', 'error');
-                return;
-            }
-
-            const baseUrl = buildBaseUrl(protocol, host, port);
-            document.getElementById('aiBaseUrl').value = baseUrl;
-
-            if (!baseUrl || !model) {
-                updateAIConfigInfo('Bitte Base URL und Modell ausfüllen', 'error');
-                return;
-            }
-
-            const originalText = button.textContent;
-            button.disabled = true;
-            button.textContent = 'Speichere...';
-
             try {
-                const response = await fetch('/api/ai/config', {
+                const baseUrl = document.getElementById('aiBaseUrl').value;
+                const model = document.getElementById('aiModel').value;
+                const res = await fetch('/api/ai/config', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        base_url: baseUrl,
-                        model: model
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ base_url: baseUrl, model })
                 });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    await loadOllamaModels(data.model || model);
-                    updateAIConfigInfo(
-                        `Gespeichert: ${data.model} @ ${data.base_url} (${data.connected ? 'verbunden' : 'nicht verbunden'})`,
-                        data.connected ? 'success' : 'error'
-                    );
-
-                    // Status in der Header-Leiste direkt aktualisieren
-                    const ollamaDot = document.getElementById('ollamaDot');
-                    if (data.connected) {
-                        ollamaDot.classList.remove('disconnected');
-                    } else {
-                        ollamaDot.classList.add('disconnected');
-                    }
-                } else {
-                    updateAIConfigInfo(`Fehler: ${data.error || 'Konnte nicht speichern'}`, 'error');
-                }
-            } catch (error) {
-                updateAIConfigInfo(`Verbindungsfehler: ${error.message}`, 'error');
-            } finally {
-                button.disabled = false;
-                button.textContent = originalText;
+                const result = await res.json();
+                document.getElementById('aiStatus').innerHTML = '✓ Saved successfully';
+                document.getElementById('aiStatus').style.color = 'var(--brand)';
+                updateStatus();
+            } catch (err) {
+                document.getElementById('aiStatus').innerHTML = '✗ Error saving';
+                document.getElementById('aiStatus').classList.add('error');
             }
         }
 
-        function extractPortFromBaseUrl(baseUrl) {
+        async function loadOllamaModels() {
             try {
-                const url = new URL(baseUrl);
-                if (url.port) {
-                    return url.port;
-                }
-                return url.protocol === 'https:' ? '443' : '11434';
-            } catch {
-                return '11434';
-            }
-        }
-
-        function parseBaseUrlParts(baseUrl) {
-            try {
-                const url = new URL(baseUrl);
-                return {
-                    protocol: url.protocol === 'https:' ? 'https' : 'http',
-                    host: url.hostname || '127.0.0.1',
-                    port: url.port || (url.protocol === 'https:' ? '443' : '11434')
-                };
-            } catch {
-                return {
-                    protocol: 'http',
-                    host: '127.0.0.1',
-                    port: '11434'
-                };
-            }
-        }
-
-        function sanitizeHost(hostInput) {
-            if (!hostInput) return '';
-
-            let host = hostInput.trim();
-            host = host.replace(/^https?:\/\//i, '');
-            host = host.split('/')[0];
-
-            // Entferne Port falls versehentlich im Host-Feld eingetragen
-            const colonIndex = host.lastIndexOf(':');
-            if (colonIndex > -1 && !host.includes(']')) {
-                const possiblePort = host.slice(colonIndex + 1);
-                if (/^\d+$/.test(possiblePort)) {
-                    host = host.slice(0, colonIndex);
-                }
-            }
-
-            return host;
-        }
-
-        function buildBaseUrl(protocol, host, port) {
-            const safeProtocol = protocol === 'https' ? 'https' : 'http';
-            return `${safeProtocol}://${host}:${port}`;
-        }
-
-        function updateAIBaseUrlPreview() {
-            const protocol = document.getElementById('aiProtocol')?.value || 'http';
-            const host = sanitizeHost(document.getElementById('aiHost')?.value || '');
-            const port = document.getElementById('aiPort')?.value || '11434';
-            const baseUrlField = document.getElementById('aiBaseUrl');
-
-            if (!baseUrlField) return;
-
-            if (!host) {
-                baseUrlField.value = '';
-                return;
-            }
-
-            baseUrlField.value = buildBaseUrl(protocol, host, port);
-        }
-
-        function applyPortToBaseUrl(baseUrl, port) {
-            try {
-                const url = new URL(baseUrl);
-                url.port = String(port);
-                return url.toString().replace(/\/$/, '');
-            } catch {
-                return `http://127.0.0.1:${port}`;
+                const res = await fetch('/api/ollama/models');
+                const data = await res.json();
+                const select = document.getElementById('aiModel');
+                select.innerHTML = '';
+                data.models.forEach(model => {
+                    const opt = document.createElement('option');
+                    opt.value = model;
+                    opt.textContent = model;
+                    select.appendChild(opt);
+                });
+            } catch (err) {
+                console.error('Error loading models:', err);
             }
         }
 
         async function testAIConfig() {
-            const promptInput = document.getElementById('aiTestPrompt');
-            const prompt = (promptInput?.value || '').trim() || 'Antworte nur mit: OK';
-            const button = document.getElementById('testAiButton');
-            const originalText = button.textContent;
-
-            button.disabled = true;
-            button.textContent = 'Teste...';
-            updateAIConfigInfo('Sende Test an AI...', '');
-
             try {
-                const response = await fetch('/api/ai/test', {
+                const prompt = document.getElementById('aiTestPrompt').value || 'Respond with: OK';
+                const res = await fetch('/api/ai/test', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ prompt: prompt })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt })
                 });
-
-                const data = await response.json();
-
-                if (response.ok && data.status === 'ok') {
-                    const preview = data.response_preview || '(leere Antwort)';
-                    updateAIConfigInfo(
-                        `Test erfolgreich (${data.duration_ms} ms). Antwort: ${preview}`,
-                        'success'
-                    );
-
-                    const ollamaDot = document.getElementById('ollamaDot');
-                    ollamaDot.classList.remove('disconnected');
-                } else {
-                    updateAIConfigInfo(
-                        `Test fehlgeschlagen: ${data.error || 'Unbekannter Fehler'}`,
-                        'error'
-                    );
-
-                    const ollamaDot = document.getElementById('ollamaDot');
-                    ollamaDot.classList.add('disconnected');
-                }
-            } catch (error) {
-                updateAIConfigInfo(`Verbindungsfehler beim Test: ${error.message}`, 'error');
-                const ollamaDot = document.getElementById('ollamaDot');
-                ollamaDot.classList.add('disconnected');
-            } finally {
-                button.disabled = false;
-                button.textContent = originalText;
+                const result = await res.json();
+                const duration = result.duration_ms || 0;
+                const statusEl = document.getElementById('aiStatus');
+                statusEl.innerHTML = `✓ Success (${duration}ms): ${result.response.substring(0, 100)}...`;
+                statusEl.style.color = 'var(--brand)';
+                statusEl.classList.remove('error');
+            } catch (err) {
+                document.getElementById('aiStatus').innerHTML = '✗ Test failed: ' + err.message;
+                document.getElementById('aiStatus').classList.add('error');
             }
         }
 
-        function updateAIConfigInfo(message, type = '') {
-            const info = document.getElementById('aiConfigInfo');
-            if (!info) return;
-
-            info.className = 'knowledge-info ' + type;
-            info.innerHTML = `<p>${message}</p>`;
-        }
-
-        // Lokale Ladefunktion
-        async function loadLocalKnowledge() {
-            const path = document.getElementById('localPath').value;
-            
-            if (!path) {
-                updateKnowledgeInfo('Bitte Verzeichnispfad eingeben', 'error');
-                return;
-            }
-            
-            const button = event.target;
-            button.disabled = true;
-            button.textContent = 'Lade...';
-            
+        // === NEXTCLOUD CONFIG ===
+        async function saveNextcloudConfig() {
             try {
-                const response = await fetch('/api/knowledge/load-local', {
+                const url = document.getElementById('nextcloudUrl').value;
+                const username = document.getElementById('nextcloudUsername').value;
+                const password = document.getElementById('nextcloudPassword').value;
+                const path = document.getElementById('nextcloudPath').value;
+                
+                const res = await fetch('/api/indexing/config', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        directory_path: path
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, username, password, path })
                 });
                 
-                const data = await response.json();
-                
-                if (response.ok) {
-                    updateKnowledgeInfo(
-                        `Erfolgreich geladen: ${data.chunks_loaded} Chunks aus ${data.documents_processed} Dokumenten`,
-                        'success'
-                    );
-                    updateKnowledgeStatus();
+                const result = await res.json();
+                if (res.ok) {
+                    document.getElementById('nextcloudStatus').innerHTML = '✓ Config saved';
+                    document.getElementById('nextcloudStatus').style.color = 'var(--brand)';
                 } else {
-                    updateKnowledgeInfo(`Fehler: ${data.error}`, 'error');
+                    document.getElementById('nextcloudStatus').innerHTML = `✗ ${result.error}`;
+                    document.getElementById('nextcloudStatus').classList.add('error');
                 }
-            } catch (error) {
-                updateKnowledgeInfo(`Verbindungsfehler: ${error.message}`, 'error');
-            } finally {
-                button.disabled = false;
-                button.textContent = 'Lokale Dokumente laden';
+            } catch (err) {
+                document.getElementById('nextcloudStatus').innerHTML = '✗ Error: ' + err.message;
+                document.getElementById('nextcloudStatus').classList.add('error');
             }
         }
 
-        function updateKnowledgeInfo(message, type = '') {
-            const info = document.getElementById('knowledgeInfo');
-            const sidebarInfo = document.getElementById('knowledgeInfoSidebar');
-            
-            if (info) {
-                info.className = 'knowledge-info ' + type;
-                info.innerHTML = `<p>${message}</p>`;
-            }
-            
-            if (sidebarInfo) {
-                sidebarInfo.className = 'knowledge-info ' + type;
-                sidebarInfo.innerHTML = `<p>${message}</p>`;
-            }
-        }
-
-        function toggleSidebar() {
-            const sidebar = document.getElementById('knowledgeSidebar');
-            const button = document.querySelector('.toggle-sidebar');
-            
-            if (sidebar.style.display === 'none' || sidebar.style.display === '') {
-                sidebar.style.display = 'block';
-                button.innerHTML = '<i class="fas fa-times"></i> Close';
-            } else {
-                sidebar.style.display = 'none';
-                button.innerHTML = '<i class="fas fa-bars"></i> Knowledge';
-            }
-        }
-
-        async function updateKnowledgeStatus() {
+        // === INDEXING ===
+        async function startIndexing() {
             try {
-                const response = await fetch('/api/knowledge/sources');
-                const data = await response.json();
+                const res = await fetch('/api/indexing/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
                 
-                const knowledgeDot = document.getElementById('knowledgeDot');
-                if (data.total_chunks > 0) {
-                    knowledgeDot.classList.remove('disconnected');
+                if (res.ok) {
+                    document.getElementById('indexingInfo').innerHTML = '✓ Indexing started';
+                    startProgressUpdates();
                 } else {
-                    knowledgeDot.classList.add('disconnected');
+                    const data = await res.json();
+                    document.getElementById('indexingInfo').innerHTML = `✗ ${data.error}`;
+                    document.getElementById('indexingInfo').classList.add('error');
                 }
-            } catch (error) {
-                console.error('Error updating knowledge status:', error);
+            } catch (err) {
+                document.getElementById('indexingInfo').innerHTML = '✗ Error: ' + err.message;
+                document.getElementById('indexingInfo').classList.add('error');
             }
         }
 
-        // App initialisieren
-        document.addEventListener('DOMContentLoaded', () => {
-            new ChatApp();
-            
-            // Konfiguration laden
-            loadConfig();
-            loadAIConfig();
-            updateAIBaseUrlPreview();
-            
-            // Progress-Updates starten falls Indexierung läuft
-            updateProgress();
-        });
+        async function stopIndexing() {
+            try {
+                const res = await fetch('/api/indexing/stop', { method: 'POST' });
+                if (res.ok) {
+                    document.getElementById('indexingInfo').innerHTML = '✓ Indexing stopped';
+                    if (progressInterval) clearInterval(progressInterval);
+                }
+            } catch (err) {
+                document.getElementById('indexingInfo').innerHTML = '✗ Error: ' + err.message;
+                document.getElementById('indexingInfo').classList.add('error');
+            }
+        }
+
+        function startProgressUpdates() {
+            if (progressInterval) clearInterval(progressInterval);
+            progressInterval = setInterval(updateProgress, 500);
+        }
+
+        async function updateProgress() {
+            try {
+                const res = await fetch('/api/indexing/progress');
+                if (res.ok) {
+                    const data = await res.json();
+                    const pct = Math.round(data.progress_percentage);
+                    document.getElementById('progressBar').style.width = pct + '%';
+                    document.getElementById('progressPercent').innerText = pct + '%';
+                    document.getElementById('indexingStatus').innerText = data.status || 'processing';
+                    document.getElementById('indexingStats').innerText = 
+                        `${data.processed_files}/${data.total_files} files | ${Math.round(data.elapsed_time)}s`;
+                    
+                    if (data.status === 'completed' || data.status === 'error') {
+                        if (progressInterval) clearInterval(progressInterval);
+                    }
+                }
+            } catch (err) {
+                console.error('Update progress error:', err);
+            }
+        }
+
+        // === KNOWLEDGE GRAPH ===
+        function openKnowledgeGraph() {
+            window.open('/knowledge-graph', '_blank');
+        }
+
+        // === STATUS ===
+        async function updateStatus() {
+            try {
+                const [ollamaRes, kbRes] = await Promise.all([
+                    fetch('/api/ollama/status'),
+                    fetch('/api/knowledge/status')
+                ]);
+                const ollama = await ollamaRes.json();
+                const kb = await kbRes.json();
+                
+                const dot = document.getElementById('statusDot');
+                const text = document.getElementById('statusText');
+                
+                if (ollama.connected && kb.chunks_loaded > 0) {
+                    dot.className = 'status-dot ok';
+                    text.textContent = `${kb.chunks_loaded} Chunks | ${ollama.model}`;
+                } else {
+                    dot.className = 'status-dot error';
+                    text.textContent = 'Offline';
+                }
+            } catch (err) {
+                document.getElementById('statusDot').className = 'status-dot error';
+                document.getElementById('statusText').textContent = 'Error';
+            }
+        }
+
+        // === CHAT ===
+        function switchToChat() {
+            document.getElementById('landing').style.display = 'none';
+            document.getElementById('conversation').style.display = 'flex';
+            document.getElementById('composer').style.display = 'flex';
+        }
+
+        function addMessage(role, content) {
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${role}`;
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            bubble.textContent = content;
+            messageEl.appendChild(bubble);
+            document.getElementById('messages').appendChild(messageEl);
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+        }
+
+        function addThinking() {
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message assistant';
+            messageEl.id = 'thinking';
+            const thinking = document.createElement('div');
+            thinking.className = 'thinking-indicator';
+            for (let i = 0; i < 3; i++) {
+                const dot = document.createElement('div');
+                dot.className = 'dot';
+                thinking.appendChild(dot);
+            }
+            messageEl.appendChild(thinking);
+            document.getElementById('messages').appendChild(messageEl);
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+        }
+
+        function removeThinking() {
+            const el = document.getElementById('thinking');
+            if (el) el.remove();
+        }
+
+        async function sendMessage(text, source) {
+            text = text.trim();
+            if (!text || isThinking) return;
+
+            if (source === 'landing') {
+                document.getElementById('landingInput').value = '';
+                switchToChat();
+            } else if (source === 'composer') {
+                document.getElementById('composerInput').value = '';
+            }
+
+            addMessage('user', text);
+            isThinking = true;
+            addThinking();
+
+            try {
+                const sourceFilter = document.querySelector('input[name="source"]:checked')?.value || 'auto';
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text, source: sourceFilter })
+                });
+                const data = await res.json();
+                removeThinking();
+                addMessage('assistant', data.response);
+            } catch (err) {
+                removeThinking();
+                addMessage('assistant', `Error: ${err.message}`);
+            } finally {
+                isThinking = false;
+            }
+        }
     </script>
 </body>
 </html>
