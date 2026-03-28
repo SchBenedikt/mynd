@@ -1,8 +1,12 @@
 import os
+import sys
 import logging
-from document_parser import DocumentParser
 from typing import List, Dict, Optional
 import requests
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+from backend.features.documents.parser import DocumentParser
 from requests.auth import HTTPBasicAuth
 
 class NextcloudClient:
