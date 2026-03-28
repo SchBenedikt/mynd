@@ -309,3 +309,29 @@ dist
 
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
+
+# Sensitive configuration files
+indexing_config.json
+training_data.json
+*.config.json
+*_config.json
+config/*.json
+
+# API keys and credentials
+.env*
+*.key
+*.pem
+*.p12
+credentials.json
+api_keys.txt
+
+# User data and personal files
+user_knowledge.txt
+personal_data.json
+user_data.json
+
+# Temporary and backup files
+temp_*
+backup_*
+*.bak
+*.backup
