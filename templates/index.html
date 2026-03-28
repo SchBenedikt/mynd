@@ -664,10 +664,60 @@
                     
                     <div class="tab-container">
                         <div class="tabs">
+                            <button class="tab-button" onclick="showTab('ai', this)">AI</button>
                             <button class="tab-button active" onclick="showTab('nextcloud', this)">Nextcloud</button>
                             <button class="tab-button" onclick="showTab('local', this)">Local</button>
                             <button class="tab-button" onclick="showTab('indexing', this)">Indexing</button>
                             <button class="tab-button" onclick="showTab('graph', this)">Graph</button>
+                        </div>
+
+                        <div class="tab-content" id="ai-tab">
+                            <div class="form-group">
+                                <label>Provider:</label>
+                                <input type="text" value="Ollama" disabled>
+                            </div>
+                            <div class="form-group">
+                                <label>Protokoll:</label>
+                                <select id="aiProtocol" onchange="updateAIBaseUrlPreview()">
+                                    <option value="http" selected>http</option>
+                                    <option value="https">https</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Ollama Host:</label>
+                                <input type="text" id="aiHost" placeholder="127.0.0.1" value="127.0.0.1" oninput="updateAIBaseUrlPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label>Ollama Port:</label>
+                                <input type="number" id="aiPort" min="1" max="65535" value="11434" placeholder="11434" oninput="updateAIBaseUrlPreview()">
+                            </div>
+                            <div class="form-group">
+                                <label>Ollama Base URL (auto):</label>
+                                <input type="url" id="aiBaseUrl" placeholder="http://127.0.0.1:11434" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label>Verfügbare Modelle:</label>
+                                <select id="aiModelSelect" onchange="selectAIModel()">
+                                    <option value="">Modelle werden geladen...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Model (manuell):</label>
+                                <input type="text" id="aiModel" placeholder="gemma3:latest">
+                            </div>
+                            <div class="form-group">
+                                <label>Test-Prompt (optional):</label>
+                                <input type="text" id="aiTestPrompt" placeholder="Antworte nur mit: OK">
+                            </div>
+                            <div class="button-group">
+                                <button onclick="saveAIConfig()" class="config-button" id="saveAiConfigButton">AI speichern</button>
+                                <button onclick="loadAIConfig()" class="load-button">Neu laden</button>
+                                <button onclick="loadOllamaModels()" class="load-button">Modelle aktualisieren</button>
+                                <button onclick="testAIConfig()" class="load-button" id="testAiButton">AI testen</button>
+                            </div>
+                            <div class="knowledge-info" id="aiConfigInfo" style="margin-top: 12px;">
+                                <p>AI-Konfiguration noch nicht geladen</p>
+                            </div>
                         </div>
                         
                         <div class="tab-content active" id="nextcloud-tab">
@@ -1212,6 +1262,312 @@
             }
         }
 
+        async function loadAIConfig() {
+            try {
+                const response = await fetch('/api/ai/config');
+                const data = await response.json();
+
+                if (response.ok) {
+                    const baseParts = parseBaseUrlParts(data.base_url || '');
+                    document.getElementById('aiProtocol').value = baseParts.protocol;
+                    document.getElementById('aiHost').value = baseParts.host;
+                    document.getElementById('aiPort').value = baseParts.port;
+                    updateAIBaseUrlPreview();
+                    document.getElementById('aiModel').value = data.model || '';
+                    await loadOllamaModels(data.model || '');
+                    updateAIConfigInfo(
+                        `Aktiv: ${data.model} @ ${data.base_url} (${data.connected ? 'verbunden' : 'nicht verbunden'})`,
+                        data.connected ? 'success' : 'error'
+                    );
+                } else {
+                    updateAIConfigInfo(`Fehler: ${data.error || 'Unbekannter Fehler'}`, 'error');
+                }
+            } catch (error) {
+                updateAIConfigInfo(`Verbindungsfehler: ${error.message}`, 'error');
+            }
+        }
+
+        function selectAIModel() {
+            const modelSelect = document.getElementById('aiModelSelect');
+            const modelInput = document.getElementById('aiModel');
+
+            if (modelSelect && modelInput && modelSelect.value) {
+                modelInput.value = modelSelect.value;
+            }
+        }
+
+        async function loadOllamaModels(preferredModel = '') {
+            const modelSelect = document.getElementById('aiModelSelect');
+            if (!modelSelect) return;
+
+            modelSelect.disabled = true;
+            modelSelect.innerHTML = '';
+
+            const loadingOption = document.createElement('option');
+            loadingOption.value = '';
+            loadingOption.textContent = 'Modelle werden geladen...';
+            modelSelect.appendChild(loadingOption);
+
+            try {
+                const response = await fetch('/api/ollama/models');
+                const data = await response.json();
+
+                let models = Array.isArray(data.models) ? data.models.slice() : [];
+                const currentModel = preferredModel || document.getElementById('aiModel').value.trim() || data.current_model || '';
+
+                if (currentModel && !models.includes(currentModel)) {
+                    models.unshift(currentModel);
+                }
+
+                modelSelect.innerHTML = '';
+
+                if (!models.length) {
+                    const emptyOption = document.createElement('option');
+                    emptyOption.value = '';
+                    emptyOption.textContent = 'Keine Modelle gefunden';
+                    modelSelect.appendChild(emptyOption);
+                    modelSelect.disabled = true;
+
+                    if (data.error) {
+                        updateAIConfigInfo(`Modelle konnten nicht geladen werden: ${data.error}`, 'error');
+                    }
+                    return;
+                }
+
+                models.forEach((modelName) => {
+                    const option = document.createElement('option');
+                    option.value = modelName;
+                    option.textContent = modelName;
+                    modelSelect.appendChild(option);
+                });
+
+                if (currentModel && models.includes(currentModel)) {
+                    modelSelect.value = currentModel;
+                } else {
+                    modelSelect.selectedIndex = 0;
+                    selectAIModel();
+                }
+
+                modelSelect.disabled = false;
+            } catch (error) {
+                modelSelect.innerHTML = '';
+                const errorOption = document.createElement('option');
+                errorOption.value = '';
+                errorOption.textContent = 'Modell-Liste nicht erreichbar';
+                modelSelect.appendChild(errorOption);
+                modelSelect.disabled = true;
+                updateAIConfigInfo(`Modelle konnten nicht geladen werden: ${error.message}`, 'error');
+            }
+        }
+
+        async function saveAIConfig() {
+            const protocol = document.getElementById('aiProtocol').value.trim() || 'http';
+            const hostInput = document.getElementById('aiHost').value.trim();
+            const portInput = document.getElementById('aiPort').value.trim() || '11434';
+            const model = document.getElementById('aiModel').value.trim();
+            const button = document.getElementById('saveAiConfigButton');
+
+            const host = sanitizeHost(hostInput);
+            if (!host) {
+                updateAIConfigInfo('Bitte einen gültigen Host angeben.', 'error');
+                return;
+            }
+
+            document.getElementById('aiHost').value = host;
+
+            const port = parseInt(portInput, 10);
+            if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                updateAIConfigInfo('Ungültiger Port. Erlaubt sind 1-65535.', 'error');
+                return;
+            }
+
+            const baseUrl = buildBaseUrl(protocol, host, port);
+            document.getElementById('aiBaseUrl').value = baseUrl;
+
+            if (!baseUrl || !model) {
+                updateAIConfigInfo('Bitte Base URL und Modell ausfüllen', 'error');
+                return;
+            }
+
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Speichere...';
+
+            try {
+                const response = await fetch('/api/ai/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        base_url: baseUrl,
+                        model: model
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    await loadOllamaModels(data.model || model);
+                    updateAIConfigInfo(
+                        `Gespeichert: ${data.model} @ ${data.base_url} (${data.connected ? 'verbunden' : 'nicht verbunden'})`,
+                        data.connected ? 'success' : 'error'
+                    );
+
+                    // Status in der Header-Leiste direkt aktualisieren
+                    const ollamaDot = document.getElementById('ollamaDot');
+                    if (data.connected) {
+                        ollamaDot.classList.remove('disconnected');
+                    } else {
+                        ollamaDot.classList.add('disconnected');
+                    }
+                } else {
+                    updateAIConfigInfo(`Fehler: ${data.error || 'Konnte nicht speichern'}`, 'error');
+                }
+            } catch (error) {
+                updateAIConfigInfo(`Verbindungsfehler: ${error.message}`, 'error');
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+
+        function extractPortFromBaseUrl(baseUrl) {
+            try {
+                const url = new URL(baseUrl);
+                if (url.port) {
+                    return url.port;
+                }
+                return url.protocol === 'https:' ? '443' : '11434';
+            } catch {
+                return '11434';
+            }
+        }
+
+        function parseBaseUrlParts(baseUrl) {
+            try {
+                const url = new URL(baseUrl);
+                return {
+                    protocol: url.protocol === 'https:' ? 'https' : 'http',
+                    host: url.hostname || '127.0.0.1',
+                    port: url.port || (url.protocol === 'https:' ? '443' : '11434')
+                };
+            } catch {
+                return {
+                    protocol: 'http',
+                    host: '127.0.0.1',
+                    port: '11434'
+                };
+            }
+        }
+
+        function sanitizeHost(hostInput) {
+            if (!hostInput) return '';
+
+            let host = hostInput.trim();
+            host = host.replace(/^https?:\/\//i, '');
+            host = host.split('/')[0];
+
+            // Entferne Port falls versehentlich im Host-Feld eingetragen
+            const colonIndex = host.lastIndexOf(':');
+            if (colonIndex > -1 && !host.includes(']')) {
+                const possiblePort = host.slice(colonIndex + 1);
+                if (/^\d+$/.test(possiblePort)) {
+                    host = host.slice(0, colonIndex);
+                }
+            }
+
+            return host;
+        }
+
+        function buildBaseUrl(protocol, host, port) {
+            const safeProtocol = protocol === 'https' ? 'https' : 'http';
+            return `${safeProtocol}://${host}:${port}`;
+        }
+
+        function updateAIBaseUrlPreview() {
+            const protocol = document.getElementById('aiProtocol')?.value || 'http';
+            const host = sanitizeHost(document.getElementById('aiHost')?.value || '');
+            const port = document.getElementById('aiPort')?.value || '11434';
+            const baseUrlField = document.getElementById('aiBaseUrl');
+
+            if (!baseUrlField) return;
+
+            if (!host) {
+                baseUrlField.value = '';
+                return;
+            }
+
+            baseUrlField.value = buildBaseUrl(protocol, host, port);
+        }
+
+        function applyPortToBaseUrl(baseUrl, port) {
+            try {
+                const url = new URL(baseUrl);
+                url.port = String(port);
+                return url.toString().replace(/\/$/, '');
+            } catch {
+                return `http://127.0.0.1:${port}`;
+            }
+        }
+
+        async function testAIConfig() {
+            const promptInput = document.getElementById('aiTestPrompt');
+            const prompt = (promptInput?.value || '').trim() || 'Antworte nur mit: OK';
+            const button = document.getElementById('testAiButton');
+            const originalText = button.textContent;
+
+            button.disabled = true;
+            button.textContent = 'Teste...';
+            updateAIConfigInfo('Sende Test an AI...', '');
+
+            try {
+                const response = await fetch('/api/ai/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ prompt: prompt })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.status === 'ok') {
+                    const preview = data.response_preview || '(leere Antwort)';
+                    updateAIConfigInfo(
+                        `Test erfolgreich (${data.duration_ms} ms). Antwort: ${preview}`,
+                        'success'
+                    );
+
+                    const ollamaDot = document.getElementById('ollamaDot');
+                    ollamaDot.classList.remove('disconnected');
+                } else {
+                    updateAIConfigInfo(
+                        `Test fehlgeschlagen: ${data.error || 'Unbekannter Fehler'}`,
+                        'error'
+                    );
+
+                    const ollamaDot = document.getElementById('ollamaDot');
+                    ollamaDot.classList.add('disconnected');
+                }
+            } catch (error) {
+                updateAIConfigInfo(`Verbindungsfehler beim Test: ${error.message}`, 'error');
+                const ollamaDot = document.getElementById('ollamaDot');
+                ollamaDot.classList.add('disconnected');
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+
+        function updateAIConfigInfo(message, type = '') {
+            const info = document.getElementById('aiConfigInfo');
+            if (!info) return;
+
+            info.className = 'knowledge-info ' + type;
+            info.innerHTML = `<p>${message}</p>`;
+        }
+
         // Lokale Ladefunktion
         async function loadLocalKnowledge() {
             const path = document.getElementById('localPath').value;
@@ -1305,6 +1661,8 @@
             
             // Konfiguration laden
             loadConfig();
+            loadAIConfig();
+            updateAIBaseUrlPreview();
             
             // Progress-Updates starten falls Indexierung läuft
             updateProgress();
