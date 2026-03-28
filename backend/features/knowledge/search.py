@@ -1,8 +1,13 @@
 import sqlite3
 import logging
+import sys
+import os
 from typing import List, Dict
 import re
-from database import KnowledgeDatabase
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+from backend.core.database import KnowledgeDatabase
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 import requests
 import numpy as np
 from flask import Flask, render_template, request, jsonify
@@ -8,36 +9,55 @@ import re
 import logging
 from datetime import datetime, timedelta, date
 import time
-from document_parser import DocumentParser
-from nextcloud_client import NextcloudClient
-from indexing_manager import indexing_manager, IndexingProgress
-# from knowledge_engine import SemanticSearchEngine
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+from backend.features.documents.parser import DocumentParser
+from backend.features.integration.nextcloud_client import NextcloudClient
+from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
+# from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
 class SemanticSearchEngine:
     def __init__(self):
         pass
-from simple_search import SimpleSearchEngine
-from training_manager import TrainingManager
-from metadata_extractor import MetadataExtractor
-# from calendar_manager import create_calendar_manager
+from backend.features.knowledge.search import SimpleSearchEngine
+from backend.features.training.manager import TrainingManager
+from backend.features.knowledge.metadata import MetadataExtractor
+# from backend.features.calendar.manager import create_calendar_manager
 # Temporär deaktiviert wegen caldav Problemen
 def create_calendar_manager():
     return None
-from simple_calendar import create_simple_calendar_manager
+from backend.features.calendar.simple import create_simple_calendar_manager
 import xml.etree.ElementTree as ET
 
 load_dotenv()
 
-app = Flask(__name__)
+# Define base directories BEFORE Flask app creation
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+CONFIG_DIR = os.path.join(BASE_DIR, 'backend', 'config')
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+BACKEND_DIR = os.path.join(BASE_DIR, 'backend')
+TEMPLATES_DIR = os.path.join(BACKEND_DIR, 'templates')
+DB_PATH = os.path.join(BASE_DIR, 'knowledge_base.db')
+
+# Setup directories
+os.makedirs(CONFIG_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# Create Flask app with correct template folder
+app = Flask(__name__, template_folder=TEMPLATES_DIR)
 
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-AI_CONFIG_FILE = "ai_config.json"
+AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
 
 class KnowledgeBase:
-    def __init__(self, knowledge_file="user_knowledge.txt"):
+    def __init__(self, knowledge_file=None):
+        if knowledge_file is None:
+            knowledge_file = os.path.join(DATA_DIR, "user_knowledge.txt")
         self.knowledge_file = knowledge_file
         self.knowledge_chunks = []
         self.document_sources = []
@@ -50,7 +70,7 @@ class KnowledgeBase:
         """Initialize search engine (start with simple to avoid segfaults)"""
         try:
             # Start with simple search first
-            self.search_engine = SimpleSearchEngine()
+            self.search_engine = SimpleSearchEngine(DB_PATH)
             self.db = self.search_engine.db
             logger.info("Simple search engine initialized")
         except Exception as e:
@@ -352,7 +372,6 @@ class OllamaClient:
                     break
             
             # Erstelle verbesserten Kontext mit Training Manager
-            from app import training_manager
             enhanced_context = training_manager.create_enhanced_context_for_ai(user_message, context)
             
             # Detaillierter System-Prompt für intelligente Entscheidungen

@@ -1,0 +1,2244 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NextMind</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-1: #f6f2e8;
+      --bg-2: #f0e6d6;
+      --ink: #17140f;
+      --muted: #5b5347;
+      --line: rgba(23, 20, 15, 0.14);
+      --brand: #0f7c5f;
+      --brand-2: #d76b2d;
+      --chip-bg: #fff8ec;
+      --chip-hover: #fff1dc;
+      --input-bg: rgba(255, 252, 247, 0.78);
+      --bubble-user: #e9fff6;
+      --bubble-assistant: #ffffff;
+    }
+
+    body[data-theme="ocean"] {
+      --bg-1: #eef4ff;
+      --bg-2: #dce8ff;
+      --ink: #121826;
+      --muted: #566074;
+      --line: rgba(18, 24, 38, 0.14);
+      --brand: #2f63ff;
+      --brand-2: #15b79e;
+      --chip-bg: #f4f8ff;
+      --chip-hover: #eaf2ff;
+      --input-bg: rgba(255, 255, 255, 0.82);
+      --bubble-user: #eaf2ff;
+      --bubble-assistant: #ffffff;
+    }
+
+    body[data-theme="graphite"] {
+      --bg-1: #f3f3f3;
+      --bg-2: #e7e7e7;
+      --ink: #181818;
+      --muted: #555555;
+      --line: rgba(24, 24, 24, 0.15);
+      --brand: #424242;
+      --brand-2: #8a6f50;
+      --chip-bg: #f8f8f8;
+      --chip-hover: #efefef;
+      --input-bg: rgba(255, 255, 255, 0.84);
+      --bubble-user: #f2f2f2;
+      --bubble-assistant: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Space Grotesk", sans-serif;
+      background:
+        radial-gradient(1200px 520px at -10% -20%, #fff8d9 0%, transparent 60%),
+        radial-gradient(900px 420px at 110% 10%, #ffd7be 0%, transparent 55%),
+        linear-gradient(145deg, var(--bg-1), var(--bg-2));
+    }
+
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 58px;
+      display: flex;
+      align-items: center;
+      gap: .7rem;
+      padding: .6rem .95rem;
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(8px);
+      background: rgba(255, 252, 247, 0.48);
+      z-index: 30;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      margin-left: .2rem;
+    }
+
+    .spark {
+      width: 14px;
+      height: 14px;
+      border-radius: 99px;
+      background: linear-gradient(135deg, var(--brand), var(--brand-2));
+      box-shadow: 0 0 0 7px rgba(15, 124, 95, 0.15);
+    }
+
+    .brand h1 { margin: 0; font-size: 1.08rem; }
+
+    .top-status-badge {
+      margin-left: auto;
+      border: 1px solid var(--line);
+      background: var(--chip-bg);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: .28rem .62rem;
+      font-size: .76rem;
+      font-family: "IBM Plex Mono", monospace;
+      white-space: nowrap;
+      max-width: 52vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .icon-btn {
+      border: 1px solid var(--line);
+      background: var(--chip-bg);
+      color: var(--ink);
+      border-radius: 999px;
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    .icon-btn:hover { background: var(--chip-hover); }
+
+    .shell {
+      position: fixed;
+      top: 58px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      transition: left .24s ease;
+    }
+
+    .content-wrap {
+      width: 100%;
+      height: 100%;
+      padding: 1rem;
+    }
+
+    body.sidebar-open .shell {
+      left: min(360px, 92vw);
+    }
+
+    .landing {
+      width: min(900px, 100%);
+      height: 100%;
+      margin: 0 auto;
+      display: grid;
+      place-content: center;
+      gap: .9rem;
+      text-align: center;
+      animation: fadeIn .35s ease;
+    }
+
+    .landing.hidden,
+    .conversation.hidden {
+      display: none;
+    }
+
+    .landing h2 {
+      margin: .1rem 0 0;
+      font-size: clamp(1.8rem, 5vw, 2.9rem);
+      line-height: 1.06;
+    }
+
+    .landing p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+
+    .query {
+      width: min(760px, 100%);
+      margin: 0 auto;
+      display: grid;
+      gap: .6rem;
+    }
+
+    .input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--input-bg);
+      color: var(--ink);
+      padding: .72rem .84rem;
+      font: inherit;
+    }
+
+    textarea.input {
+      min-height: 96px;
+      resize: none;
+    }
+
+    .actions-row {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      border: 1px solid var(--line);
+      background: var(--chip-bg);
+      color: var(--ink);
+      border-radius: 11px;
+      padding: .55rem .76rem;
+      cursor: pointer;
+      font: inherit;
+      font-size: .9rem;
+    }
+
+    .btn:hover { background: var(--chip-hover); }
+
+    .btn-primary {
+      border: none;
+      color: #fff;
+      background: linear-gradient(130deg, var(--brand), var(--brand-2));
+    }
+
+    .chips {
+      width: min(760px, 100%);
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: .45rem;
+      justify-content: center;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: .38rem .62rem;
+      background: var(--chip-bg);
+      cursor: pointer;
+      font-size: .83rem;
+    }
+
+    .chip:hover { background: var(--chip-hover); }
+
+    .conversation {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      gap: .75rem;
+      animation: fadeIn .25s ease;
+    }
+
+    .messages {
+      overflow: auto;
+      padding: .4rem 0 .2rem;
+    }
+
+    .messages-inner {
+      width: min(980px, 100%);
+      margin: 0 auto;
+      display: grid;
+      gap: .62rem;
+      align-content: start;
+    }
+
+    .msg-row {
+      display: flex;
+      width: 100%;
+    }
+
+    .msg-row.user { justify-content: flex-end; }
+    .msg-row.assistant { justify-content: flex-start; }
+
+    .assistant-stack {
+      max-width: min(72ch, 82%);
+      display: grid;
+      gap: .48rem;
+      width: 100%;
+    }
+
+    .assistant-stack .bubble {
+      max-width: 100%;
+    }
+
+    .bubble {
+      max-width: min(72ch, 82%);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: .65rem .8rem;
+      line-height: 1.45;
+      white-space: normal;
+      box-shadow: 0 2px 9px rgba(0, 0, 0, 0.06);
+    }
+
+    .msg-row.user .bubble {
+      background: var(--bubble-user);
+      border-bottom-right-radius: 8px;
+    }
+
+    .msg-row.assistant .bubble {
+      background: var(--bubble-assistant);
+      border-bottom-left-radius: 8px;
+    }
+
+    .bubble strong { font-weight: 700; }
+    .bubble ul { margin: .45rem 0 .3rem 1.2rem; padding: 0; }
+    .bubble p { margin: .28rem 0; }
+    .bubble a { color: var(--brand); text-decoration: underline; }
+    .bubble img.msg-image {
+      display: block;
+      width: min(320px, 100%);
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      margin: .35rem 0;
+      object-fit: cover;
+      background: rgba(0, 0, 0, 0.04);
+    }
+
+    .smart-cards {
+      display: grid;
+      gap: .45rem;
+      margin-top: 0;
+    }
+
+    .smart-cards.photo-row {
+      display: flex;
+      gap: .6rem;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding-bottom: .2rem;
+      scroll-snap-type: x proximity;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .smart-cards.photo-row .smart-card {
+      flex: 0 0 min(260px, 72vw);
+      scroll-snap-align: start;
+    }
+
+    .smart-cards.event-row {
+      display: flex;
+      gap: .6rem;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding-bottom: .2rem;
+      scroll-snap-type: x proximity;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .smart-cards.event-row .smart-card {
+      flex: 0 0 min(320px, 84vw);
+      scroll-snap-align: start;
+    }
+
+    .smart-card {
+      display: grid;
+      gap: .28rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.72);
+      padding: .52rem .62rem;
+    }
+
+    .smart-card-header {
+      display: flex;
+      align-items: center;
+      gap: .45rem;
+      min-width: 0;
+    }
+
+    .smart-card-icon {
+      flex: 0 0 auto;
+      font-size: .92rem;
+      line-height: 1;
+    }
+
+    .smart-card-title {
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .smart-card-meta {
+      color: var(--muted);
+      font-size: .82rem;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+
+    .smart-card-thumb {
+      width: min(260px, 100%);
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      display: block;
+      background: rgba(0, 0, 0, 0.04);
+    }
+
+    .composer {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.48);
+      padding: .45rem;
+      display: block;
+      width: min(980px, 100%);
+      margin: 0 auto;
+    }
+
+    .composer-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: .45rem;
+      align-items: end;
+    }
+
+    .prompt-with-source {
+      position: relative;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: .45rem;
+      align-items: start;
+      width: 100%;
+    }
+
+    .source-selection-indicator {
+      grid-column: 1 / -1;
+      display: inline-flex;
+      align-items: center;
+      gap: .35rem;
+      margin-top: .1rem;
+      color: var(--muted);
+      font-size: .76rem;
+      user-select: none;
+    }
+
+    .source-selection-indicator strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .source-warning {
+      grid-column: 1 / -1;
+      display: none;
+      margin-top: .18rem;
+      border: 1px solid rgba(215, 107, 45, 0.45);
+      background: rgba(215, 107, 45, 0.10);
+      color: #7a3f1f;
+      border-radius: 10px;
+      padding: .32rem .45rem;
+      font-size: .78rem;
+      line-height: 1.3;
+    }
+
+    .source-warning.visible {
+      display: block;
+    }
+
+    .source-plus-btn {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--chip-bg);
+      color: var(--ink);
+      width: 32px;
+      min-width: 32px;
+      height: 32px;
+      cursor: pointer;
+      font-size: .95rem;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      opacity: .88;
+    }
+
+    .source-plus-btn:hover {
+      background: var(--chip-hover);
+    }
+
+    .source-plus-btn.active {
+      background: rgba(15, 124, 95, 0.14);
+      border-color: rgba(15, 124, 95, 0.45);
+      opacity: 1;
+    }
+
+    .source-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      bottom: auto;
+      left: 0;
+      z-index: 35;
+      min-width: 220px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.97);
+      box-shadow: 0 12px 26px rgba(0, 0, 0, 0.14);
+      padding: .35rem;
+      display: none;
+      gap: .22rem;
+    }
+
+    .source-menu.open {
+      display: grid;
+    }
+
+    .source-menu.upward {
+      top: auto;
+      bottom: calc(100% + 6px);
+    }
+
+    .source-item {
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background: transparent;
+      text-align: left;
+      padding: .45rem .52rem;
+      cursor: pointer;
+      color: var(--ink);
+      font: inherit;
+      font-size: .85rem;
+      line-height: 1.25;
+    }
+
+    .source-item:hover {
+      background: var(--chip-hover);
+    }
+
+    .source-item.active {
+      border-color: rgba(15, 124, 95, 0.45);
+      background: rgba(15, 124, 95, 0.12);
+      font-weight: 600;
+    }
+
+    .source-item small {
+      display: block;
+      color: var(--muted);
+      font-weight: 400;
+      margin-top: 2px;
+    }
+
+    .composer #chatPrompt {
+      min-height: 44px;
+      max-height: 120px;
+      padding: .58rem .72rem;
+      border-radius: 12px;
+    }
+
+    .send-btn {
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      padding: 0;
+      font-size: 1.02rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .send-btn .send-label {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+    }
+
+    .send-btn.thinking .send-label {
+      display: none;
+    }
+
+    .thinking-dots {
+      display: none;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .send-btn.thinking .thinking-dots {
+      display: inline-flex;
+    }
+
+    .thinking-dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #fff;
+      opacity: .85;
+      animation: dotBounce 0.9s infinite ease-in-out;
+    }
+
+    .thinking-dots span:nth-child(2) { animation-delay: 0.14s; }
+    .thinking-dots span:nth-child(3) { animation-delay: 0.28s; }
+
+    @keyframes dotBounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: .55; }
+      40% { transform: translateY(-5px); opacity: 1; }
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(8, 8, 8, 0.35);
+      backdrop-filter: blur(2px);
+      z-index: 60;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(520px, 96vw);
+      background: var(--bubble-assistant);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1rem;
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
+      display: grid;
+      gap: .6rem;
+    }
+
+    .modal-card h3 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .modal-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .sidebar {
+      position: fixed;
+      top: 58px;
+      left: 0;
+      bottom: 0;
+      width: min(360px, 92vw);
+      border-right: 1px solid var(--line);
+      background: rgba(255, 252, 247, 0.62);
+      backdrop-filter: blur(8px);
+      transform: translateX(-102%);
+      transition: transform .24s ease;
+      z-index: 22;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      overflow: hidden;
+    }
+
+    .sidebar.open { transform: translateX(0); }
+
+    .sidebar-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: .72rem .8rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .sidebar-section {
+      padding: .72rem .8rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .sidebar-section h3 {
+      margin: 0 0 .55rem;
+      font-size: .9rem;
+    }
+
+    .row { display: flex; gap: .45rem; flex-wrap: wrap; }
+
+    .chats-list {
+      overflow: auto;
+      padding: .72rem .8rem;
+    }
+
+    .chat-item {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.4);
+      padding: .62rem;
+      margin-bottom: .55rem;
+      cursor: pointer;
+    }
+
+    .chat-item:hover { background: rgba(255, 255, 255, 0.58); }
+    .chat-item-time { font-size: .75rem; color: var(--muted); }
+    .chat-item-title { margin-top: .25rem; font-size: .84rem; }
+
+    .log {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #10100f;
+      color: #f4f4f4;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: .78rem;
+      min-height: 130px;
+      max-height: 220px;
+      overflow: auto;
+      white-space: pre-wrap;
+      padding: .65rem;
+      margin-top: .45rem;
+    }
+
+    .profile-fab {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      width: 48px;
+      height: 48px;
+      border: none;
+      border-radius: 999px;
+      background: linear-gradient(130deg, var(--brand), var(--brand-2));
+      color: #fff;
+      cursor: pointer;
+      font-size: 1.14rem;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      z-index: 26;
+      box-shadow: 0 8px 22px rgba(10, 10, 10, .2);
+    }
+
+    .global-health-indicator {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.9);
+      box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.14);
+      z-index: 28;
+      transition: background-color .2s ease, box-shadow .2s ease, transform .2s ease;
+    }
+
+    .global-health-indicator.state-ok {
+      background: #1db954;
+      box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.25);
+    }
+
+    .global-health-indicator.state-warn {
+      background: #f4b400;
+      box-shadow: 0 0 0 3px rgba(244, 180, 0, 0.25);
+    }
+
+    .global-health-indicator.state-error {
+      background: #e53935;
+      box-shadow: 0 0 0 3px rgba(229, 57, 53, 0.25);
+    }
+
+    .global-health-indicator.state-unknown {
+      background: #8e8e8e;
+      box-shadow: 0 0 0 3px rgba(142, 142, 142, 0.25);
+    }
+
+    .profile-drawer {
+      position: fixed;
+      left: 12px;
+      bottom: 68px;
+      width: min(360px, calc(100vw - 24px));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(8px);
+      padding: .8rem;
+      display: none;
+      z-index: 27;
+      max-height: calc(100vh - 150px);
+      overflow: auto;
+    }
+
+    .profile-drawer.open { display: block; }
+
+    .muted { color: var(--muted); font-size: .82rem; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 900px) {
+      body.sidebar-open .shell {
+        left: 0;
+      }
+      .sidebar {
+        width: min(340px, 92vw);
+      }
+      .bubble {
+        max-width: 92%;
+      }
+      .assistant-stack {
+        max-width: 92%;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .content-wrap { padding: .7rem; }
+      .landing h2 { font-size: clamp(1.55rem, 7.8vw, 2.2rem); }
+      textarea.input { min-height: 84px; }
+    }
+  </style>
+</head>
+<body data-theme="classic">
+  <header class="topbar">
+    <button class="icon-btn" id="sidebarToggle" title="Seitenleiste">☰</button>
+    <div class="brand"><span class="spark"></span><h1>NextMind</h1></div>
+    <div id="topIndexBadge" class="top-status-badge">Index: n/a</div>
+  </header>
+
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <strong>Chats</strong>
+      <button class="btn" id="newChatBtn">Neu</button>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Intelligente Tools</h3>
+      <div class="row">
+        <button class="btn" id="semanticBtn">Semantische Suche</button>
+        <button class="btn" id="pdfBtn">PDF zusammenfassen</button>
+        <button class="btn" id="photoBtn">Immich Fotos</button>
+      </div>
+      <input id="pdfPath" class="input" placeholder="/Dokumente/Steuern2025.pdf" style="margin-top:.5rem;" />
+    </div>
+
+    <div class="chats-list" id="chatsList"></div>
+
+    <div class="sidebar-section">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <strong style="font-size:.9rem;">Logs</strong>
+        <button class="btn" id="clearLogsBtn">Leeren</button>
+      </div>
+      <div class="log" id="logs">NextMind Konsole bereit.</div>
+    </div>
+  </aside>
+
+  <button class="profile-fab" id="profileFab" title="Profil">👤</button>
+  <div id="globalHealthIndicator" class="global-health-indicator state-unknown" title="Systemstatus unbekannt" aria-label="Systemstatus"></div>
+
+  <aside class="profile-drawer" id="profileDrawer">
+    <h3 style="margin:.1rem 0 .65rem;">Profil</h3>
+    <label class="muted" for="loginUsername">Nextcloud Benutzer</label>
+    <input id="loginUsername" class="input" placeholder="Vinzenz" />
+    <label class="muted" for="loginPassword">Nextcloud App-Passwort</label>
+    <input id="loginPassword" type="password" class="input" placeholder="••••••••" />
+    <button class="btn btn-primary" id="loginBtn" style="width:100%; margin-top:.55rem;">Mit Nextcloud anmelden</button>
+
+    <hr style="border:none; border-top:1px solid var(--line); margin:.8rem 0;" />
+
+    <label class="muted" for="theme">Theme</label>
+    <select id="theme" class="input">
+      <option value="classic">Klassisch</option>
+      <option value="ocean">Ocean</option>
+      <option value="graphite">Graphite</option>
+    </select>
+
+    <label class="muted" for="language">Sprache</label>
+    <select id="language" class="input">
+      <option value="de">Deutsch</option>
+      <option value="en">English</option>
+    </select>
+
+    <label class="muted" for="adminUrl">Nextcloud URL (nur Admin)</label>
+    <input id="adminUrl" class="input" placeholder="https://cloud.example.com" />
+    <p class="muted" id="adminHint">Nur Admin kann die URL ändern.</p>
+
+    <label class="muted" for="immichUrl">Immich URL</label>
+    <input id="immichUrl" class="input" placeholder="https://immich.example.com" />
+    <label class="muted" for="immichApiKey">Immich API Key</label>
+    <input id="immichApiKey" class="input" placeholder="immich-api-key" />
+
+    <hr style="border:none; border-top:1px solid var(--line); margin:.8rem 0;" />
+    <h4 style="margin:.1rem 0 .55rem;">Runtime Konfiguration (Admin)</h4>
+
+    <label class="muted" for="cfgOllamaUrl">Ollama URL</label>
+    <input id="cfgOllamaUrl" class="input" placeholder="http://localhost:11434" />
+    <label class="muted" for="cfgOllamaModel">Ollama Modell</label>
+    <input id="cfgOllamaModel" class="input" placeholder="mistral" />
+
+    <label class="muted" for="cfgVectorEnabled">Vector DB aktiv</label>
+    <select id="cfgVectorEnabled" class="input">
+      <option value="true">Ja</option>
+      <option value="false">Nein</option>
+    </select>
+    <label class="muted" for="cfgVectorProvider">Vector Provider</label>
+    <input id="cfgVectorProvider" class="input" placeholder="qdrant" />
+    <label class="muted" for="cfgVectorPath">Vector DB Pfad</label>
+    <input id="cfgVectorPath" class="input" placeholder="./qdrant_data" />
+
+    <label class="muted" for="cfgReindexHours">Auto-Reindex Intervall (Stunden)</label>
+    <input id="cfgReindexHours" class="input" type="number" min="1" step="1" placeholder="6" />
+    <label class="muted" for="cfgPastDays">Reindex Vergangenheit (Tage)</label>
+    <input id="cfgPastDays" class="input" type="number" min="1" step="1" placeholder="730" />
+    <label class="muted" for="cfgFutureDays">Reindex Zukunft (Tage)</label>
+    <input id="cfgFutureDays" class="input" type="number" min="1" step="1" placeholder="365" />
+
+    <label class="muted" for="cfgImmichUrlDefault">Immich URL Standard (global)</label>
+    <input id="cfgImmichUrlDefault" class="input" placeholder="https://immich.example.com" />
+    <label class="muted" for="cfgImmichApiKeyDefault">Immich API Key Standard (global)</label>
+    <input id="cfgImmichApiKeyDefault" class="input" placeholder="immich-api-key" />
+    <p class="muted" id="runtimeHint">Nur Admin kann Runtime-Konfiguration ändern.</p>
+
+    <hr style="border:none; border-top:1px solid var(--line); margin:.8rem 0;" />
+    <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:.35rem;">
+      <h4 style="margin:0;">Index Status</h4>
+      <button class="btn" id="refreshIndexStatusBtn">Aktualisieren</button>
+    </div>
+    <div class="log" id="indexStatusBox" style="max-height:180px;">Noch keine Statusdaten geladen.</div>
+
+    <hr style="border:none; border-top:1px solid var(--line); margin:.8rem 0;" />
+    <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:.35rem;">
+      <h4 style="margin:0;">Verbindungsstatus</h4>
+      <button class="btn" id="refreshConnectivityBtn">Prüfen</button>
+    </div>
+    <div class="log" id="connectivityStatusBox" style="max-height:220px;">Noch keine Verbindungsdaten geladen.</div>
+
+    <div class="row" style="margin-top:.6rem;">
+      <button class="btn" id="saveProfileBtn">Profil speichern</button>
+      <button class="btn" id="reindexBtn">Index neu aufbauen</button>
+    </div>
+  </aside>
+
+  <main class="shell">
+    <div class="content-wrap">
+      <section class="landing" id="landingView">
+        <h2>Was soll ich für dich erledigen?</h2>
+        <p>Frag mich natürlich - ich kümmere mich drum. ✨</p>
+
+        <div class="query">
+          <div class="prompt-with-source">
+            <button class="source-plus-btn" id="landingSourceBtn" title="Quelle wählen (aktuell: Alle Quellen)" aria-label="Quelle wählen">+</button>
+            <textarea id="landingPrompt" class="input" placeholder="Welche Termine habe ich morgen?"></textarea>
+            <div class="source-menu" id="landingSourceMenu" aria-label="Quellenauswahl">
+              <button class="source-item active" data-source="auto">Alle Quellen<small>Standard: bestmögliche Kombination</small></button>
+              <button class="source-item" data-source="photos">Fotos (Immich)<small>Erzwingt Foto/Immich-Suche</small></button>
+              <button class="source-item" data-source="files">Dateien (Nextcloud)<small>Erzwingt Datei/Nextcloud-Suche</small></button>
+            </div>
+            <div class="source-selection-indicator" id="landingSourceIndicator">Aktive Quelle: <strong>Alle Quellen</strong></div>
+            <div class="source-warning" id="landingSourceWarning"></div>
+          </div>
+          <div class="actions-row">
+            <button class="btn btn-primary" id="landingAskBtn">Fragen</button>
+          </div>
+        </div>
+
+        <div class="chips" id="suggestions"></div>
+      </section>
+
+      <section class="conversation hidden" id="conversationView">
+        <div class="messages" id="messages"><div class="messages-inner" id="messagesInner"></div></div>
+        <div class="composer">
+          <div class="composer-row">
+            <div class="prompt-with-source">
+              <button class="source-plus-btn" id="chatSourceBtn" title="Quelle wählen (aktuell: Alle Quellen)" aria-label="Quelle wählen">+</button>
+              <textarea id="chatPrompt" class="input" placeholder="Nachricht schreiben..."></textarea>
+              <div class="source-menu" id="chatSourceMenu" aria-label="Quellenauswahl">
+                <button class="source-item active" data-source="auto">Alle Quellen<small>Standard: bestmögliche Kombination</small></button>
+                <button class="source-item" data-source="photos">Fotos (Immich)<small>Erzwingt Foto/Immich-Suche</small></button>
+                <button class="source-item" data-source="files">Dateien (Nextcloud)<small>Erzwingt Datei/Nextcloud-Suche</small></button>
+              </div>
+              <div class="source-selection-indicator" id="chatSourceIndicator">Aktive Quelle: <strong>Alle Quellen</strong></div>
+              <div class="source-warning" id="chatSourceWarning"></div>
+            </div>
+            <button class="btn btn-primary send-btn" id="chatSendBtn" title="Senden" aria-label="Senden">
+              <span class="send-label">➤</span>
+              <span class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="modal-backdrop" id="loginPromptModal" aria-hidden="true">
+    <div class="modal-card">
+      <h3>Für Nextcloud-Funktionen anmelden</h3>
+      <p>Die Antwort kommt vom KI-Modell. Für Datei-, Kalender- und Immich-Zugriff bitte Nextcloud verbinden.</p>
+      <label class="muted" for="connectNextcloudUrl">Nextcloud URL</label>
+      <input id="connectNextcloudUrl" class="input" placeholder="https://cloud.example.com" />
+      <div class="row" style="justify-content:flex-end; margin-top:.3rem;">
+        <button class="btn" id="dismissLoginPromptBtn">Später</button>
+        <button class="btn btn-primary" id="startNextcloudLoginBtn">Mit Nextcloud verbinden</button>
+      </div>
+      <p class="muted" id="loginPromptStatus">Noch nicht verbunden.</p>
+    </div>
+  </div>
+
+<script>
+  const sidebar = document.getElementById('sidebar');
+  const sidebarToggle = document.getElementById('sidebarToggle');
+  const profileFab = document.getElementById('profileFab');
+  const profileDrawer = document.getElementById('profileDrawer');
+
+  const newChatBtn = document.getElementById('newChatBtn');
+  const clearLogsBtn = document.getElementById('clearLogsBtn');
+  const loginBtn = document.getElementById('loginBtn');
+  const landingAskBtn = document.getElementById('landingAskBtn');
+  const chatSendBtn = document.getElementById('chatSendBtn');
+  const semanticBtn = document.getElementById('semanticBtn');
+  const pdfBtn = document.getElementById('pdfBtn');
+  const photoBtn = document.getElementById('photoBtn');
+  const saveProfileBtn = document.getElementById('saveProfileBtn');
+  const reindexBtn = document.getElementById('reindexBtn');
+  const refreshIndexStatusBtn = document.getElementById('refreshIndexStatusBtn');
+  const refreshConnectivityBtn = document.getElementById('refreshConnectivityBtn');
+  const loginPromptModal = document.getElementById('loginPromptModal');
+  const connectNextcloudUrlEl = document.getElementById('connectNextcloudUrl');
+  const startNextcloudLoginBtn = document.getElementById('startNextcloudLoginBtn');
+  const dismissLoginPromptBtn = document.getElementById('dismissLoginPromptBtn');
+  const loginPromptStatus = document.getElementById('loginPromptStatus');
+
+  const logs = document.getElementById('logs');
+  const suggestionsEl = document.getElementById('suggestions');
+  const chatsList = document.getElementById('chatsList');
+  const messagesEl = document.getElementById('messages');
+  const messagesInnerEl = document.getElementById('messagesInner');
+
+  const landingView = document.getElementById('landingView');
+  const conversationView = document.getElementById('conversationView');
+  const landingPrompt = document.getElementById('landingPrompt');
+  const chatPrompt = document.getElementById('chatPrompt');
+  const landingSourceBtn = document.getElementById('landingSourceBtn');
+  const chatSourceBtn = document.getElementById('chatSourceBtn');
+  const landingSourceMenu = document.getElementById('landingSourceMenu');
+  const chatSourceMenu = document.getElementById('chatSourceMenu');
+  const landingSourceIndicator = document.getElementById('landingSourceIndicator');
+  const chatSourceIndicator = document.getElementById('chatSourceIndicator');
+  const landingSourceWarning = document.getElementById('landingSourceWarning');
+  const chatSourceWarning = document.getElementById('chatSourceWarning');
+
+  const themeEl = document.getElementById('theme');
+  const languageEl = document.getElementById('language');
+  const adminUrlEl = document.getElementById('adminUrl');
+  const adminHintEl = document.getElementById('adminHint');
+  const immichUrlEl = document.getElementById('immichUrl');
+  const immichApiKeyEl = document.getElementById('immichApiKey');
+  const cfgOllamaUrlEl = document.getElementById('cfgOllamaUrl');
+  const cfgOllamaModelEl = document.getElementById('cfgOllamaModel');
+  const cfgVectorEnabledEl = document.getElementById('cfgVectorEnabled');
+  const cfgVectorProviderEl = document.getElementById('cfgVectorProvider');
+  const cfgVectorPathEl = document.getElementById('cfgVectorPath');
+  const cfgReindexHoursEl = document.getElementById('cfgReindexHours');
+  const cfgPastDaysEl = document.getElementById('cfgPastDays');
+  const cfgFutureDaysEl = document.getElementById('cfgFutureDays');
+  const cfgImmichUrlDefaultEl = document.getElementById('cfgImmichUrlDefault');
+  const cfgImmichApiKeyDefaultEl = document.getElementById('cfgImmichApiKeyDefault');
+  const runtimeHintEl = document.getElementById('runtimeHint');
+  const indexStatusBox = document.getElementById('indexStatusBox');
+  const connectivityStatusBox = document.getElementById('connectivityStatusBox');
+  const globalHealthIndicator = document.getElementById('globalHealthIndicator');
+  const topIndexBadge = document.getElementById('topIndexBadge');
+
+  let systemConfig = {configured: false, admin_username: null, nextcloud_url: ''};
+  let nextcloudLoginPollTimer = null;
+  let preferredSource = 'auto';
+  let suggestionsRefreshTimer = null;
+
+  function sourceLabel(source) {
+    if (source === 'photos') return 'Fotos (Immich)';
+    if (source === 'files') return 'Dateien (Nextcloud)';
+    return 'Alle Quellen';
+  }
+
+  function setPreferredSource(source) {
+    const normalized = ['auto', 'photos', 'files'].includes(source) ? source : 'auto';
+    preferredSource = normalized;
+
+    [landingSourceBtn, chatSourceBtn].forEach((btn) => {
+      if (!btn) return;
+      btn.title = 'Quelle wählen (aktuell: ' + sourceLabel(normalized) + ')';
+      btn.classList.toggle('active', normalized !== 'auto');
+    });
+
+    [landingSourceMenu, chatSourceMenu].forEach((menu) => {
+      if (!menu) return;
+      const items = Array.from(menu.querySelectorAll('.source-item'));
+      items.forEach((item) => {
+        item.classList.toggle('active', item.getAttribute('data-source') === normalized);
+      });
+    });
+
+    [landingSourceIndicator, chatSourceIndicator].forEach((el) => {
+      if (!el) return;
+      el.innerHTML = 'Aktive Quelle: <strong>' + sourceLabel(normalized) + '</strong>';
+    });
+
+    if (suggestionsEl && !conversationView.classList.contains('hidden')) {
+      return;
+    }
+    loadSuggestions();
+  }
+
+  function hideSourceWarnings() {
+    [landingSourceWarning, chatSourceWarning].forEach((el) => {
+      if (!el) return;
+      el.textContent = '';
+      el.classList.remove('visible');
+    });
+  }
+
+  function showSourceWarning(message) {
+    const target = conversationView.classList.contains('hidden') ? landingSourceWarning : chatSourceWarning;
+    if (!target) return;
+    target.textContent = message;
+    target.classList.add('visible');
+  }
+
+  function classifyPromptIntent(promptText) {
+    const text = String(promptText || '').toLowerCase();
+    const hasPhoto = /(foto|fotos|bild|bilder|image|images|photo|photos|immich|katze|katzen|cat|cats)/.test(text);
+    const hasFile = /(datei|dateien|dokument|dokumente|pdf|unterlage|unterlagen|file|files|document|documents)/.test(text);
+    if (hasPhoto && !hasFile) return 'photos';
+    if (hasFile && !hasPhoto) return 'files';
+    return 'mixed';
+  }
+
+  function closeSourceMenus() {
+    [landingSourceMenu, chatSourceMenu].forEach((menu) => {
+      if (menu) menu.classList.remove('open');
+    });
+  }
+
+  function toggleSourceMenu(menu) {
+    if (!menu) return;
+    const willOpen = !menu.classList.contains('open');
+    closeSourceMenus();
+    if (willOpen) {
+      const anchor = menu.parentElement;
+      const anchorRect = anchor ? anchor.getBoundingClientRect() : null;
+      const menuHeightEstimate = 190;
+      const spaceBelow = anchorRect ? (window.innerHeight - anchorRect.bottom) : 0;
+      menu.classList.toggle('upward', spaceBelow < menuHeightEstimate);
+      menu.classList.add('open');
+    }
+  }
+
+  function log(title, payload) {
+    const text = "\n\n### " + title + "\n" + JSON.stringify(payload, null, 2);
+    logs.textContent = (logs.textContent + text).slice(-50000);
+    logs.scrollTop = logs.scrollHeight;
+  }
+
+  function getLanguage() {
+    return languageEl.value === 'en' ? 'en' : 'de';
+  }
+
+  function getCurrentUser() {
+    return localStorage.getItem('nm_username') || '';
+  }
+
+  function setCurrentUser(username) {
+    localStorage.setItem('nm_username', username || '');
+    document.getElementById('loginUsername').value = username || '';
+  }
+
+  function saveLocalSettings() {
+    localStorage.setItem('nm_lang', getLanguage());
+    localStorage.setItem('nm_theme', themeEl.value);
+    document.body.setAttribute('data-theme', themeEl.value);
+  }
+
+  function loadLocalSettings() {
+    languageEl.value = localStorage.getItem('nm_lang') || 'de';
+    const theme = localStorage.getItem('nm_theme') || 'classic';
+    themeEl.value = theme;
+    document.body.setAttribute('data-theme', theme);
+    document.getElementById('loginUsername').value = getCurrentUser();
+  }
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function renderMarkdown(rawText) {
+    const escaped = escapeHtml(rawText || '');
+    const lines = escaped.split('\n');
+    const out = [];
+    let inList = false;
+
+    function inline(text) {
+      let rendered = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      rendered = rendered.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img class="msg-image" alt="$1" src="$2" />');
+      rendered = rendered.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer noopener">$1</a>');
+      return rendered;
+    }
+
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('- ')) {
+        if (!inList) {
+          out.push('<ul>');
+          inList = true;
+        }
+        out.push('<li>' + inline(trimmed.slice(2)) + '</li>');
+        return;
+      }
+
+      if (inList) {
+        out.push('</ul>');
+        inList = false;
+      }
+
+      if (!trimmed) {
+        out.push('<p></p>');
+        return;
+      }
+      out.push('<p>' + inline(trimmed) + '</p>');
+    });
+
+    if (inList) out.push('</ul>');
+    return out.join('');
+  }
+
+  function classifyCardType(href, title, meta, hasImage) {
+    const url = String(href || '').toLowerCase();
+    const text = (String(title || '') + ' ' + String(meta || '')).toLowerCase();
+    if (hasImage || url.includes('/search/photos/') || url.includes('/api/ui/immich/thumbnail')) return 'photo';
+    if (url.includes('/apps/files/') || url.includes('/remote.php/dav/files/') || /\.(pdf|txt|md|csv|json|docx?|xlsx?|pptx?)\b/.test(text)) return 'file';
+    if (text.includes('termin') || text.includes('meeting') || text.includes('event') || /\d{2}\.\d{2}\.\d{4}/.test(text) || /\d{4}-\d{2}-\d{2}/.test(text)) return 'event';
+    return null;
+  }
+
+  function iconForCardType(type) {
+    if (type === 'photo') return '🖼️';
+    if (type === 'file') return '📄';
+    if (type === 'event') return '📅';
+    return '🔗';
+  }
+
+  function injectSmartCards(bubble) {
+    if (!bubble) return null;
+    const candidates = Array.from(bubble.querySelectorAll('li, p'));
+    const cards = [];
+    const seen = new Map();
+
+    candidates.forEach((node) => {
+      const links = Array.from(node.querySelectorAll('a[href]'));
+      if (!links.length) return;
+
+      const primary = links[0];
+      const href = primary.getAttribute('href') || '';
+      if (!href) return;
+
+      const imgNode = node.querySelector('img');
+      const hasImage = !!imgNode;
+      const title = (primary.textContent || imgNode?.getAttribute('alt') || '').trim() || 'Öffnen';
+      const fullText = (node.textContent || '').trim().replace(/\s+/g, ' ');
+      const meta = fullText.replace(title, '').trim();
+      const type = classifyCardType(href, title, meta, hasImage);
+      if (!type) return;
+
+      const dedupeKey = [type, href, title].join('|');
+      const card = {
+        type,
+        href,
+        title,
+        meta,
+        thumb: imgNode ? (imgNode.getAttribute('src') || '') : '',
+        alt: imgNode ? (imgNode.getAttribute('alt') || title) : title,
+      };
+
+      if (seen.has(dedupeKey)) {
+        const existing = seen.get(dedupeKey);
+        if (existing && !existing.thumb && card.thumb) {
+          existing.thumb = card.thumb;
+          existing.alt = card.alt || existing.alt;
+        }
+        if (existing && (!existing.meta || existing.meta.length < card.meta.length) && card.meta) {
+          existing.meta = card.meta;
+        }
+        return;
+      }
+
+      seen.set(dedupeKey, card);
+      cards.push(card);
+    });
+
+    if (!cards.length) return null;
+
+    const box = document.createElement('div');
+    box.className = 'smart-cards';
+    const allPhoto = cards.length > 0 && cards.every((card) => card.type === 'photo');
+    const allEvent = cards.length > 0 && cards.every((card) => card.type === 'event');
+    if (allPhoto) {
+      box.classList.add('photo-row');
+    } else if (allEvent) {
+      box.classList.add('event-row');
+    }
+
+    cards.forEach((card) => {
+      const item = document.createElement('div');
+      item.className = 'smart-card';
+
+      const header = document.createElement('div');
+      header.className = 'smart-card-header';
+
+      const icon = document.createElement('span');
+      icon.className = 'smart-card-icon';
+      icon.textContent = iconForCardType(card.type);
+
+      const link = document.createElement('a');
+      link.className = 'smart-card-title';
+      link.href = card.href;
+      link.target = '_blank';
+      link.rel = 'noreferrer noopener';
+      link.textContent = card.title;
+
+      header.appendChild(icon);
+      header.appendChild(link);
+      item.appendChild(header);
+
+      if (card.meta) {
+        const meta = document.createElement('div');
+        meta.className = 'smart-card-meta';
+        meta.textContent = card.meta;
+        item.appendChild(meta);
+      }
+
+      if (card.type === 'photo' && card.thumb) {
+        const imgLink = document.createElement('a');
+        imgLink.href = card.href;
+        imgLink.target = '_blank';
+        imgLink.rel = 'noreferrer noopener';
+
+        const img = document.createElement('img');
+        img.className = 'smart-card-thumb';
+        img.src = card.thumb;
+        img.alt = card.alt;
+        img.loading = 'lazy';
+
+        imgLink.appendChild(img);
+        item.appendChild(imgLink);
+      }
+
+      box.appendChild(item);
+    });
+
+    return box;
+  }
+
+  function linkifyPlainUrls(container) {
+    if (!container) return;
+    const urlRegex = /(https?:\/\/[^\s<>")]+[^\s<>"),.!?;:])/gi;
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (!node || !node.parentElement) continue;
+      if (node.parentElement.closest('a')) continue;
+      textNodes.push(node);
+    }
+
+    textNodes.forEach((node) => {
+      const text = node.nodeValue || '';
+      urlRegex.lastIndex = 0;
+      if (!urlRegex.test(text)) return;
+      urlRegex.lastIndex = 0;
+
+      const frag = document.createDocumentFragment();
+      let lastIdx = 0;
+      let match;
+      while ((match = urlRegex.exec(text)) !== null) {
+        const full = match[0];
+        const idx = match.index;
+        if (idx > lastIdx) {
+          frag.appendChild(document.createTextNode(text.slice(lastIdx, idx)));
+        }
+        const link = document.createElement('a');
+        link.href = full;
+        link.target = '_blank';
+        link.rel = 'noreferrer noopener';
+        link.textContent = full;
+        frag.appendChild(link);
+        lastIdx = idx + full.length;
+      }
+      if (lastIdx < text.length) {
+        frag.appendChild(document.createTextNode(text.slice(lastIdx)));
+      }
+      node.parentNode.replaceChild(frag, node);
+    });
+  }
+
+  function switchToChat() {
+    landingView.classList.add('hidden');
+    conversationView.classList.remove('hidden');
+    setTimeout(() => chatPrompt.focus(), 0);
+  }
+
+  function switchToLanding() {
+    conversationView.classList.add('hidden');
+    landingView.classList.remove('hidden');
+    setTimeout(() => landingPrompt.focus(), 0);
+  }
+
+  function addMessage(role, text) {
+    const row = document.createElement('div');
+    row.className = 'msg-row ' + (role === 'user' ? 'user' : 'assistant');
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    if (role === 'assistant') {
+      bubble.innerHTML = renderMarkdown(text);
+      linkifyPlainUrls(bubble);
+      const stack = document.createElement('div');
+      stack.className = 'assistant-stack';
+      stack.appendChild(bubble);
+
+      const cardsBox = injectSmartCards(bubble);
+      if (cardsBox) {
+        stack.appendChild(cardsBox);
+      }
+
+      row.appendChild(stack);
+    } else {
+      bubble.textContent = text || '';
+      row.appendChild(bubble);
+    }
+
+    messagesInnerEl.appendChild(row);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  async function loadSystemConfig() {
+    try {
+      const res = await fetch('/api/ui/system-config');
+      const data = await res.json();
+      systemConfig = {
+        configured: !!data.configured,
+        admin_username: data.admin_username || null,
+        nextcloud_url: data.nextcloud_url || '',
+      };
+
+      const currentUser = getCurrentUser();
+      const isAdmin = !systemConfig.admin_username || currentUser === systemConfig.admin_username;
+
+      adminUrlEl.value = systemConfig.nextcloud_url || '';
+      adminUrlEl.disabled = !isAdmin;
+      cfgOllamaUrlEl.disabled = !isAdmin;
+      cfgOllamaModelEl.disabled = !isAdmin;
+      cfgVectorEnabledEl.disabled = !isAdmin;
+      cfgVectorProviderEl.disabled = !isAdmin;
+      cfgVectorPathEl.disabled = !isAdmin;
+      cfgReindexHoursEl.disabled = !isAdmin;
+      cfgPastDaysEl.disabled = !isAdmin;
+      cfgFutureDaysEl.disabled = !isAdmin;
+      cfgImmichUrlDefaultEl.disabled = !isAdmin;
+      cfgImmichApiKeyDefaultEl.disabled = !isAdmin;
+
+      if (!systemConfig.configured) {
+        adminHintEl.textContent = 'Noch kein Admin gesetzt. Erster eingeloggter Nutzer wird Admin.';
+        runtimeHintEl.textContent = 'Runtime-Konfiguration wird nach erstem Admin-Login aktiv.';
+      } else if (isAdmin) {
+        adminHintEl.textContent = 'Du bist Admin und kannst die zentrale URL ändern.';
+        runtimeHintEl.textContent = 'Du bist Admin und kannst Runtime-Konfiguration online ändern.';
+      } else {
+        adminHintEl.textContent = 'System-URL ist gesetzt. Admin: ' + systemConfig.admin_username;
+        runtimeHintEl.textContent = 'Runtime-Konfiguration ist schreibgeschützt. Admin: ' + systemConfig.admin_username;
+      }
+    } catch (e) {
+      log('System Config', {error: String(e)});
+    }
+  }
+
+  async function loadRuntimeConfig() {
+    try {
+      const res = await fetch('/api/ui/runtime-config');
+      const data = await res.json();
+      if (!data.success) {
+        log('Runtime Config', data);
+        return;
+      }
+      cfgOllamaUrlEl.value = data.ollama_url || '';
+      cfgOllamaModelEl.value = data.ollama_model || '';
+      cfgVectorEnabledEl.value = String(data.vector_db_enabled !== false);
+      cfgVectorProviderEl.value = data.vector_db_provider || 'qdrant';
+      cfgVectorPathEl.value = data.vector_db_path || './qdrant_data';
+      cfgReindexHoursEl.value = String(data.calendar_auto_reindex_hours || 6);
+      cfgPastDaysEl.value = String(data.calendar_auto_reindex_past_days || 730);
+      cfgFutureDaysEl.value = String(data.calendar_auto_reindex_future_days || 365);
+      cfgImmichUrlDefaultEl.value = data.immich_url_default || '';
+      cfgImmichApiKeyDefaultEl.value = data.immich_api_key_default || '';
+    } catch (e) {
+      log('Runtime Config', {error: String(e)});
+    }
+  }
+
+  async function loadIndexStatus() {
+    const username = getCurrentUser();
+    if (!username) {
+      indexStatusBox.textContent = 'Noch kein Login. Status erst nach Anmeldung verfügbar.';
+      if (topIndexBadge) topIndexBadge.textContent = 'Index: kein Login';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/ui/index-status?username=' + encodeURIComponent(username));
+      const data = await res.json();
+      if (!data.success) {
+        indexStatusBox.textContent = 'Status konnte nicht geladen werden: ' + (data.error || data.detail || 'unbekannter Fehler');
+        if (topIndexBadge) topIndexBadge.textContent = 'Index: Fehler';
+        return;
+      }
+
+      const docs = data.documents || {};
+      const cal = data.calendar || {};
+      const vec = data.vector || {};
+      const nc = data.nextcloud || {};
+      const allFiles = (docs.total_files_visible === null || docs.total_files_visible === undefined) ? '?' : docs.total_files_visible;
+      const total = (docs.total_visible === null || docs.total_visible === undefined) ? '?' : docs.total_visible;
+      const remaining = (docs.remaining_estimate === null || docs.remaining_estimate === undefined) ? '?' : docs.remaining_estimate;
+      const docLast = docs.last_full_reindex || '-';
+      const incLast = docs.last_incremental_sync || '-';
+      const calLast = cal.last_full_reindex || '-';
+      const calBg = cal.last_background_run || '-';
+
+      indexStatusBox.textContent = [
+        'Index-Backend: ' + (docs.index_backend || '-'),
+        'Dateien sichtbar gesamt: ' + allFiles,
+        'Dokumente: ' + (docs.indexed || 0) + ' / ' + total + ' indexiert',
+        'Chunks indexiert: ' + (docs.indexed_chunks || 0),
+        'Dokumente offen (geschätzt): ' + remaining,
+        'Dokument-Reindex zuletzt: ' + docLast,
+        'Dokument-Incremental zuletzt: ' + incLast,
+        'Kalender-Events indexiert: ' + (cal.indexed_events || 0),
+        'Kalender-Reindex zuletzt: ' + calLast,
+        'Kalender-Background zuletzt: ' + calBg,
+        'Nextcloud URL: ' + (nc.url || '-'),
+        'Vector DB: ' + (vec.enabled ? 'aktiv' : 'inaktiv') + ' (' + (vec.provider || '-') + ')',
+      ].join('\n');
+
+      if (topIndexBadge) {
+        topIndexBadge.textContent = 'Index: ' + (docs.indexed || 0) + '/' + total + ' | offen: ' + remaining;
+      }
+    } catch (e) {
+      indexStatusBox.textContent = 'Statusfehler: ' + String(e);
+      if (topIndexBadge) topIndexBadge.textContent = 'Index: Fehler';
+    }
+  }
+
+  function formatConnLine(label, service) {
+    const cfg = service && service.configured;
+    const active = service && service.active;
+    const icon = active ? '🟢' : (cfg ? '🟠' : '⚪');
+    const state = active ? 'aktiv' : (cfg ? 'konfiguriert, aber nicht erreichbar' : 'nicht konfiguriert');
+    const details = service && service.details ? String(service.details) : '-';
+    const source = service && service.source ? ' [' + service.source + ']' : '';
+    const error = service && service.error ? ' | Fehler: ' + String(service.error) : '';
+    return icon + ' ' + label + ': ' + state + source + ' | ' + details + error;
+  }
+
+  function setGlobalIndicatorState(state, title) {
+    if (!globalHealthIndicator) return;
+    globalHealthIndicator.classList.remove('state-ok', 'state-warn', 'state-error', 'state-unknown');
+    const normalized = ['ok', 'warn', 'error', 'unknown'].includes(state) ? state : 'unknown';
+    globalHealthIndicator.classList.add('state-' + normalized);
+    globalHealthIndicator.title = title || 'Systemstatus';
+    globalHealthIndicator.setAttribute('aria-label', title || 'Systemstatus');
+  }
+
+  function updateGlobalHealthFromConnectivity(data) {
+    if (!data || !data.success) {
+      setGlobalIndicatorState('error', 'Fehler beim Laden des Systemstatus');
+      return;
+    }
+
+    const s = data.services || {};
+    const serviceKeys = ['database', 'ollama', 'vector_db', 'nextcloud', 'immich'];
+    const statuses = serviceKeys.map((key) => s[key] || {});
+
+    const hasError = statuses.some((entry) => entry.configured && !entry.active);
+    const hasUnconfigured = statuses.some((entry) => !entry.configured);
+    const allConfiguredActive = statuses.every((entry) => entry.configured && entry.active);
+
+    if (allConfiguredActive) {
+      setGlobalIndicatorState('ok', 'Alle Verbindungen aktiv');
+      return;
+    }
+    if (hasError) {
+      setGlobalIndicatorState('error', 'Mindestens eine konfigurierte Verbindung ist inaktiv');
+      return;
+    }
+    if (hasUnconfigured) {
+      setGlobalIndicatorState('warn', 'Mindestens eine Verbindung ist noch nicht konfiguriert');
+      return;
+    }
+    setGlobalIndicatorState('unknown', 'Systemstatus unbekannt');
+  }
+
+  async function loadConnectivityStatus() {
+    const username = getCurrentUser();
+    const qs = username ? ('?username=' + encodeURIComponent(username)) : '';
+
+    try {
+      const res = await fetch('/api/ui/connectivity-status' + qs);
+      const data = await res.json();
+      if (!data.success) {
+        connectivityStatusBox.textContent = 'Status konnte nicht geladen werden: ' + (data.error || data.detail || 'unbekannter Fehler');
+        updateGlobalHealthFromConnectivity(data);
+        return;
+      }
+
+      const s = data.services || {};
+      connectivityStatusBox.textContent = [
+        formatConnLine('Nextcloud', s.nextcloud || {}),
+        formatConnLine('Immich', s.immich || {}),
+        formatConnLine('Ollama', s.ollama || {}),
+        formatConnLine('Vector DB', s.vector_db || {}),
+        formatConnLine('Datenbank', s.database || {}),
+        'Zuletzt geprüft: ' + (data.checked_at || '-'),
+      ].join('\n');
+      updateGlobalHealthFromConnectivity(data);
+    } catch (e) {
+      connectivityStatusBox.textContent = 'Statusfehler: ' + String(e);
+      setGlobalIndicatorState('error', 'Statusfehler: ' + String(e));
+    }
+  }
+
+  async function loadProfileConfig() {
+    const username = getCurrentUser();
+    if (!username) {
+      immichUrlEl.value = '';
+      immichApiKeyEl.value = '';
+      return;
+    }
+    try {
+      const res = await fetch('/api/ui/profile-config?username=' + encodeURIComponent(username));
+      const data = await res.json();
+      immichUrlEl.value = data.immich_url || '';
+      immichApiKeyEl.value = data.immich_api_key || '';
+    } catch (e) {
+      log('Profil', {error: String(e)});
+    }
+  }
+
+  async function saveProfileConfig() {
+    const username = getCurrentUser();
+    if (!username) {
+      log('Profil', {error: 'Bitte zuerst anmelden.'});
+      return;
+    }
+
+    saveLocalSettings();
+
+    const isAdmin = !systemConfig.admin_username || username === systemConfig.admin_username;
+    if (isAdmin && adminUrlEl.value.trim()) {
+      const cfgRes = await fetch('/api/ui/system-config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({actor_username: username, nextcloud_url: adminUrlEl.value.trim()}),
+      });
+      const cfgData = await cfgRes.json();
+      log('System Config', cfgData);
+    }
+
+    if (isAdmin) {
+      const runtimeRes = await fetch('/api/ui/runtime-config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          actor_username: username,
+          ollama_url: cfgOllamaUrlEl.value.trim(),
+          ollama_model: cfgOllamaModelEl.value.trim(),
+          vector_db_enabled: cfgVectorEnabledEl.value === 'true',
+          vector_db_provider: cfgVectorProviderEl.value.trim(),
+          vector_db_path: cfgVectorPathEl.value.trim(),
+          calendar_auto_reindex_hours: Number(cfgReindexHoursEl.value || 6),
+          calendar_auto_reindex_past_days: Number(cfgPastDaysEl.value || 730),
+          calendar_auto_reindex_future_days: Number(cfgFutureDaysEl.value || 365),
+          immich_url_default: cfgImmichUrlDefaultEl.value.trim(),
+          immich_api_key_default: cfgImmichApiKeyDefaultEl.value.trim(),
+        }),
+      });
+      const runtimeData = await runtimeRes.json();
+      log('Runtime Config', runtimeData);
+    }
+
+    const res = await fetch('/api/ui/profile-config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        username,
+        immich_url: immichUrlEl.value.trim(),
+        immich_api_key: immichApiKeyEl.value.trim(),
+      }),
+    });
+    const data = await res.json();
+    log('Profil', data);
+    await loadSystemConfig();
+    await loadRuntimeConfig();
+    await loadIndexStatus();
+    await loadConnectivityStatus();
+  }
+
+  async function loadSuggestions() {
+    const username = getCurrentUser();
+    try {
+      const qs =
+        'language=' + encodeURIComponent(getLanguage()) +
+        '&username=' + encodeURIComponent(username) +
+        '&preferred_source=' + encodeURIComponent(preferredSource || 'auto');
+      const res = await fetch('/api/ui/suggestions?' + qs);
+      const data = await res.json();
+      const list = Array.isArray(data.suggestions) ? data.suggestions : [];
+      suggestionsEl.innerHTML = '';
+      list.slice(0, 6).forEach((text) => {
+        const chip = document.createElement('button');
+        chip.className = 'chip';
+        chip.textContent = text;
+        chip.addEventListener('click', () => {
+          landingPrompt.value = text;
+          landingPrompt.focus();
+        });
+        suggestionsEl.appendChild(chip);
+      });
+    } catch (e) {
+      log('Suggestions', {error: String(e)});
+    }
+  }
+
+  function startSuggestionsAutoRefresh() {
+    if (suggestionsRefreshTimer) {
+      clearInterval(suggestionsRefreshTimer);
+      suggestionsRefreshTimer = null;
+    }
+    suggestionsRefreshTimer = setInterval(() => {
+      if (conversationView.classList.contains('hidden')) {
+        loadSuggestions();
+      }
+    }, 90000);
+  }
+
+  async function loadChats() {
+    const username = getCurrentUser();
+    if (!username) {
+      chatsList.innerHTML = '<p class="muted">Noch kein Login.</p>';
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/chat/history?username=' + encodeURIComponent(username) + '&limit=200');
+      const data = await res.json();
+      const chats = Array.isArray(data.chats) ? data.chats : [];
+      chatsList.innerHTML = '';
+
+      if (!chats.length) {
+        chatsList.innerHTML = '<p class="muted">Noch keine Chats vorhanden.</p>';
+        return;
+      }
+
+      chats.forEach((chat) => {
+        const item = document.createElement('div');
+        item.className = 'chat-item';
+
+        const time = document.createElement('div');
+        time.className = 'chat-item-time';
+        const date = new Date(chat.timestamp);
+        time.textContent = Number.isNaN(date.getTime()) ? '-' : date.toLocaleString(getLanguage() === 'de' ? 'de-DE' : 'en-US');
+
+        const title = document.createElement('div');
+        title.className = 'chat-item-title';
+        title.textContent = chat.preview || chat.prompt || 'Ohne Titel';
+
+        item.appendChild(time);
+        item.appendChild(title);
+        item.addEventListener('click', () => {
+          messagesInnerEl.innerHTML = '';
+          switchToChat();
+          addMessage('user', chat.prompt || '');
+          addMessage('assistant', chat.response || '');
+          sidebar.classList.remove('open');
+          document.body.classList.remove('sidebar-open');
+        });
+
+        item.addEventListener('contextmenu', async (ev) => {
+          ev.preventDefault();
+          if (!confirm('Diesen Chat löschen?')) return;
+          await fetch('/api/chat/' + encodeURIComponent(chat.id) + '?username=' + encodeURIComponent(username), {method: 'DELETE'});
+          loadChats();
+        });
+
+        chatsList.appendChild(item);
+      });
+    } catch (e) {
+      log('Chats', {error: String(e)});
+    }
+  }
+
+  async function loginWithNextcloud() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const appPassword = document.getElementById('loginPassword').value;
+    const nextcloudUrl = (systemConfig && systemConfig.nextcloud_url) ? systemConfig.nextcloud_url : adminUrlEl.value.trim();
+
+    if (!username || !appPassword || !nextcloudUrl) {
+      log('Login', {error: 'Bitte Benutzername, App-Passwort und Nextcloud URL setzen.'});
+      return;
+    }
+
+    const payload = {username, app_password: appPassword, nextcloud_url: nextcloudUrl};
+
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        log('Login', data);
+        return;
+      }
+
+      setCurrentUser(username);
+      document.getElementById('loginPassword').value = '';
+      log('Login', data);
+
+      if (!systemConfig.configured && nextcloudUrl) {
+        await fetch('/api/ui/system-config', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({actor_username: username, nextcloud_url: nextcloudUrl}),
+        });
+      }
+
+      await loadSystemConfig();
+      await loadProfileConfig();
+      await loadIndexStatus();
+      await loadConnectivityStatus();
+      await loadChats();
+      await loadSuggestions();
+      profileDrawer.classList.remove('open');
+    } catch (e) {
+      log('Login', {error: String(e)});
+    }
+  }
+
+  function openLoginPrompt() {
+    const defaultUrl = (systemConfig && systemConfig.nextcloud_url) ? systemConfig.nextcloud_url : adminUrlEl.value.trim();
+    if (defaultUrl) connectNextcloudUrlEl.value = defaultUrl;
+    loginPromptStatus.textContent = 'Noch nicht verbunden.';
+    loginPromptModal.classList.add('open');
+    loginPromptModal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeLoginPrompt() {
+    loginPromptModal.classList.remove('open');
+    loginPromptModal.setAttribute('aria-hidden', 'true');
+    if (nextcloudLoginPollTimer) {
+      clearInterval(nextcloudLoginPollTimer);
+      nextcloudLoginPollTimer = null;
+    }
+  }
+
+  async function startNextcloudBrowserLogin() {
+    const nextcloudUrl = connectNextcloudUrlEl.value.trim();
+    if (!nextcloudUrl) {
+      loginPromptStatus.textContent = 'Bitte zuerst eine Nextcloud URL angeben.';
+      return;
+    }
+
+    startNextcloudLoginBtn.disabled = true;
+    loginPromptStatus.textContent = 'Starte Login-Weiterleitung...';
+
+    try {
+      const res = await fetch('/api/auth/nextcloud/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({nextcloud_url: nextcloudUrl}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        loginPromptStatus.textContent = 'Start fehlgeschlagen: ' + (data.detail || data.error || 'unbekannter Fehler');
+        return;
+      }
+
+      window.open(data.login_url, '_blank', 'noopener,noreferrer');
+      loginPromptStatus.textContent = 'Bitte in Nextcloud anmelden. Warte auf Bestätigung...';
+
+      if (nextcloudLoginPollTimer) clearInterval(nextcloudLoginPollTimer);
+      nextcloudLoginPollTimer = setInterval(async () => {
+        try {
+          const statusRes = await fetch('/api/auth/nextcloud/status?flow_id=' + encodeURIComponent(data.flow_id));
+          const status = await statusRes.json();
+          if (!status.success && status.status !== 'pending') {
+            loginPromptStatus.textContent = 'Login fehlgeschlagen: ' + (status.error || 'unbekannter Fehler');
+            clearInterval(nextcloudLoginPollTimer);
+            nextcloudLoginPollTimer = null;
+            startNextcloudLoginBtn.disabled = false;
+            return;
+          }
+
+          if (status.status === 'authenticated' && status.username) {
+            setCurrentUser(status.username);
+            loginPromptStatus.textContent = 'Erfolgreich verbunden als ' + status.username + '.';
+            clearInterval(nextcloudLoginPollTimer);
+            nextcloudLoginPollTimer = null;
+            await loadSystemConfig();
+            await loadRuntimeConfig();
+            await loadProfileConfig();
+            await loadIndexStatus();
+            await loadConnectivityStatus();
+            await loadChats();
+            await loadSuggestions();
+            setTimeout(closeLoginPrompt, 450);
+          }
+        } catch (e) {
+          loginPromptStatus.textContent = 'Polling-Fehler: ' + String(e);
+        }
+      }, 2000);
+    } catch (e) {
+      loginPromptStatus.textContent = 'Startfehler: ' + String(e);
+    } finally {
+      startNextcloudLoginBtn.disabled = false;
+    }
+  }
+
+  async function saveChat(prompt, response) {
+    const username = getCurrentUser();
+    if (!username || !prompt) return;
+    try {
+      await fetch('/api/chat/save?username=' + encodeURIComponent(username), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt, response}),
+      });
+    } catch (e) {
+      log('Chat Save', {error: String(e)});
+    }
+  }
+
+  function activePromptValue() {
+    if (!conversationView.classList.contains('hidden')) {
+      return chatPrompt.value.trim();
+    }
+    return landingPrompt.value.trim();
+  }
+
+  function clearPromptAfterSend() {
+    if (!conversationView.classList.contains('hidden')) {
+      chatPrompt.value = '';
+    } else {
+      landingPrompt.value = '';
+    }
+  }
+
+  function buildConversationContext(maxItems = 8) {
+    const rows = Array.from(messagesInnerEl.querySelectorAll('.msg-row'));
+    const tail = rows.slice(Math.max(0, rows.length - maxItems));
+    const lines = tail.map((row) => {
+      const role = row.classList.contains('user') ? 'User' : 'Assistant';
+      const text = (row.textContent || '').trim().replace(/\s+/g, ' ');
+      return text ? (role + ': ' + text) : null;
+    }).filter(Boolean);
+    return lines.join('\n');
+  }
+
+  async function queryAgent(promptValue) {
+    const username = getCurrentUser();
+    const isAnonymous = !username;
+    const prompt = (promptValue || '').trim();
+    if (!prompt) {
+      log('Agent', {error: 'Bitte eine Frage eingeben.'});
+      return;
+    }
+
+    hideSourceWarnings();
+    const intent = classifyPromptIntent(prompt);
+    let mismatchWarning = '';
+    if (preferredSource === 'files' && intent === 'photos') {
+      mismatchWarning = 'Hinweis: Quelle ist auf Dateien gestellt, die Anfrage klingt nach Fotos.';
+    } else if (preferredSource === 'photos' && intent === 'files') {
+      mismatchWarning = 'Hinweis: Quelle ist auf Fotos gestellt, die Anfrage klingt nach Dateien.';
+    }
+    if (mismatchWarning) {
+      showSourceWarning(mismatchWarning);
+    }
+
+    landingAskBtn.disabled = true;
+    chatSendBtn.disabled = true;
+    chatSendBtn.classList.add('thinking');
+
+    switchToChat();
+    addMessage('user', prompt);
+    clearPromptAfterSend();
+
+    try {
+      const endpoint = username
+        ? '/api/agent/query?username=' + encodeURIComponent(username)
+        : '/api/agent/query';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          prompt,
+          language: getLanguage(),
+          context: buildConversationContext(),
+          preferred_source: preferredSource,
+        }),
+      });
+      const data = await res.json();
+      const response = (typeof data.response === 'string' && data.response.trim())
+        ? data.response
+        : (data.error
+            ? ('Keine vollständige Antwort erhalten. Fehler: ' + data.error)
+            : 'Ich konnte gerade keine belastbare Antwort erzeugen. Soll ich gezielt in Dateien oder Fotos suchen?');
+      addMessage('assistant', response);
+      if (!isAnonymous) {
+        await saveChat(prompt, response);
+        await loadChats();
+      } else {
+        openLoginPrompt();
+      }
+      log('Agent', data);
+    } catch (e) {
+      addMessage('assistant', 'Fehler bei der Anfrage.');
+      log('Agent', {error: String(e)});
+    } finally {
+      landingAskBtn.disabled = false;
+      chatSendBtn.disabled = false;
+      chatSendBtn.classList.remove('thinking');
+    }
+  }
+
+  async function runTool(toolName, parameters) {
+    const username = getCurrentUser();
+    if (!username) {
+      log('Tool', {error: 'Bitte zuerst mit Nextcloud anmelden.'});
+      return null;
+    }
+    try {
+      const res = await fetch('/api/tools/test/' + encodeURIComponent(toolName), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username, parameters: parameters || {}}),
+      });
+      const data = await res.json();
+      log('Tool: ' + toolName, data);
+      return data;
+    } catch (e) {
+      log('Tool: ' + toolName, {error: String(e)});
+      return null;
+    }
+  }
+
+  sidebarToggle.addEventListener('click', () => {
+    sidebar.classList.toggle('open');
+    document.body.classList.toggle('sidebar-open', sidebar.classList.contains('open'));
+  });
+
+  landingSourceBtn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    toggleSourceMenu(landingSourceMenu);
+  });
+
+  chatSourceBtn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    toggleSourceMenu(chatSourceMenu);
+  });
+
+  [landingSourceMenu, chatSourceMenu].forEach((menu) => {
+    if (!menu) return;
+    menu.addEventListener('click', (ev) => {
+      const item = ev.target.closest('.source-item');
+      if (!item) return;
+      ev.preventDefault();
+      const source = item.getAttribute('data-source') || 'auto';
+      setPreferredSource(source);
+      closeSourceMenus();
+    });
+  });
+
+  profileFab.addEventListener('click', () => {
+    profileDrawer.classList.toggle('open');
+  });
+
+  document.addEventListener('click', (ev) => {
+    const inSidebar = sidebar.contains(ev.target) || ev.target === sidebarToggle;
+    const inProfile = profileDrawer.contains(ev.target) || ev.target === profileFab;
+    const inSourceMenu =
+      (landingSourceMenu && landingSourceMenu.contains(ev.target)) ||
+      (chatSourceMenu && chatSourceMenu.contains(ev.target)) ||
+      ev.target === landingSourceBtn ||
+      ev.target === chatSourceBtn;
+    if (!inSidebar) {
+      sidebar.classList.remove('open');
+      document.body.classList.remove('sidebar-open');
+    }
+    if (!inProfile) profileDrawer.classList.remove('open');
+    if (!inSourceMenu) closeSourceMenus();
+  });
+
+  themeEl.addEventListener('change', () => {
+    saveLocalSettings();
+  });
+
+  languageEl.addEventListener('change', () => {
+    saveLocalSettings();
+    loadSuggestions();
+    loadChats();
+  });
+
+  landingAskBtn.addEventListener('click', () => {
+    queryAgent(landingPrompt.value);
+  });
+
+  chatSendBtn.addEventListener('click', () => {
+    queryAgent(chatPrompt.value);
+  });
+
+  landingPrompt.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      queryAgent(landingPrompt.value);
+    }
+  });
+
+  chatPrompt.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) {
+      ev.preventDefault();
+      queryAgent(chatPrompt.value);
+    }
+  });
+
+  loginBtn.addEventListener('click', loginWithNextcloud);
+  startNextcloudLoginBtn.addEventListener('click', startNextcloudBrowserLogin);
+  dismissLoginPromptBtn.addEventListener('click', closeLoginPrompt);
+  saveProfileBtn.addEventListener('click', saveProfileConfig);
+
+  reindexBtn.addEventListener('click', async () => {
+    await runTool('sync_document_index_incremental', {candidate_limit: 20000, force: true});
+    await runTool('rebuild_calendar_index', {
+      past_days: Number(cfgPastDaysEl.value || 730),
+      future_days: Number(cfgFutureDaysEl.value || 365),
+    });
+    await loadIndexStatus();
+  });
+
+  refreshIndexStatusBtn.addEventListener('click', async () => {
+    await loadIndexStatus();
+  });
+
+  refreshConnectivityBtn.addEventListener('click', async () => {
+    await loadConnectivityStatus();
+  });
+
+  semanticBtn.addEventListener('click', async () => {
+    const q = activePromptValue() || 'Dokumente zu Steuern';
+    const res = await runTool('semantic_search_documents', {query: q, limit: 8, candidate_limit: 40});
+    if (res && res.result && res.result.success) {
+      const list = (res.result.results || []).map((it) => '- ' + (it.name || 'Dokument') + ' (Score: ' + (it.score || 0) + ')').join('\n');
+      switchToChat();
+      addMessage('assistant', list || 'Keine Treffer.');
+    }
+  });
+
+  pdfBtn.addEventListener('click', async () => {
+    const filePath = document.getElementById('pdfPath').value.trim();
+    if (!filePath) {
+      log('PDF', {error: 'Bitte PDF-Pfad angeben.'});
+      return;
+    }
+    const res = await runTool('summarize_pdf', {file_path: filePath});
+    if (res && res.result && res.result.summary) {
+      switchToChat();
+      addMessage('assistant', res.result.summary);
+    }
+  });
+
+  photoBtn.addEventListener('click', async () => {
+    const q = activePromptValue() || 'Fotos vom Urlaub';
+    const res = await runTool('search_photos_immich', {query: q, limit: 12});
+    if (res && res.result && res.result.success) {
+      switchToChat();
+      const rows = Array.isArray(res.result.results) ? res.result.results : [];
+      const lines = rows.slice(0, 8).map((item) => {
+        const name = item.original_file_name || 'Foto';
+        const thumb = item.thumbnail_url || '';
+        const assetUrl = item.asset_url || '';
+        if (thumb && assetUrl) {
+          return '- [' + name + '](' + assetUrl + ')\n  [![' + name + '](' + thumb + ')](' + assetUrl + ')';
+        }
+        if (assetUrl) {
+          return '- [' + name + '](' + assetUrl + ')';
+        }
+        return thumb ? '- ![' + name + '](' + thumb + ')' : '- ' + name;
+      });
+      const text = lines.length
+        ? ('🖼️ **Immich Treffer**\n' + lines.join('\n'))
+        : 'Keine Foto-Treffer gefunden.';
+      addMessage('assistant', text);
+    } else if (res && res.result) {
+      addMessage('assistant', 'Immich-Suche fehlgeschlagen: ' + (res.result.error || 'unbekannter Fehler'));
+    }
+  });
+
+  clearLogsBtn.addEventListener('click', () => {
+    logs.textContent = 'Logs geleert.';
+  });
+
+  newChatBtn.addEventListener('click', () => {
+    messagesInnerEl.innerHTML = '';
+    landingPrompt.value = '';
+    chatPrompt.value = '';
+    hideSourceWarnings();
+    switchToLanding();
+    sidebar.classList.remove('open');
+    document.body.classList.remove('sidebar-open');
+  });
+
+  loadLocalSettings();
+  setPreferredSource('auto');
+  switchToLanding();
+  startSuggestionsAutoRefresh();
+  loadSystemConfig();
+  loadRuntimeConfig();
+  loadProfileConfig();
+  loadIndexStatus();
+  loadConnectivityStatus();
+  loadSuggestions();
+  loadChats();
+</script>
+</body>
+</html>

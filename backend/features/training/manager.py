@@ -1,9 +1,13 @@
 import json
 import time
+import sys
 import logging
 from typing import List, Dict, Optional
-from database import KnowledgeDatabase
 import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+from backend.core.database import KnowledgeDatabase
 
 logger = logging.getLogger(__name__)
 
