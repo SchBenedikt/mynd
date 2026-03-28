@@ -12,6 +12,14 @@ class SimpleSearchEngine:
     def __init__(self, db_path: str = "knowledge_base.db"):
         self.db = KnowledgeDatabase(db_path)
         logger.info("Simple search engine initialized")
+
+    def add_chunks_to_index(self, chunks: List[Dict]) -> None:
+        """Compatibility no-op: chunks are already persisted in SQLite via KnowledgeDatabase."""
+        logger.info(f"Received {len(chunks)} chunks for index update (SQLite FTS uses DB directly)")
+
+    def _save_index(self) -> None:
+        """Compatibility no-op for interface parity with semantic engine."""
+        logger.debug("Skipping index save for SQLite FTS backend")
     
     def search(self, query: str, k: int = 5) -> List[Dict]:
         """Perform search using SQLite FTS with improved query processing"""
