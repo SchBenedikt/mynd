@@ -8,31 +8,31 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <div class="container mx-auto px-4 py-8 max-w-2xl">
-        <div class="bg-white rounded-lg shadow-lg p-6">
-            <h1 class="text-2xl font-bold text-gray-800 mb-6">
-                <i class="fas fa-calendar-plus mr-2"></i>
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <div class="bg-white rounded-xl shadow-xl p-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-8">
+                <i class="fas fa-calendar-plus mr-3"></i>
                 Kalender-Ereignis erstellen
             </h1>
 
             <!-- Schnellerstellung -->
-            <div class="mb-8">
-                <h2 class="text-lg font-semibold text-gray-700 mb-4">Schnellerstellung</h2>
-                <div class="space-y-4">
+            <div class="mb-10">
+                <h2 class="text-xl font-semibold text-gray-700 mb-6">Schnellerstellung</h2>
+                <div class="space-y-6">
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                        <label class="block text-sm font-medium text-gray-700 mb-3">
                             Ereignis beschreiben
                         </label>
                         <textarea 
                             id="quickMessage" 
-                            class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                            rows="3"
+                            class="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200"
+                            rows="4"
                             placeholder="z.B. &quot;Erstelle einen Termin &quot;Team Meeting&quot; morgen um 14:30 im Konferenzraum&quot;"
                         ></textarea>
                     </div>
                     <button 
                         onclick="quickCreate()"
-                        class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition duration-200"
+                        class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition duration-200 font-medium"
                     >
                         <i class="fas fa-magic mr-2"></i>
                         Intelligent erstellen
@@ -41,9 +41,9 @@
             </div>
 
             <!-- Detaillierte Erstellung -->
-            <div class="border-t pt-6">
-                <h2 class="text-lg font-semibold text-gray-700 mb-4">Detaillierte Erstellung</h2>
-                <form id="eventForm" class="space-y-4">
+            <div class="border-t pt-8">
+                <h2 class="text-xl font-semibold text-gray-700 mb-6">Detaillierte Erstellung</h2>
+                <form id="eventForm" class="space-y-6">
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">
                             Titel <span class="text-red-500">*</span>
@@ -52,12 +52,12 @@
                             type="text" 
                             id="title" 
                             required
-                            class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            class="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200"
                             placeholder="Titel des Ereignisses"
                         >
                     </div>
 
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-2 gap-6">
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-2">
                                 Startzeit <span class="text-red-500">*</span>
@@ -66,7 +66,7 @@
                                 type="datetime-local" 
                                 id="startTime" 
                                 required
-                                class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                class="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200"
                             >
                         </div>
                         <div>
@@ -76,7 +76,7 @@
                             <input 
                                 type="datetime-local" 
                                 id="endTime"
-                                class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                class="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200"
                             >
                         </div>
                     </div>
@@ -87,7 +87,7 @@
                         </label>
                         <select 
                             id="calendarName"
-                            class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            class="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200"
                         >
                             <option value="">Kalender auswählen...</option>
                         </select>
@@ -100,7 +100,7 @@
                         <input 
                             type="text" 
                             id="location"
-                            class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            class="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200"
                             placeholder="Ort des Ereignisses"
                         >
                     </div>
@@ -111,15 +111,15 @@
                         </label>
                         <textarea 
                             id="description"
-                            rows="3"
-                            class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            rows="4"
+                            class="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200"
                             placeholder="Beschreibung des Ereignisses"
                         ></textarea>
                     </div>
 
                     <button 
                         type="submit"
-                        class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 transition duration-200"
+                        class="w-full bg-green-600 text-white py-3 px-6 rounded-lg hover:bg-green-700 transition duration-200 font-medium"
                     >
                         <i class="fas fa-save mr-2"></i>
                         Ereignis erstellen
@@ -128,7 +128,7 @@
             </div>
 
             <!-- Status-Meldungen -->
-            <div id="statusMessage" class="hidden mt-4 p-4 rounded-md"></div>
+            <div id="statusMessage" class="hidden mt-6 p-6 rounded-lg"></div>
         </div>
     </div>
 
