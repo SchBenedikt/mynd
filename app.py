@@ -34,6 +34,8 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+AI_CONFIG_FILE = "ai_config.json"
+
 class KnowledgeBase:
     def __init__(self, knowledge_file="user_knowledge.txt"):
         self.knowledge_file = knowledge_file
@@ -307,9 +309,34 @@ PREFERENZEN
             f.write(sample_content)
 
 class OllamaClient:
-    def __init__(self, base_url="http://127.0.0.1:11434"):
-        self.base_url = base_url
-        self.model = "gemma3:latest"  # Standardmodell, kann angepasst werden
+    def __init__(self, base_url=None, model=None):
+        self.base_url = (base_url or os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434')).rstrip('/')
+        self.model = model or os.getenv('OLLAMA_MODEL', 'gemma3:latest')
+
+    def update_config(self, base_url: str, model: str):
+        """Aktualisiert die Laufzeit-Konfiguration des Ollama-Clients."""
+        self.base_url = base_url.rstrip('/')
+        self.model = model
+
+    def _messages_to_prompt(self, messages):
+        """Konvertiert Chat-Nachrichten in einen Prompt für /api/generate Fallback."""
+        lines = []
+        for msg in messages:
+            role = str(msg.get('role', 'user')).strip().lower()
+            content = str(msg.get('content', '')).strip()
+
+            if not content:
+                continue
+
+            if role == 'system':
+                lines.append(f"System: {content}")
+            elif role == 'assistant':
+                lines.append(f"Assistant: {content}")
+            else:
+                lines.append(f"User: {content}")
+
+        lines.append("Assistant:")
+        return "\n\n".join(lines)
     
     def chat(self, messages, context=None):
         """Sendet eine Chat-Anfrage an Ollama mit verbessertem Training-Manager"""
@@ -371,6 +398,27 @@ Basierend auf den Informationen beantworte die Frage informativ und direkt."""
         
         try:
             response = requests.post(url, json=payload, timeout=90)  # Noch längeres Timeout
+
+            # Fallback für Ollama-Instanzen ohne /api/chat Support
+            if response.status_code == 404:
+                generate_url = f"{self.base_url}/api/generate"
+                generate_payload = {
+                    "model": self.model,
+                    "prompt": self._messages_to_prompt(messages),
+                    "stream": False,
+                    "options": payload.get("options", {})
+                }
+                generate_response = requests.post(generate_url, json=generate_payload, timeout=90)
+                generate_response.raise_for_status()
+                generate_data = generate_response.json()
+
+                return {
+                    "message": {
+                        "role": "assistant",
+                        "content": generate_data.get("response", "")
+                    }
+                }
+
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -384,11 +432,61 @@ Basierend auf den Informationen beantworte die Frage informativ und direkt."""
         except:
             return False
 
+    def list_models(self):
+        """Lädt verfügbare Modelle von Ollama."""
+        response = requests.get(f"{self.base_url}/api/tags", timeout=8)
+        response.raise_for_status()
+        data = response.json()
+
+        models = []
+        for model in data.get('models', []):
+            name = model.get('name')
+            if name:
+                models.append(name)
+
+        return sorted(set(models))
+
+def load_ai_config() -> dict:
+    """Lädt AI-Konfiguration aus Datei (oder Defaults) und wendet sie an."""
+    config = {
+        'provider': 'ollama',
+        'base_url': os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/'),
+        'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest')
+    }
+
+    if os.path.exists(AI_CONFIG_FILE):
+        try:
+            with open(AI_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                file_config = json.load(f)
+
+            config['base_url'] = str(file_config.get('base_url', config['base_url'])).rstrip('/')
+            config['model'] = str(file_config.get('model', config['model']))
+        except Exception as e:
+            logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
+
+    ollama_client.update_config(config['base_url'], config['model'])
+    return config
+
+
+def save_ai_config(base_url: str, model: str) -> None:
+    """Speichert AI-Konfiguration persistent in einer lokalen JSON-Datei."""
+    config = {
+        'provider': 'ollama',
+        'base_url': base_url.rstrip('/'),
+        'model': model
+    }
+
+    with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
 # Initialisierung
 knowledge_base = KnowledgeBase()
 ollama_client = OllamaClient()
 training_manager = TrainingManager()
 metadata_extractor = MetadataExtractor()
+
+# AI-Konfiguration beim Start laden
+load_ai_config()
 
 # Kalender-Manager initialisieren
 calendar_manager = create_calendar_manager()
@@ -1321,8 +1419,112 @@ def ollama_status():
     """Prüft den Ollama-Verbindungsstatus"""
     return jsonify({
         'connected': ollama_client.check_connection(),
+        'base_url': ollama_client.base_url,
         'model': ollama_client.model
     })
+
+
+@app.route('/api/ollama/models', methods=['GET'])
+def ollama_models():
+    """Gibt verfügbare Ollama-Modelle für die UI-Auswahl zurück."""
+    try:
+        models = ollama_client.list_models()
+        if ollama_client.model and ollama_client.model not in models:
+            models.insert(0, ollama_client.model)
+
+        return jsonify({
+            'connected': True,
+            'base_url': ollama_client.base_url,
+            'current_model': ollama_client.model,
+            'models': models
+        })
+    except Exception as e:
+        fallback_models = [ollama_client.model] if ollama_client.model else []
+        return jsonify({
+            'connected': False,
+            'base_url': ollama_client.base_url,
+            'current_model': ollama_client.model,
+            'models': fallback_models,
+            'error': str(e)
+        })
+
+
+@app.route('/api/ai/config', methods=['GET', 'POST'])
+def ai_config():
+    """Liest oder speichert die AI-Konfiguration (aktuell Ollama)."""
+    try:
+        if request.method == 'GET':
+            return jsonify({
+                'provider': 'ollama',
+                'base_url': ollama_client.base_url,
+                'model': ollama_client.model,
+                'connected': ollama_client.check_connection()
+            })
+
+        data = request.json or {}
+        base_url = str(data.get('base_url', '')).strip().rstrip('/')
+        model = str(data.get('model', '')).strip()
+
+        if not base_url or not model:
+            return jsonify({'error': 'base_url und model sind erforderlich'}), 400
+
+        if not (base_url.startswith('http://') or base_url.startswith('https://')):
+            return jsonify({'error': 'base_url muss mit http:// oder https:// beginnen'}), 400
+
+        ollama_client.update_config(base_url, model)
+        save_ai_config(base_url, model)
+
+        return jsonify({
+            'status': 'saved',
+            'provider': 'ollama',
+            'base_url': ollama_client.base_url,
+            'model': ollama_client.model,
+            'connected': ollama_client.check_connection()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ai/test', methods=['POST'])
+def ai_test():
+    """Testet die aktuelle AI-Konfiguration mit einem kurzen Prompt."""
+    try:
+        data = request.json or {}
+        prompt = str(data.get('prompt', 'Antworte nur mit: OK')).strip()
+
+        if not prompt:
+            return jsonify({'error': 'prompt darf nicht leer sein'}), 400
+
+        start_time = time.time()
+        response = ollama_client.chat([
+            {'role': 'user', 'content': prompt}
+        ])
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        if 'error' in response:
+            return jsonify({
+                'status': 'error',
+                'connected': False,
+                'base_url': ollama_client.base_url,
+                'model': ollama_client.model,
+                'duration_ms': duration_ms,
+                'error': response['error']
+            }), 502
+
+        message = response.get('message', {}) or {}
+        content = str(message.get('content', '')).strip()
+
+        return jsonify({
+            'status': 'ok',
+            'connected': True,
+            'base_url': ollama_client.base_url,
+            'model': ollama_client.model,
+            'duration_ms': duration_ms,
+            'response': content,
+            'response_preview': content[:280]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # Kalender API Endpunkte
 @app.route('/api/calendar/status', methods=['GET'])
