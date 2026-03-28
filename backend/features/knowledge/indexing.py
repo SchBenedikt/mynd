@@ -1,5 +1,6 @@
 import threading
 import time
+import sys
 import logging
 from typing import Dict, Optional, Callable
 from dataclasses import dataclass
@@ -7,8 +8,11 @@ from enum import Enum
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from nextcloud_client import NextcloudClient
-from document_parser import DocumentParser
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+from backend.features.integration.nextcloud_client import NextcloudClient
+from backend.features.documents.parser import DocumentParser
 
 class IndexingStatus(Enum):
     IDLE = "idle"
