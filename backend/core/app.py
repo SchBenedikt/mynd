@@ -33,22 +33,24 @@ import xml.etree.ElementTree as ET
 
 load_dotenv()
 
-app = Flask(__name__)
-
-# Logging konfigurieren
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Define base directories
+# Define base directories BEFORE Flask app creation
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CONFIG_DIR = os.path.join(BASE_DIR, 'backend', 'config')
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 BACKEND_DIR = os.path.join(BASE_DIR, 'backend')
+TEMPLATES_DIR = os.path.join(BACKEND_DIR, 'templates')
 DB_PATH = os.path.join(BASE_DIR, 'knowledge_base.db')
 
 # Setup directories
 os.makedirs(CONFIG_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Create Flask app with correct template folder
+app = Flask(__name__, template_folder=TEMPLATES_DIR)
+
+# Logging konfigurieren
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
 
