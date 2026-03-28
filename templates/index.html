@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Chat Assistant</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
             --primary: #1a1a1a;
@@ -35,13 +36,13 @@
         }
 
         .chat-container {
-            width: 92%;
-            max-width: 900px;
-            height: 92vh;
-            max-height: 700px;
+            width: 95%;
+            max-width: 1400px;
+            height: 95vh;
+            max-height: 900px;
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 24px var(--shadow);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px var(--shadow);
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -240,10 +241,10 @@
         .knowledge-panel {
             background: white;
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 20px;
-            margin: 16px;
-            max-height: 320px;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 20px;
+            max-height: 400px;
             overflow-y: auto;
         }
 
@@ -472,6 +473,118 @@
             border-color: #fecaca;
         }
 
+        .desktop-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .knowledge-sidebar {
+            width: 380px;
+            background: var(--secondary);
+            border-left: 1px solid var(--border);
+            overflow-y: auto;
+            display: none;
+        }
+        
+        .knowledge-sidebar.collapsible {
+            display: block;
+        }
+        
+        @media (min-width: 1200px) {
+            .desktop-layout {
+                display: flex;
+            }
+            
+            .knowledge-sidebar {
+                display: block;
+            }
+            
+            .knowledge-panel {
+                margin: 0;
+                border-radius: 0;
+                border: none;
+                height: 100%;
+                max-height: none;
+            }
+        }
+        
+        .toggle-sidebar {
+            display: none;
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            margin-right: 12px;
+        }
+        
+        @media (min-width: 1200px) {
+            .toggle-sidebar {
+                display: block;
+            }
+        }
+        
+        @media (min-width: 1200px) {
+            .chat-container {
+                width: 98%;
+                max-width: 1600px;
+                height: 98vh;
+                max-height: 1000px;
+            }
+            
+            .chat-messages {
+                padding: 32px;
+            }
+            
+            .message-content {
+                max-width: 70%;
+                font-size: 1rem;
+            }
+            
+            .chat-header {
+                padding: 32px;
+            }
+            
+            .chat-header h1 {
+                font-size: 1.5rem;
+            }
+            
+            .chat-input {
+                padding: 24px;
+            }
+        }
+
+        @media (max-width: 1199px) {
+            .desktop-layout {
+                flex-direction: column;
+            }
+            
+            .knowledge-sidebar {
+                width: 100%;
+                border-left: none;
+                border-top: 1px solid var(--border);
+                display: none;
+            }
+            
+            .toggle-sidebar {
+                display: block;
+            }
+            
+            .main-content {
+                width: 100%;
+            }
+        }
+
         @media (max-width: 600px) {
             .chat-container {
                 width: 96%;
@@ -516,7 +629,12 @@
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            <h1>AI Assistant</h1>
+            <div style="display: flex; align-items: center;">
+                <button class="toggle-sidebar" onclick="toggleSidebar()">
+                    <i class="fas fa-bars"></i> Knowledge
+                </button>
+                <h1>AI Assistant</h1>
+            </div>
             <div class="status-indicators">
                 <div class="status" id="ollamaStatus">
                     <span class="status-dot" id="ollamaDot"></span>
@@ -528,130 +646,137 @@
                 </div>
             </div>
         </div>
-
-        <div class="knowledge-panel" id="knowledgePanel">
-            <h3>Knowledge Base</h3>
-            
-            <div class="tab-container">
-                <div class="tabs">
-                    <button class="tab-button active" onclick="showTab('nextcloud', this)">Nextcloud</button>
-                    <button class="tab-button" onclick="showTab('local', this)">Local</button>
-                    <button class="tab-button" onclick="showTab('indexing', this)">Indexing</button>
-                    <button class="tab-button" onclick="showTab('graph', this)">Graph</button>
-                </div>
-                
-                <div class="tab-content active" id="nextcloud-tab">
-                    <div class="form-group">
-                        <label>Nextcloud URL:</label>
-                        <input type="url" id="nextcloudUrl" placeholder="https://your-nextcloud.com">
-                    </div>
-                    <div class="form-group">
-                        <label>Username:</label>
-                        <input type="text" id="nextcloudUsername" placeholder="username">
-                    </div>
-                    <div class="form-group">
-                        <label>Password:</label>
-                        <input type="password" id="nextcloudPassword" placeholder="password">
-                    </div>
-                    <div class="form-group">
-                        <label>Directory (optional):</label>
-                        <input type="text" id="nextcloudPath" placeholder="/" value="/">
-                    </div>
-                    <div class="button-group">
-                        <button onclick="saveNextcloudConfig()" class="config-button">Save Config</button>
-                        <button onclick="startIndexing()" class="load-button">Start Indexing</button>
-                    </div>
-                </div>
-                
-                <div class="tab-content" id="local-tab">
-                    <div class="form-group">
-                        <label>Local Directory:</label>
-                        <input type="text" id="localPath" placeholder="/path/to/documents">
-                    </div>
-                    <button onclick="loadLocalKnowledge()" class="load-button">Load Local Documents</button>
-                </div>
-                
-                <div class="tab-content" id="indexing-tab">
-                    <h4>Indexing Status</h4>
-                    <div class="progress-container">
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        
+        <div class="desktop-layout">
+            <div class="main-content">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="message ai">
+                        <div class="message-content">
+                            Hello! I'm your personal AI assistant. I can help you and have access to information about you. How can I help you today?
                         </div>
-                        <div class="progress-text" id="progressText">0%</div>
-                    </div>
-                    
-                    <div class="status-info">
-                        <p><strong>Status:</strong> <span id="indexingStatus">Idle</span></p>
-                        <p><strong>Current File:</strong> <span id="currentFile">-</span></p>
-                        <p><strong>Processed Files:</strong> <span id="processedFiles">0</span> / <span id="totalFiles">0</span></p>
-                        <p><strong>Elapsed Time:</strong> <span id="elapsedTime">0s</span></p>
-                        <p><strong>Errors:</strong> <span id="errorCount">0</span></p>
-                    </div>
-                    
-                    <div class="button-group">
-                        <button onclick="startIndexing()" class="load-button" id="startButton">Start Indexing</button>
-                        <button onclick="stopIndexing()" class="stop-button" id="stopButton">Stop Indexing</button>
-                    </div>
-                    
-                    <div class="error-log" id="errorLog" style="display: none;">
-                        <h4>Error Log:</h4>
-                        <div id="errorList"></div>
                     </div>
                 </div>
-                
-                <div class="tab-content" id="graph-tab">
-                    <h4>Knowledge Graph Visualization</h4>
-                    <p style="margin-bottom: 15px; color: var(--text-light);">
-                        Interactive visualization of your knowledge base. Explore connections between documents and chunks.
-                    </p>
-                    <div class="button-group">
-                        <button onclick="openKnowledgeGraph()" class="load-button">Open Graph</button>
-                        <button onclick="window.open('/knowledge-graph', '_blank')" class="config-button">New Tab</button>
-                    </div>
-                    
-                    <div class="knowledge-info" style="margin-top: 15px;">
-                        <p><strong>Features:</strong></p>
-                        <ul style="margin: 10px 0; padding-left: 20px; color: var(--text-light);">
-                            <li>Search function for chunks and documents</li>
-                            <li>Interactive nodes with details</li>
-                            <li>Zoom and pan navigation</li>
-                            <li>Real-time statistics</li>
-                            <li>SVG export</li>
-                            <li>Physics simulation</li>
-                        </ul>
+
+                <div class="typing-indicator" id="typingIndicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+
+                <div class="chat-input">
+                    <div class="input-container">
+                        <input type="text" id="messageInput" placeholder="Type your message..." autocomplete="off">
+                        <button id="sendButton">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </button>
                     </div>
                 </div>
             </div>
             
-            <div class="knowledge-info" id="knowledgeInfo">
-                <p>No knowledge base loaded</p>
-            </div>
-        </div>
-
-        <div class="chat-messages" id="chatMessages">
-            <div class="message ai">
-                <div class="message-content">
-                    Hello! I'm your personal AI assistant. I can help you and have access to information about you. How can I help you today?
+            <div class="knowledge-sidebar" id="knowledgeSidebar">
+                <div class="knowledge-panel">
+                    <h3>Knowledge Base</h3>
+                    
+                    <div class="tab-container">
+                        <div class="tabs">
+                            <button class="tab-button active" onclick="showTab('nextcloud', this)">Nextcloud</button>
+                            <button class="tab-button" onclick="showTab('local', this)">Local</button>
+                            <button class="tab-button" onclick="showTab('indexing', this)">Indexing</button>
+                            <button class="tab-button" onclick="showTab('graph', this)">Graph</button>
+                        </div>
+                        
+                        <div class="tab-content active" id="nextcloud-tab">
+                            <div class="form-group">
+                                <label>Nextcloud URL:</label>
+                                <input type="url" id="nextcloudUrl" placeholder="https://your-nextcloud.com">
+                            </div>
+                            <div class="form-group">
+                                <label>Username:</label>
+                                <input type="text" id="nextcloudUsername" placeholder="username">
+                            </div>
+                            <div class="form-group">
+                                <label>Password:</label>
+                                <input type="password" id="nextcloudPassword" placeholder="password">
+                            </div>
+                            <div class="form-group">
+                                <label>Directory (optional):</label>
+                                <input type="text" id="nextcloudPath" placeholder="/" value="/">
+                            </div>
+                            <div class="button-group">
+                                <button onclick="saveNextcloudConfig()" class="config-button">Save Config</button>
+                                <button onclick="startIndexing()" class="load-button">Start Indexing</button>
+                            </div>
+                        </div>
+                        
+                        <div class="tab-content" id="local-tab">
+                            <div class="form-group">
+                                <label>Local Directory:</label>
+                                <input type="text" id="localPath" placeholder="/path/to/documents">
+                            </div>
+                            <button onclick="loadLocalKnowledge()" class="load-button">Load Local Documents</button>
+                        </div>
+                        
+                        <div class="tab-content" id="indexing-tab">
+                            <h4>Indexing Status</h4>
+                            <div class="progress-container">
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                                </div>
+                                <div class="progress-text" id="progressText">0%</div>
+                            </div>
+                            
+                            <div class="status-info">
+                                <p><strong>Status:</strong> <span id="indexingStatus">Idle</span></p>
+                                <p><strong>Current File:</strong> <span id="currentFile">-</span></p>
+                                <p><strong>Processed Files:</strong> <span id="processedFiles">0</span> / <span id="totalFiles">0</span></p>
+                                <p><strong>Elapsed Time:</strong> <span id="elapsedTime">0s</span></p>
+                                <p><strong>Errors:</strong> <span id="errorCount">0</span></p>
+                            </div>
+                            
+                            <div class="button-group">
+                                <button onclick="startIndexing()" class="load-button" id="startButton">Start Indexing</button>
+                                <button onclick="stopIndexing()" class="stop-button" id="stopButton">Stop Indexing</button>
+                            </div>
+                            
+                            <div class="error-log" id="errorLog" style="display: none;">
+                                <h4>Error Log:</h4>
+                                <div id="errorList"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="tab-content" id="graph-tab">
+                            <h4>Knowledge Graph Visualization</h4>
+                            <p style="margin-bottom: 15px; color: var(--text-light);">
+                                Interactive visualization of your knowledge base. Explore connections between documents and chunks.
+                            </p>
+                            <div class="button-group">
+                                <button onclick="openKnowledgeGraph()" class="load-button">Open Graph</button>
+                                <button onclick="window.open('/knowledge-graph', '_blank')" class="config-button">New Tab</button>
+                            </div>
+                            
+                            <div class="knowledge-info" style="margin-top: 15px;">
+                                <p><strong>Features:</strong></p>
+                                <ul style="margin: 10px 0; padding-left: 20px; color: var(--text-light);">
+                                    <li>Search function for chunks and documents</li>
+                                    <li>Interactive nodes with details</li>
+                                    <li>Zoom and pan navigation</li>
+                                    <li>Real-time statistics</li>
+                                    <li>SVG export</li>
+                                    <li>Physics simulation</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="knowledge-info" id="knowledgeInfoSidebar">
+                        <p>No knowledge base loaded</p>
+                    </div>
                 </div>
             </div>
         </div>
-
-        <div class="typing-indicator" id="typingIndicator">
-            <span></span>
-            <span></span>
-            <span></span>
-        </div>
-
-        <div class="chat-input">
-            <div class="input-container">
-                <input type="text" id="messageInput" placeholder="Type your message..." autocomplete="off">
-                <button id="sendButton">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                    </svg>
-                </button>
-            </div>
         </div>
     </div>
 
@@ -1150,8 +1275,30 @@
 
         function updateKnowledgeInfo(message, type = '') {
             const info = document.getElementById('knowledgeInfo');
-            info.className = 'knowledge-info ' + type;
-            info.innerHTML = `<p>${message}</p>`;
+            const sidebarInfo = document.getElementById('knowledgeInfoSidebar');
+            
+            if (info) {
+                info.className = 'knowledge-info ' + type;
+                info.innerHTML = `<p>${message}</p>`;
+            }
+            
+            if (sidebarInfo) {
+                sidebarInfo.className = 'knowledge-info ' + type;
+                sidebarInfo.innerHTML = `<p>${message}</p>`;
+            }
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('knowledgeSidebar');
+            const button = document.querySelector('.toggle-sidebar');
+            
+            if (sidebar.style.display === 'none' || sidebar.style.display === '') {
+                sidebar.style.display = 'block';
+                button.innerHTML = '<i class="fas fa-times"></i> Close';
+            } else {
+                sidebar.style.display = 'none';
+                button.innerHTML = '<i class="fas fa-bars"></i> Knowledge';
+            }
         }
 
         async function updateKnowledgeStatus() {

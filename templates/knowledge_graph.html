@@ -28,8 +28,8 @@
 
         .main-layout {
             display: flex;
-            gap: 20px;
-            max-width: 1600px;
+            gap: 24px;
+            max-width: 1800px;
             margin: 0 auto;
         }
 
@@ -39,10 +39,20 @@
         }
 
         .sidebar {
-            width: 320px;
+            width: 380px;
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 24px;
+        }
+
+        @media (min-width: 1600px) {
+            .sidebar {
+                width: 420px;
+            }
+            
+            .main-layout {
+                gap: 32px;
+            }
         }
 
         .container {
@@ -53,19 +63,32 @@
         .glass-card {
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
-            border-radius: 16px;
-            box-shadow: 0 8px 32px var(--shadow);
+            border-radius: 20px;
+            box-shadow: 0 12px 40px var(--shadow);
             border: 1px solid rgba(255, 255, 255, 0.2);
-            padding: 24px;
-            margin-bottom: 20px;
+            padding: 28px;
+            margin-bottom: 24px;
         }
 
         .graph-container {
-            height: 600px;
-            border-radius: 12px;
+            height: 700px;
+            border-radius: 16px;
             overflow: hidden;
             position: relative;
             background: #fafafa;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        }
+        
+        @media (min-width: 1400px) {
+            .graph-container {
+                height: 750px;
+            }
+        }
+        
+        @media (min-width: 1600px) {
+            .graph-container {
+                height: 800px;
+            }
         }
 
         #graph {
