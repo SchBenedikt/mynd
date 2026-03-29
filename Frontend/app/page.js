@@ -1,20 +1,20 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 
-const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:5001';
+const API_BASE = '';
 
 export default function HomePage() {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [theme, setThemeState] = useState('classic');
+  const router = useRouter();
+  const [theme, setThemeState] = useState('gold');
+  const [darkMode, setDarkModeState] = useState('auto');
   const [messages, setMessages] = useState([]);
   const [isThinking, setIsThinking] = useState(false);
   const [conversationActive, setConversationActive] = useState(false);
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
-  const [activeTab, setActiveTab] = useState('config');
   
-  // AI Config
   const [aiProtocol, setAiProtocol] = useState('http');
   const [aiHost, setAiHost] = useState('127.0.0.1');
   const [aiPort, setAiPort] = useState('11434');
@@ -22,7 +22,6 @@ export default function HomePage() {
   const [aiModels, setAiModels] = useState([]);
   const [aiStatus, setAiStatus] = useState('');
   
-  // Indexing
   const [indexingProgress, setIndexingProgress] = useState(0);
   const [indexingStatus, setIndexingStatus] = useState('idle');
   const [indexingStats, setIndexingStats] = useState('');
@@ -31,21 +30,37 @@ export default function HomePage() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Initialize
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') || 'classic';
+    const savedTheme = localStorage.getItem('theme') || 'gold';
+    const savedDarkMode = localStorage.getItem('darkMode') || 'auto';
+    const savedContrast = localStorage.getItem('contrastColor') || '';
     setThemeState(savedTheme);
+    setDarkModeState(savedDarkMode);
     document.documentElement.setAttribute('data-theme', savedTheme);
+    applyDarkMode(savedDarkMode);
+    if (savedContrast) {
+      document.documentElement.style.setProperty('--brand', savedContrast);
+    }
+    
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      if (savedDarkMode === 'auto') {
+        applyDarkMode('auto');
+      }
+    };
+    mediaQuery.addEventListener('change', handleChange);
     
     loadAIConfig();
     loadOllamaModels();
     updateStatus();
     
     const statusInterval = setInterval(updateStatus, 8000);
-    return () => clearInterval(statusInterval);
+    return () => {
+      clearInterval(statusInterval);
+      mediaQuery.removeEventListener('change', handleChange);
+    };
   }, []);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -56,9 +71,19 @@ export default function HomePage() {
     document.documentElement.setAttribute('data-theme', newTheme);
   };
 
-  const updateAIPreview = () => {
-    const baseUrl = `${aiProtocol}://${aiHost}:${aiPort}`;
-    return baseUrl;
+  const applyDarkMode = (mode) => {
+    if (mode === 'auto') {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-mode', prefersDark ? 'dark' : 'light');
+    } else {
+      document.documentElement.setAttribute('data-mode', mode);
+    }
+  };
+
+  const setDarkMode = (mode) => {
+    setDarkModeState(mode);
+    localStorage.setItem('darkMode', mode);
+    applyDarkMode(mode);
   };
 
   const loadAIConfig = async () => {
@@ -70,10 +95,9 @@ export default function HomePage() {
       setAiHost(url.hostname);
       setAiPort(url.port || '11434');
       setAiModel(config.model);
-      setAiStatus('✓ Config loaded');
+      setAiStatus('Loaded');
     } catch (err) {
-      console.error('Error loading config:', err);
-      setAiStatus('✗ Error loading config');
+      setAiStatus('Error loading config');
     }
   };
 
@@ -89,20 +113,20 @@ export default function HomePage() {
 
   const saveAIConfig = async () => {
     try {
-      const baseUrl = updateAIPreview();
+      const baseUrl = `${aiProtocol}://${aiHost}:${aiPort}`;
       const res = await fetch(`${API_BASE}/api/ai/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base_url: baseUrl, model: aiModel })
       });
       if (res.ok) {
-        setAiStatus('✓ Saved successfully');
+        setAiStatus('Saved successfully');
         updateStatus();
       } else {
-        setAiStatus('✗ Error saving');
+        setAiStatus('Error saving');
       }
     } catch (err) {
-      setAiStatus('✗ Error: ' + err.message);
+      setAiStatus('Error: ' + err.message);
     }
   };
 
@@ -114,7 +138,6 @@ export default function HomePage() {
       ]);
       const ollama = await ollamaRes.json();
       const kb = await kbRes.json();
-      
       setHealth({
         ollama: ollama.connected ? 'ok' : 'error',
         kb: kb.chunks_loaded > 0 ? 'ok' : 'error'
@@ -133,7 +156,23 @@ export default function HomePage() {
       });
       if (res.ok) {
         setIndexingStatus('running');
-        startProgressUpdates();
+        if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = setInterval(async () => {
+          try {
+            const res = await fetch(`${API_BASE}/api/indexing/progress`);
+            if (res.ok) {
+              const data = await res.json();
+              setIndexingProgress(Math.round(data.progress_percentage));
+              setIndexingStats(`${data.processed_files}/${data.total_files} files | ${Math.round(data.elapsed_time)}s`);
+              if (data.status === 'completed' || data.status === 'error') {
+                setIndexingStatus(data.status);
+                clearInterval(progressIntervalRef.current);
+              }
+            }
+          } catch (err) {
+            console.error('Update progress error:', err);
+          }
+        }, 500);
       } else {
         const data = await res.json();
         setIndexingStatus('error: ' + data.error);
@@ -143,54 +182,13 @@ export default function HomePage() {
     }
   };
 
-  const startProgressUpdates = () => {
-    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-    progressIntervalRef.current = setInterval(updateProgress, 500);
-  };
-
-  const updateProgress = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/indexing/progress`);
-      if (res.ok) {
-        const data = await res.json();
-        const pct = Math.round(data.progress_percentage);
-        setIndexingProgress(pct);
-        setIndexingStats(`${data.processed_files}/${data.total_files} files | ${Math.round(data.elapsed_time)}s`);
-        
-        if (data.status === 'completed' || data.status === 'error') {
-          setIndexingStatus(data.status);
-          if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-        }
-      }
-    } catch (err) {
-      console.error('Update progress error:', err);
-    }
-  };
-
-  const addMessage = (role, content) => {
-    setMessages(prev => [...prev, { role, content, id: Date.now() }]);
-  };
-
-  const switchToChat = () => {
-    setConversationActive(true);
-  };
-
   const sendMessage = async (text) => {
     if (!text.trim() || isThinking) return;
-    
     text = text.trim();
-    
-    if (!conversationActive) {
-      switchToChat();
-    }
-    
-    addMessage('user', text);
+    if (!conversationActive) setConversationActive(true);
+    setMessages(prev => [...prev, { role: 'user', content: text, id: Date.now() }]);
     setIsThinking(true);
-    
-    // Clear input
-    if (inputRef.current) {
-      inputRef.current.value = '';
-    }
+    if (inputRef.current) inputRef.current.value = '';
 
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
@@ -199,267 +197,116 @@ export default function HomePage() {
         body: JSON.stringify({ message: text, source })
       });
       const data = await res.json();
-      addMessage('assistant', data.response);
+      setMessages(prev => [...prev, { role: 'assistant', content: data.response, id: Date.now() }]);
     } catch (err) {
-      addMessage('assistant', `Error: ${err.message}`);
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}`, id: Date.now() }]);
     } finally {
       setIsThinking(false);
     }
   };
 
+  const startNewChat = () => {
+    setMessages([]);
+    setConversationActive(false);
+  };
+
+  const goToSettings = () => {
+    router.push('/settings');
+  };
+
   return (
     <div className="container">
-      {/* TOPBAR */}
-      <div className="topbar">
-        <div className="topbar-left">
-          <button className="icon-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
-            <i className="fas fa-bars"></i>
-          </button>
+      {/* LEFT SIDEBAR */}
+      <div className="left-sidebar">
+        <div className="sidebar-header">
           <div className="brand">
             <div className="brand-icon">M</div>
             <span>MYND</span>
           </div>
         </div>
-
-        <div className="topbar-right">
-          <div className="status-badge">
-            <div className={`status-dot ${health.ollama === 'ok' ? 'ok' : 'error'}`}></div>
-            <span> Ollama</span>
+        <button className="new-chat-btn" onClick={startNewChat}>
+          <i className="fas fa-plus"></i> New Chat
+        </button>
+        <button 
+          className="new-chat-btn settings-btn"
+          onClick={goToSettings}
+        >
+          <i className="fas fa-cog"></i> Settings
+        </button>
+        <div className="chat-history">
+          <div className="history-item active">
+            <i className="fas fa-message"></i>
+            <span>Current Chat</span>
           </div>
-          <div className="status-badge">
-            <div className={`status-dot ${health.kb === 'ok' ? 'ok' : 'error'}`}></div>
-            <span> KB</span>
+        </div>
+        <div className="sidebar-footer">
+          <div className="status-badges">
+            <div className="status-badge">
+              <div className={`status-dot ${health.ollama === 'ok' ? 'ok' : 'error'}`}></div>
+              <span>Ollama</span>
+            </div>
+            <div className="status-badge">
+              <div className={`status-dot ${health.kb === 'ok' ? 'ok' : 'error'}`}></div>
+              <span>KB</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* MAIN */}
-      <div className="main">
-        {/* SIDEBAR */}
-        <div className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-          <div className="sidebar-content">
-            <div className="tabs">
-              <button 
-                className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`}
-                onClick={() => setActiveTab('config')}
-              >
-                ⚙️ Config
-              </button>
-              <button 
-                className={`tab-btn ${activeTab === 'indexing' ? 'active' : ''}`}
-                onClick={() => setActiveTab('indexing')}
-              >
-                📝 Indexing
-              </button>
-              <button 
-                className={`tab-btn ${activeTab === 'sources' ? 'active' : ''}`}
-                onClick={() => setActiveTab('sources')}
-              >
-                📂 Sources
+      {/* CENTER - Chat */}
+      <div className="center-area">
+        {!conversationActive ? (
+          <div className="landing">
+            <div className="landing-header">
+              <h2>What is on your mind?</h2>
+              <p>Ask anything about your knowledge base.</p>
+            </div>
+            <div className="input-wrapper">
+              <input 
+                type="text" 
+                ref={inputRef}
+                placeholder="Ask a question..." 
+                onKeyPress={(e) => e.key === 'Enter' && sendMessage(e.target.value)}
+              />
+              <button onClick={() => sendMessage(inputRef.current?.value || '')}>
+                <i className="fas fa-arrow-right"></i>
               </button>
             </div>
-
-            {/* CONFIG TAB */}
-            {activeTab === 'config' && (
-              <div>
-                <div className="sidebar-section">
-                  <div className="section-title">🤖 AI Model</div>
-                  <div className="input-group">
-                    <label>Protocol</label>
-                    <select 
-                      value={aiProtocol}
-                      onChange={(e) => setAiProtocol(e.target.value)}
-                    >
-                      <option>http</option>
-                      <option>https</option>
-                    </select>
-                  </div>
-                  <div className="input-group">
-                    <label>Host</label>
-                    <input 
-                      type="text" 
-                      value={aiHost}
-                      onChange={(e) => setAiHost(e.target.value)}
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label>Port</label>
-                    <input 
-                      type="text" 
-                      value={aiPort}
-                      onChange={(e) => setAiPort(e.target.value)}
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label>Model</label>
-                    <select 
-                      value={aiModel}
-                      onChange={(e) => setAiModel(e.target.value)}
-                    >
-                      <option value="">Select model...</option>
-                      {aiModels.map(model => (
-                        <option key={model} value={model}>{model}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="button-group">
-                    <button className="btn primary" onClick={saveAIConfig}>Save</button>
-                  </div>
-                  {aiStatus && <div className="status-text">{aiStatus}</div>}
-                </div>
-              </div>
-            )}
-
-            {/* INDEXING TAB */}
-            {activeTab === 'indexing' && (
-              <div>
-                <div className="sidebar-section">
-                  <div className="section-title">📚 Document Indexing</div>
-                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
-                    Index your documents for semantic search
-                  </p>
-                  <div className="button-group">
-                    <button className="btn primary" onClick={startIndexing}>Start</button>
-                  </div>
-                  <div className="progress-bar-wrapper">
-                    <div className="progress-bar">
-                      <div className="progress-fill" style={{width: `${indexingProgress}%`}}></div>
-                    </div>
-                    <div className="progress-text">
-                      <span>{indexingStatus}</span>
-                      <span>{indexingProgress}%</span>
-                    </div>
-                  </div>
-                  {indexingStats && <div className="status-text">{indexingStats}</div>}
-                </div>
-              </div>
-            )}
-
-            {/* SOURCES TAB */}
-            {activeTab === 'sources' && (
-              <div>
-                <div className="sidebar-section">
-                  <div className="section-title">📂 Message Sources</div>
-                  <div className="input-group" style={{ gap: '0.5rem' }}>
-                    <label>
-                      <input 
-                        type="radio" 
-                        name="source" 
-                        value="auto" 
-                        checked={source === 'auto'}
-                        onChange={(e) => setSource(e.target.value)}
-                      /> Auto
-                    </label>
-                    <label>
-                      <input 
-                        type="radio" 
-                        name="source" 
-                        value="files" 
-                        checked={source === 'files'}
-                        onChange={(e) => setSource(e.target.value)}
-                      /> Files
-                    </label>
-                    <label>
-                      <input 
-                        type="radio" 
-                        name="source" 
-                        value="photos" 
-                        checked={source === 'photos'}
-                        onChange={(e) => setSource(e.target.value)}
-                      /> Photos
-                    </label>
-                  </div>
-                </div>
-
-                <div className="sidebar-section">
-                  <div className="section-title">🎨 Theme</div>
-                  <div className="theme-selector">
-                    <button 
-                      className={`theme-btn classic ${theme === 'classic' ? 'active' : ''}`}
-                      onClick={() => setTheme('classic')}
-                    ></button>
-                    <button 
-                      className={`theme-btn ocean ${theme === 'ocean' ? 'active' : ''}`}
-                      onClick={() => setTheme('ocean')}
-                    ></button>
-                    <button 
-                      className={`theme-btn graphite ${theme === 'graphite' ? 'active' : ''}`}
-                      onClick={() => setTheme('graphite')}
-                    ></button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
-        </div>
-
-        {/* CHAT AREA */}
-        <div className="chat-area">
-          {!conversationActive ? (
-            // LANDING VIEW
-            <div className="landing">
-              <div className="landing-header">
-                <h2>What's on your mind?</h2>
-                <p>Ask anything about your knowledge base or get creative answers powered by AI.</p>
-              </div>
-              <div className="input-wrapper">
-                <input 
-                  type="text" 
-                  ref={inputRef}
-                  placeholder="Ask a question..." 
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      sendMessage(e.target.value);
-                    }
-                  }}
-                />
-                <button onClick={() => sendMessage(inputRef.current?.value || '')}>
-                  <i className="fas fa-arrow-right"></i>
-                </button>
+        ) : (
+          <>
+            <div className="conversation">
+              <div className="messages">
+                {messages.map((msg) => (
+                  <div key={msg.id} className={`message ${msg.role}`}>
+                    <div className="bubble">{msg.content}</div>
+                  </div>
+                ))}
+                {isThinking && (
+                  <div className="message assistant">
+                    <div className="thinking-indicator">
+                      <div className="dot"></div>
+                      <div className="dot"></div>
+                      <div className="dot"></div>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
               </div>
             </div>
-          ) : (
-            <>
-              {/* CONVERSATION VIEW */}
-              <div className="conversation">
-                <div className="messages">
-                  {messages.map((msg) => (
-                    <div key={msg.id} className={`message ${msg.role}`}>
-                      <div className="bubble">{msg.content}</div>
-                    </div>
-                  ))}
-                  {isThinking && (
-                    <div className="message assistant">
-                      <div className="thinking-indicator">
-                        <div className="dot"></div>
-                        <div className="dot"></div>
-                        <div className="dot"></div>
-                      </div>
-                    </div>
-                  )}
-                  <div ref={messagesEndRef} />
-                </div>
-              </div>
-
-              {/* COMPOSER */}
-              <div className="composer">
-                <input 
-                  type="text" 
-                  ref={inputRef}
-                  placeholder="Your message here..." 
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter' && !e.ctrlKey) {
-                      sendMessage(e.target.value);
-                    }
-                  }}
-                />
-                <button onClick={() => sendMessage(inputRef.current?.value || '')} disabled={isThinking}>
-                  <i className="fas fa-arrow-right"></i>
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+            <div className="composer">
+              <input 
+                type="text" 
+                ref={inputRef}
+                placeholder="Your message here..." 
+                onKeyPress={(e) => e.key === 'Enter' && !e.ctrlKey && sendMessage(e.target.value)}
+              />
+              <button onClick={() => sendMessage(inputRef.current?.value || '')} disabled={isThinking}>
+                <i className="fas fa-arrow-right"></i>
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
