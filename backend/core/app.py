@@ -3,7 +3,7 @@ import json
 import sys
 import requests
 import numpy as np
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import re
 import logging
@@ -29,6 +29,7 @@ from backend.features.knowledge.metadata import MetadataExtractor
 def create_calendar_manager():
     return None
 from backend.features.calendar.simple import create_simple_calendar_manager
+from backend.features.tasks.manager import task_manager, set_database
 import xml.etree.ElementTree as ET
 
 load_dotenv()
@@ -344,23 +345,25 @@ class OllamaClient:
             enhanced_context = training_manager.create_enhanced_context_for_ai(user_message, context)
             
             # Detaillierter System-Prompt für intelligente Entscheidungen
-            system_prompt = f"""Du bist ein präziser KI-Assistent mit Zugang zu einer Wissensdatenbank und einem Kalender-System.
+            system_prompt = f"""Du bist ein präziser KI-Assistent mit Zugang zu einer Wissensdatenbank, einem Kalender-System und einer TODO-Liste.
 
 WICHTIGE ANWEISUNGEN:
 1. Analysiere die Nutzeranfrage intelligent und selbstständig
-2. Wenn die Anfrage zeitbezogen ist (Termine, Ereignisse, Pläne), nutze den Kalender-Kontext
-3. Wenn die Anfrage wissensbasiert ist, nutze die Wissensdatenbank
-4. Wenn beide relevant sind, kombiniere sie weise
+2. Bei Fragen nach AUFGABEN/TODOS/TASKS: Überprüfe ZUERST die TODO-Liste mit Fälligkeitsdatum
+3. Bei Fragen nach TERMINEN/EVENTS: Nutze den Kalender-Kontext
+4. Bei anderen Fragen: Nutze die Wissensdatenbank
 5. Bei persönlichen Fragen ohne Quellen: Antworte "Ich habe dazu keine Informationen."
 6. Sei informativ aber vermeide unnötig lange Erklärungen
-7. Treffe selbstständig die Entscheidung, welche Tools du nutzt
+7. WICHTIG: Wenn TODOs mit Fälligkeitsdatum vorhanden sind, zeige sie IMMER in deiner Antwort!
 
-ZEITBEZOGENE ANFRAGEN:
-- Nutze den Kalender-Kontext wenn nach Terminen, Ereignissen, Plänen gefragt wird
-- Berücksichtisse relative Zeitangaben ("in 3 Tagen", "nächste Woche")
-- Gib Datum, Uhrzeit und Ort an wenn verfügbar
+FÄLLIGKEITSDATUM-ANFRAGEN:
+- "Welche Aufgaben habe ich heute/morgen/diese Woche?" → Suche nach Fälligkeitsdatum
+- "Was ist heute fällig?" → Zeige Aufgaben mit heute's Datum
+- "Welche todos/tasks?" → Zeige Aufgaben aus der TODO-Liste
 
 {enhanced_context}
+
+KRITISCH: Antworte mit konkreten TODO-Einträgen wenn die Anfrage nach Aufgaben/Todos fragt!
 
 Basierend auf den Informationen beantworte die Frage informativ und direkt."""
             
@@ -473,6 +476,11 @@ ollama_client = OllamaClient()
 training_manager = TrainingManager()
 metadata_extractor = MetadataExtractor()
 
+# Database für TaskManager setzen
+if knowledge_base.db:
+    set_database(knowledge_base.db)
+    logger.info("✅ Database connected to task_manager")
+
 # AI-Konfiguration beim Start laden
 load_ai_config()
 
@@ -480,6 +488,51 @@ load_ai_config()
 calendar_manager = create_calendar_manager()
 simple_calendar_manager = create_simple_calendar_manager()
 calendar_enabled = os.getenv('CALENDAR_ENABLED', 'False').lower() == 'true'
+
+# Tasks/Todos Manager initialisieren
+tasks_enabled = False
+
+def initialize_tasks_from_config():
+    """Initialisiert Task-Manager wenn Nextcloud-Config vorhanden"""
+    global tasks_enabled
+    logger.info("🔧 Starting tasks initialization...")
+    try:
+        # Versuche aus verschiedenen Quellen zu laden
+        config = None
+        
+        # 1. Versuche indexing_manager
+        try:
+            config = indexing_manager.get_config(mask_password=False)
+            if config and config.get('url'):
+                logger.info("✓ Config from indexing_manager")
+        except Exception as e:
+            logger.info(f"✗ indexing_manager.get_config() failed: {e}")
+            pass
+        
+        # 2. Fallback: Direkt JSON laden
+        if not config or not config.get('url'):
+            import json
+            import os
+            config_file = os.path.join(os.path.dirname(__file__), '..', 'config', 'indexing_config.json')
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    logger.info(f"✓ Config from {config_file}")
+        
+        if config and config.get('url') and config.get('username') and config.get('password'):
+            success = task_manager.initialize(config['url'], config['username'], config['password'])
+            tasks_enabled = success
+            if success:
+                logger.info(f"✅ Tasks manager initialized: tasks_enabled={tasks_enabled}")
+            else:
+                logger.warning(f"❌ Failed to initialize tasks manager: tasks_enabled={tasks_enabled}")
+        else:
+            logger.warning("❌ No valid config found for tasks initialization")
+            tasks_enabled = False
+    except Exception as e:
+        logger.warning(f"❌ Could not initialize tasks: {str(e)}")
+        tasks_enabled = False
+    logger.info(f"📊 Final state: tasks_enabled={tasks_enabled}")
 
 # Kalender-Caching für Performance
 calendar_cache = {}
@@ -528,6 +581,35 @@ def get_cached_calendar_events(cache_key: str) -> tuple:
         if time.time() - cached_data['timestamp'] < CACHE_DURATION:
             return cached_data['events'], cached_data['description']
     return None, None
+
+def is_todo_query(message: str) -> bool:
+    """Prüft ob die Nachricht eine TODO-Frage ist"""
+    message_lower = message.lower()
+    todo_keywords = [
+        'todo', 'todos', 'aufgabe', 'aufgaben', 'task', 'tasks',
+        'zu tun', 'sache', 'sachen', 'erledigungen',
+        'checklist', 'checkliste', 'reminders',
+        'muss ich', 'sollte ich', 'vergesse ich nicht',
+        'was habe ich', 'was muss ich'
+    ]
+    return any(keyword in message_lower for keyword in todo_keywords)
+
+def get_todo_context(message: str) -> str:
+    """Holt Todo-Kontext basierend auf der Nachricht"""
+    if not tasks_enabled or not task_manager.tasks_client:
+        return ""
+    
+    try:
+        # get_tasks mit None wird automatisch verschiedene Listen-Namen versuchen
+        tasks = task_manager.get_tasks(use_cache=True, list_name=None)
+        if not tasks:
+            return ""
+        
+        context = task_manager.format_tasks_for_context(tasks)
+        return context
+    except Exception as e:
+        logger.error(f"Error getting todo context: {str(e)}")
+        return ""
 
 def create_calendar_event(title: str, start_time: str, end_time: str = None, 
                           calendar_name: str = None, location: str = None, 
@@ -920,15 +1002,6 @@ def try_migrate_existing_data():
     except Exception as e:
         logger.warning(f"Migration failed: {str(e)}")
 
-@app.route('/calendar-create')
-def calendar_create_page():
-    """Kalender-Erstellungsseite"""
-    return render_template('calendar_create.html')
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
 @app.route('/api/chat', methods=['POST'])
 def chat():
     data = request.json
@@ -940,10 +1013,20 @@ def chat():
     
     # Intelligente Kalender-Erkennung ohne feste Muster
     calendar_context = None
+    todo_context = None
     
     # Lasse die KI entscheiden, ob es eine Kalender-Frage ist
     # durch semantische Analyse statt feste Keywords
     message_lower = message.lower()
+    
+    # TODOS erkennen - NOW RE-ENABLED: Auto-loading is fast because tasks are loaded from DB (not WebDAV)
+    if is_todo_query(message):
+        try:
+            todo_context = get_todo_context(message)
+            if todo_context:
+                logger.info(f"Todo context found: {len(todo_context)} characters")
+        except Exception as e:
+            logger.error(f"Todo error: {e}")
     
     # Nur grundlegende Prüfung, ob es zeitbezogen sein könnte
     time_related_indicators = [
@@ -988,8 +1071,19 @@ def chat():
         {'role': 'user', 'content': message}
     ]
     
-    # Kombiniere Kontexte (Wissensbasis + Kalender)
+    # Kombiniere Kontexte (Wissensbasis + Kalender + Todos)
     combined_context = relevant_context.copy()
+    
+    # Füge Todo-Kontext hinzu wenn vorhanden
+    if todo_context:
+        combined_context.insert(0, {
+            'content': todo_context,
+            'source': 'Todos',
+            'path': 'todos',
+            'similarity_score': 1.0,
+            'metadata': {}
+        })
+    
     if calendar_context:
         # Füge Kalender-Kontext als speziellen Kontext hinzu
         combined_context.insert(0, {
@@ -1021,6 +1115,59 @@ def chat():
         logger.info(f"Response generated, context used: {context_used}")
         if calendar_context:
             logger.info(f"Calendar context included in response")
+        if todo_context:
+            logger.info(f"Todo context included in response")
+        
+        # ACTION PARSER: Versuche natürlichsprachige Aktionen auszuführen
+        action_response = None
+        try:
+            # Erkenne "erstelle erinnerung/task/todo für [datum]: [titel]"
+            import re
+            
+            # Pattern: "erstelle (erinnerung|aufgabe|task|todo) für (morgen|heute|[datum]) *: *(.+)"
+            pattern = r'(?:erstelle|create)\s+(?:eine?\s+)?(?:erinnerung|aufgabe|task|todo|aufgaben|tasks|reminder)\s+(?:für|um)\s+([^:]+):\s*(.+?)(?:\.|$)'
+            match = re.search(pattern, message.lower())
+            
+            if match:
+                time_ref = match.group(1).strip()
+                title = match.group(2).strip()
+                
+                # Parse the time reference
+                due_date = None
+                if 'morgen' in time_ref or 'tomorrow' in time_ref:
+                    due_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                elif 'heute' in time_ref or 'today' in time_ref:
+                    due_date = datetime.now().strftime('%Y-%m-%d')
+                
+                # Create the task if we parsed everything
+                if title and tasks_enabled and task_manager.tasks_client:
+                    try:
+                        success = task_manager.create_task(
+                            title=title,
+                            due_date=due_date,
+                            list_name='todo'
+                        )
+                        if success:
+                            action_response = f"✓ Erinnerung '{title}' wurde erstellt (fällig: {due_date or 'unbegrenzt'})"
+                            logger.info(f"Action executed: Created task '{title}'")
+                    except Exception as e:
+                        logger.warning(f"Failed to create task from action: {e}")
+        except Exception as e:
+            logger.debug(f"Action parser error (this is OK): {e}")
+        
+        # Prepare detailed source attribution
+        sources = []
+        for ctx in combined_context:
+            source_info = {
+                'source': ctx.get('source', 'Unknown'),
+                'path': ctx.get('path', ''),
+                'content_preview': ctx.get('content', '')[:200] + '...' if len(ctx.get('content', '')) > 200 else ctx.get('content', ''),
+                'similarity_score': ctx.get('similarity_score', 0.0),
+                'chunk_id': ctx.get('chunk_id', ''),
+                'document_id': ctx.get('document_id', ''),
+                'search_type': ctx.get('search_type', 'unknown')
+            }
+            sources.append(source_info)
         
         # Prepare detailed source attribution
         sources = []
@@ -1038,6 +1185,7 @@ def chat():
         
         return jsonify({
             'response': ai_response,
+            'action': action_response,  # Include action result if any
             'context_used': context_used,
             'context_count': len(combined_context),
             'calendar_used': calendar_context is not None,
@@ -1187,11 +1335,6 @@ def get_knowledge_graph_data():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-@app.route('/knowledge-graph')
-def knowledge_graph():
-    """Knowledge Graph Visualization Seite"""
-    return render_template('knowledge_graph.html')
 
 @app.route('/api/knowledge/migrate', methods=['POST'])
 def migrate_knowledge():
@@ -1649,6 +1792,177 @@ def calendar_day(day_name):
         logger.error(f"Calendar day error: {e}")
         return jsonify({'error': str(e)}), 500
 
+# Task/Todo API Endpunkte
+@app.route('/api/tasks/init', methods=['POST'])
+def init_tasks():
+    """Initialisiert den Task-Manager mit Nextcloud-Konfiguration"""
+    try:
+        initialize_tasks_from_config()
+        return jsonify({
+            'enabled': tasks_enabled,
+            'message': 'Tasks initialized' if tasks_enabled else 'Tasks could not be initialized'
+        })
+    except Exception as e:
+        logger.error(f"Task initialization error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/list', methods=['GET'])
+def list_tasks():
+    """Gibt alle aktiven Todos/Tasks zurück"""
+    try:
+        if not tasks_enabled or not task_manager.tasks_client:
+            return jsonify({'error': 'Tasks nicht verfügbar'}), 400
+        
+        # get_tasks mit None wird automatisch verschiedene Listen-Namen versuchen
+        tasks = task_manager.get_tasks(use_cache=True, list_name=None)
+        return jsonify({
+            'tasks': tasks,
+            'count': len(tasks),
+            'enabled': True
+        })
+    except Exception as e:
+        logger.error(f"Error listing tasks: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/create', methods=['POST'])
+def create_task():
+    """Erstellt ein neues Task/Todo"""
+    try:
+        if not tasks_enabled or not task_manager.tasks_client:
+            return jsonify({'error': 'Tasks nicht verfügbar'}), 400
+        
+        data = request.json
+        title = data.get('title')
+        description = data.get('description', '')
+        due_date = data.get('due_date')  # YYYY-MM-DD
+        priority = data.get('priority', 0)
+        list_name = data.get('list_name', 'tasks')
+        
+        if not title:
+            return jsonify({'error': 'Titel ist erforderlich'}), 400
+        
+        success = task_manager.create_task(title, description, due_date, priority, list_name)
+        
+        if success:
+            return jsonify({
+                'status': 'created',
+                'title': title,
+                'message': f'Task "{title}" wurde erstellt'
+            })
+        else:
+            return jsonify({'error': 'Fehler beim Erstellen des Tasks'}), 500
+    
+    except Exception as e:
+        logger.error(f"Error creating task: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/complete/<task_uid>', methods=['POST'])
+def complete_task(task_uid):
+    """Markiert ein Task als abgeschlossen"""
+    try:
+        if not tasks_enabled or not task_manager.tasks_client:
+            return jsonify({'error': 'Tasks nicht verfügbar'}), 400
+        
+        data = request.json or {}
+        list_name = data.get('list_name', 'tasks')
+        
+        success = task_manager.complete_task(task_uid, list_name)
+        
+        if success:
+            return jsonify({
+                'status': 'completed',
+                'task_uid': task_uid,
+                'message': 'Task wurde als erledigt markiert'
+            })
+        else:
+            return jsonify({'error': 'Fehler beim Abschließen des Tasks'}), 500
+    
+    except Exception as e:
+        logger.error(f"Error completing task: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/status', methods=['GET'])
+def tasks_status():
+    """Gibt Status der Task-Integration zurück"""
+    try:
+        return jsonify({
+            'enabled': tasks_enabled,
+            'connected': tasks_enabled and task_manager.tasks_client is not None,
+            'message': 'Tasks sind aktiviert und verbunden' if tasks_enabled else 'Tasks nicht verfügbar'
+        })
+    except Exception as e:
+        logger.error(f"Task status error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/sync', methods=['POST'])
+def tasks_sync():
+    """
+    Startet den Background-Load aller Tasks von Nextcloud in die Datenbank
+    **WICHTIG**: Dies sollte nur EINMAL gemacht werden!
+    Nach dem Sync werden Chat-Queries von der DB (ultra-schnell) gelesen
+    """
+    if not tasks_enabled or not task_manager.tasks_client:
+        return jsonify({'error': 'Tasks nicht initialisiert'}), 400
+    
+    if not task_manager.database:
+        return jsonify({'error': 'Database nicht verfügbar'}), 400
+    
+    try:
+        # Starte Background-Load
+        success = task_manager.sync_tasks_to_database(
+            list_name=request.json.get('list_name', 'todo'),
+            batch_size=request.json.get('batch_size', 100)
+        )
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': '🔄 Background task sync gestartet! Tasks werden in Batches geladen...',
+                'status': task_manager.get_sync_status()
+            })
+        else:
+            return jsonify({'error': 'Sync konnte nicht gestartet werden'}), 500
+            
+    except Exception as e:
+        logger.error(f"Sync error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/sync-status', methods=['GET'])
+def tasks_sync_status():
+    """Gibt Status des laufenden Task-Syncs zurück"""
+    if not task_manager.database:
+        return jsonify({'error': 'Database nicht verfügbar'}), 400
+    
+    try:
+        status = task_manager.get_sync_status()
+        return jsonify({
+            'status': status,
+            'is_loading': task_manager.batch_loader.is_loading if task_manager.batch_loader else False
+        })
+    except Exception as e:
+        logger.error(f"Sync status error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tasks/db-stats', methods=['GET'])
+def tasks_db_stats():
+    """Gibt Statistiken über Tasks in der Datenbank zurück"""
+    if not task_manager.database:
+        return jsonify({'error': 'Database nicht verfügbar'}), 400
+    
+    try:
+        stats = task_manager.database.get_task_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"DB stats error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# Tasks/Todos Manager initialisieren wenn Konfiguration vorhanden
+# IMPORTANT: Initialize BEFORE if __name__ == '__main__' so it runs on module import too
+try:
+    initialize_tasks_from_config()
+except Exception as e:
+    logger.error(f"Error in initialize_tasks_from_config: {e}")
+
 if __name__ == '__main__':
     # Initialize knowledge base
     try:
@@ -1675,6 +1989,7 @@ if __name__ == '__main__':
         print("Semantic Search: Nicht verfügbar (Fallback Mode)")
     
     print(f"Ollama-Verbindung: {'OK' if ollama_client.check_connection() else 'Nicht verfügbar'}")
+    print(f"Todos/Tasks: {'Aktiviert' if tasks_enabled else 'Nicht verfügbar'}")
     print("Öffne http://localhost:5001 im Browser")
     
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(debug=False, host='0.0.0.0', port=5001, use_reloader=False)

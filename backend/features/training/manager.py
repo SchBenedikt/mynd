@@ -148,8 +148,12 @@ class TrainingManager:
         """Erstelle verbesserten Kontext für die KI mit Metadaten und detaillierten Quellenangaben"""
         
         # Metadaten extrahieren
-        from app import metadata_extractor
-        enhanced_context = metadata_extractor.enhance_context_with_metadata(context_results)
+        try:
+            from backend.core.app import metadata_extractor
+            enhanced_context = metadata_extractor.enhance_context_with_metadata(context_results)
+        except ImportError:
+            # Fallback wenn metadata_extractor nicht verfügbar ist
+            enhanced_context = context_results
         
         # Prüfen, ob die Frage nach persönlichen Informationen geht
         personal_query_patterns = [
