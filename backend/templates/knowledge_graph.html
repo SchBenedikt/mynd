@@ -823,25 +823,45 @@
 
         async function extractConcepts(chunks) {
             const concepts = [];
-            const conceptWords = ['Benedikt', 'Schächner', 'Nextcloud', 'Server', 'Datenbank', 'System', 'KI', 'Chat', 'Training', 'Graph'];
             
+            // Extract concepts from chunk content using simple keyword extraction
             for (let index = 0; index < chunks.length; index++) {
-                if (Math.random() > 0.7) {
-                    const word = conceptWords[Math.floor(Math.random() * conceptWords.length)];
-                    const existing = concepts.find(c => c.name === word);
+                const chunk = chunks[index];
+                if (chunk.content && chunk.content.length > 20) {
+                    // Simple keyword extraction - split by common separators and filter
+                    const words = chunk.content
+                        .toLowerCase()
+                        .replace(/[^\w\säöüß]/g, ' ')
+                        .split(/\s+/)
+                        .filter(word => word.length > 3)
+                        .filter(word => !['dies', 'diese', 'dieser', 'diesen', 'diesem', 'jener', 'jene', 'jenes', 'kann', 'können', 'muss', 'müssen', 'soll', 'sollen', 'wird', 'werden', 'wäre', 'wären', 'hätte', 'hätten', 'hat', 'haben', 'hatte', 'hatten'].includes(word));
                     
-                    if (existing) {
-                        existing.frequency++;
-                    } else {
-                        concepts.push({ id: `concept_${word.toLowerCase()}`, name: word, type: 'concept', frequency: 1 });
-                    }
+                    // Count word frequency
+                    words.forEach(word => {
+                        const existing = concepts.find(c => c.name.toLowerCase() === word);
+                        if (existing) {
+                            existing.frequency++;
+                        } else if (Math.random() > 0.8) { // Only keep some words as concepts
+                            concepts.push({ 
+                                id: `concept_${word.toLowerCase().replace(/\s+/g, '_')}`, 
+                                name: word, 
+                                type: 'concept', 
+                                frequency: 1 
+                            });
+                        }
+                    });
                 }
+                
                 if (index % 200 === 0) {
                     updateProgress(60 + (index / chunks.length) * 20);
                     await this._sleep(5);
                 }
             }
-            return concepts;
+            
+            // Return only concepts with frequency > 1 or a random sample
+            return concepts
+                .filter(c => c.frequency > 1)
+                .slice(0, 50); // Limit to 50 concepts
         }
 
         function buildGraphStructure(documents, chunks, concepts) {

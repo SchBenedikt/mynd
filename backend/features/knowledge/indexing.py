@@ -63,6 +63,8 @@ class IndexingManager:
         self.knowledge_cache_file = "knowledge_cache.json"
         self.max_workers = 8  # Erhöht für bessere Parallelität
         self.batch_size = 50  # Batch-Verarbeitung für bessere Performance
+        self.last_indexing_start = 0
+        self.last_indexing_end = 0
         
     def add_progress_callback(self, callback: Callable[[IndexingProgress], None]):
         """Fügt einen Callback für Fortschritts-Updates hinzu"""
@@ -131,6 +133,9 @@ class IndexingManager:
             status=IndexingStatus.RUNNING,
             start_time=time.time()
         )
+        
+        # Track last indexing start time
+        self.last_indexing_start = time.time()
         
         # Indexierungsthread starten
         self.indexing_thread = threading.Thread(
@@ -260,6 +265,10 @@ class IndexingManager:
         finally:
             self.current_progress.end_time = time.time()
             self.current_progress.current_file = ""
+            
+            # Track last indexing end time
+            self.last_indexing_end = time.time()
+            
             self.notify_progress()
     
     def _split_text(self, text: str, chunk_size: int = 500) -> list:
@@ -410,7 +419,10 @@ class IndexingManager:
             'errors': self.current_progress.errors,
             'elapsed_time': self.current_progress.elapsed_time,
             'error_message': self.current_progress.error_message,
-            'is_running': self.current_progress.status == IndexingStatus.RUNNING
+            'is_running': self.current_progress.status == IndexingStatus.RUNNING,
+            'last_indexing_start': self.last_indexing_start,
+            'last_indexing_end': self.last_indexing_end,
+            'last_indexing_duration': self.last_indexing_end - self.last_indexing_start if self.last_indexing_end > 0 and self.last_indexing_start > 0 else 0
         }
     
     def get_config(self, mask_password: bool = False) -> Dict:
