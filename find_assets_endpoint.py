@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
+import os
 import requests
 import json
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-IMMICH_URL = "https://fotos.xn--schchner-2za.de"
-IMMICH_KEY = "r8hRtGPc8CvdLD08PTFc97sW9o7NHsPl9aFPm0qvQ"
+IMMICH_URL = os.getenv("IMMICH_URL", "").strip()
+IMMICH_KEY = os.getenv("IMMICH_API_KEY", "").strip()
+
+if not IMMICH_URL or not IMMICH_KEY:
+    raise SystemExit(
+        "Bitte IMMICH_URL und IMMICH_API_KEY als Umgebungsvariablen setzen."
+    )
 
 headers = {
     'X-Api-Key': IMMICH_KEY,
