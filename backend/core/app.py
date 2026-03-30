@@ -442,7 +442,15 @@ def load_ai_config() -> dict:
     config = {
         'provider': 'ollama',
         'base_url': os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/'),
-        'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest')
+        'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest'),
+        'immich_url_default': '',
+        'immich_api_key_default': '',
+        'vector_db_enabled': True,
+        'vector_db_provider': 'qdrant',
+        'vector_db_path': './qdrant_data',
+        'calendar_auto_reindex_hours': 6,
+        'calendar_auto_reindex_past_days': 730,
+        'calendar_auto_reindex_future_days': 365
     }
 
     if os.path.exists(AI_CONFIG_FILE):
@@ -452,6 +460,14 @@ def load_ai_config() -> dict:
 
             config['base_url'] = str(file_config.get('base_url', config['base_url'])).rstrip('/')
             config['model'] = str(file_config.get('model', config['model']))
+            config['immich_url_default'] = file_config.get('immich_url_default', '')
+            config['immich_api_key_default'] = file_config.get('immich_api_key_default', '')
+            config['vector_db_enabled'] = file_config.get('vector_db_enabled', True)
+            config['vector_db_provider'] = file_config.get('vector_db_provider', 'qdrant')
+            config['vector_db_path'] = file_config.get('vector_db_path', './qdrant_data')
+            config['calendar_auto_reindex_hours'] = file_config.get('calendar_auto_reindex_hours', 6)
+            config['calendar_auto_reindex_past_days'] = file_config.get('calendar_auto_reindex_past_days', 730)
+            config['calendar_auto_reindex_future_days'] = file_config.get('calendar_auto_reindex_future_days', 365)
         except Exception as e:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
 
@@ -469,6 +485,32 @@ def save_ai_config(base_url: str, model: str) -> None:
 
     with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
+
+def load_user_config(username: str) -> dict:
+    """Lädt benutzerspezifische Konfiguration"""
+    user_config_file = os.path.join(CONFIG_DIR, f"user_{username}.json")
+    config = {}
+
+    if os.path.exists(user_config_file):
+        try:
+            with open(user_config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception as e:
+            logger.warning(f"Could not load user config for {username}: {str(e)}")
+
+    return config
+
+def save_user_config(username: str, config: dict) -> None:
+    """Speichert benutzerspezifische Konfiguration"""
+    user_config_file = os.path.join(CONFIG_DIR, f"user_{username}.json")
+
+    try:
+        with open(user_config_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Could not save user config for {username}: {str(e)}")
+        raise
+
 
 # Initialisierung
 knowledge_base = KnowledgeBase()
@@ -1940,13 +1982,753 @@ def tasks_db_stats():
     """Gibt Statistiken über Tasks in der Datenbank zurück"""
     if not task_manager.database:
         return jsonify({'error': 'Database nicht verfügbar'}), 400
-    
+
     try:
         stats = task_manager.database.get_task_stats()
         return jsonify(stats)
     except Exception as e:
         logger.error(f"DB stats error: {e}")
         return jsonify({'error': str(e)}), 500
+
+# ==================== Immich Photo API Endpoints ====================
+
+from backend.features.integration.immich_client import ImmichClient
+
+def get_immich_client(username: str = None) -> Optional[ImmichClient]:
+    """Holt Immich-Client mit Credentials aus Konfiguration"""
+    try:
+        # Versuche user-spezifische Konfiguration
+        if username:
+            user_config = load_user_config(username)
+            immich_url = user_config.get('immich_url')
+            immich_api_key = user_config.get('immich_api_key')
+            # Custom timeout configuration
+            timeout_short = user_config.get('immich_timeout_short', 15)
+            timeout_long = user_config.get('immich_timeout_long', 45)
+        else:
+            immich_url = None
+            immich_api_key = None
+            timeout_short = 15
+            timeout_long = 45
+
+        # Fallback auf globale Konfiguration
+        if not immich_url or not immich_api_key:
+            global_config = load_ai_config()
+            immich_url = immich_url or global_config.get('immich_url_default')
+            immich_api_key = immich_api_key or global_config.get('immich_api_key_default')
+            # Get global timeout settings if not from user config
+            if username is None or not user_config.get('immich_url'):
+                timeout_short = global_config.get('immich_timeout_short', 15)
+                timeout_long = global_config.get('immich_timeout_long', 45)
+
+        if immich_url and immich_api_key:
+            return ImmichClient(immich_url, immich_api_key, timeout_short, timeout_long)
+        else:
+            logger.warning("Immich not configured")
+            return None
+
+    except Exception as e:
+        logger.error(f"Error creating Immich client: {e}")
+        return None
+
+@app.route('/api/immich/test', methods=['POST'])
+def immich_test_connection():
+    """Testet die Verbindung zu Immich"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+
+        client = get_immich_client(username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Immich nicht konfiguriert. Bitte URL und API-Key setzen.'
+            }), 400
+
+        success = client.test_connection()
+
+        return jsonify({
+            'success': success,
+            'message': 'Verbindung erfolgreich' if success else 'Verbindung fehlgeschlagen'
+        })
+
+    except Exception as e:
+        logger.error(f"Immich test error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/immich/search', methods=['POST'])
+def immich_search_photos():
+    """Sucht Fotos in Immich"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        query = data.get('query', '')
+        limit = data.get('limit', 20)
+
+        client = get_immich_client(username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Immich nicht konfiguriert'
+            }), 400
+
+        result = client.search_photos_intelligent(query, limit=limit)
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Immich search error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/immich/people', methods=['GET'])
+def immich_get_people():
+    """Holt alle erkannten Personen von Immich"""
+    try:
+        username = request.args.get('username')
+
+        client = get_immich_client(username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Immich nicht konfiguriert'
+            }), 400
+
+        people = client.get_people()
+
+        return jsonify({
+            'success': True,
+            'people': people
+        })
+
+    except Exception as e:
+        logger.error(f"Immich people error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/immich/assets', methods=['GET'])
+def immich_get_assets():
+    """Holt Assets von Immich"""
+    try:
+        username = request.args.get('username')
+        limit = int(request.args.get('limit', 100))
+        skip = int(request.args.get('skip', 0))
+
+        client = get_immich_client(username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Immich nicht konfiguriert'
+            }), 400
+
+        assets = client.get_all_assets(limit=limit, skip=skip)
+
+        return jsonify({
+            'success': True,
+            'count': len(assets),
+            'assets': assets
+        })
+
+    except Exception as e:
+        logger.error(f"Immich assets error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== UI Configuration Endpoints ====================
+
+@app.route('/api/ui/system-config', methods=['GET', 'POST'])
+def ui_system_config():
+    """System-wide configuration (admin level)"""
+    try:
+        if request.method == 'GET':
+            config = load_ai_config()
+            return jsonify({
+                'success': True,
+                'config': {
+                    'provider': config.get('provider', 'ollama'),
+                    'base_url': config.get('base_url', ''),
+                    'model': config.get('model', ''),
+                    'immich_url_default': config.get('immich_url_default', ''),
+                    'immich_api_key_default': config.get('immich_api_key_default', ''),
+                    'vector_db_enabled': config.get('vector_db_enabled', True),
+                    'vector_db_provider': config.get('vector_db_provider', 'qdrant'),
+                    'vector_db_path': config.get('vector_db_path', './qdrant_data')
+                }
+            })
+
+        # POST - update system config
+        data = request.get_json()
+        config = load_ai_config()
+
+        # Update config values
+        if 'immich_url_default' in data:
+            config['immich_url_default'] = data['immich_url_default']
+        if 'immich_api_key_default' in data:
+            config['immich_api_key_default'] = data['immich_api_key_default']
+        if 'base_url' in data:
+            config['base_url'] = data['base_url']
+        if 'model' in data:
+            config['model'] = data['model']
+        if 'vector_db_enabled' in data:
+            config['vector_db_enabled'] = data['vector_db_enabled']
+
+        # Save to file
+        with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+
+        # Reload config
+        load_ai_config()
+
+        return jsonify({'success': True, 'message': 'System configuration updated'})
+
+    except Exception as e:
+        logger.error(f"System config error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/runtime-config', methods=['GET', 'POST'])
+def ui_runtime_config():
+    """Runtime configuration (current session)"""
+    try:
+        if request.method == 'GET':
+            config = load_ai_config()
+            return jsonify({
+                'success': True,
+                'config': {
+                    'ollama_base_url': config.get('base_url', ''),
+                    'ollama_model': config.get('model', ''),
+                    'ollama_connected': ollama_client.check_connection(),
+                    'vector_db_enabled': config.get('vector_db_enabled', True),
+                    'calendar_enabled': calendar_enabled,
+                    'tasks_enabled': tasks_enabled
+                }
+            })
+
+        # POST - update runtime config
+        data = request.get_json()
+
+        if 'base_url' in data and 'model' in data:
+            ollama_client.update_config(data['base_url'], data['model'])
+            save_ai_config(data['base_url'], data['model'])
+
+        return jsonify({'success': True, 'message': 'Runtime configuration updated'})
+
+    except Exception as e:
+        logger.error(f"Runtime config error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/profile-config', methods=['GET', 'POST'])
+def ui_profile_config():
+    """User-specific profile configuration"""
+    try:
+        username = request.args.get('username') if request.method == 'GET' else request.get_json().get('username')
+
+        if not username:
+            return jsonify({'success': False, 'error': 'Username required'}), 400
+
+        if request.method == 'GET':
+            user_config = load_user_config(username)
+            return jsonify({
+                'success': True,
+                'username': username,
+                'config': {
+                    'immich_url': user_config.get('immich_url', ''),
+                    'immich_api_key': user_config.get('immich_api_key', ''),
+                    'nextcloud_url': user_config.get('nextcloud_url', ''),
+                    'nextcloud_username': user_config.get('nextcloud_username', ''),
+                    'nextcloud_password': user_config.get('nextcloud_password', ''),
+                    'caldav_url': user_config.get('caldav_url', ''),
+                    'caldav_username': user_config.get('caldav_username', ''),
+                    'caldav_password': user_config.get('caldav_password', '')
+                }
+            })
+
+        # POST - update user config
+        data = request.get_json()
+        user_config = load_user_config(username)
+
+        # Update user-specific settings
+        if 'immich_url' in data:
+            user_config['immich_url'] = data['immich_url']
+        if 'immich_api_key' in data:
+            user_config['immich_api_key'] = data['immich_api_key']
+        if 'nextcloud_url' in data:
+            user_config['nextcloud_url'] = data['nextcloud_url']
+        if 'nextcloud_username' in data:
+            user_config['nextcloud_username'] = data['nextcloud_username']
+        if 'nextcloud_password' in data:
+            user_config['nextcloud_password'] = data['nextcloud_password']
+        if 'caldav_url' in data:
+            user_config['caldav_url'] = data['caldav_url']
+        if 'caldav_username' in data:
+            user_config['caldav_username'] = data['caldav_username']
+        if 'caldav_password' in data:
+            user_config['caldav_password'] = data['caldav_password']
+
+        save_user_config(username, user_config)
+
+        return jsonify({'success': True, 'message': 'User profile updated'})
+
+    except Exception as e:
+        logger.error(f"Profile config error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/connectivity-status', methods=['GET'])
+def ui_connectivity_status():
+    """Check connectivity status of all services"""
+    try:
+        username = request.args.get('username')
+
+        status = {
+            'ollama': {
+                'connected': ollama_client.check_connection(),
+                'url': ollama_client.base_url,
+                'model': ollama_client.model
+            },
+            'calendar': {
+                'enabled': calendar_enabled,
+                'connected': False
+            },
+            'tasks': {
+                'enabled': tasks_enabled,
+                'connected': False
+            },
+            'immich': {
+                'configured': False,
+                'connected': False
+            }
+        }
+
+        # Check Immich connection
+        if username:
+            client = get_immich_client(username)
+            if client:
+                status['immich']['configured'] = True
+                status['immich']['connected'] = client.test_connection()
+
+        return jsonify({'success': True, 'status': status})
+
+    except Exception as e:
+        logger.error(f"Connectivity status error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/index-status', methods=['GET'])
+def ui_index_status():
+    """Get indexing status"""
+    try:
+        # Get knowledge base stats
+        stats = {
+            'total_documents': 0,
+            'total_chunks': 0,
+            'last_indexed': None,
+            'indexing_in_progress': False
+        }
+
+        if knowledge_base and knowledge_base.db:
+            cursor = knowledge_base.db.cursor()
+
+            # Count documents
+            cursor.execute("SELECT COUNT(*) FROM files")
+            stats['total_documents'] = cursor.fetchone()[0]
+
+            # Count chunks
+            cursor.execute("SELECT COUNT(*) FROM chunks")
+            stats['total_chunks'] = cursor.fetchone()[0]
+
+            # Get last indexed timestamp
+            cursor.execute("SELECT MAX(indexed_at) FROM files")
+            last_indexed = cursor.fetchone()[0]
+            if last_indexed:
+                stats['last_indexed'] = last_indexed
+
+        return jsonify({'success': True, 'stats': stats})
+
+    except Exception as e:
+        logger.error(f"Index status error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/suggestions', methods=['GET'])
+def ui_suggestions():
+    """Get query suggestions based on available data"""
+    try:
+        username = request.args.get('username')
+
+        suggestions = []
+
+        # Add calendar suggestions if available
+        if calendar_enabled:
+            suggestions.append({
+                'type': 'calendar',
+                'text': 'Was steht heute in meinem Kalender?',
+                'icon': 'calendar'
+            })
+
+        # Add tasks suggestions if available
+        if tasks_enabled:
+            suggestions.append({
+                'type': 'tasks',
+                'text': 'Zeige meine offenen Aufgaben',
+                'icon': 'checklist'
+            })
+
+        # Add Immich suggestions if configured
+        if username:
+            client = get_immich_client(username)
+            if client:
+                suggestions.append({
+                    'type': 'photos',
+                    'text': 'Zeige mir Fotos vom letzten Urlaub',
+                    'icon': 'photo'
+                })
+
+        # Add file search suggestions
+        suggestions.append({
+            'type': 'files',
+            'text': 'Suche nach Dokumenten zu Projekt X',
+            'icon': 'document'
+        })
+
+        return jsonify({'success': True, 'suggestions': suggestions})
+
+    except Exception as e:
+        logger.error(f"Suggestions error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/immich', methods=['GET'])
+def ui_immich_status():
+    """Get Immich integration status"""
+    try:
+        username = request.args.get('username')
+
+        if not username:
+            return jsonify({'success': False, 'error': 'Username required'}), 400
+
+        client = get_immich_client(username)
+
+        status = {
+            'configured': client is not None,
+            'connected': False,
+            'person_count': 0,
+            'asset_count': 0
+        }
+
+        if client:
+            status['connected'] = client.test_connection()
+
+            if status['connected']:
+                try:
+                    # Get people count
+                    people = client.get_people()
+                    status['person_count'] = len(people)
+                except:
+                    pass
+
+        return jsonify({'success': True, 'status': status})
+
+    except Exception as e:
+        logger.error(f"Immich status error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== Tools Execution Endpoint ====================
+
+@app.route('/api/tools/test/<tool_name>', methods=['POST'])
+def tools_test_execution(tool_name: str):
+    """Execute a tool by name with provided parameters"""
+    try:
+        data = request.get_json() or {}
+        username = data.get('username')
+
+        # Map tool names to their implementations
+        if tool_name == 'search_photos_immich':
+            query = data.get('query', '')
+            limit = data.get('limit', 20)
+
+            client = get_immich_client(username)
+            if not client:
+                return jsonify({
+                    'success': False,
+                    'error': 'Immich nicht konfiguriert'
+                }), 400
+
+            result = client.search_photos_intelligent(query, limit=limit)
+            return jsonify(result)
+
+        elif tool_name == 'get_people_immich':
+            client = get_immich_client(username)
+            if not client:
+                return jsonify({
+                    'success': False,
+                    'error': 'Immich nicht konfiguriert'
+                }), 400
+
+            people = client.get_people()
+            return jsonify({
+                'success': True,
+                'people': people
+            })
+
+        elif tool_name == 'test_immich_connection':
+            client = get_immich_client(username)
+            if not client:
+                return jsonify({
+                    'success': False,
+                    'error': 'Immich nicht konfiguriert'
+                }), 400
+
+            connected = client.test_connection()
+            return jsonify({
+                'success': True,
+                'connected': connected
+            })
+
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Unknown tool: {tool_name}'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Tool execution error ({tool_name}): {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== Agent Query Endpoint (Unified Chat Interface) ====================
+
+def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
+    """
+    Erkennt die Intention der Anfrage
+
+    Returns: 'photos', 'files', 'calendar', 'tasks', 'mixed'
+    """
+    prompt_lower = prompt.lower()
+
+    # Wenn explizite Quelle gewählt wurde, respektiere das
+    if preferred_source == 'photos':
+        return 'photos'
+    elif preferred_source == 'files':
+        return 'files'
+
+    # Erkenne Foto-Anfragen
+    photo_keywords = ['foto', 'fotos', 'bild', 'bilder', 'image', 'images', 'photo', 'photos',
+                     'immich', 'person', 'personen', 'gesicht', 'album', 'aufnahme']
+    has_photo = any(keyword in prompt_lower for keyword in photo_keywords)
+
+    # Erkenne Datei-Anfragen
+    file_keywords = ['datei', 'dateien', 'dokument', 'dokumente', 'pdf', 'unterlage',
+                    'unterlagen', 'file', 'files', 'document', 'documents', 'nextcloud']
+    has_file = any(keyword in prompt_lower for keyword in file_keywords)
+
+    # Erkenne Kalender-Anfragen
+    time_keywords = ['termin', 'termine', 'kalender', 'heute', 'morgen', 'wann', 'woche',
+                    'datum', 'event', 'ereignis', 'meeting', 'appointment']
+    has_time = any(keyword in prompt_lower for keyword in time_keywords)
+
+    # Erkenne Task-Anfragen
+    task_keywords = ['task', 'tasks', 'todo', 'todos', 'aufgabe', 'aufgaben',
+                    'erledigen', 'machen', 'erinnerung']
+    has_task = any(keyword in prompt_lower for keyword in task_keywords)
+
+    # Bestimme primäre Intention
+    if has_photo and not has_file:
+        return 'photos'
+    elif has_file and not has_photo:
+        return 'files'
+    elif has_time:
+        return 'calendar'
+    elif has_task:
+        return 'tasks'
+    else:
+        return 'mixed'
+
+@app.route('/api/agent/query', methods=['POST'])
+def agent_query():
+    """
+    Unified query endpoint that intelligently routes queries to appropriate sources
+    (photos, files, calendar, tasks) and generates AI responses
+    """
+    try:
+        data = request.get_json()
+        prompt = data.get('prompt', '').strip()
+        username = data.get('username')
+        language = data.get('language', 'de')
+        context = data.get('context', '')  # Previous conversation context
+        preferred_source = data.get('preferred_source', 'auto')
+
+        if not prompt:
+            return jsonify({
+                'success': False,
+                'error': 'Keine Anfrage erhalten'
+            }), 400
+
+        # Detect query intent
+        intent = detect_query_intent(prompt, preferred_source)
+        logger.info(f"Query intent: {intent}, preferred_source: {preferred_source}")
+
+        # Collect context from different sources based on intent
+        photo_context = None
+        file_context = None
+        calendar_context = None
+        todo_context = None
+
+        # Gather photo context if relevant
+        if intent in ['photos', 'mixed']:
+            try:
+                client = get_immich_client(username)
+                if client:
+                    result = client.search_photos_intelligent(prompt, limit=12)
+                    if result.get('success') and result.get('results'):
+                        # Format photo results for context
+                        photos = result['results']
+                        photo_lines = []
+                        for photo in photos[:8]:  # Limit to 8 for context
+                            name = photo['original_file_name']
+                            date = photo.get('created_at', 'Unknown')
+                            people = ', '.join(photo.get('people', []))
+                            location = photo.get('location', '')
+
+                            photo_line = f"- [{name}]({photo['asset_url']})"
+                            if people:
+                                photo_line += f" - Personen: {people}"
+                            if location:
+                                photo_line += f" - Ort: {location}"
+                            if date and date != 'Unknown':
+                                photo_line += f" - Datum: {date[:10]}"
+                            photo_lines.append(photo_line)
+
+                            # Add thumbnail for display
+                            photo_lines.append(f"  [![{name}]({photo['thumbnail_url']})]({photo['asset_url']})")
+
+                        photo_context = {
+                            'content': '=== FOTOS VON IMMICH ===\n\n' + '\n'.join(photo_lines),
+                            'source': 'Immich Photos',
+                            'path': 'immich',
+                            'similarity_score': 1.0,
+                            'metadata': {'count': len(photos)}
+                        }
+                        logger.info(f"Found {len(photos)} photos for context")
+            except Exception as e:
+                logger.error(f"Photo search error: {e}")
+
+        # Gather file context if relevant
+        if intent in ['files', 'mixed']:
+            try:
+                file_results = knowledge_base.search_knowledge(prompt, k=8)
+                if file_results:
+                    file_context = file_results
+                    logger.info(f"Found {len(file_results)} file results for context")
+            except Exception as e:
+                logger.error(f"File search error: {e}")
+
+        # Gather calendar context if relevant
+        if intent in ['calendar', 'mixed'] and calendar_enabled:
+            try:
+                calendar_context_str = get_calendar_context(prompt)
+                if calendar_context_str:
+                    calendar_context = {
+                        'content': calendar_context_str,
+                        'source': 'Kalender',
+                        'path': 'calendar',
+                        'similarity_score': 1.0,
+                        'metadata': {}
+                    }
+                    logger.info("Calendar context added")
+            except Exception as e:
+                logger.error(f"Calendar error: {e}")
+
+        # Gather todo context if relevant
+        if intent in ['tasks', 'mixed']:
+            try:
+                if is_todo_query(prompt):
+                    todo_context_str = get_todo_context(prompt)
+                    if todo_context_str:
+                        todo_context = {
+                            'content': todo_context_str,
+                            'source': 'Todos',
+                            'path': 'todos',
+                            'similarity_score': 1.0,
+                            'metadata': {}
+                        }
+                        logger.info("Todo context added")
+            except Exception as e:
+                logger.error(f"Todo error: {e}")
+
+        # Combine all contexts
+        combined_context = []
+
+        if photo_context:
+            combined_context.insert(0, photo_context)
+
+        if file_context:
+            combined_context.extend(file_context)
+
+        if calendar_context:
+            combined_context.insert(0, calendar_context)
+
+        if todo_context:
+            combined_context.insert(0, todo_context)
+
+        # Build system message with context
+        if not combined_context:
+            system_message = "Du bist ein hilfreicher Assistent. Antworte natürlich und präzise."
+        else:
+            context_parts = []
+            for ctx in combined_context:
+                source_name = ctx.get('source', 'Unknown')
+                content = ctx.get('content', '')
+                if content:
+                    context_parts.append(f"--- {source_name} ---\n{content}")
+
+            context_text = '\n\n'.join(context_parts)
+            system_message = f"""Du bist ein hilfreicher Assistent mit Zugriff auf folgende Informationen:
+
+{context_text}
+
+Nutze diese Informationen um die Frage präzise zu beantworten.
+Falls Fotos verfügbar sind, stelle sie als Markdown-Links dar.
+Antworte auf {language}."""
+
+        # Generate AI response
+        messages = [
+            {'role': 'system', 'content': system_message},
+            {'role': 'user', 'content': prompt}
+        ]
+
+        if context:
+            messages.insert(1, {'role': 'assistant', 'content': context})
+
+        try:
+            response = ollama_client.chat(messages, [])
+
+            if 'error' in response:
+                return jsonify({
+                    'success': False,
+                    'error': response['error']
+                }), 500
+
+            ai_response = response.get('message', {}).get('content', 'Entschuldigung, ich konnte keine Antwort generieren.')
+
+            return jsonify({
+                'success': True,
+                'response': ai_response,
+                'context_used': len(combined_context) > 0,
+                'context_count': len(combined_context),
+                'intent': intent,
+                'sources_used': {
+                    'photos': photo_context is not None,
+                    'files': file_context is not None and len(file_context) > 0,
+                    'calendar': calendar_context is not None,
+                    'todos': todo_context is not None
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"AI generation error: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'Fehler bei der AI-Generierung: {str(e)}'
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Agent query error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 # Tasks/Todos Manager initialisieren wenn Konfiguration vorhanden
 # IMPORTANT: Initialize BEFORE if __name__ == '__main__' so it runs on module import too
