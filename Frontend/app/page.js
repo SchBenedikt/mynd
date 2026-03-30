@@ -224,12 +224,28 @@ export default function HomePage() {
     if (inputRef.current) inputRef.current.value = '';
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat`, {
+      const conversationContext = messages
+        .slice(-8)
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n');
+
+      const res = await fetch(`${API_BASE}/api/agent/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, source })
+        body: JSON.stringify({
+          prompt: text,
+          language: 'de',
+          preferred_source: source,
+          context: conversationContext
+        })
       });
       const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        const errorMessage = data?.error || `Request failed with status ${res.status}`;
+        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errorMessage}`, id: Date.now() }]);
+        return;
+      }
+
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: data.response,
