@@ -220,13 +220,13 @@ def get_immich_client(username: str = None) -> Optional[ImmichClient]
 
 ## Frontend-Integration
 
-Die Frontend-UI (`Frontend/ui.html`) ist bereits vorbereitet:
+Die Frontend-UI ist in Next.js integriert, insbesondere in `frontend/app/settings/page.js`.
 
 ### Konfigurations-Felder
-- `immichUrlEl` - Immich URL Eingabefeld
-- `immichApiKeyEl` - Immich API Key Eingabefeld
-- `cfgImmichUrlDefaultEl` - Globale Standard-URL (Admin)
-- `cfgImmichApiKeyDefaultEl` - Globaler Standard-API-Key (Admin)
+- `immichUrlDefault` - Immich URL Eingabefeld
+- `immichApiKeyDefault` - Immich API Key Eingabefeld
+- `saveImmichConfig()` - Speichert globale Immich-Defaults
+- `testImmichConnection()` - Testet die Verbindung über `/api/immich/test`
 
 ### Smart Cards
 Die Frontend-UI enthält bereits CSS für:
@@ -236,14 +236,7 @@ Die Frontend-UI enthält bereits CSS für:
 
 ### Verwendung im Frontend
 
-```javascript
-// Foto-Suche über Tool-Button
-photoBtn.addEventListener('click', async () => {
-  const q = activePromptValue() || 'Fotos vom Urlaub';
-  const res = await runTool('search_photos_immich', {query: q, limit: 12});
-  // Zeigt Fotos mit Thumbnails an
-});
-
+Konfiguration erfolgt im Webinterface unter `/settings` im Abschnitt "Immich Integration".
 // Oder über natürliche Sprache via Agent Query
 await fetch('/api/agent/query', {
   method: 'POST',
