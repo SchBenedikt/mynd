@@ -442,7 +442,15 @@ def load_ai_config() -> dict:
     config = {
         'provider': 'ollama',
         'base_url': os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/'),
-        'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest')
+        'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest'),
+        'immich_url_default': '',
+        'immich_api_key_default': '',
+        'vector_db_enabled': True,
+        'vector_db_provider': 'qdrant',
+        'vector_db_path': './qdrant_data',
+        'calendar_auto_reindex_hours': 6,
+        'calendar_auto_reindex_past_days': 730,
+        'calendar_auto_reindex_future_days': 365
     }
 
     if os.path.exists(AI_CONFIG_FILE):
@@ -452,6 +460,14 @@ def load_ai_config() -> dict:
 
             config['base_url'] = str(file_config.get('base_url', config['base_url'])).rstrip('/')
             config['model'] = str(file_config.get('model', config['model']))
+            config['immich_url_default'] = file_config.get('immich_url_default', '')
+            config['immich_api_key_default'] = file_config.get('immich_api_key_default', '')
+            config['vector_db_enabled'] = file_config.get('vector_db_enabled', True)
+            config['vector_db_provider'] = file_config.get('vector_db_provider', 'qdrant')
+            config['vector_db_path'] = file_config.get('vector_db_path', './qdrant_data')
+            config['calendar_auto_reindex_hours'] = file_config.get('calendar_auto_reindex_hours', 6)
+            config['calendar_auto_reindex_past_days'] = file_config.get('calendar_auto_reindex_past_days', 730)
+            config['calendar_auto_reindex_future_days'] = file_config.get('calendar_auto_reindex_future_days', 365)
         except Exception as e:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
 
@@ -469,6 +485,32 @@ def save_ai_config(base_url: str, model: str) -> None:
 
     with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
+
+def load_user_config(username: str) -> dict:
+    """Lädt benutzerspezifische Konfiguration"""
+    user_config_file = os.path.join(CONFIG_DIR, f"user_{username}.json")
+    config = {}
+
+    if os.path.exists(user_config_file):
+        try:
+            with open(user_config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception as e:
+            logger.warning(f"Could not load user config for {username}: {str(e)}")
+
+    return config
+
+def save_user_config(username: str, config: dict) -> None:
+    """Speichert benutzerspezifische Konfiguration"""
+    user_config_file = os.path.join(CONFIG_DIR, f"user_{username}.json")
+
+    try:
+        with open(user_config_file, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Could not save user config for {username}: {str(e)}")
+        raise
+
 
 # Initialisierung
 knowledge_base = KnowledgeBase()
