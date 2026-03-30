@@ -4,6 +4,7 @@ import logging
 from typing import List, Dict, Optional, Any
 import requests
 from datetime import datetime, date
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
@@ -11,10 +12,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 class ImmichClient:
     """Client für Immich-Integration über REST API"""
 
-    def __init__(self, url: str, api_key: str):
+    def __init__(self, url: str, api_key: str, timeout_short: int = 15, timeout_long: int = 45):
         self.url = url.rstrip('/')
         self.api_key = api_key
         self.logger = logging.getLogger(__name__)
+        # Configurable timeouts
+        self.timeout_short = timeout_short  # For quick operations like ping, asset info
+        self.timeout_long = timeout_long    # For heavy operations like search, get people
 
     def _get_headers(self) -> Dict[str, str]:
         """Get request headers with API key"""
@@ -31,7 +35,7 @@ class ImmichClient:
             url = f"{self.url}/api/server-info/ping"
             self.logger.info(f"Testing connection to: {url}")
 
-            response = requests.get(url, headers=self._get_headers(), timeout=10)
+            response = requests.get(url, headers=self._get_headers(), timeout=self.timeout_short)
 
             self.logger.info(f"Connection test response status: {response.status_code}")
 
@@ -63,7 +67,7 @@ class ImmichClient:
                 'skip': skip
             }
 
-            response = requests.get(url, headers=self._get_headers(), params=params, timeout=30)
+            response = requests.get(url, headers=self._get_headers(), params=params, timeout=self.timeout_long)
 
             if response.status_code == 200:
                 assets = response.json()
@@ -113,7 +117,7 @@ class ImmichClient:
 
             self.logger.info(f"Searching Immich with payload: {payload}")
 
-            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=30)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout_long)
 
             if response.status_code == 200:
                 result = response.json()
@@ -142,7 +146,7 @@ class ImmichClient:
 
             self.logger.info(f"Smart searching Immich for: {query}")
 
-            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=30)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout_long)
 
             if response.status_code == 200:
                 result = response.json()
@@ -164,7 +168,7 @@ class ImmichClient:
         try:
             url = f"{self.url}/api/person"
 
-            response = requests.get(url, headers=self._get_headers(), timeout=30)
+            response = requests.get(url, headers=self._get_headers(), timeout=self.timeout_long)
 
             if response.status_code == 200:
                 people = response.json()
@@ -224,7 +228,7 @@ class ImmichClient:
         try:
             url = f"{self.url}/api/asset/assetById/{asset_id}"
 
-            response = requests.get(url, headers=self._get_headers(), timeout=10)
+            response = requests.get(url, headers=self._get_headers(), timeout=self.timeout_short)
 
             if response.status_code == 200:
                 return response.json()
@@ -267,9 +271,11 @@ class ImmichClient:
         location_parts = [p for p in [city, state, country] if p]
         return ', '.join(location_parts) if location_parts else None
 
-    def search_photos_intelligent(self, query: str, limit: int = 20) -> Dict[str, Any]:
+    def search_photos_intelligent(self, query: str, limit: int = 20, max_parallel: int = 3) -> Dict[str, Any]:
         """
         Intelligente Suche die verschiedene Suchstrategien kombiniert
+
+        Uses parallel execution to avoid timeout stacking
 
         Erkennt automatisch:
         - Personennamen
@@ -280,22 +286,50 @@ class ImmichClient:
         """
         results = []
 
-        # Strategie 1: Versuche Smart Search (CLIP-basiert)
-        smart_results = self.search_smart(query, limit=limit)
-        if smart_results:
-            results.extend(smart_results)
-
-        # Strategie 2: Falls noch Platz, versuche Personensuche
         # Extrahiere potentielle Namen aus Query (Wörter mit Großbuchstaben)
         words = query.split()
         potential_names = [w for w in words if w and w[0].isupper()]
 
-        if potential_names and len(results) < limit:
-            for name in potential_names:
-                person_results = self.search_by_person_name(name, limit=limit-len(results))
-                results.extend(person_results)
-                if len(results) >= limit:
-                    break
+        try:
+            # Use ThreadPoolExecutor for parallel execution to avoid sequential timeout stacking
+            with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+                futures = {}
+
+                # Strategie 1: Starte Smart Search (CLIP-basiert)
+                smart_future = executor.submit(self.search_smart, query, limit)
+                futures['smart'] = smart_future
+
+                # Strategie 2: Falls Namen gefunden wurden, starte Personensuche parallel
+                if potential_names:
+                    for i, name in enumerate(potential_names[:max_parallel-1]):  # Leave one worker for smart search
+                        person_future = executor.submit(self.search_by_person_name, name, limit)
+                        futures[f'person_{i}_{name}'] = person_future
+
+                # Sammle Ergebnisse mit timeout protection
+                total_timeout = self.timeout_long + 10  # Add buffer to timeout
+
+                for future_name, future in futures.items():
+                    try:
+                        result = future.result(timeout=total_timeout)
+                        if result:
+                            self.logger.info(f"Got {len(result)} results from {future_name}")
+                            results.extend(result)
+                            if len(results) >= limit * 2:  # Stop if we have enough
+                                break
+                    except FuturesTimeoutError:
+                        self.logger.warning(f"Timeout getting results from {future_name}")
+                    except Exception as e:
+                        self.logger.error(f"Error getting results from {future_name}: {e}")
+
+        except Exception as e:
+            self.logger.error(f"Error in parallel search execution: {e}")
+            # Fallback to sequential search if parallel fails
+            try:
+                smart_results = self.search_smart(query, limit=limit)
+                if smart_results:
+                    results.extend(smart_results)
+            except Exception as fallback_error:
+                self.logger.error(f"Fallback search also failed: {fallback_error}")
 
         # Deduplizierung
         seen_ids = set()
