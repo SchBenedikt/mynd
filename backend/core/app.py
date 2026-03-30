@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 import requests
 import numpy as np
 from flask import Flask, render_template, request, jsonify
@@ -8,36 +9,55 @@ import re
 import logging
 from datetime import datetime, timedelta, date
 import time
-from document_parser import DocumentParser
-from nextcloud_client import NextcloudClient
-from indexing_manager import indexing_manager, IndexingProgress
-# from knowledge_engine import SemanticSearchEngine
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+from backend.features.documents.parser import DocumentParser
+from backend.features.integration.nextcloud_client import NextcloudClient
+from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
+# from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
 class SemanticSearchEngine:
     def __init__(self):
         pass
-from simple_search import SimpleSearchEngine
-from training_manager import TrainingManager
-from metadata_extractor import MetadataExtractor
-# from calendar_manager import create_calendar_manager
+from backend.features.knowledge.search import SimpleSearchEngine
+from backend.features.training.manager import TrainingManager
+from backend.features.knowledge.metadata import MetadataExtractor
+# from backend.features.calendar.manager import create_calendar_manager
 # Temporär deaktiviert wegen caldav Problemen
 def create_calendar_manager():
     return None
-from simple_calendar import create_simple_calendar_manager
+from backend.features.calendar.simple import create_simple_calendar_manager
 import xml.etree.ElementTree as ET
 
 load_dotenv()
 
-app = Flask(__name__)
+# Define base directories BEFORE Flask app creation
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+CONFIG_DIR = os.path.join(BASE_DIR, 'backend', 'config')
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+BACKEND_DIR = os.path.join(BASE_DIR, 'backend')
+TEMPLATES_DIR = os.path.join(BACKEND_DIR, 'templates')
+DB_PATH = os.path.join(BASE_DIR, 'knowledge_base.db')
+
+# Setup directories
+os.makedirs(CONFIG_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# Create Flask app with correct template folder
+app = Flask(__name__, template_folder=TEMPLATES_DIR)
 
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-AI_CONFIG_FILE = "ai_config.json"
+AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
 
 class KnowledgeBase:
-    def __init__(self, knowledge_file="user_knowledge.txt"):
+    def __init__(self, knowledge_file=None):
+        if knowledge_file is None:
+            knowledge_file = os.path.join(DATA_DIR, "user_knowledge.txt")
         self.knowledge_file = knowledge_file
         self.knowledge_chunks = []
         self.document_sources = []
@@ -50,7 +70,7 @@ class KnowledgeBase:
         """Initialize search engine (start with simple to avoid segfaults)"""
         try:
             # Start with simple search first
-            self.search_engine = SimpleSearchEngine()
+            self.search_engine = SimpleSearchEngine(DB_PATH)
             self.db = self.search_engine.db
             logger.info("Simple search engine initialized")
         except Exception as e:
@@ -61,7 +81,9 @@ class KnowledgeBase:
     def load_knowledge(self):
         """Lädt und verarbeitet die Wissensdatei"""
         if not os.path.exists(self.knowledge_file):
-            self.create_sample_knowledge()
+            # Create empty knowledge file if it doesn't exist
+            with open(self.knowledge_file, 'w', encoding='utf-8') as f:
+                f.write("")
             
         with open(self.knowledge_file, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -274,39 +296,6 @@ class KnowledgeBase:
                     break
         
         return relevant_chunks[:k]
-    
-    def create_sample_knowledge(self):
-        """Erstellt eine Beispiel-Wissensdatei"""
-        sample_content = """BENEDIKT SCHAECHNER - PERSÖNLICHE INFORMATIONEN
-
-Name: Benedikt Schäechner
-Beruf: Software Entwickler
-Standort: Schweiz
-Programmiersprachen: Python, JavaScript, TypeScript, Java
-Interessen: Künstliche Intelligenz, Webentwicklung, Machine Learning
-
-PROJEKTE
-
-Aktuelle Projekte:
-- Lokale AI-Chat-Anwendung mit Ollama
-- Webentwicklung mit modernen Frameworks
-- Machine Learning Experimente
-
-ERFAHRUNG
-
-- Mehrjährige Erfahrung in der Softwareentwicklung
-- Fokus auf Backend- und Full-Stack-Entwicklung
-- Erfahrung mit Cloud-Technologien und Containern
-
-PREFERENZEN
-
-- Bevorzugt Python für Backend-Entwicklung
-- Nutzt gerne React für Frontend
-- Interessiert an neuen AI-Technologien
-- Arbeitet gerne mit Docker und Git"""
-        
-        with open(self.knowledge_file, 'w', encoding='utf-8') as f:
-            f.write(sample_content)
 
 class OllamaClient:
     def __init__(self, base_url=None, model=None):
@@ -352,7 +341,6 @@ class OllamaClient:
                     break
             
             # Erstelle verbesserten Kontext mit Training Manager
-            from app import training_manager
             enhanced_context = training_manager.create_enhanced_context_for_ai(user_message, context)
             
             # Detaillierter System-Prompt für intelligente Entscheidungen
@@ -1034,12 +1022,27 @@ def chat():
         if calendar_context:
             logger.info(f"Calendar context included in response")
         
+        # Prepare detailed source attribution
+        sources = []
+        for ctx in combined_context:
+            source_info = {
+                'source': ctx.get('source', 'Unknown'),
+                'path': ctx.get('path', ''),
+                'content_preview': ctx.get('content', '')[:200] + '...' if len(ctx.get('content', '')) > 200 else ctx.get('content', ''),
+                'similarity_score': ctx.get('similarity_score', 0.0),
+                'chunk_id': ctx.get('chunk_id', ''),
+                'document_id': ctx.get('document_id', ''),
+                'search_type': ctx.get('search_type', 'unknown')
+            }
+            sources.append(source_info)
+        
         return jsonify({
             'response': ai_response,
             'context_used': context_used,
             'context_count': len(combined_context),
             'calendar_used': calendar_context is not None,
             'training_saved': True,
+            'sources': sources,  # Detailed source attribution
             'debug_info': {
                 'query': message,
                 'found_context': len(relevant_context),
