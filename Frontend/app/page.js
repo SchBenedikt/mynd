@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import SourceCard from '../components/SourceCard';
 
 const API_BASE = '';
 
@@ -239,14 +240,18 @@ export default function HomePage() {
         })
       });
       const data = await res.json();
-
       if (!res.ok || data?.success === false) {
         const errorMessage = data?.error || `Request failed with status ${res.status}`;
         setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errorMessage}`, id: Date.now() }]);
         return;
       }
 
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response, id: Date.now() }]);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.response,
+        sources: data.sources || [],
+        id: Date.now()
+      }]);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}`, id: Date.now() }]);
     } finally {
@@ -422,6 +427,19 @@ export default function HomePage() {
                         msg.content
                       )}
                     </div>
+                    {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                      <div className="sources-container">
+                        <div className="sources-header">
+                          <i className="fas fa-link"></i>
+                          <span>Quellen ({msg.sources.length})</span>
+                        </div>
+                        <div className="sources-grid">
+                          {msg.sources.map((source, idx) => (
+                            <SourceCard key={idx} source={source} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {isThinking && (
