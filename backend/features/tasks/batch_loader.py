@@ -1,0 +1,238 @@
+"""
+BatchTaskLoader - Lädt Nextcloud Tasks in Batches/Chunks in die SQLite Datenbank
+macht dann Chat ultra-schnell, da nur von DB gelesen wird (nicht WebDAV)
+"""
+
+import logging
+import time
+from typing import List, Dict, Tuple, Optional
+from concurrent.futures import ThreadPoolExecutor
+import threading
+
+logger = logging.getLogger(__name__)
+
+
+class BatchTaskLoader:
+    """Lädt Tasks von Nextcloud in Batches in die Datenbank"""
+    
+    def __init__(self, tasks_client, database, batch_size: int = 100):
+        """
+        tasks_client: SimpleNextcloudTasks instance
+        database: KnowledgeDatabase instance
+        batch_size: Wie viele Tasks pro Batch (default: 100)
+        """
+        self.tasks_client = tasks_client
+        self.database = database
+        self.batch_size = batch_size
+        self.is_loading = False
+        self.load_thread: Optional[threading.Thread] = None
+        self.logger = logger
+    
+    def start_background_load(self, list_name: str = 'todo') -> bool:
+        """Startet Background-Thread zum Laden von Tasks"""
+        if self.is_loading:
+            self.logger.warning("Load already in progress")
+            return False
+        
+        self.is_loading = True
+        self.load_thread = threading.Thread(
+            target=self._background_load,
+            args=(list_name,),
+            daemon=True
+        )
+        self.load_thread.start()
+        self.logger.info(f"🔄 Background task loading started for list '{list_name}'")
+        
+        return True
+    
+    def _background_load(self, list_name: str):
+        """Background-Prozess zum Laden von Tasks"""
+        try:
+            start_time = time.time()
+            self.logger.info(f"⏳ Loading tasks from Nextcloud in batches...")
+            
+            # Lade alle Task-Pfade von Nextcloud
+            ics_paths = self._get_all_task_paths(list_name)
+            
+            if not ics_paths:
+                self.logger.warning(f"No tasks found in '{list_name}'")
+                self.is_loading = False
+                return
+            
+            self.logger.info(f"📦 Found {len(ics_paths)} tasks, loading in batches of {self.batch_size}...")
+            
+            # Lade in Batches
+            total_loaded = 0
+            for batch_num, batch_paths in enumerate(self._chunk_list(ics_paths, self.batch_size)):
+                batch_start = time.time()
+                batch_tasks = self._load_task_batch(batch_paths)
+                
+                if batch_tasks:
+                    loaded_count = self.database.add_tasks_batch(batch_tasks, list_name)
+                    total_loaded += loaded_count
+                    
+                    batch_time = time.time() - batch_start
+                    self.logger.info(
+                        f"✅ Batch {batch_num + 1}: "
+                        f"Loaded {loaded_count}/{len(batch_paths)} tasks in {batch_time:.2f}s"
+                    )
+                
+                # Kurze Pause zwischen Batches um WebDAV nicht zu überlasten
+                time.sleep(0.2)
+            
+            elapsed = time.time() - start_time
+            self.logger.info(
+                f"🎉 DONE! Loaded {total_loaded} tasks in {elapsed:.2f}s "
+                f"({elapsed/total_loaded:.2f}s pro Task durchschnittlich)"
+            )
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error in background load: {str(e)}", exc_info=True)
+        finally:
+            self.is_loading = False
+    
+    def _get_all_task_paths(self, list_name: str) -> List[str]:
+        """Holt alle ICS-Pfade vom Nextcloud (schnell, nur PROPFIND)"""
+        try:
+            import requests
+            import xml.etree.ElementTree as ET
+            
+            url = f"{self.tasks_client.base_url}/calendars/{self.tasks_client.username}/{list_name}/"
+            
+            response = requests.request(
+                'PROPFIND',
+                url,
+                auth=self.tasks_client.session.auth,
+                headers={'Depth': '1'},
+                timeout=10
+            )
+            
+            if response.status_code not in [207, 200]:
+                self.logger.warning(f"PROPFIND failed: {response.status_code}")
+                return []
+            
+            # Parse XML
+            root = ET.fromstring(response.content)
+            namespaces = {'d': 'DAV:'}
+            
+            ics_paths = []
+            for response_elem in root.findall('.//d:response', namespaces):
+                href_elem = response_elem.find('d:href', namespaces)
+                if href_elem is not None and href_elem.text and href_elem.text.endswith('.ics'):
+                    ics_paths.append(href_elem.text)
+            
+            return ics_paths
+            
+        except Exception as e:
+            self.logger.error(f"Error getting task paths: {str(e)}")
+            return []
+    
+    def _load_task_batch(self, ics_paths: List[str]) -> List[Dict]:
+        """Lädt ein Batch von Tasks (mit 2 parallelen Workers)"""
+        tasks = []
+        
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [
+                    executor.submit(self.tasks_client._get_task_quick, path)
+                    for path in ics_paths
+                ]
+                
+                for future in futures:
+                    try:
+                        task = future.result(timeout=2)
+                        if task:
+                            tasks.append(task)
+                    except Exception as e:
+                        self.logger.debug(f"Task load error: {e}")
+        
+        except Exception as e:
+            self.logger.error(f"Batch load error: {str(e)}")
+        
+        return tasks
+    
+    def _chunk_list(self, lst: List, chunk_size: int) -> List[List]:
+        """Teilt Liste in Chunks"""
+        for i in range(0, len(lst), chunk_size):
+            yield lst[i:i + chunk_size]
+    
+    def get_load_status(self) -> Dict:
+        """Gibt aktuellen Loading-Status zurück"""
+        task_stats = self.database.get_task_stats()
+        
+        return {
+            'is_loading': self.is_loading,
+            'stats': task_stats,
+            'total': task_stats.get('total', 0),
+            'open': task_stats.get('open', 0),
+            'completed': task_stats.get('completed', 0)
+        }
+
+
+class QuickTaskLoader:
+    """Schnelle Loader-Variante für nur wenige Tasks (z.B. für Chat)"""
+    
+    def __init__(self, tasks_client, database):
+        self.tasks_client = tasks_client
+        self.database = database
+        self.logger = logger
+    
+    def load_open_tasks_only(self, list_name: str = 'todo', max_tasks: int = 5) -> List[Dict]:
+        """Lädt NUR wenige offene Tasks (schnell, für Chat)"""
+        try:
+            ics_paths = self._get_first_n_paths(list_name, max_tasks * 2)
+            
+            if not ics_paths:
+                self.logger.warning(f"No tasks found in '{list_name}'")
+                return []
+            
+            # Schnell 2-3 Tasks laden
+            tasks = []
+            for path in ics_paths[:max_tasks]:
+                task = self.tasks_client._get_task_quick(path)
+                if task and not task.get('completed'):
+                    tasks.append(task)
+                    if len(tasks) >= max_tasks:
+                        break
+            
+            return tasks
+            
+        except Exception as e:
+            self.logger.error(f"Error loading quick tasks: {str(e)}")
+            return []
+    
+    def _get_first_n_paths(self, list_name: str, n: int) -> List[str]:
+        """Holt nur erste N Task-Pfade (sehr schnell)"""
+        try:
+            import requests
+            import xml.etree.ElementTree as ET
+            
+            url = f"{self.tasks_client.base_url}/calendars/{self.tasks_client.username}/{list_name}/"
+            
+            response = requests.request(
+                'PROPFIND',
+                url,
+                auth=self.tasks_client.session.auth,
+                headers={'Depth': '1'},
+                timeout=5
+            )
+            
+            if response.status_code not in [207, 200]:
+                return []
+            
+            root = ET.fromstring(response.content)
+            namespaces = {'d': 'DAV:'}
+            
+            ics_paths = []
+            for response_elem in root.findall('.//d:response', namespaces):
+                href_elem = response_elem.find('d:href', namespaces)
+                if href_elem is not None and href_elem.text and href_elem.text.endswith('.ics'):
+                    ics_paths.append(href_elem.text)
+                    if len(ics_paths) >= n:
+                        break
+            
+            return ics_paths
+            
+        except Exception as e:
+            self.logger.error(f"Error getting task paths: {str(e)}")
+            return []

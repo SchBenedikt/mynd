@@ -121,6 +121,35 @@ class KnowledgeDatabase:
             )
         """)
         
+        # Tasks table - für Nextcloud Todos Caching
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uid TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL,
+                description TEXT,
+                due_date TEXT,
+                completed INTEGER DEFAULT 0,
+                priority INTEGER DEFAULT 0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                last_synced REAL NOT NULL,
+                nextcloud_path TEXT
+            )
+        """)
+        
+        # Tasks sync status
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tasks_sync_status (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                list_name TEXT NOT NULL UNIQUE,
+                total_count INTEGER DEFAULT 0,
+                loaded_count INTEGER DEFAULT 0,
+                last_full_sync REAL,
+                last_update REAL NOT NULL
+            )
+        """)
+        
         self.connection.commit()
     
     def _create_indexes(self):
@@ -140,6 +169,15 @@ class KnowledgeDatabase:
         # Embedding indexes
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_chunk ON embeddings(chunk_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model_name)")
+        
+        # Tasks indexes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_uid ON tasks(uid)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_completed ON tasks(completed)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_updated ON tasks(updated_at)")
+        
+        # Tasks sync status index
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_sync_list ON tasks_sync_status(list_name)")
         
         self.connection.commit()
     
@@ -325,6 +363,149 @@ class KnowledgeDatabase:
         """, (query, results_count, execution_time, time.time()))
         
         self.connection.commit()
+    
+    # ============ TASKS MANAGEMENT ============
+    
+    def add_tasks_batch(self, tasks: List[Dict], list_name: str = 'todo') -> int:
+        """Speichert Batch von Tasks in Datenbank (für Nextcloud Sync)"""
+        cursor = self.connection.cursor()
+        current_time = time.time()
+        added_count = 0
+        
+        try:
+            for task in tasks:
+                uid = task.get('uid', task.get('title', f'task_{current_time}'))
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO tasks 
+                    (uid, title, description, due_date, completed, priority, created_at, updated_at, last_synced, nextcloud_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    uid,
+                    task.get('title', 'Untitled'),
+                    task.get('description', ''),
+                    task.get('due_date'),
+                    1 if task.get('completed') else 0,
+                    task.get('priority', 0),
+                    current_time,
+                    current_time,
+                    current_time,
+                    task.get('nextcloud_path', '')
+                ))
+                added_count += 1
+            
+            # Update sync status
+            cursor.execute("""
+                INSERT OR REPLACE INTO tasks_sync_status 
+                (list_name, loaded_count, last_update)
+                VALUES (?, ?, ?)
+            """, (list_name, added_count, current_time))
+            
+            self.connection.commit()
+            logger.info(f"✅ Added {added_count} tasks to database from list '{list_name}'")
+            return added_count
+            
+        except Exception as e:
+            logger.error(f"❌ Error adding tasks batch: {str(e)}")
+            self.connection.rollback()
+            return 0
+    
+    def get_tasks_from_db(self, completed_only: bool = False, limit: int = 100) -> List[Dict]:
+        """Lädt Tasks aus Datenbank (ultra-schnell!)"""
+        cursor = self.connection.cursor()
+        
+        completed_filter = "WHERE completed = 1" if completed_only else ""
+        
+        cursor.execute(f"""
+            SELECT id, uid, title, description, due_date, completed, priority, updated_at
+            FROM tasks
+            {completed_filter}
+            ORDER BY 
+                completed ASC,
+                due_date ASC,
+                updated_at DESC
+            LIMIT ?
+        """, (limit,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_open_tasks(self, limit: int = 20) -> List[Dict]:
+        """Gibt nur offene (nicht abgehakte) Tasks zurück"""
+        cursor = self.connection.cursor()
+        
+        cursor.execute("""
+            SELECT id, uid, title, description, due_date, priority
+            FROM tasks
+            WHERE completed = 0
+            ORDER BY due_date ASC, priority DESC
+            LIMIT ?
+        """, (limit,))
+        
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def complete_task_in_db(self, task_uid: str) -> bool:
+        """Markiert Task als completed in DB"""
+        cursor = self.connection.cursor()
+        
+        try:
+            cursor.execute("""
+                UPDATE tasks
+                SET completed = 1, updated_at = ?
+                WHERE uid = ?
+            """, (time.time(), task_uid))
+            
+            self.connection.commit()
+            logger.info(f"✅ Task marked completed: {task_uid}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error completing task: {str(e)}")
+            return False
+    
+    def get_task_stats(self) -> Dict:
+        """Gibt Statistiken über Tasks zurück"""
+        cursor = self.connection.cursor()
+        
+        stats = {}
+        
+        # Total tasks
+        cursor.execute("SELECT COUNT(*) as count FROM tasks")
+        stats['total'] = cursor.fetchone()['count']
+        
+        # Open tasks
+        cursor.execute("SELECT COUNT(*) as count FROM tasks WHERE completed = 0")
+        stats['open'] = cursor.fetchone()['count']
+        
+        # Completed tasks
+        cursor.execute("SELECT COUNT(*) as count FROM tasks WHERE completed = 1")
+        stats['completed'] = cursor.fetchone()['count']
+        
+        # By priority
+        cursor.execute("""
+            SELECT priority, COUNT(*) as count 
+            FROM tasks WHERE completed = 0
+            GROUP BY priority
+        """)
+        stats['by_priority'] = {row['priority']: row['count'] for row in cursor.fetchall()}
+        
+        # Sync status
+        cursor.execute("SELECT list_name, loaded_count, last_update FROM tasks_sync_status")
+        stats['sync_status'] = [dict(row) for row in cursor.fetchall()]
+        
+        return stats
+    
+    def clear_tasks(self) -> bool:
+        """Löscht alle Tasks aus der Datenbank (für Neustart/Neuload)"""
+        cursor = self.connection.cursor()
+        
+        try:
+            cursor.execute("DELETE FROM tasks")
+            cursor.execute("DELETE FROM tasks_sync_status")
+            self.connection.commit()
+            logger.info("✅ All tasks cleared from database")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error clearing tasks: {str(e)}")
+            return False
     
     def close(self):
         """Close database connection"""
