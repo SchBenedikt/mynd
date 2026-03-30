@@ -1,4 +1,53 @@
-:root,
+/* Reset and Base Styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  color: var(--ink);
+  font-family: var(--font-space-grotesk), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background:
+    radial-gradient(1200px 520px at -10% -20%, var(--accent-light) 0%, transparent 60%),
+    radial-gradient(900px 420px at 110% 10%, var(--accent-warm) 0%, transparent 55%),
+    linear-gradient(145deg, var(--bg-1), var(--bg-2));
+}
+
+/* CSS Variables - Light Theme */
+:root {
+  /* Default to Gold Theme */
+  --bg-1: #f6f2e8;
+  --bg-2: #f0e6d6;
+  --ink: #713f12;
+  --muted: #92400e;
+  --line: rgba(146, 64, 14, 0.15);
+  --brand: #b45309;
+  --brand-hover: #92400e;
+  --accent: #d4a574;
+  --accent-light: #fff8d9;
+  --accent-warm: #ffd7be;
+  --chip-bg: #fff8ec;
+  --chip-hover: #fff1dc;
+  --input-bg: rgba(255, 252, 247, 0.78);
+  --bubble-user: #fef3c7;
+  --bubble-assistant: #ffffff;
+}
+
+/* Default to gold theme brand color */
+[data-theme="gold"] {
+  --brand: #b45309 !important;
+}
+
+/* Theme Variants */
+
 [data-theme="classic"] {
   --bg-1: #f0fdf4;
   --bg-2: #dcfce7;
@@ -647,12 +696,7 @@ body {
   border-radius: 8px;
 }
 
-/* Theme Selector */
-.theme-selector {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
+/* Theme Buttons */
 
 .theme-btn {
   width: 36px;
@@ -869,6 +913,102 @@ body {
   white-space: pre-wrap;
   font-size: 0.95rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* Markdown Styles */
+.bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 {
+  margin: 1em 0 0.5em 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.bubble h1 { font-size: 1.5em; }
+.bubble h2 { font-size: 1.3em; }
+.bubble h3 { font-size: 1.1em; }
+
+.bubble p {
+  margin: 0.5em 0;
+}
+
+.bubble ul, .bubble ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.bubble li {
+  margin: 0.25em 0;
+}
+
+.bubble strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.bubble em {
+  font-style: italic;
+}
+
+.bubble code {
+  background: var(--chip-bg);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 0.9em;
+  color: var(--ink);
+}
+
+.bubble pre {
+  background: var(--chip-bg);
+  padding: 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+
+.bubble pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.9em;
+}
+
+.bubble blockquote {
+  border-left: 4px solid var(--brand);
+  padding-left: 1em;
+  margin: 0.5em 0;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.bubble a {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.bubble a:hover {
+  text-decoration: underline;
+}
+
+.bubble hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 1em 0;
+}
+
+.bubble table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+}
+
+.bubble th, .bubble td {
+  border: 1px solid var(--line);
+  padding: 0.5em;
+  text-align: left;
+}
+
+.bubble th {
+  background: var(--chip-bg);
+  font-weight: 600;
 }
 
 .message.user .bubble {
