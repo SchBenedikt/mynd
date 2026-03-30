@@ -2010,18 +2010,27 @@ def get_immich_client(username: str = None) -> Optional[ImmichClient]:
             user_config = load_user_config(username)
             immich_url = user_config.get('immich_url')
             immich_api_key = user_config.get('immich_api_key')
+            # Custom timeout configuration
+            timeout_short = user_config.get('immich_timeout_short', 15)
+            timeout_long = user_config.get('immich_timeout_long', 45)
         else:
             immich_url = None
             immich_api_key = None
+            timeout_short = 15
+            timeout_long = 45
 
         # Fallback auf globale Konfiguration
         if not immich_url or not immich_api_key:
             global_config = load_ai_config()
             immich_url = immich_url or global_config.get('immich_url_default')
             immich_api_key = immich_api_key or global_config.get('immich_api_key_default')
+            # Get global timeout settings if not from user config
+            if username is None or not user_config.get('immich_url'):
+                timeout_short = global_config.get('immich_timeout_short', 15)
+                timeout_long = global_config.get('immich_timeout_long', 45)
 
         if immich_url and immich_api_key:
-            return ImmichClient(immich_url, immich_api_key)
+            return ImmichClient(immich_url, immich_api_key, timeout_short, timeout_long)
         else:
             logger.warning("Immich not configured")
             return None
@@ -2128,6 +2137,362 @@ def immich_get_assets():
 
     except Exception as e:
         logger.error(f"Immich assets error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== UI Configuration Endpoints ====================
+
+@app.route('/api/ui/system-config', methods=['GET', 'POST'])
+def ui_system_config():
+    """System-wide configuration (admin level)"""
+    try:
+        if request.method == 'GET':
+            config = load_ai_config()
+            return jsonify({
+                'success': True,
+                'config': {
+                    'provider': config.get('provider', 'ollama'),
+                    'base_url': config.get('base_url', ''),
+                    'model': config.get('model', ''),
+                    'immich_url_default': config.get('immich_url_default', ''),
+                    'immich_api_key_default': config.get('immich_api_key_default', ''),
+                    'vector_db_enabled': config.get('vector_db_enabled', True),
+                    'vector_db_provider': config.get('vector_db_provider', 'qdrant'),
+                    'vector_db_path': config.get('vector_db_path', './qdrant_data')
+                }
+            })
+
+        # POST - update system config
+        data = request.get_json()
+        config = load_ai_config()
+
+        # Update config values
+        if 'immich_url_default' in data:
+            config['immich_url_default'] = data['immich_url_default']
+        if 'immich_api_key_default' in data:
+            config['immich_api_key_default'] = data['immich_api_key_default']
+        if 'base_url' in data:
+            config['base_url'] = data['base_url']
+        if 'model' in data:
+            config['model'] = data['model']
+        if 'vector_db_enabled' in data:
+            config['vector_db_enabled'] = data['vector_db_enabled']
+
+        # Save to file
+        with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+
+        # Reload config
+        load_ai_config()
+
+        return jsonify({'success': True, 'message': 'System configuration updated'})
+
+    except Exception as e:
+        logger.error(f"System config error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/runtime-config', methods=['GET', 'POST'])
+def ui_runtime_config():
+    """Runtime configuration (current session)"""
+    try:
+        if request.method == 'GET':
+            config = load_ai_config()
+            return jsonify({
+                'success': True,
+                'config': {
+                    'ollama_base_url': config.get('base_url', ''),
+                    'ollama_model': config.get('model', ''),
+                    'ollama_connected': ollama_client.check_connection(),
+                    'vector_db_enabled': config.get('vector_db_enabled', True),
+                    'calendar_enabled': calendar_enabled,
+                    'tasks_enabled': tasks_enabled
+                }
+            })
+
+        # POST - update runtime config
+        data = request.get_json()
+
+        if 'base_url' in data and 'model' in data:
+            ollama_client.update_config(data['base_url'], data['model'])
+            save_ai_config(data['base_url'], data['model'])
+
+        return jsonify({'success': True, 'message': 'Runtime configuration updated'})
+
+    except Exception as e:
+        logger.error(f"Runtime config error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/profile-config', methods=['GET', 'POST'])
+def ui_profile_config():
+    """User-specific profile configuration"""
+    try:
+        username = request.args.get('username') if request.method == 'GET' else request.get_json().get('username')
+
+        if not username:
+            return jsonify({'success': False, 'error': 'Username required'}), 400
+
+        if request.method == 'GET':
+            user_config = load_user_config(username)
+            return jsonify({
+                'success': True,
+                'username': username,
+                'config': {
+                    'immich_url': user_config.get('immich_url', ''),
+                    'immich_api_key': user_config.get('immich_api_key', ''),
+                    'nextcloud_url': user_config.get('nextcloud_url', ''),
+                    'nextcloud_username': user_config.get('nextcloud_username', ''),
+                    'nextcloud_password': user_config.get('nextcloud_password', ''),
+                    'caldav_url': user_config.get('caldav_url', ''),
+                    'caldav_username': user_config.get('caldav_username', ''),
+                    'caldav_password': user_config.get('caldav_password', '')
+                }
+            })
+
+        # POST - update user config
+        data = request.get_json()
+        user_config = load_user_config(username)
+
+        # Update user-specific settings
+        if 'immich_url' in data:
+            user_config['immich_url'] = data['immich_url']
+        if 'immich_api_key' in data:
+            user_config['immich_api_key'] = data['immich_api_key']
+        if 'nextcloud_url' in data:
+            user_config['nextcloud_url'] = data['nextcloud_url']
+        if 'nextcloud_username' in data:
+            user_config['nextcloud_username'] = data['nextcloud_username']
+        if 'nextcloud_password' in data:
+            user_config['nextcloud_password'] = data['nextcloud_password']
+        if 'caldav_url' in data:
+            user_config['caldav_url'] = data['caldav_url']
+        if 'caldav_username' in data:
+            user_config['caldav_username'] = data['caldav_username']
+        if 'caldav_password' in data:
+            user_config['caldav_password'] = data['caldav_password']
+
+        save_user_config(username, user_config)
+
+        return jsonify({'success': True, 'message': 'User profile updated'})
+
+    except Exception as e:
+        logger.error(f"Profile config error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/connectivity-status', methods=['GET'])
+def ui_connectivity_status():
+    """Check connectivity status of all services"""
+    try:
+        username = request.args.get('username')
+
+        status = {
+            'ollama': {
+                'connected': ollama_client.check_connection(),
+                'url': ollama_client.base_url,
+                'model': ollama_client.model
+            },
+            'calendar': {
+                'enabled': calendar_enabled,
+                'connected': False
+            },
+            'tasks': {
+                'enabled': tasks_enabled,
+                'connected': False
+            },
+            'immich': {
+                'configured': False,
+                'connected': False
+            }
+        }
+
+        # Check Immich connection
+        if username:
+            client = get_immich_client(username)
+            if client:
+                status['immich']['configured'] = True
+                status['immich']['connected'] = client.test_connection()
+
+        return jsonify({'success': True, 'status': status})
+
+    except Exception as e:
+        logger.error(f"Connectivity status error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/index-status', methods=['GET'])
+def ui_index_status():
+    """Get indexing status"""
+    try:
+        # Get knowledge base stats
+        stats = {
+            'total_documents': 0,
+            'total_chunks': 0,
+            'last_indexed': None,
+            'indexing_in_progress': False
+        }
+
+        if knowledge_base and knowledge_base.db:
+            cursor = knowledge_base.db.cursor()
+
+            # Count documents
+            cursor.execute("SELECT COUNT(*) FROM files")
+            stats['total_documents'] = cursor.fetchone()[0]
+
+            # Count chunks
+            cursor.execute("SELECT COUNT(*) FROM chunks")
+            stats['total_chunks'] = cursor.fetchone()[0]
+
+            # Get last indexed timestamp
+            cursor.execute("SELECT MAX(indexed_at) FROM files")
+            last_indexed = cursor.fetchone()[0]
+            if last_indexed:
+                stats['last_indexed'] = last_indexed
+
+        return jsonify({'success': True, 'stats': stats})
+
+    except Exception as e:
+        logger.error(f"Index status error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/suggestions', methods=['GET'])
+def ui_suggestions():
+    """Get query suggestions based on available data"""
+    try:
+        username = request.args.get('username')
+
+        suggestions = []
+
+        # Add calendar suggestions if available
+        if calendar_enabled:
+            suggestions.append({
+                'type': 'calendar',
+                'text': 'Was steht heute in meinem Kalender?',
+                'icon': 'calendar'
+            })
+
+        # Add tasks suggestions if available
+        if tasks_enabled:
+            suggestions.append({
+                'type': 'tasks',
+                'text': 'Zeige meine offenen Aufgaben',
+                'icon': 'checklist'
+            })
+
+        # Add Immich suggestions if configured
+        if username:
+            client = get_immich_client(username)
+            if client:
+                suggestions.append({
+                    'type': 'photos',
+                    'text': 'Zeige mir Fotos vom letzten Urlaub',
+                    'icon': 'photo'
+                })
+
+        # Add file search suggestions
+        suggestions.append({
+            'type': 'files',
+            'text': 'Suche nach Dokumenten zu Projekt X',
+            'icon': 'document'
+        })
+
+        return jsonify({'success': True, 'suggestions': suggestions})
+
+    except Exception as e:
+        logger.error(f"Suggestions error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/ui/immich', methods=['GET'])
+def ui_immich_status():
+    """Get Immich integration status"""
+    try:
+        username = request.args.get('username')
+
+        if not username:
+            return jsonify({'success': False, 'error': 'Username required'}), 400
+
+        client = get_immich_client(username)
+
+        status = {
+            'configured': client is not None,
+            'connected': False,
+            'person_count': 0,
+            'asset_count': 0
+        }
+
+        if client:
+            status['connected'] = client.test_connection()
+
+            if status['connected']:
+                try:
+                    # Get people count
+                    people = client.get_people()
+                    status['person_count'] = len(people)
+                except:
+                    pass
+
+        return jsonify({'success': True, 'status': status})
+
+    except Exception as e:
+        logger.error(f"Immich status error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== Tools Execution Endpoint ====================
+
+@app.route('/api/tools/test/<tool_name>', methods=['POST'])
+def tools_test_execution(tool_name: str):
+    """Execute a tool by name with provided parameters"""
+    try:
+        data = request.get_json() or {}
+        username = data.get('username')
+
+        # Map tool names to their implementations
+        if tool_name == 'search_photos_immich':
+            query = data.get('query', '')
+            limit = data.get('limit', 20)
+
+            client = get_immich_client(username)
+            if not client:
+                return jsonify({
+                    'success': False,
+                    'error': 'Immich nicht konfiguriert'
+                }), 400
+
+            result = client.search_photos_intelligent(query, limit=limit)
+            return jsonify(result)
+
+        elif tool_name == 'get_people_immich':
+            client = get_immich_client(username)
+            if not client:
+                return jsonify({
+                    'success': False,
+                    'error': 'Immich nicht konfiguriert'
+                }), 400
+
+            people = client.get_people()
+            return jsonify({
+                'success': True,
+                'people': people
+            })
+
+        elif tool_name == 'test_immich_connection':
+            client = get_immich_client(username)
+            if not client:
+                return jsonify({
+                    'success': False,
+                    'error': 'Immich nicht konfiguriert'
+                }), 400
+
+            connected = client.test_connection()
+            return jsonify({
+                'success': True,
+                'connected': connected
+            })
+
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Unknown tool: {tool_name}'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Tool execution error ({tool_name}): {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== Agent Query Endpoint (Unified Chat Interface) ====================
