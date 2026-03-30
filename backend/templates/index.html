@@ -505,6 +505,77 @@
             font-size: 0.95rem;
         }
 
+        /* === SOURCES === */
+        .sources {
+            margin-top: 0.5rem;
+            max-width: 70%;
+            font-size: 0.8rem;
+        }
+
+        .sources-title {
+            font-weight: 600;
+            color: var(--brand);
+            margin-bottom: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        .source-item {
+            background: var(--bg-1);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .source-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.25rem;
+        }
+
+        .source-name {
+            font-weight: 500;
+            color: var(--ink);
+        }
+
+        .source-score {
+            color: var(--brand);
+            font-size: 0.75rem;
+            background: var(--chip-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .source-path {
+            color: var(--muted);
+            font-size: 0.75rem;
+            margin-bottom: 0.25rem;
+            word-break: break-all;
+        }
+
+        .source-content {
+            color: var(--ink);
+            font-size: 0.8rem;
+            line-height: 1.3;
+            margin-bottom: 0.25rem;
+            font-style: italic;
+            opacity: 0.8;
+        }
+
+        .source-meta {
+            display: flex;
+            gap: 0.5rem;
+            font-size: 0.7rem;
+            color: var(--muted);
+        }
+
+        .chunk-id, .search-type {
+            background: var(--bg-2);
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+
         .thinking-indicator {
             display: flex;
             gap: 0.4rem;
@@ -1142,13 +1213,61 @@
             document.getElementById('composer').style.display = 'flex';
         }
 
-        function addMessage(role, content) {
+        function addMessage(role, content, sources = null) {
             const messageEl = document.createElement('div');
             messageEl.className = `message ${role}`;
             const bubble = document.createElement('div');
             bubble.className = 'bubble';
             bubble.textContent = content;
             messageEl.appendChild(bubble);
+            
+            // Add sources if available for assistant messages
+            if (role === 'assistant' && sources && sources.length > 0) {
+                const sourcesEl = document.createElement('div');
+                sourcesEl.className = 'sources';
+                
+                const sourcesTitle = document.createElement('div');
+                sourcesTitle.className = 'sources-title';
+                sourcesTitle.textContent = '📚 Quellen:';
+                sourcesEl.appendChild(sourcesTitle);
+                
+                sources.forEach((source, index) => {
+                    const sourceEl = document.createElement('div');
+                    sourceEl.className = 'source-item';
+                    
+                    const sourceHeader = document.createElement('div');
+                    sourceHeader.className = 'source-header';
+                    sourceHeader.innerHTML = `
+                        <span class="source-name">${source.source || 'Unbekannt'}</span>
+                        <span class="source-score">${(source.similarity_score * 100).toFixed(1)}% Übereinstimmung</span>
+                    `;
+                    
+                    const sourcePath = document.createElement('div');
+                    sourcePath.className = 'source-path';
+                    sourcePath.textContent = source.path || 'Kein Pfad';
+                    
+                    const sourceContent = document.createElement('div');
+                    sourceContent.className = 'source-content';
+                    sourceContent.textContent = source.content_preview || '';
+                    
+                    const sourceMeta = document.createElement('div');
+                    sourceMeta.className = 'source-meta';
+                    sourceMeta.innerHTML = `
+                        <span class="chunk-id">Chunk: ${source.chunk_id || 'N/A'}</span>
+                        <span class="search-type">Typ: ${source.search_type || 'unknown'}</span>
+                    `;
+                    
+                    sourceEl.appendChild(sourceHeader);
+                    sourceEl.appendChild(sourcePath);
+                    sourceEl.appendChild(sourceContent);
+                    sourceEl.appendChild(sourceMeta);
+                    
+                    sourcesEl.appendChild(sourceEl);
+                });
+                
+                messageEl.appendChild(sourcesEl);
+            }
+            
             document.getElementById('messages').appendChild(messageEl);
             document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
         }
@@ -1198,7 +1317,7 @@
                 });
                 const data = await res.json();
                 removeThinking();
-                addMessage('assistant', data.response);
+                addMessage('assistant', data.response, data.sources);
             } catch (err) {
                 removeThinking();
                 addMessage('assistant', `Error: ${err.message}`);
