@@ -81,7 +81,9 @@ class KnowledgeBase:
     def load_knowledge(self):
         """Lädt und verarbeitet die Wissensdatei"""
         if not os.path.exists(self.knowledge_file):
-            self.create_sample_knowledge()
+            # Create empty knowledge file if it doesn't exist
+            with open(self.knowledge_file, 'w', encoding='utf-8') as f:
+                f.write("")
             
         with open(self.knowledge_file, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -294,39 +296,6 @@ class KnowledgeBase:
                     break
         
         return relevant_chunks[:k]
-    
-    def create_sample_knowledge(self):
-        """Erstellt eine Beispiel-Wissensdatei"""
-        sample_content = """BENEDIKT SCHAECHNER - PERSÖNLICHE INFORMATIONEN
-
-Name: Benedikt Schäechner
-Beruf: Software Entwickler
-Standort: Schweiz
-Programmiersprachen: Python, JavaScript, TypeScript, Java
-Interessen: Künstliche Intelligenz, Webentwicklung, Machine Learning
-
-PROJEKTE
-
-Aktuelle Projekte:
-- Lokale AI-Chat-Anwendung mit Ollama
-- Webentwicklung mit modernen Frameworks
-- Machine Learning Experimente
-
-ERFAHRUNG
-
-- Mehrjährige Erfahrung in der Softwareentwicklung
-- Fokus auf Backend- und Full-Stack-Entwicklung
-- Erfahrung mit Cloud-Technologien und Containern
-
-PREFERENZEN
-
-- Bevorzugt Python für Backend-Entwicklung
-- Nutzt gerne React für Frontend
-- Interessiert an neuen AI-Technologien
-- Arbeitet gerne mit Docker und Git"""
-        
-        with open(self.knowledge_file, 'w', encoding='utf-8') as f:
-            f.write(sample_content)
 
 class OllamaClient:
     def __init__(self, base_url=None, model=None):
@@ -1053,12 +1022,27 @@ def chat():
         if calendar_context:
             logger.info(f"Calendar context included in response")
         
+        # Prepare detailed source attribution
+        sources = []
+        for ctx in combined_context:
+            source_info = {
+                'source': ctx.get('source', 'Unknown'),
+                'path': ctx.get('path', ''),
+                'content_preview': ctx.get('content', '')[:200] + '...' if len(ctx.get('content', '')) > 200 else ctx.get('content', ''),
+                'similarity_score': ctx.get('similarity_score', 0.0),
+                'chunk_id': ctx.get('chunk_id', ''),
+                'document_id': ctx.get('document_id', ''),
+                'search_type': ctx.get('search_type', 'unknown')
+            }
+            sources.append(source_info)
+        
         return jsonify({
             'response': ai_response,
             'context_used': context_used,
             'context_count': len(combined_context),
             'calendar_used': calendar_context is not None,
             'training_saved': True,
+            'sources': sources,  # Detailed source attribution
             'debug_info': {
                 'query': message,
                 'found_context': len(relevant_context),
