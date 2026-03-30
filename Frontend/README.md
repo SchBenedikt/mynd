@@ -1,6 +1,6 @@
 # Frontend (Next.js)
 
-Dieses Frontend uebernimmt das Design aus `ui.html` und bindet dein bestehendes Flask-Backend an.
+Dieses Frontend ist die aktive UI auf Basis von Next.js und bindet dein bestehendes Flask-Backend an.
 
 ## Start
 
@@ -23,4 +23,4 @@ Backend (Flask): http://127.0.0.1:5001
 
 - API-Ziel wird ueber `NEXT_PUBLIC_BACKEND_URL` gesteuert.
 - Das UI nutzt `/api/chat`, `/api/ollama/status` und `/api/knowledge/status`.
-- `ui.html` bleibt als Referenz erhalten.
+- Immich-, Nextcloud- und AI-Einstellungen befinden sich in der Next.js-Settings-Seite unter `/settings`.
