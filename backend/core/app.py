@@ -3,12 +3,13 @@ import json
 import sys
 import requests
 import numpy as np
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from dotenv import load_dotenv
 import re
 import logging
 from datetime import datetime, timedelta, date
 import time
+from urllib.parse import urlencode
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -631,27 +632,185 @@ def is_todo_query(message: str) -> bool:
         'todo', 'todos', 'aufgabe', 'aufgaben', 'task', 'tasks',
         'zu tun', 'sache', 'sachen', 'erledigungen',
         'checklist', 'checkliste', 'reminders',
+        'erinnerung', 'erinnerungen', 'erinnern',
         'muss ich', 'sollte ich', 'vergesse ich nicht',
         'was habe ich', 'was muss ich'
     ]
     return any(keyword in message_lower for keyword in todo_keywords)
 
+
+def _parse_task_due_date(due_value) -> Optional[date]:
+    """Konvertiert Task-Datum robust in ein date-Objekt."""
+    if not due_value:
+        return None
+
+    try:
+        if isinstance(due_value, date) and not isinstance(due_value, datetime):
+            return due_value
+        if isinstance(due_value, datetime):
+            return due_value.date()
+
+        due_str = str(due_value).strip()
+        if not due_str:
+            return None
+
+        # Häufigster Fall: YYYY-MM-DD
+        if len(due_str) >= 10:
+            return datetime.strptime(due_str[:10], '%Y-%m-%d').date()
+
+        # Fallback für kompakte Formate (z.B. YYYYMMDD)
+        if len(due_str) == 8 and due_str.isdigit():
+            return datetime.strptime(due_str, '%Y%m%d').date()
+    except Exception:
+        return None
+
+    return None
+
+
+def _filter_tasks_by_prompt(tasks: List[Dict], message: str) -> List[Dict]:
+    """Filtert Tasks nach Zeitbezug in der Nutzeranfrage."""
+    message_lower = message.lower()
+    today = date.today()
+
+    def due_of(task: Dict) -> Optional[date]:
+        return _parse_task_due_date(task.get('due_date'))
+
+    if 'überfällig' in message_lower:
+        return [t for t in tasks if due_of(t) and due_of(t) < today]
+
+    if 'heute' in message_lower:
+        return [t for t in tasks if due_of(t) == today]
+
+    if 'morgen' in message_lower:
+        target = today + timedelta(days=1)
+        return [t for t in tasks if due_of(t) == target]
+
+    if 'gestern' in message_lower:
+        target = today - timedelta(days=1)
+        return [t for t in tasks if due_of(t) == target]
+
+    if 'diese woche' in message_lower or 'diesewoche' in message_lower:
+        week_start = today - timedelta(days=today.weekday())
+        week_end = week_start + timedelta(days=6)
+        return [t for t in tasks if due_of(t) and week_start <= due_of(t) <= week_end]
+
+    if 'nächste woche' in message_lower or 'naechste woche' in message_lower:
+        week_start = today - timedelta(days=today.weekday()) + timedelta(days=7)
+        week_end = week_start + timedelta(days=6)
+        return [t for t in tasks if due_of(t) and week_start <= due_of(t) <= week_end]
+
+    if 'letzte woche' in message_lower:
+        week_start = today - timedelta(days=today.weekday()) - timedelta(days=7)
+        week_end = week_start + timedelta(days=6)
+        return [t for t in tasks if due_of(t) and week_start <= due_of(t) <= week_end]
+
+    # Standard: alle offenen Tasks
+    return tasks
+
+
+def _build_direct_todo_response(tasks: List[Dict], filtered_tasks: List[Dict], message: str) -> str:
+    """Erzeugt eine direkte, verlässliche Antwort für Todo/Erinnerungsfragen."""
+    today = date.today()
+    message_lower = message.lower()
+
+    overdue_count = 0
+    due_today_count = 0
+    no_due_count = 0
+
+    for task in tasks:
+        due = _parse_task_due_date(task.get('due_date'))
+        if not due:
+            no_due_count += 1
+        elif due < today:
+            overdue_count += 1
+        elif due == today:
+            due_today_count += 1
+
+    if not filtered_tasks:
+        if 'überfällig' in message_lower:
+            return "Du hast aktuell keine überfälligen Erinnerungen."
+        if 'heute' in message_lower:
+            return "Für heute hast du keine fälligen Erinnerungen."
+        return "Du hast aktuell keine offenen Erinnerungen."
+
+    lines = []
+    lines.append(f"Du hast {len(tasks)} offene Erinnerungen.")
+    lines.append(f"Davon: {overdue_count} überfällig, {due_today_count} für heute, {no_due_count} ohne Datum.")
+    lines.append("")
+    lines.append("Relevante Erinnerungen:")
+
+    # Sortierung: zuerst überfällig, dann heute, dann mit Datum, dann ohne Datum
+    def sort_key(task: Dict):
+        due = _parse_task_due_date(task.get('due_date'))
+        if due is None:
+            return (3, date.max)
+        if due < today:
+            return (0, due)
+        if due == today:
+            return (1, due)
+        return (2, due)
+
+    sorted_tasks = sorted(filtered_tasks, key=sort_key)
+
+    for i, task in enumerate(sorted_tasks[:15], 1):
+        title = (task.get('title') or 'Ohne Titel').strip()
+        due = _parse_task_due_date(task.get('due_date'))
+
+        if due is None:
+            due_label = "ohne Datum"
+        elif due < today:
+            days_overdue = (today - due).days
+            due_label = f"überfällig seit {due.strftime('%d.%m.%Y')} ({days_overdue} Tage)"
+        elif due == today:
+            due_label = "heute fällig"
+        else:
+            due_label = f"fällig am {due.strftime('%d.%m.%Y')}"
+
+        lines.append(f"{i}. {title} ({due_label})")
+
+    remaining = len(sorted_tasks) - min(len(sorted_tasks), 15)
+    if remaining > 0:
+        lines.append(f"… und {remaining} weitere.")
+
+    return "\n".join(lines)
+
+
+def get_todo_data(message: str) -> Dict:
+    """Lädt offene Tasks und erzeugt gefilterten Todo-Kontext."""
+    if not tasks_enabled or not task_manager.tasks_client:
+        return {
+            'enabled': False,
+            'tasks': [],
+            'filtered_tasks': [],
+            'context': ''
+        }
+
+    try:
+        tasks = task_manager.get_tasks(use_cache=True, list_name=None)
+        open_tasks = [t for t in tasks if not t.get('completed', False)]
+        filtered_tasks = _filter_tasks_by_prompt(open_tasks, message)
+
+        context = task_manager.format_tasks_for_context(open_tasks)
+
+        return {
+            'enabled': True,
+            'tasks': open_tasks,
+            'filtered_tasks': filtered_tasks,
+            'context': context
+        }
+    except Exception as e:
+        logger.error(f"Error getting todo data: {str(e)}")
+        return {
+            'enabled': True,
+            'tasks': [],
+            'filtered_tasks': [],
+            'context': ''
+        }
+
 def get_todo_context(message: str) -> str:
     """Holt Todo-Kontext basierend auf der Nachricht"""
-    if not tasks_enabled or not task_manager.tasks_client:
-        return ""
-    
-    try:
-        # get_tasks mit None wird automatisch verschiedene Listen-Namen versuchen
-        tasks = task_manager.get_tasks(use_cache=True, list_name=None)
-        if not tasks:
-            return ""
-        
-        context = task_manager.format_tasks_for_context(tasks)
-        return context
-    except Exception as e:
-        logger.error(f"Error getting todo context: {str(e)}")
-        return ""
+    todo_data = get_todo_data(message)
+    return todo_data.get('context', '')
 
 def create_calendar_event(title: str, start_time: str, end_time: str = None, 
                           calendar_name: str = None, location: str = None, 
@@ -2031,6 +2190,15 @@ def get_immich_client(username: str = None) -> Optional[ImmichClient]:
         logger.error(f"Error creating Immich client: {e}")
         return None
 
+def build_immich_thumbnail_proxy_url(asset_id: str, username: str = None, size: str = 'preview') -> str:
+    """Erzeugt eine Browser-taugliche Thumbnail-URL über den Backend-Proxy."""
+    if not asset_id:
+        return ''
+    params = {'size': size}
+    if username:
+        params['username'] = username
+    return f"{request.host_url.rstrip('/')}/api/immich/thumbnail/{asset_id}?{urlencode(params)}"
+
 @app.route('/api/immich/test', methods=['POST'])
 def immich_test_connection():
     """Testet die Verbindung zu Immich"""
@@ -2047,10 +2215,14 @@ def immich_test_connection():
 
         success = client.test_connection()
 
-        return jsonify({
+        response_payload = {
             'success': success,
-            'message': 'Verbindung erfolgreich' if success else 'Verbindung fehlgeschlagen'
-        })
+            'message': 'Verbindung erfolgreich' if success else 'Verbindung fehlgeschlagen',
+        }
+        if not success:
+            response_payload['error'] = client.last_error or 'Immich-Verbindung fehlgeschlagen'
+
+        return jsonify(response_payload)
 
     except Exception as e:
         logger.error(f"Immich test error: {e}")
@@ -2073,6 +2245,12 @@ def immich_search_photos():
             }), 400
 
         result = client.search_photos_intelligent(query, limit=limit)
+
+        # Ersetze direkte Immich-Thumbnail-Links durch Backend-Proxy-Links
+        for photo in result.get('results', []):
+            asset_id = photo.get('id')
+            if asset_id:
+                photo['thumbnail_url'] = build_immich_thumbnail_proxy_url(asset_id, username, 'preview')
 
         return jsonify(result)
 
@@ -2129,6 +2307,69 @@ def immich_get_assets():
 
     except Exception as e:
         logger.error(f"Immich assets error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/immich/thumbnail/<asset_id>', methods=['GET'])
+def immich_thumbnail_proxy(asset_id):
+    """Proxy für Immich-Thumbnails, damit Browser keinen API-Key benötigen."""
+    try:
+        username = request.args.get('username')
+        size = request.args.get('size', 'preview')
+
+        client = get_immich_client(username)
+        if not client:
+            return jsonify({'success': False, 'error': 'Immich nicht konfiguriert'}), 400
+
+        upstream_url = f"{client.url}/api/assets/{asset_id}/thumbnail?size={size}"
+        upstream = requests.get(upstream_url, headers=client._get_headers(), timeout=client.timeout_short)
+
+        if upstream.status_code != 200:
+            return jsonify({
+                'success': False,
+                'error': f'Thumbnail konnte nicht geladen werden (HTTP {upstream.status_code})'
+            }), upstream.status_code
+
+        return Response(upstream.content, content_type=upstream.headers.get('Content-Type', 'image/jpeg'))
+
+    except Exception as e:
+        logger.error(f"Immich thumbnail proxy error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/immich/search-by-context', methods=['POST'])
+def immich_search_by_context():
+    """Sucht Fotos basierend auf KI-erkannte Kontextinformationen (Objekte, Tags)"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        query = data.get('query', '')
+        limit = data.get('limit', 20)
+
+        client = get_immich_client(username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Immich nicht konfiguriert'
+            }), 400
+
+        # Search by context (objects, tags, description)
+        results = client.search_by_context(query, limit=limit)
+        
+        # Format results for display
+        formatted_results = [client.format_asset_for_display(asset) for asset in results]
+        for photo in formatted_results:
+            asset_id = photo.get('id')
+            if asset_id:
+                photo['thumbnail_url'] = build_immich_thumbnail_proxy_url(asset_id, username, 'preview')
+
+        return jsonify({
+            'success': True,
+            'query': query,
+            'count': len(formatted_results),
+            'results': formatted_results
+        })
+
+    except Exception as e:
+        logger.error(f"Immich context search error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== UI Configuration Endpoints ====================
@@ -2505,8 +2746,15 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
 
     # Erkenne Foto-Anfragen
     photo_keywords = ['foto', 'fotos', 'bild', 'bilder', 'image', 'images', 'photo', 'photos',
-                     'immich', 'person', 'personen', 'gesicht', 'album', 'aufnahme']
+                     'immich', 'person', 'personen', 'gesicht', 'album', 'aufnahme', 
+                     'zeig mir', 'gib mir', 'show me', 'finde', 'find',
+                     'katze', 'hund', 'baum', 'auto', 'haus', 'mensch',
+                     'katzen', 'hunde', 'bäume', 'autos', 'häuser', 'menschen']
     has_photo = any(keyword in prompt_lower for keyword in photo_keywords)
+    
+    # Zusätzlich: Wenn Query mit Großbuchstaben beginnt (wahrscheinlich Name), könnte es Fotos sein
+    words = prompt.split()
+    has_proper_noun = len(words) > 0 and words[0][0].isupper() if words[0] else False
 
     # Erkenne Datei-Anfragen
     file_keywords = ['datei', 'dateien', 'dokument', 'dokumente', 'pdf', 'unterlage',
@@ -2520,7 +2768,7 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
 
     # Erkenne Task-Anfragen
     task_keywords = ['task', 'tasks', 'todo', 'todos', 'aufgabe', 'aufgaben',
-                    'erledigen', 'machen', 'erinnerung']
+                    'erledigen', 'machen', 'erinnerung', 'erinnerungen', 'reminder', 'reminders']
     has_task = any(keyword in prompt_lower for keyword in task_keywords)
 
     # Bestimme primäre Intention
@@ -2528,10 +2776,12 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
         return 'photos'
     elif has_file and not has_photo:
         return 'files'
-    elif has_time:
-        return 'calendar'
     elif has_task:
         return 'tasks'
+    elif has_time:
+        return 'calendar'
+    elif has_proper_noun:  # Names usually point to photos
+        return 'photos'
     else:
         return 'mixed'
 
@@ -2561,6 +2811,7 @@ def agent_query():
 
         # Collect context from different sources based on intent
         photo_context = None
+        photo_results = []
         file_context = None
         calendar_context = None
         todo_context = None
@@ -2570,37 +2821,64 @@ def agent_query():
             try:
                 client = get_immich_client(username)
                 if client:
-                    result = client.search_photos_intelligent(prompt, limit=12)
-                    if result.get('success') and result.get('results'):
-                        # Format photo results for context
+                    # Reduced limit for quicker response in agent context
+                    result = client.search_photos_intelligent(prompt, limit=6)
+                    if result.get('success') and result.get('results') and len(result['results']) > 0:
+                        # Format photo results for context with full details
                         photos = result['results']
+                        photo_results = photos
                         photo_lines = []
-                        for photo in photos[:8]:  # Limit to 8 for context
+                        
+                        photo_lines.append("### 📸 Gefundene Fotos")
+                        photo_lines.append("")
+                        
+                        for i, photo in enumerate(photos[:5], 1):  # Limit to 5 for context
                             name = photo['original_file_name']
                             date = photo.get('created_at', 'Unknown')
-                            people = ', '.join(photo.get('people', []))
+                            people = photo.get('people', [])
                             location = photo.get('location', '')
+                            objects = photo.get('objects', [])
+                            tags = photo.get('tags', [])
+                            photo_id = photo.get('id', 'N/A')
+                            asset_url = photo['asset_url']
+                            thumbnail_url = build_immich_thumbnail_proxy_url(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url', '')
 
-                            photo_line = f"- [{name}]({photo['asset_url']})"
-                            if people:
-                                photo_line += f" - Personen: {people}"
-                            if location:
-                                photo_line += f" - Ort: {location}"
+                            # Add numbered photo entry with thumbnail as clickable link
+                            photo_lines.append(f"#### Foto {i}: {name}")
+                            photo_lines.append(f"**ID:** `{photo_id}`")
+                            photo_lines.append(f"**Link:** [{asset_url}]({asset_url})")
+                            
                             if date and date != 'Unknown':
-                                photo_line += f" - Datum: {date[:10]}"
-                            photo_lines.append(photo_line)
-
-                            # Add thumbnail for display
-                            photo_lines.append(f"  [![{name}]({photo['thumbnail_url']})]({photo['asset_url']})")
+                                date_str = date[:10] if len(str(date)) > 10 else date
+                                photo_lines.append(f"**Datum:** {date_str}")
+                            
+                            if people:
+                                photo_lines.append(f"**Personen:** {', '.join(people)}")
+                            
+                            if location:
+                                photo_lines.append(f"**Ort:** {location}")
+                            
+                            if objects:
+                                photo_lines.append(f"**Objekte erkannt:** {', '.join(objects[:5])}")  # Show first 5
+                            
+                            if tags:
+                                photo_lines.append(f"**Tags:** {', '.join(tags[:5])}")  # Show first 5
+                            
+                            # Add thumbnail as image with link
+                            photo_lines.append(f"[![Vorschau]({thumbnail_url})]({asset_url})")
+                            photo_lines.append("")
 
                         photo_context = {
                             'content': '=== FOTOS VON IMMICH ===\n\n' + '\n'.join(photo_lines),
                             'source': 'Immich Photos',
                             'path': 'immich',
                             'similarity_score': 1.0,
-                            'metadata': {'count': len(photos)}
+                            'metadata': {
+                                'count': len(photos),
+                                'photo_ids': [p.get('id') for p in photos]
+                            }
                         }
-                        logger.info(f"Found {len(photos)} photos for context")
+                        logger.info(f"Found {len(photos)} photos for context with full metadata")
             except Exception as e:
                 logger.error(f"Photo search error: {e}")
 
@@ -2631,10 +2909,12 @@ def agent_query():
                 logger.error(f"Calendar error: {e}")
 
         # Gather todo context if relevant
+        todo_data = None
         if intent in ['tasks', 'mixed']:
             try:
                 if is_todo_query(prompt):
-                    todo_context_str = get_todo_context(prompt)
+                    todo_data = get_todo_data(prompt)
+                    todo_context_str = todo_data.get('context', '')
                     if todo_context_str:
                         todo_context = {
                             'content': todo_context_str,
@@ -2646,6 +2926,43 @@ def agent_query():
                         logger.info("Todo context added")
             except Exception as e:
                 logger.error(f"Todo error: {e}")
+
+        # Für reine Todo/Erinnerungs-Anfragen direkt antworten,
+        # um generische LLM-Antworten ohne Datenbezug zu vermeiden.
+        if intent == 'tasks' and is_todo_query(prompt):
+            todo_data = todo_data or get_todo_data(prompt)
+            open_tasks = todo_data.get('tasks', [])
+            filtered_tasks = todo_data.get('filtered_tasks', open_tasks)
+
+            if not todo_data.get('enabled', False):
+                return jsonify({
+                    'success': True,
+                    'response': 'Deine Erinnerungen sind aktuell nicht verbunden. Bitte prüfe die Nextcloud-Task-Konfiguration.',
+                    'context_used': False,
+                    'context_count': 0,
+                    'intent': intent,
+                    'sources_used': {
+                        'photos': False,
+                        'files': False,
+                        'calendar': False,
+                        'todos': False
+                    }
+                })
+
+            direct_response = _build_direct_todo_response(open_tasks, filtered_tasks, prompt)
+            return jsonify({
+                'success': True,
+                'response': direct_response,
+                'context_used': len(open_tasks) > 0,
+                'context_count': len(open_tasks),
+                'intent': intent,
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': True
+                }
+            })
 
         # Combine all contexts
         combined_context = []
@@ -2661,6 +2978,57 @@ def agent_query():
 
         if todo_context:
             combined_context.insert(0, todo_context)
+
+        # Für reine Foto-Anfragen direkt antworten, um LLM-Ausreden zu vermeiden
+        if intent == 'photos':
+            if photo_results:
+                response_lines = ["Hier sind passende Fotos aus Immich:", ""]
+                for i, photo in enumerate(photo_results[:5], 1):
+                    url = photo.get('asset_url')
+                    name = photo.get('original_file_name', f'Foto {i}')
+                    photo_id = photo.get('id', 'N/A')
+                    thumbnail_url = build_immich_thumbnail_proxy_url(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url')
+                    people = photo.get('people', [])
+                    date_value = photo.get('created_at', '')
+                    date_label = date_value[:10] if date_value else ''
+
+                    response_lines.append(f"{i}. [{name}]({url})")
+                    response_lines.append(f"   ID: {photo_id}")
+                    if people:
+                        response_lines.append(f"   Personen: {', '.join(people)}")
+                    if date_label:
+                        response_lines.append(f"   Datum: {date_label}")
+                    if thumbnail_url and url:
+                        response_lines.append(f"   [![Vorschau {i}]({thumbnail_url})]({url})")
+                    response_lines.append("")
+
+                return jsonify({
+                    'success': True,
+                    'response': '\n'.join(response_lines).strip(),
+                    'context_used': True,
+                    'context_count': len(combined_context),
+                    'intent': intent,
+                    'sources_used': {
+                        'photos': True,
+                        'files': False,
+                        'calendar': False,
+                        'todos': False
+                    }
+                })
+
+            return jsonify({
+                'success': True,
+                'response': 'Ich habe in Immich keine passenden Fotos gefunden. Versuche einen anderen Namen oder ein anderes Suchwort.',
+                'context_used': False,
+                'context_count': 0,
+                'intent': intent,
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': False
+                }
+            })
 
         # Build system message with context
         if not combined_context:
