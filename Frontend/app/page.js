@@ -2,13 +2,13 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 const API_BASE = '';
 
 export default function HomePage() {
   const router = useRouter();
-  const [theme, setThemeState] = useState('gold');
-  const [darkMode, setDarkModeState] = useState('auto');
   const [messages, setMessages] = useState([]);
   const [isThinking, setIsThinking] = useState(false);
   const [conversationActive, setConversationActive] = useState(false);
@@ -31,25 +31,10 @@ export default function HomePage() {
   const inputRef = useRef(null);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') || 'gold';
-    const savedDarkMode = localStorage.getItem('darkMode') || 'auto';
-    const savedContrast = localStorage.getItem('contrastColor') || '';
-    setThemeState(savedTheme);
-    setDarkModeState(savedDarkMode);
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    applyDarkMode(savedDarkMode);
-    if (savedContrast) {
-      document.documentElement.style.setProperty('--brand', savedContrast);
-    }
-    
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = () => {
-      if (savedDarkMode === 'auto') {
-        applyDarkMode('auto');
-      }
-    };
-    mediaQuery.addEventListener('change', handleChange);
-    
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  useEffect(() => {
     loadAIConfig();
     loadOllamaModels();
     updateStatus();
@@ -57,34 +42,8 @@ export default function HomePage() {
     const statusInterval = setInterval(updateStatus, 8000);
     return () => {
       clearInterval(statusInterval);
-      mediaQuery.removeEventListener('change', handleChange);
     };
   }, []);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const setTheme = (newTheme) => {
-    setThemeState(newTheme);
-    localStorage.setItem('theme', newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-  };
-
-  const applyDarkMode = (mode) => {
-    if (mode === 'auto') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.setAttribute('data-mode', prefersDark ? 'dark' : 'light');
-    } else {
-      document.documentElement.setAttribute('data-mode', mode);
-    }
-  };
-
-  const setDarkMode = (mode) => {
-    setDarkModeState(mode);
-    localStorage.setItem('darkMode', mode);
-    applyDarkMode(mode);
-  };
 
   const loadAIConfig = async () => {
     try {
@@ -279,7 +238,15 @@ export default function HomePage() {
               <div className="messages">
                 {messages.map((msg) => (
                   <div key={msg.id} className={`message ${msg.role}`}>
-                    <div className="bubble">{msg.content}</div>
+                    <div className="bubble">
+                      {msg.role === 'assistant' ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      ) : (
+                        msg.content
+                      )}
+                    </div>
                   </div>
                 ))}
                 {isThinking && (

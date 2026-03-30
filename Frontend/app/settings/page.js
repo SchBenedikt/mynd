@@ -2,14 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTheme } from '../../hooks/useTheme';
+import { ThemeSelector } from '../../components/ThemeSelector';
 
 const API_BASE = '';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const [theme, setThemeState] = useState('gold');
-  const [darkMode, setDarkModeState] = useState('auto');
-  const [contrastColor, setContrastColorState] = useState('');
+  const { theme, darkMode, contrastColor, setTheme, setDarkMode, setContrastColor } = useTheme();
   const [activeTab, setActiveTab] = useState('config');
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
@@ -26,26 +26,6 @@ export default function SettingsPage() {
   const [indexingStats, setIndexingStats] = useState('');
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') || 'gold';
-    const savedDarkMode = localStorage.getItem('darkMode') || 'auto';
-    const savedContrast = localStorage.getItem('contrastColor') || '';
-    setThemeState(savedTheme);
-    setDarkModeState(savedDarkMode);
-    setContrastColorState(savedContrast);
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    applyDarkMode(savedDarkMode);
-    if (savedContrast) {
-      document.documentElement.style.setProperty('--brand', savedContrast);
-    }
-    
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = () => {
-      if (savedDarkMode === 'auto') {
-        applyDarkMode('auto');
-      }
-    };
-    mediaQuery.addEventListener('change', handleChange);
-    
     loadAIConfig();
     loadOllamaModels();
     updateStatus();
@@ -53,46 +33,8 @@ export default function SettingsPage() {
     const statusInterval = setInterval(updateStatus, 8000);
     return () => {
       clearInterval(statusInterval);
-      mediaQuery.removeEventListener('change', handleChange);
     };
   }, []);
-
-  const handleSetTheme = (newTheme) => {
-    setThemeState(newTheme);
-    localStorage.setItem('theme', newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-    // Reset custom contrast color when switching themes
-    const savedContrast = localStorage.getItem('contrastColor');
-    if (savedContrast) {
-      document.documentElement.style.setProperty('--brand', savedContrast);
-    }
-  };
-
-  const setContrastColor = (color) => {
-    setContrastColorState(color);
-    if (color) {
-      localStorage.setItem('contrastColor', color);
-      document.documentElement.style.setProperty('--brand', color);
-    } else {
-      localStorage.removeItem('contrastColor');
-      document.documentElement.style.removeProperty('--brand');
-    }
-  };
-
-  const applyDarkMode = (mode) => {
-    if (mode === 'auto') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.setAttribute('data-mode', prefersDark ? 'dark' : 'light');
-    } else {
-      document.documentElement.setAttribute('data-mode', mode);
-    }
-  };
-
-  const setDarkMode = (mode) => {
-    setDarkModeState(mode);
-    localStorage.setItem('darkMode', mode);
-    applyDarkMode(mode);
-  };
 
   const loadAIConfig = async () => {
     try {
@@ -316,40 +258,15 @@ export default function SettingsPage() {
             )}
             {activeTab === 'design' && (
               <div className="settings-panel">
-                <div className="panel-section">
-                  <div className="section-title">Dark Mode</div>
-                  <div className="dark-mode-selector">
-                    <button className={`mode-btn ${darkMode === 'light' ? 'active' : ''}`} onClick={() => setDarkMode('light')}><i className="fas fa-sun"></i> Light</button>
-                    <button className={`mode-btn ${darkMode === 'dark' ? 'active' : ''}`} onClick={() => setDarkMode('dark')}><i className="fas fa-moon"></i> Dark</button>
-                    <button className={`mode-btn ${darkMode === 'auto' ? 'active' : ''}`} onClick={() => setDarkMode('auto')}><i className="fas fa-adjust"></i> Auto</button>
-                  </div>
-                </div>
-                <div className="panel-section">
-                  <div className="section-title">Theme</div>
-                  <div className="theme-selector">
-                    <button className={`theme-btn classic ${theme === 'classic' ? 'active' : ''}`} onClick={() => handleSetTheme('classic')} title="Classic"></button>
-                    <button className={`theme-btn ocean ${theme === 'ocean' ? 'active' : ''}`} onClick={() => handleSetTheme('ocean')} title="Ocean"></button>
-                    <button className={`theme-btn graphite ${theme === 'graphite' ? 'active' : ''}`} onClick={() => handleSetTheme('graphite')} title="Graphite"></button>
-                    <button className={`theme-btn lavender ${theme === 'lavender' ? 'active' : ''}`} onClick={() => handleSetTheme('lavender')} title="Lavender"></button>
-                    <button className={`theme-btn rose ${theme === 'rose' ? 'active' : ''}`} onClick={() => handleSetTheme('rose')} title="Rose"></button>
-                    <button className={`theme-btn gold ${theme === 'gold' ? 'active' : ''}`} onClick={() => handleSetTheme('gold')} title="Gold"></button>
-                  </div>
-                </div>
-                <div className="panel-section">
-                  <div className="section-title">Kontrastfarbe (Akzent)</div>
-                  <div className="input-group">
-                    <input 
-                      type="color" 
-                      value={contrastColor || '#16a34a'} 
-                      onChange={(e) => setContrastColor(e.target.value)}
-                      style={{ width: '60px', height: '40px', padding: '0', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
-                    />
-                    <button className="btn" onClick={() => setContrastColor('')} style={{ marginLeft: '0.5rem' }}>Zurücksetzen</button>
-                  </div>
-                  <p style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.5rem'}}>
-                    Wähle eine eigene Akzentfarbe für Buttons und aktive Elemente.
-                  </p>
-                </div>
+                <ThemeSelector
+                  currentTheme={theme}
+                  onThemeChange={setTheme}
+                  currentDarkMode={darkMode}
+                  onDarkModeChange={setDarkMode}
+                  contrastColor={contrastColor}
+                  onContrastColorChange={setContrastColor}
+                  showContrastColor={true}
+                />
               </div>
             )}
           </div>
