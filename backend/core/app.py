@@ -1079,16 +1079,18 @@ def chat():
         combined_context.insert(0, {
             'content': todo_context,
             'source': 'Todos',
+            'source_type': 'todo',
             'path': 'todos',
             'similarity_score': 1.0,
             'metadata': {}
         })
-    
+
     if calendar_context:
         # Füge Kalender-Kontext als speziellen Kontext hinzu
         combined_context.insert(0, {
             'content': calendar_context,
             'source': 'Kalender',
+            'source_type': 'calendar',
             'path': 'calendar',
             'similarity_score': 1.0,
             'metadata': {}
@@ -1158,28 +1160,18 @@ def chat():
         # Prepare detailed source attribution
         sources = []
         for ctx in combined_context:
+            source_type = ctx.get('source_type', 'file')
+
             source_info = {
                 'source': ctx.get('source', 'Unknown'),
+                'source_type': source_type,
                 'path': ctx.get('path', ''),
                 'content_preview': ctx.get('content', '')[:200] + '...' if len(ctx.get('content', '')) > 200 else ctx.get('content', ''),
                 'similarity_score': ctx.get('similarity_score', 0.0),
                 'chunk_id': ctx.get('chunk_id', ''),
                 'document_id': ctx.get('document_id', ''),
-                'search_type': ctx.get('search_type', 'unknown')
-            }
-            sources.append(source_info)
-        
-        # Prepare detailed source attribution
-        sources = []
-        for ctx in combined_context:
-            source_info = {
-                'source': ctx.get('source', 'Unknown'),
-                'path': ctx.get('path', ''),
-                'content_preview': ctx.get('content', '')[:200] + '...' if len(ctx.get('content', '')) > 200 else ctx.get('content', ''),
-                'similarity_score': ctx.get('similarity_score', 0.0),
-                'chunk_id': ctx.get('chunk_id', ''),
-                'document_id': ctx.get('document_id', ''),
-                'search_type': ctx.get('search_type', 'unknown')
+                'search_type': ctx.get('search_type', 'unknown'),
+                'metadata': ctx.get('metadata', {})
             }
             sources.append(source_info)
         
