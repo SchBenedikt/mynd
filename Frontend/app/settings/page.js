@@ -20,6 +20,9 @@ export default function SettingsPage() {
   const [aiModel, setAiModel] = useState('');
   const [aiModels, setAiModels] = useState([]);
   const [aiStatus, setAiStatus] = useState('');
+  const [immichUrlDefault, setImmichUrlDefault] = useState('');
+  const [immichApiKeyDefault, setImmichApiKeyDefault] = useState('');
+  const [immichStatus, setImmichStatus] = useState('');
   
   const [indexingProgress, setIndexingProgress] = useState(0);
   const [indexingStatus, setIndexingStatus] = useState('idle');
@@ -39,21 +42,20 @@ export default function SettingsPage() {
     lastIndexingDuration: 0
   });
   
-  const [nextcloudConfig, setNextcloudConfig] = useState({
-    url: '',
-    username: '',
-    password: '',
-    path: '/'
-  });
+  const [nextcloudUrl, setNextcloudUrl] = useState('');
   const [nextcloudStatus, setNextcloudStatus] = useState('');
   const [calendarConfig, setCalendarConfig] = useState({
     default_calendar_name: ''
   });
   const [calendarOptions, setCalendarOptions] = useState([]);
   const [calendarConfigStatus, setCalendarConfigStatus] = useState('');
+  const [nextcloudConfigured, setNextcloudConfigured] = useState(false);
+  const [nextcloudDisplayName, setNextcloudDisplayName] = useState('');
+  const [nextcloudLoggingIn, setNextcloudLoggingIn] = useState(false);
 
   useEffect(() => {
     loadAIConfig();
+    loadImmichConfig();
     loadOllamaModels();
     loadNextcloudConfig();
     loadCalendarConfig();
@@ -68,18 +70,27 @@ export default function SettingsPage() {
 
   const loadNextcloudConfig = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/indexing/config`);
-      if (res.ok) {
-        const config = await res.json();
-        setNextcloudConfig({
-          url: config.url || '',
-          username: config.username || '',
-          password: config.password || '',
-          path: config.path || '/'
-        });
+      // Check if Nextcloud is configured from the backend
+      const configRes = await fetch(`${API_BASE}/api/nextcloud/config`);
+      if (configRes.ok) {
+        const config = await configRes.json();
+        if (config.configured) {
+          setNextcloudConfigured(true);
+          setNextcloudDisplayName(config.display_name || config.username || '');
+          setNextcloudUrl(config.nextcloud_url || '');
+        }
       }
     } catch (err) {
       console.error('Error loading Nextcloud config:', err);
+    }
+    
+    // Also check for auth parameters in URL (from OAuth2 callback redirect)
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('nc_auth_success')) {
+      setNextcloudStatus('✓ Successfully logged in! Redirecting...');
+      setTimeout(() => window.location.reload(), 1000);
+    } else if (params.has('nc_auth_error')) {
+      setNextcloudStatus('Error: ' + decodeURIComponent(params.get('nc_auth_error')));
     }
   };
 
@@ -127,19 +138,92 @@ export default function SettingsPage() {
     }
   };
 
-  const saveNextcloudConfig = async () => {
+  const handleNextcloudLogin = async () => {
+    if (!nextcloudUrl.trim()) {
+      setNextcloudStatus('Please enter your Nextcloud URL');
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE}/api/indexing/config`, {
+      setNextcloudLoggingIn(true);
+      setNextcloudStatus('Opening Nextcloud login...');
+
+      const startRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nextcloudConfig)
+        body: JSON.stringify({ nextcloud_url: nextcloudUrl.trim() })
       });
-      if (res.ok) {
-        setNextcloudStatus('Configuration saved successfully');
-      } else {
-        const data = await res.json();
-        setNextcloudStatus('Error: ' + data.error);
+
+      const startData = await startRes.json();
+      if (!startRes.ok) {
+        setNextcloudLoggingIn(false);
+        setNextcloudStatus('Error: ' + (startData.error || 'Could not start Nextcloud login flow'));
+        return;
       }
+
+      window.open(startData.login_url, '_blank', 'noopener,noreferrer');
+      setNextcloudStatus('Please confirm login in the opened Nextcloud tab...');
+
+      let attempts = 0;
+      const maxAttempts = 120;
+      const pollInterval = setInterval(async () => {
+        attempts += 1;
+        try {
+          const pollRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/poll`);
+          const pollData = await pollRes.json();
+
+          if (!pollRes.ok) {
+            clearInterval(pollInterval);
+            setNextcloudLoggingIn(false);
+            setNextcloudStatus('Error: ' + (pollData.error || 'Login flow failed'));
+            return;
+          }
+
+          if (pollData.status === 'connected') {
+            clearInterval(pollInterval);
+            setNextcloudConfigured(true);
+            setNextcloudDisplayName(pollData.display_name || pollData.username || '');
+            setNextcloudUrl(pollData.nextcloud_url || nextcloudUrl.trim());
+            setNextcloudLoggingIn(false);
+            setNextcloudStatus(`✓ Connected as ${pollData.display_name || pollData.username}`);
+            return;
+          }
+
+          if (attempts >= maxAttempts) {
+            clearInterval(pollInterval);
+            setNextcloudLoggingIn(false);
+            setNextcloudStatus('Login timeout. Please try again.');
+          }
+        } catch (pollErr) {
+          clearInterval(pollInterval);
+          setNextcloudLoggingIn(false);
+          setNextcloudStatus('Error: ' + pollErr.message);
+        }
+      }, 2000);
+      
+    } catch (err) {
+      setNextcloudLoggingIn(false);
+      setNextcloudStatus('Error: ' + err.message);
+    }
+  };
+
+  const handleNextcloudDisconnect = async () => {
+    try {
+      setNextcloudStatus('Disconnecting...');
+      const res = await fetch(`${API_BASE}/api/nextcloud/disconnect`, {
+        method: 'POST'
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        setNextcloudStatus('Error: ' + (data.error || 'Disconnect failed'));
+        return;
+      }
+
+      setNextcloudConfigured(false);
+      setNextcloudDisplayName('');
+      setNextcloudUrl('');
+      setNextcloudLoggingIn(false);
+      setNextcloudStatus('Nextcloud connection removed');
     } catch (err) {
       setNextcloudStatus('Error: ' + err.message);
     }
@@ -167,6 +251,64 @@ export default function SettingsPage() {
       setAiModels(data.models || []);
     } catch (err) {
       console.error('Error loading models:', err);
+    }
+  };
+
+  const loadImmichConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ui/system-config`);
+      const data = await res.json();
+      if (res.ok && data?.success && data?.config) {
+        setImmichUrlDefault(data.config.immich_url_default || '');
+        setImmichApiKeyDefault(data.config.immich_api_key_default || '');
+        setImmichStatus('Loaded');
+      } else {
+        setImmichStatus('Error loading Immich config');
+      }
+    } catch (err) {
+      setImmichStatus('Error loading Immich config');
+    }
+  };
+
+  const saveImmichConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ui/system-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          immich_url_default: immichUrlDefault,
+          immich_api_key_default: immichApiKeyDefault
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setImmichStatus('Saved successfully');
+      } else {
+        setImmichStatus(`Error: ${data?.error || 'Could not save Immich config'}`);
+      }
+    } catch (err) {
+      setImmichStatus('Error: ' + err.message);
+    }
+  };
+
+  const testImmichConnection = async () => {
+    try {
+      setImmichStatus('Testing connection...');
+      const res = await fetch(`${API_BASE}/api/immich/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setImmichStatus('Connection successful');
+      } else {
+        setImmichStatus(`Connection failed: ${data?.error || data?.message || 'Unknown error'}`);
+      }
+    } catch (err) {
+      setImmichStatus('Connection failed: ' + err.message);
     }
   };
 
@@ -393,6 +535,36 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="panel-section" style={{marginTop: '2rem'}}>
+                  <div className="section-title">Immich Integration</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                    Configure global Immich defaults for photo search.
+                  </p>
+                  <div className="input-group">
+                    <label>Immich URL</label>
+                    <input
+                      type="text"
+                      value={immichUrlDefault}
+                      onChange={(e) => setImmichUrlDefault(e.target.value)}
+                      placeholder="https://immich.example.com"
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>Immich API Key</label>
+                    <input
+                      type="password"
+                      value={immichApiKeyDefault}
+                      onChange={(e) => setImmichApiKeyDefault(e.target.value)}
+                      placeholder="immich-api-key"
+                    />
+                  </div>
+                  <div className="button-group">
+                    <button className="btn primary" onClick={saveImmichConfig}>Save Immich</button>
+                    <button className="btn" onClick={testImmichConnection}>Test Connection</button>
+                  </div>
+                  {immichStatus && <div className="status-text">{immichStatus}</div>}
+                </div>
+
+                <div className="panel-section" style={{marginTop: '2rem'}}>
                   <div className="section-title">Kalender Standard</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
                     Dieser Kalender wird verwendet, wenn beim Erstellen eines Termins kein Kalender angegeben wird.
@@ -420,50 +592,54 @@ export default function SettingsPage() {
             {activeTab === 'indexing' && (
               <div className="settings-panel">
                 <div className="panel-section">
-                  <div className="section-title">Nextcloud Configuration</div>
+                  <div className="section-title">Nextcloud Login</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
-                    Configure your Nextcloud connection for document indexing
+                    Connect to your Nextcloud instance for document indexing
                   </p>
-                  <div className="input-group">
-                    <label>Nextcloud URL</label>
-                    <input 
-                      type="text" 
-                      value={nextcloudConfig.url} 
-                      onChange={(e) => setNextcloudConfig(prev => ({...prev, url: e.target.value}))}
-                      placeholder="https://cloud.example.com"
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label>Username</label>
-                    <input 
-                      type="text" 
-                      value={nextcloudConfig.username} 
-                      onChange={(e) => setNextcloudConfig(prev => ({...prev, username: e.target.value}))}
-                      placeholder="your-username"
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label>Password</label>
-                    <input 
-                      type="password" 
-                      value={nextcloudConfig.password} 
-                      onChange={(e) => setNextcloudConfig(prev => ({...prev, password: e.target.value}))}
-                      placeholder="your-password"
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label>Remote Path (optional)</label>
-                    <input 
-                      type="text" 
-                      value={nextcloudConfig.path} 
-                      onChange={(e) => setNextcloudConfig(prev => ({...prev, path: e.target.value}))}
-                      placeholder="/Documents"
-                    />
-                  </div>
-                  <div className="button-group">
-                    <button className="btn primary" onClick={saveNextcloudConfig}>Save Configuration</button>
-                  </div>
-                  {nextcloudStatus && <div className="status-text">{nextcloudStatus}</div>}
+
+                  {nextcloudConfigured ? (
+                    <div style={{padding: '1rem', background: 'var(--background)', borderRadius: '8px', border: '2px solid var(--success)', marginBottom: '1.5rem'}}>
+                      <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
+                        <i className="fas fa-check-circle" style={{color: 'var(--success)', marginRight: '0.5rem', fontSize: '1.4rem'}}></i>
+                        <span style={{fontWeight: '600', fontSize: '1.1rem'}}>Connected</span>
+                      </div>
+                      <div style={{marginLeft: '2rem', color: 'var(--muted)'}}>
+                        <p style={{margin: '0.25rem 0'}}>
+                          <strong>{nextcloudDisplayName}</strong>
+                        </p>
+                        <p style={{margin: '0.25rem 0', fontSize: '0.9rem'}}>
+                          {nextcloudUrl}
+                        </p>
+                      </div>
+                      <div className="button-group" style={{marginTop: '0.75rem'}}>
+                        <button className="btn secondary" onClick={handleNextcloudDisconnect}>
+                          Nextcloud trennen
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="input-group">
+                        <label>Nextcloud URL</label>
+                        <input 
+                          type="text" 
+                          value={nextcloudUrl}
+                          onChange={(e) => setNextcloudUrl(e.target.value)}
+                          placeholder="https://cloud.example.com"
+                        />
+                        <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                          Enter your Nextcloud URL. You'll be redirected to your Nextcloud instance to log in with your normal credentials.
+                        </small>
+                      </div>
+                      <div className="button-group">
+                        <button className="btn primary" onClick={handleNextcloudLogin} disabled={nextcloudLoggingIn || !nextcloudUrl.trim()}>
+                          <i className="fas fa-sign-in-alt" style={{marginRight: '0.5rem'}}></i>
+                          {nextcloudLoggingIn ? 'Waiting for confirmation...' : 'Login with Nextcloud'}
+                        </button>
+                      </div>
+                      {nextcloudStatus && <div className="status-text">{nextcloudStatus}</div>}
+                    </>
+                  )}
                 </div>
                 
                 <div className="panel-section" style={{marginTop: '2rem'}}>

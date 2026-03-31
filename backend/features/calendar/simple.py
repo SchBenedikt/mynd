@@ -6,32 +6,52 @@ Einfacher Nextcloud Kalender-Client (ohne caldav-Dependencies)
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 import logging
 import os
+import sys
 from urllib.parse import quote
 from dotenv import load_dotenv
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+from backend.features.integration.auth_provider import AuthProvider
+from backend.features.integration.auth_manager import get_auth_manager
 
 load_dotenv()  # WICHTIG: .env Datei laden
 
 logger = logging.getLogger(__name__)
 
 class SimpleNextcloudCalendar:
-    def __init__(self, nextcloud_url: str, username: str, password: str):
+    def __init__(self, nextcloud_url: str, username: str = None, password: str = None, auth_provider: AuthProvider = None):
         """
         Initialisiert den einfachen Nextcloud Kalender-Client
-        
+
         Args:
             nextcloud_url: Nextcloud Server URL (z.B. https://cloud.deine-domain.de)
-            username: Nextcloud Benutzername
-            password: Nextcloud Passwort oder App-Passwort
+            username: Nextcloud Benutzername (for backward compatibility)
+            password: Nextcloud Passwort oder App-Passwort (for backward compatibility)
+            auth_provider: AuthProvider instance (recommended)
         """
         self.nextcloud_url = nextcloud_url.rstrip('/')
         self.username = username
-        self.password = password
         self.session = requests.Session()
-        # Basic Auth hinzufügen
-        self.session.auth = (username, password)
+
+        # Set up authentication
+        if auth_provider:
+            self.auth_provider = auth_provider
+            self.session.auth = auth_provider.get_auth()
+        elif username and password:
+            # Backward compatibility: create basic auth provider
+            auth_manager = get_auth_manager()
+            self.auth_provider = auth_manager.create_basic_auth(username, password)
+            self.session.auth = self.auth_provider.get_auth()
+        else:
+            raise ValueError("Either auth_provider or username/password must be provided")
+
+        # Get username from auth provider if not provided
+        if not self.username:
+            self.username = self.auth_provider.config.get('username', 'unknown')
         
     def _make_dav_request(self, endpoint: str) -> requests.Response:
         """Macht eine DAV-Anfrage"""
@@ -440,25 +460,43 @@ class SimpleNextcloudCalendar:
             return []
 
 
-def create_simple_calendar_manager() -> Optional[SimpleNextcloudCalendar]:
-    """Erstellt einfachen Kalender-Manager aus Umgebungsvariablen"""
+def create_simple_calendar_manager(nextcloud_url: str = None, username: str = None, password: str = None, auth_provider: AuthProvider = None) -> Optional[SimpleNextcloudCalendar]:
+    """
+    Erstellt einfachen Kalender-Manager aus Umgebungsvariablen oder direkten Parametern
+
+    Args:
+        nextcloud_url: Nextcloud server URL (optional, uses env var if not provided)
+        username: Username (optional, uses env var if not provided)
+        password: Password (optional, uses env var if not provided)
+        auth_provider: AuthProvider instance (recommended)
+
+    Returns:
+        SimpleNextcloudCalendar instance or None if creation failed
+    """
     try:
-        # Konfiguration aus .env Datei
-        nextcloud_url = os.getenv('NEXTCLOUD_URL')
-        username = os.getenv('NEXTCLOUD_USERNAME')
-        password = os.getenv('NEXTCLOUD_PASSWORD')
-        
+        # Konfiguration aus .env Datei falls nicht direkt übergeben
+        if not nextcloud_url:
+            nextcloud_url = os.getenv('NEXTCLOUD_URL')
+        if not username:
+            username = os.getenv('NEXTCLOUD_USERNAME')
+        if not password:
+            password = os.getenv('NEXTCLOUD_PASSWORD')
+
         print(f"DEBUG: URL={nextcloud_url}")
         print(f"DEBUG: Username={username}")
         print(f"DEBUG: Password configured={password is not None}")
-        
-        if not all([nextcloud_url, username, password]):
-            logger.error("Missing Nextcloud configuration in .env file")
+
+        if not nextcloud_url:
+            logger.error("Missing Nextcloud URL")
             return None
-        
-        manager = SimpleNextcloudCalendar(nextcloud_url, username, password)
+
+        if not auth_provider and not (username and password):
+            logger.error("Missing Nextcloud configuration (username/password or auth_provider)")
+            return None
+
+        manager = SimpleNextcloudCalendar(nextcloud_url, username, password, auth_provider)
         return manager
-        
+
     except Exception as e:
         logger.error(f"Error creating calendar manager: {e}")
         return None

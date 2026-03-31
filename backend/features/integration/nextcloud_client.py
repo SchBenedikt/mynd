@@ -1,40 +1,63 @@
 import os
 import sys
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 import requests
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 from backend.features.documents.parser import DocumentParser
-from requests.auth import HTTPBasicAuth
+from backend.features.integration.auth_provider import AuthProvider
+from backend.features.integration.auth_manager import get_auth_manager
 
 class NextcloudClient:
     """Client für Nextcloud-Integration über WebDAV"""
-    
-    def __init__(self, url: str, username: str, password: str):
+
+    def __init__(self, url: str, username: str = None, password: str = None, auth_provider: AuthProvider = None):
+        """
+        Initialize Nextcloud client
+
+        Args:
+            url: Nextcloud server URL
+            username: Username (for backward compatibility with basic auth)
+            password: Password (for backward compatibility with basic auth)
+            auth_provider: AuthProvider instance (recommended)
+        """
         self.url = url.rstrip('/')
         self.username = username
-        self.password = password
         self.parser = DocumentParser()
         self.logger = logging.getLogger(__name__)
-        
+
+        # Set up authentication
+        if auth_provider:
+            self.auth_provider = auth_provider
+        elif username and password:
+            # Backward compatibility: create basic auth provider
+            auth_manager = get_auth_manager()
+            self.auth_provider = auth_manager.create_basic_auth(username, password)
+        else:
+            raise ValueError("Either auth_provider or username/password must be provided")
+
         # Unterstützte Dateiformate - erweitert um mehr Formate
         self.supported_formats = {
-            '.pdf', '.docx', '.doc', '.xlsx', '.xls', 
-            '.pptx', '.ppt', '.md', '.markdown', 
-            '.txt', '.html', '.htm', '.rtf', '.odt', 
-            '.ods', '.odp', '.csv', '.json', '.xml', 
+            '.pdf', '.docx', '.doc', '.xlsx', '.xls',
+            '.pptx', '.ppt', '.md', '.markdown',
+            '.txt', '.html', '.htm', '.rtf', '.odt',
+            '.ods', '.odp', '.csv', '.json', '.xml',
             '.epub', '.mobi', '.pages', '.numbers', '.key'
         }
     
     def test_connection(self) -> bool:
         """Testet die Verbindung zu Nextcloud mit verbesserter Fehlerbehandlung"""
         try:
+            # Get username from auth provider config or fallback to self.username
+            if not self.username:
+                self.username = self.auth_provider.config.get('username', 'unknown')
+
             url = f"{self.url}/remote.php/dav/files/{self.username}/"
             self.logger.info(f"Testing connection to: {url}")
-            
-            response = requests.request('PROPFIND', url, auth=HTTPBasicAuth(self.username, self.password), timeout=30)
+
+            response = requests.request('PROPFIND', url, auth=self.auth_provider.get_auth(), timeout=30)
             
             self.logger.info(f"Connection test response status: {response.status_code}")
             
@@ -70,7 +93,7 @@ class NextcloudClient:
             
             # PROPFIND request für Verzeichnisinhalt
             headers = {'Depth': '1' if not recursive else 'infinity'}
-            response = requests.request('PROPFIND', url, auth=HTTPBasicAuth(self.username, self.password), headers=headers, timeout=60)
+            response = requests.request('PROPFIND', url, auth=self.auth_provider.get_auth(), headers=headers, timeout=60)
             
             if response.status_code in [200, 207]:
                 # XML-Verarbeitung mit besserer Fehlerbehandlung
@@ -165,8 +188,8 @@ class NextcloudClient:
             # Datei herunterladen
             url = f"{self.url}/remote.php/dav/files/{self.username}{remote_path}"
             self.logger.debug(f"Downloading {remote_path} to {local_path}")
-            
-            response = requests.get(url, auth=HTTPBasicAuth(self.username, self.password), timeout=60)
+
+            response = requests.get(url, auth=self.auth_provider.get_auth(), timeout=60)
             
             if response.status_code == 200:
                 with open(local_path, 'wb') as f:

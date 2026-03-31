@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import SourceCard from '../components/SourceCard';
 
 const API_BASE = '';
 
@@ -236,13 +237,34 @@ export default function HomePage() {
     if (inputRef.current) inputRef.current.value = '';
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat`, {
+      const conversationContext = messages
+        .slice(-8)
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n');
+
+      const res = await fetch(`${API_BASE}/api/agent/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, source })
+        body: JSON.stringify({
+          prompt: text,
+          language: 'de',
+          preferred_source: source,
+          context: conversationContext
+        })
       });
       const data = await res.json();
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response, id: Date.now() }]);
+      if (!res.ok || data?.success === false) {
+        const errorMessage = data?.error || `Request failed with status ${res.status}`;
+        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errorMessage}`, id: Date.now() }]);
+        return;
+      }
+
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.response,
+        sources: data.sources || [],
+        id: Date.now()
+      }]);
 
       if (data?.requires_input && data?.action === 'calendar_missing_input') {
         const extracted = data?.extracted_info || {};
@@ -557,6 +579,19 @@ export default function HomePage() {
                         msg.content
                       )}
                     </div>
+                    {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                      <div className="sources-container">
+                        <div className="sources-header">
+                          <i className="fas fa-link"></i>
+                          <span>Quellen ({msg.sources.length})</span>
+                        </div>
+                        <div className="sources-grid">
+                          {msg.sources.map((source, idx) => (
+                            <SourceCard key={idx} source={source} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {isThinking && (

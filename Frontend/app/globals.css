@@ -1190,6 +1190,123 @@ body {
   cursor: not-allowed;
 }
 
+/* Source Cards - below AI responses */
+.sources-container {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--chip-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  max-width: min(85%, 900px);
+}
+
+.sources-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sources-header i {
+  font-size: 0.9rem;
+}
+
+.sources-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+.source-card {
+  background: var(--bubble-assistant);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem;
+  transition: all 0.2s ease;
+  cursor: default;
+}
+
+.source-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: var(--brand);
+}
+
+.source-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.source-icon {
+  font-size: 1.2rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.source-title-container {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.source-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.source-link {
+  color: var(--brand);
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.source-link:hover {
+  text-decoration: underline;
+  color: var(--brand-hover);
+}
+
+.source-path {
+  font-size: 0.75rem;
+  color: var(--muted);
+  word-break: break-all;
+  line-height: 1.3;
+}
+
+.source-score {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--brand);
+  background: var(--chip-bg);
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.source-preview {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
 /* Radio Buttons */
 .input-group label:has(input[type="radio"]) {
   display: flex;
