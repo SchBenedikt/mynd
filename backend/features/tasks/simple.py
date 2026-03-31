@@ -4,23 +4,52 @@ Unterstützt Nextcloud Tasks Plugin via WebDAV/CalDAV
 """
 
 import requests
-from requests.auth import HTTPBasicAuth
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from datetime import datetime
 import re
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+from backend.features.integration.auth_provider import AuthProvider
+from backend.features.integration.auth_manager import get_auth_manager
 
 class SimpleNextcloudTasks:
     """Einfache Nextcloud Tasks Integration über WebDAV"""
-    
-    def __init__(self, url: str, username: str, password: str):
+
+    def __init__(self, url: str, username: str = None, password: str = None, auth_provider: AuthProvider = None):
+        """
+        Initialize SimpleNextcloudTasks
+
+        Args:
+            url: Nextcloud server URL
+            username: Username (for backward compatibility with basic auth)
+            password: Password (for backward compatibility with basic auth)
+            auth_provider: AuthProvider instance (recommended)
+        """
         self.url = url.rstrip('/')
         self.username = username
-        self.password = password
         self.logger = logging.getLogger(__name__)
         self.base_url = f"{self.url}/remote.php/dav"
         self.session = requests.Session()
-        self.session.auth = HTTPBasicAuth(username, password)
+
+        # Set up authentication
+        if auth_provider:
+            self.auth_provider = auth_provider
+            self.session.auth = auth_provider.get_auth()
+        elif username and password:
+            # Backward compatibility: create basic auth provider
+            auth_manager = get_auth_manager()
+            self.auth_provider = auth_manager.create_basic_auth(username, password)
+            self.session.auth = self.auth_provider.get_auth()
+        else:
+            raise ValueError("Either auth_provider or username/password must be provided")
+
+        # Get username from auth provider if not provided
+        if not self.username:
+            self.username = self.auth_provider.config.get('username', 'unknown')
     
     def test_connection(self) -> bool:
         """Testet die Verbindung zu Nextcloud Tasks"""
@@ -327,10 +356,21 @@ SUMMARY:{title}"""
         return False
 
 
-def create_simple_tasks_manager(url: str, username: str, password: str) -> Optional[SimpleNextcloudTasks]:
-    """Factory-Funktion zur Erstellung eines SimpleNextcloudTasks"""
+def create_simple_tasks_manager(url: str, username: str = None, password: str = None, auth_provider: AuthProvider = None) -> Optional[SimpleNextcloudTasks]:
+    """
+    Factory-Funktion zur Erstellung eines SimpleNextcloudTasks
+
+    Args:
+        url: Nextcloud server URL
+        username: Username (for backward compatibility)
+        password: Password (for backward compatibility)
+        auth_provider: AuthProvider instance (recommended)
+
+    Returns:
+        SimpleNextcloudTasks instance or None if connection failed
+    """
     try:
-        manager = SimpleNextcloudTasks(url, username, password)
+        manager = SimpleNextcloudTasks(url, username, password, auth_provider)
         if manager.test_connection():
             return manager
         else:
