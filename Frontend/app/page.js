@@ -628,6 +628,24 @@ export default function HomePage() {
     setPhotoPreview((prev) => ({ ...prev, open: false }));
   };
 
+  const handleMarkdownContentClick = (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const imageElement = target.closest('img.chat-thumbnail');
+    if (!imageElement) return;
+
+    const anchorElement = imageElement.closest('a');
+    const thumbnailUrl = imageElement.getAttribute('src') || '';
+    const title = imageElement.getAttribute('alt') || 'Vorschau';
+    const immichUrl = anchorElement?.getAttribute('href') || '';
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    openPhotoPreview({ title, thumbnailUrl, immichUrl });
+  };
+
   const markdownComponents = {
     p: ({ node, children, ...props }) => {
       const hasOnlyImageLink =
@@ -650,27 +668,7 @@ export default function HomePage() {
         </p>
       );
     },
-    a: ({ node, href, children, ...props }) => {
-      const isImageLink =
-        node?.children?.length === 1
-        && node.children[0]?.type === 'image';
-
-      if (isImageLink) {
-        const imageNode = node.children[0];
-        const thumbnailUrl = imageNode?.url || '';
-        const title = imageNode?.alt || 'Vorschau';
-
-        return (
-          <button
-            type="button"
-            className="chat-thumbnail-trigger"
-            onClick={() => openPhotoPreview({ title, thumbnailUrl, immichUrl: href || '' })}
-          >
-            {children}
-          </button>
-        );
-      }
-
+    a: ({ href, children, ...props }) => {
       return (
         <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
           {children}
@@ -976,9 +974,11 @@ export default function HomePage() {
                   <div key={msg.id} className={`message ${msg.role}`}>
                     <div className="bubble">
                       {msg.role === 'assistant' ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                          {msg.content}
-                        </ReactMarkdown>
+                        <div onClickCapture={handleMarkdownContentClick}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
                       ) : (
                         msg.content
                       )}
