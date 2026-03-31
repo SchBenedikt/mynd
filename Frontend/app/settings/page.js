@@ -44,6 +44,11 @@ export default function SettingsPage() {
   
   const [nextcloudUrl, setNextcloudUrl] = useState('');
   const [nextcloudStatus, setNextcloudStatus] = useState('');
+  const [calendarConfig, setCalendarConfig] = useState({
+    default_calendar_name: ''
+  });
+  const [calendarOptions, setCalendarOptions] = useState([]);
+  const [calendarConfigStatus, setCalendarConfigStatus] = useState('');
   const [nextcloudConfigured, setNextcloudConfigured] = useState(false);
   const [nextcloudDisplayName, setNextcloudDisplayName] = useState('');
   const [nextcloudLoggingIn, setNextcloudLoggingIn] = useState(false);
@@ -53,6 +58,8 @@ export default function SettingsPage() {
     loadImmichConfig();
     loadOllamaModels();
     loadNextcloudConfig();
+    loadCalendarConfig();
+    loadCalendarOptions();
     updateStatus();
     
     const statusInterval = setInterval(updateStatus, 8000);
@@ -87,12 +94,55 @@ export default function SettingsPage() {
     }
   };
 
+  const loadCalendarConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/calendar/config`);
+      if (res.ok) {
+        const config = await res.json();
+        setCalendarConfig({
+          default_calendar_name: config.default_calendar_name || ''
+        });
+      }
+    } catch (err) {
+      console.error('Error loading calendar config:', err);
+    }
+  };
+
+  const loadCalendarOptions = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/calendar/calendars`);
+      if (res.ok) {
+        const data = await res.json();
+        setCalendarOptions(data.calendars || []);
+      }
+    } catch (err) {
+      console.error('Error loading calendar options:', err);
+    }
+  };
+
+  const saveCalendarConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/calendar/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(calendarConfig)
+      });
+      if (res.ok) {
+        setCalendarConfigStatus('Standard-Kalender gespeichert');
+      } else {
+        const data = await res.json();
+        setCalendarConfigStatus('Fehler: ' + (data.error || 'Unbekannt'));
+      }
+    } catch (err) {
+      setCalendarConfigStatus('Fehler: ' + err.message);
+    }
+  };
+
   const handleNextcloudLogin = async () => {
     if (!nextcloudUrl.trim()) {
       setNextcloudStatus('Please enter your Nextcloud URL');
       return;
     }
-
     try {
       setNextcloudLoggingIn(true);
       setNextcloudStatus('Opening Nextcloud login...');
@@ -512,6 +562,30 @@ export default function SettingsPage() {
                     <button className="btn" onClick={testImmichConnection}>Test Connection</button>
                   </div>
                   {immichStatus && <div className="status-text">{immichStatus}</div>}
+                </div>
+
+                <div className="panel-section" style={{marginTop: '2rem'}}>
+                  <div className="section-title">Kalender Standard</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                    Dieser Kalender wird verwendet, wenn beim Erstellen eines Termins kein Kalender angegeben wird.
+                  </p>
+                  <div className="input-group">
+                    <label>Standard-Kalender</label>
+                    <select
+                      value={calendarConfig.default_calendar_name}
+                      onChange={(e) => setCalendarConfig(prev => ({ ...prev, default_calendar_name: e.target.value }))}
+                    >
+                      <option value="">(Kein Standard - erster Kalender)</option>
+                      {calendarOptions.map((cal, idx) => (
+                        <option key={`${cal.name}-${idx}`} value={cal.name}>{cal.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="button-group">
+                    <button className="btn primary" onClick={saveCalendarConfig}>Standard speichern</button>
+                    <button className="btn" onClick={loadCalendarOptions}>Kalender neu laden</button>
+                  </div>
+                  {calendarConfigStatus && <div className="status-text">{calendarConfigStatus}</div>}
                 </div>
               </div>
             )}
