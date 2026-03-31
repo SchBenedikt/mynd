@@ -135,6 +135,7 @@ export default function HomePage() {
     downloadUrl: ''
   });
   const progressIntervalRef = useRef(null);
+  const requestAbortRef = useRef(null);
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -361,6 +362,36 @@ export default function HomePage() {
     };
   }, [photoPreview.open]);
 
+  useEffect(() => {
+    const handleCancelKey = (event) => {
+      if (!isThinking) return;
+      if (event.key === 'c' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        cancelPendingRequest();
+      }
+    };
+
+    window.addEventListener('keydown', handleCancelKey);
+    return () => {
+      window.removeEventListener('keydown', handleCancelKey);
+    };
+  }, [isThinking]);
+
+  const cancelPendingRequest = () => {
+    if (!requestAbortRef.current) return;
+    requestAbortRef.current.abort();
+    requestAbortRef.current = null;
+    setIsThinking(false);
+
+    if (activeChatId) {
+      appendMessageToChat(activeChatId, {
+        role: 'assistant',
+        content: 'Anfrage abgebrochen.',
+        id: Date.now()
+      });
+    }
+  };
+
   const appendMessageToChat = (chatId, message, originalUserText = null) => {
     const now = Date.now();
     setChats((prevChats) => prevChats.map((chat) => {
@@ -555,6 +586,8 @@ export default function HomePage() {
     }
 
     setIsThinking(true);
+    const abortController = new AbortController();
+    requestAbortRef.current = abortController;
 
     try {
       const currentMessages = chats.find((chat) => chat.id === targetChatId)?.messages || [];
@@ -566,6 +599,7 @@ export default function HomePage() {
       const res = await fetch(`${API_BASE}/api/agent/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           prompt: text,
           language,
@@ -621,9 +655,13 @@ export default function HomePage() {
         });
       }
     } catch (err) {
+      if (err?.name === 'AbortError') {
+        return;
+      }
       appendMessageToChat(targetChatId, { role: 'assistant', content: `Error: ${err.message}`, id: Date.now() });
     } finally {
       setIsThinking(false);
+      requestAbortRef.current = null;
     }
   };
 
@@ -895,6 +933,45 @@ export default function HomePage() {
 
   const sortedChats = [...chats].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
+  const getWeekStart = (value) => {
+    const date = new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    const day = date.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    date.setDate(date.getDate() + diff);
+    return date;
+  };
+
+  const getChatGroupLabel = (chat) => {
+    const ts = chat.updatedAt || chat.createdAt || 0;
+    if (!ts) return 'Aelter';
+
+    const now = new Date();
+    const lastUpdated = new Date(ts);
+    const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfYesterday = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
+    const startOfWeek = getWeekStart(now);
+    const startOfLastWeek = new Date(startOfWeek.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    if (lastUpdated >= hourAgo) return 'Letzte Stunde';
+    if (lastUpdated >= startOfToday) return 'Heute';
+    if (lastUpdated >= startOfYesterday) return 'Gestern';
+    if (lastUpdated >= startOfWeek) return 'Diese Woche';
+    if (lastUpdated >= startOfLastWeek) return 'Letzte Woche';
+    return 'Aelter';
+  };
+
+  const groupedChats = sortedChats.reduce((groups, chat) => {
+    const label = getChatGroupLabel(chat);
+    const lastGroup = groups[groups.length - 1];
+    if (!lastGroup || lastGroup.label !== label) {
+      groups.push({ label, items: [chat] });
+    } else {
+      lastGroup.items.push(chat);
+    }
+    return groups;
+  }, []);
+
   const goToSettings = () => {
     router.push('/settings');
   };
@@ -943,47 +1020,52 @@ export default function HomePage() {
               <i className="fas fa-message"></i>
             </button>
           ) : (
-            sortedChats.map((chat) => (
-              <div
-                key={chat.id}
-                className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}
-                onClick={() => openChat(chat.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    openChat(chat.id);
-                  }
-                }}
-                role="button"
-                tabIndex={0}
-                title={chat.title}
-              >
-                <i className="fas fa-message"></i>
-                <span className="history-title">{chat.title}</span>
-                <div className="history-actions">
-                  <button
-                    type="button"
-                    className="history-action"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      renameChat(chat.id);
+            groupedChats.map((group, groupIndex) => (
+              <div key={`${group.label}-${groupIndex}`} className="history-group">
+                <div className="history-group-label">{group.label}</div>
+                {group.items.map((chat) => (
+                  <div
+                    key={chat.id}
+                    className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}
+                    onClick={() => openChat(chat.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openChat(chat.id);
+                      }
                     }}
-                    title="Umbenennen"
+                    role="button"
+                    tabIndex={0}
+                    title={chat.title}
                   >
-                    <i className="fas fa-pen"></i>
-                  </button>
-                  <button
-                    type="button"
-                    className="history-action danger"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      deleteChat(chat.id);
-                    }}
-                    title="Loeschen"
-                  >
-                    <i className="fas fa-trash"></i>
-                  </button>
-                </div>
+                    <i className="fas fa-message"></i>
+                    <span className="history-title">{chat.title}</span>
+                    <div className="history-actions">
+                      <button
+                        type="button"
+                        className="history-action"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          renameChat(chat.id);
+                        }}
+                        title="Umbenennen"
+                      >
+                        <i className="fas fa-pen"></i>
+                      </button>
+                      <button
+                        type="button"
+                        className="history-action danger"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          deleteChat(chat.id);
+                        }}
+                        title="Loeschen"
+                      >
+                        <i className="fas fa-trash"></i>
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             ))
           )}
@@ -1258,16 +1340,22 @@ export default function HomePage() {
                 <div ref={messagesEndRef} />
               </div>
             </div>
-            <div className="composer">
-              <input 
-                type="text" 
-                ref={inputRef}
-                placeholder={t('composerPlaceholder')}
-                onKeyPress={(e) => e.key === 'Enter' && !e.ctrlKey && sendMessage(e.target.value)}
-              />
-              <button onClick={() => sendMessage(inputRef.current?.value || '')} disabled={isThinking}>
-                <i className="fas fa-arrow-right"></i>
-              </button>
+            <div className="composer-shell">
+              {isThinking && (
+                <div className="composer-hint">Anfrage läuft · Strg+C zum Abbrechen</div>
+              )}
+              <div className={`composer ${isThinking ? 'is-thinking' : ''}`}>
+                <input 
+                  type="text" 
+                  ref={inputRef}
+                  placeholder={t('composerPlaceholder')}
+                  onKeyPress={(e) => e.key === 'Enter' && !e.ctrlKey && sendMessage(e.target.value)}
+                  disabled={isThinking}
+                />
+                <button onClick={() => sendMessage(inputRef.current?.value || '')} disabled={isThinking}>
+                  <i className="fas fa-arrow-right"></i>
+                </button>
+              </div>
             </div>
           </>
         )}
