@@ -5,6 +5,7 @@ import re
 from typing import List, Dict, Optional, Any, Tuple
 import requests
 from datetime import datetime, date, timedelta
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
 # Add parent directory to path for imports
@@ -21,6 +22,10 @@ class ImmichClient:
         # Configurable timeouts
         self.timeout_short = timeout_short  # For quick operations like ping, asset info
         self.timeout_long = timeout_long    # For heavy operations like search, get people
+        # Keep a short-lived people cache to avoid expensive /people calls on every query.
+        self._people_cache: List[Dict[str, Any]] = []
+        self._people_cache_time: float = 0
+        self._people_cache_ttl_seconds: int = 300
 
     def _normalize_url(self, url: str) -> str:
         """Stellt sicher, dass die URL ein gültiges Schema hat."""
@@ -201,25 +206,83 @@ class ImmichClient:
             # Fallback auf normale Suche
             return self.search_assets(query=query, limit=limit)
 
-    def get_people(self) -> List[Dict[str, Any]]:
-        """Holt alle erkannten Personen von Immich"""
+    def get_people(self, page_size: int = 500, max_pages: int = 5, use_cache: bool = True) -> List[Dict[str, Any]]:
+        """Holt Personen von Immich mit limitierter Pagination und Cache."""
         try:
+            now_ts = time.time()
+            if use_cache and self._people_cache and (now_ts - self._people_cache_time) < self._people_cache_ttl_seconds:
+                self.logger.info(f"Using cached Immich people list ({len(self._people_cache)} entries)")
+                return self._people_cache
+
             url = f"{self.url}/api/people"
 
-            response = requests.get(url, headers=self._get_headers(), timeout=self.timeout_long)
+            all_people: List[Dict[str, Any]] = []
+            page = 1
+            max_pages = max(1, int(max_pages))
 
-            if response.status_code == 200:
+            while page <= max_pages:
+                params = {
+                    'page': page,
+                    'size': page_size,
+                    'withHidden': 'false'
+                }
+                response = requests.get(
+                    url,
+                    headers=self._get_headers(),
+                    params=params,
+                    timeout=self.timeout_long
+                )
+
+                if response.status_code != 200:
+                    # Fallback für ältere Immich-Versionen ohne Pagination-Query
+                    if page == 1:
+                        legacy_response = requests.get(url, headers=self._get_headers(), timeout=self.timeout_long)
+                        if legacy_response.status_code == 200:
+                            data = legacy_response.json()
+                            if isinstance(data, list):
+                                all_people = data
+                            else:
+                                all_people = data.get('people', [])
+                            self._people_cache = all_people
+                            self._people_cache_time = now_ts
+                            self.logger.info(f"Retrieved {len(all_people)} people from Immich")
+                            return all_people
+
+                    self.logger.error(f"Failed to get people: {response.status_code}")
+                    return []
+
                 data = response.json()
-                # The /api/people endpoint returns either a list directly or an object with 'people' key
                 if isinstance(data, list):
-                    people = data
-                else:
-                    people = data.get('people', [])
-                self.logger.info(f"Retrieved {len(people)} people from Immich")
-                return people
-            else:
-                self.logger.error(f"Failed to get people: {response.status_code}")
-                return []
+                    # Legacy behavior: list already contains all people
+                    all_people.extend(data)
+                    break
+
+                page_people = data.get('people', [])
+                all_people.extend(page_people)
+
+                has_next_page = bool(data.get('hasNextPage'))
+                if not has_next_page:
+                    break
+                page += 1
+
+            # Dedupe by id for safety across mixed API behaviors
+            unique_people = {}
+            for person in all_people:
+                pid = person.get('id')
+                if pid and pid not in unique_people:
+                    unique_people[pid] = person
+
+            people = list(unique_people.values()) if unique_people else all_people
+            self._people_cache = people
+            self._people_cache_time = now_ts
+
+            if page >= max_pages and len(all_people) >= page_size * max_pages:
+                self.logger.warning(
+                    f"Immich people list truncated after {max_pages} pages ({len(people)} loaded). "
+                    "Increase max_pages only if needed."
+                )
+            self.logger.info(f"Retrieved {len(people)} people from Immich")
+            return people
 
         except Exception as e:
             self.logger.error(f"Error getting people: {str(e)}")
@@ -306,11 +369,12 @@ class ImmichClient:
         return list(unique.values())
 
     def search_by_person_name(self, person_name: str, limit: int = 20,
-                              date_from: str = None, date_to: str = None) -> List[Dict[str, Any]]:
+                              date_from: str = None, date_to: str = None,
+                              people: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """Sucht Fotos einer bestimmten Person nach Name"""
         try:
             # Erst alle Personen holen
-            people = self.get_people()
+            people = people if people is not None else self.get_people()
 
             # Person nach Name finden (case-insensitive), mit Priorität auf exakte Volltreffer.
             target_name = (person_name or '').strip().lower()
@@ -613,7 +677,8 @@ class ImmichClient:
                             person_name,
                             limit,
                             date_from,
-                            date_to
+                            date_to,
+                            people
                         )
                         person_futures[f'person_{i}_{person_name}'] = person_future
                         futures[f'person_{i}_{person_name}'] = person_future
@@ -677,32 +742,36 @@ class ImmichClient:
                     except Exception as e:
                         self.logger.error(f"Error getting results from {future_name}: {e}")
 
-                # Falls Person+Datum keine Treffer liefert, fallback auf breite Datumssuche.
-                if (date_from or date_to) and mentioned_people and len(results) == 0:
-                    fallback_assets = self.search_assets(
-                        query=metadata_query,
-                        person_ids=None,
-                        date_from=date_from,
-                        date_to=date_to,
-                        limit=limit
-                    )
-                    if fallback_assets:
-                        self.logger.info(f"Fallback date metadata search returned {len(fallback_assets)} assets")
-                        results.extend(fallback_assets)
+                # Bei Person+Datum KEIN Query-Fallback: strikt über personIds + Datum filtern.
 
         except Exception as e:
             self.logger.error(f"Error in parallel search execution: {e}")
             # Fallback to sequential search if parallel fails
             try:
                 if date_from or date_to:
-                    metadata_results = self.search_assets(
-                        query=metadata_query,
-                        date_from=date_from,
-                        date_to=date_to,
-                        limit=limit
-                    )
-                    if metadata_results:
-                        results.extend(metadata_results)
+                    if mentioned_people:
+                        for person in mentioned_people[:max_parallel]:
+                            person_name = person.get('name', '')
+                            person_results = self.search_by_person_name(
+                                person_name,
+                                limit=limit,
+                                date_from=date_from,
+                                date_to=date_to,
+                                people=people
+                            )
+                            if person_results:
+                                results.extend(person_results)
+                            if len(results) >= limit:
+                                break
+                    else:
+                        metadata_results = self.search_assets(
+                            query=metadata_query,
+                            date_from=date_from,
+                            date_to=date_to,
+                            limit=limit
+                        )
+                        if metadata_results:
+                            results.extend(metadata_results)
                 else:
                     smart_results = self.search_smart(query, limit=limit)
                     if smart_results:
@@ -723,7 +792,8 @@ class ImmichClient:
 
         # Für Datumsanfragen den UI-Suchkontext nicht mit dem kompletten Satz befüllen.
         if date_from or date_to:
-            ui_search_query = ' '.join(mentioned_person_names[:2]) if mentioned_person_names else metadata_query
+            # Bei Person+Datum keinen natürlichsprachlichen Query-Text in den UI-Kontext übernehmen.
+            ui_search_query = None if mentioned_person_names else metadata_query
         else:
             ui_search_query = query
 
