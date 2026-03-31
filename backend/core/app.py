@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timedelta, date
 import time
 from urllib.parse import urlencode
+from typing import Optional, List, Dict
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
