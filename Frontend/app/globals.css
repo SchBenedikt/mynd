@@ -1032,6 +1032,64 @@ body {
   color: var(--ink);
 }
 
+.calendar-form-bubble {
+  width: min(100%, 520px);
+}
+
+.calendar-form-bubble h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+}
+
+.calendar-form-hint {
+  margin-bottom: 0.75rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.calendar-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.calendar-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.calendar-form input,
+.calendar-form select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--input-bg);
+  color: var(--ink);
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.calendar-form input:focus,
+.calendar-form select:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+
+.calendar-form-error {
+  color: #b91c1c;
+  font-size: 0.82rem;
+}
+
+.calendar-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
+}
+
 /* Thinking Indicator */
 .thinking-indicator {
   display: flex;

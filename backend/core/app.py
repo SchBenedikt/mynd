@@ -19,6 +19,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from backend.features.documents.parser import DocumentParser
 from backend.features.integration.nextcloud_client import NextcloudClient
+from backend.features.integration.activity_client import NextcloudActivityClient
+from backend.features.integration.notifications_client import NextcloudNotificationsClient
 from backend.features.integration.auth_manager import get_auth_manager, AuthManager
 from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
@@ -68,6 +70,35 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
+CALENDAR_CONFIG_FILE = os.path.join(CONFIG_DIR, "calendar_config.json")
+
+
+def load_calendar_config() -> Dict:
+    """Lädt Kalender-Konfiguration (z.B. Standard-Kalender) aus Datei."""
+    config = {
+        'default_calendar_name': ''
+    }
+
+    if os.path.exists(CALENDAR_CONFIG_FILE):
+        try:
+            with open(CALENDAR_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                file_config = json.load(f)
+
+            config['default_calendar_name'] = str(file_config.get('default_calendar_name', '')).strip()
+        except Exception as e:
+            logger.warning(f"Konnte Kalender-Konfiguration nicht laden: {str(e)}")
+
+    return config
+
+
+def save_calendar_config(default_calendar_name: str) -> None:
+    """Speichert Kalender-Konfiguration persistent in einer lokalen JSON-Datei."""
+    config = {
+        'default_calendar_name': str(default_calendar_name or '').strip()
+    }
+
+    with open(CALENDAR_CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
 
 class KnowledgeBase:
     def __init__(self, knowledge_file=None):
@@ -834,6 +865,222 @@ def get_todo_context(message: str) -> str:
     todo_data = get_todo_data(message)
     return todo_data.get('context', '')
 
+def get_nextcloud_runtime_config() -> Dict:
+    """Lädt Nextcloud-Zugangsdaten aus mehreren Quellen in stabiler Reihenfolge."""
+    config = {}
+
+    # 1) Bereits geladene Laufzeit-Konfiguration
+    try:
+        config = indexing_manager.get_config(mask_password=False)
+        if config and all(config.get(k) for k in ['url', 'username', 'password']):
+            return config
+    except Exception as e:
+        logger.debug(f"indexing_manager.get_config failed: {e}")
+
+    # 2) Versuche explizit aus der vom IndexingManager genutzten Datei zu laden
+    try:
+        if hasattr(indexing_manager, 'load_nextcloud_config'):
+            indexing_manager.load_nextcloud_config()
+            config = indexing_manager.get_config(mask_password=False)
+            if config and all(config.get(k) for k in ['url', 'username', 'password']):
+                return config
+    except Exception as e:
+        logger.debug(f"indexing_manager.load_nextcloud_config failed: {e}")
+
+    # 3) Fallback auf bekannte Konfig-Dateien im Projekt
+    config_candidates = [
+        os.path.join(CONFIG_DIR, 'indexing_config.json'),
+        os.path.join(BASE_DIR, 'indexing_config.json')
+    ]
+    for config_path in config_candidates:
+        try:
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    file_config = json.load(f)
+                if all(file_config.get(k) for k in ['url', 'username', 'password']):
+                    return file_config
+        except Exception as e:
+            logger.debug(f"Could not read Nextcloud config from {config_path}: {e}")
+
+    # 4) Letzter Fallback auf Environment
+    env_config = {
+        'url': os.getenv('NEXTCLOUD_URL'),
+        'username': os.getenv('NEXTCLOUD_USERNAME'),
+        'password': os.getenv('NEXTCLOUD_PASSWORD')
+    }
+    if all(env_config.get(k) for k in ['url', 'username', 'password']):
+        return env_config
+
+    return {}
+
+def is_activity_query(message: str) -> bool:
+    """Erkennt Fragen zu neuen Nextcloud-Aktivitäten."""
+    message_lower = message.lower()
+    activity_keywords = [
+        'aktivität', 'aktivitäten', 'activity', 'activities', 'neuigkeiten',
+        'was gibt es neues', 'was ist neu', 'nextcloud'
+    ]
+    return any(keyword in message_lower for keyword in activity_keywords)
+
+def is_calendar_create_query(message: str) -> bool:
+    """Erkennt Wunsch nach Termin-Erstellung."""
+    message_lower = message.lower()
+    create_keywords = ['erstelle', 'anlegen', 'create', 'eintragen', 'hinzufügen']
+    calendar_keywords = ['termin', 'ereignis', 'kalender', 'event', 'appointment']
+    return any(k in message_lower for k in create_keywords) and any(k in message_lower for k in calendar_keywords)
+
+def get_activity_context(limit: int = 10) -> Dict:
+    """Lädt aktuelle Nextcloud-Aktivitäten und formatiert sie für Chat-Kontext und Direktantworten."""
+    config = get_nextcloud_runtime_config()
+    if not config:
+        return {
+            'context': "",
+            'summary_text': "Ich konnte keine Nextcloud-Konfiguration finden.",
+            'count': 0,
+            'error': 'missing_config'
+        }
+
+    try:
+        activity_client = NextcloudActivityClient(config['url'], config['username'], config['password'])
+        if not activity_client.test_connection():
+            return {
+                'context': "",
+                'summary_text': "Die Activity-API ist aktuell nicht erreichbar oder nicht aktiviert.",
+                'count': 0,
+                'error': 'connection_failed'
+            }
+
+        activities = activity_client.get_recent_activities(limit=limit)
+        if not activities:
+            return {
+                'context': "=== NEXTCLOUD AKTIVITAETEN ===\nKeine neuen Aktivitäten gefunden.",
+                'summary_text': "Es gibt aktuell keine neuen Aktivitäten auf deiner Nextcloud.",
+                'count': 0,
+                'error': None
+            }
+
+        lines = ["=== NEXTCLOUD AKTIVITAETEN ===", f"Anzahl: {len(activities)}", ""]
+        summary_lines = ["Ja, es gibt neue Aktivitäten:"]
+
+        for idx, activity in enumerate(activities[:10], 1):
+            subject = activity.get('subject') or 'Ohne Betreff'
+            app_name = activity.get('app') or 'unknown'
+            dt = activity.get('datetime') or ''
+            line = f"{idx}. [{app_name}] {subject}"
+            if dt:
+                line += f" ({dt})"
+            lines.append(line)
+            if idx <= 5:
+                summary_lines.append(f"- [{app_name}] {subject}")
+
+        return {
+            'context': "\n".join(lines),
+            'summary_text': "\n".join(summary_lines),
+            'count': len(activities),
+            'error': None
+        }
+    except Exception as e:
+        logger.error(f"Error getting activity context: {e}")
+        return {
+            'context': "",
+            'summary_text': f"Beim Abruf der Aktivitäten ist ein Fehler aufgetreten: {str(e)[:120]}",
+            'count': 0,
+            'error': 'runtime_error'
+        }
+
+def get_notifications_context(limit: int = 10) -> Dict:
+    """Lädt aktuelle Nextcloud-Benachrichtigungen und formatiert sie für Chat-Kontext."""
+    config = get_nextcloud_runtime_config()
+    if not config:
+        return {
+            'context': "",
+            'summary_text': "",
+            'count': 0,
+            'error': 'missing_config'
+        }
+
+    try:
+        notifications_client = NextcloudNotificationsClient(config['url'], config['username'], config['password'])
+        if not notifications_client.test_connection():
+            return {
+                'context': "",
+                'summary_text': "",
+                'count': 0,
+                'error': 'connection_failed'
+            }
+
+        notifications = notifications_client.get_notifications()[:limit]
+        if not notifications:
+            return {
+                'context': "=== NEXTCLOUD BENACHRICHTIGUNGEN ===\nKeine offenen Benachrichtigungen.",
+                'summary_text': "",
+                'count': 0,
+                'error': None
+            }
+
+        lines = ["=== NEXTCLOUD BENACHRICHTIGUNGEN ===", f"Anzahl: {len(notifications)}", ""]
+        summary_lines = ["Zusätzlich gibt es Benachrichtigungen:"]
+
+        for idx, notif in enumerate(notifications, 1):
+            subject = notif.get('subject') or 'Ohne Betreff'
+            app_name = notif.get('app') or 'unknown'
+            dt = notif.get('datetime') or ''
+            line = f"{idx}. [{app_name}] {subject}"
+            if dt:
+                line += f" ({dt})"
+            lines.append(line)
+            if idx <= 5:
+                summary_lines.append(f"- [{app_name}] {subject}")
+
+        return {
+            'context': "\n".join(lines),
+            'summary_text': "\n".join(summary_lines),
+            'count': len(notifications),
+            'error': None
+        }
+    except Exception as e:
+        logger.error(f"Error getting notifications context: {e}")
+        return {
+            'context': "",
+            'summary_text': "",
+            'count': 0,
+            'error': 'runtime_error'
+        }
+
+def get_updates_context(activity_limit: int = 10, notifications_limit: int = 10) -> Dict:
+    """Kombiniert Nextcloud Activity und Notifications zu einer einheitlichen Update-Antwort."""
+    activity_result = get_activity_context(limit=activity_limit)
+    notifications_result = get_notifications_context(limit=notifications_limit)
+
+    combined_context_parts = []
+    if activity_result.get('context'):
+        combined_context_parts.append(activity_result['context'])
+    if notifications_result.get('context'):
+        combined_context_parts.append(notifications_result['context'])
+
+    total_count = int(activity_result.get('count', 0)) + int(notifications_result.get('count', 0))
+
+    summary_lines = []
+    if activity_result.get('count', 0) > 0:
+        summary_lines.append(activity_result.get('summary_text', ''))
+    if notifications_result.get('count', 0) > 0:
+        summary_lines.append(notifications_result.get('summary_text', ''))
+
+    if total_count == 0:
+        summary_text = "Aktuell gibt es weder neue Aktivitäten noch offene Benachrichtigungen auf deiner Nextcloud."
+    else:
+        summary_text = "\n\n".join([line for line in summary_lines if line])
+        if not summary_text:
+            summary_text = f"Es gibt insgesamt {total_count} neue Einträge auf deiner Nextcloud."
+
+    return {
+        'context': "\n\n".join(combined_context_parts),
+        'summary_text': summary_text,
+        'count': total_count,
+        'activity_count': activity_result.get('count', 0),
+        'notification_count': notifications_result.get('count', 0)
+    }
+
 def create_calendar_event(title: str, start_time: str, end_time: str = None, 
                           calendar_name: str = None, location: str = None, 
                           description: str = None) -> dict:
@@ -847,12 +1094,18 @@ def create_calendar_event(title: str, start_time: str, end_time: str = None,
         if not calendars:
             return {'success': False, 'error': 'Keine Kalender gefunden'}
         
-        # Wähle Kalender aus
+        # Wähle Kalender aus: explizit übergeben > gespeicherter Standard > erster Kalender
         target_calendar = None
-        if calendar_name:
+
+        preferred_calendar_name = (calendar_name or '').strip()
+        if not preferred_calendar_name:
+            calendar_cfg = load_calendar_config()
+            preferred_calendar_name = str(calendar_cfg.get('default_calendar_name', '')).strip()
+
+        if preferred_calendar_name:
             # Suche nach Kalender mit passendem Namen
             for cal in calendars:
-                if calendar_name.lower() in cal['name'].lower():
+                if preferred_calendar_name.lower() in cal['name'].lower():
                     target_calendar = cal
                     break
         
@@ -961,63 +1214,77 @@ def extract_event_info_from_message(message: str) -> dict:
         'missing_info': []
     }
     
-    message_lower = message.lower()
-    
-    # Titel extrahieren (oft nach "erstelle", "termin", "ereignis")
-    title_patterns = [
-        r'"([^"]+)"',  # In Anführungszeichen
-        r'termin[:\s]+([^.!?]+)',  # "termin: Titel"
-        r'ereignis[:\s]+([^.!?]+)',  # "ereignis: Titel"
-        r'erstelle[:\s]+([^.!?]+)',  # "erstelle Titel"
-    ]
-    
-    for pattern in title_patterns:
-        match = re.search(pattern, message_lower)
+    message_clean = ' '.join(message.strip().split())
+
+    # Zeit extrahieren (inkl. relativer Angaben)
+    now = datetime.now()
+
+    match = re.search(r'\bmorgen\s+um\s+(\d{1,2}:\d{2})\b', message_clean, re.IGNORECASE)
+    if match:
+        tomorrow = now + timedelta(days=1)
+        result['start_time'] = f"{tomorrow.strftime('%d.%m.%Y')} {match.group(1)}"
+    else:
+        match = re.search(r'\bheute\s+um\s+(\d{1,2}:\d{2})\b', message_clean, re.IGNORECASE)
         if match:
-            result['title'] = match.group(1).strip().title()
-            break
-    
-    # Zeit extrahieren
-    time_patterns = [
-        r'(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2})',  # 26.03.2026 14:30
-        r'(\d{2}:\d{2})',  # 14:30
-        r'heute\s+um\s+(\d{2}:\d{2})',  # heute um 14:30
-        r'morgen\s+um\s+(\d{2}:\d{2})',  # morgen um 14:30
-    ]
-    
-    for pattern in time_patterns:
-        match = re.search(pattern, message_lower)
-        if match:
-            result['start_time'] = match.group(1)
-            break
-    
-    # Ort extrahieren
-    location_patterns = [
-        r'in\s+([^.!?]+)',
-        r'bei\s+([^.!?]+)',
-        r'ort[:\s]+([^.!?]+)'
-    ]
-    
-    for pattern in location_patterns:
-        match = re.search(pattern, message_lower)
-        if match:
-            location = match.group(1).strip()
-            # Vermeide Zeitangaben als Ort
-            if not any(char.isdigit() for char in location):
-                result['location'] = location.title()
-                break
-    
+            result['start_time'] = f"{now.strftime('%d.%m.%Y')} {match.group(1)}"
+        else:
+            match = re.search(r'\b(\d{2}\.\d{2}\.\d{4})\s+um\s+(\d{1,2}:\d{2})\b', message_clean, re.IGNORECASE)
+            if match:
+                result['start_time'] = f"{match.group(1)} {match.group(2)}"
+            else:
+                match = re.search(r'\b(\d{2}\.\d{2}\.\d{4}\s+\d{1,2}:\d{2})\b', message_clean)
+                if match:
+                    result['start_time'] = match.group(1)
+                else:
+                    match = re.search(r'\bum\s+(\d{1,2}:\d{2})\b', message_clean, re.IGNORECASE)
+                    if match:
+                        result['start_time'] = match.group(1)
+
     # Kalender extrahieren
     calendar_patterns = [
-        r'im\s+kalender[:\s]+([^.!?]+)',
-        r'kalender[:\s]+([^.!?]+)'
+        r'\bim\s+kalender\s+([^,.!?]+?)(?=\s+(?:in|bei|um|heute|morgen|am)\b|[,.!?]|$)',
+        r'\bkalender[:\s]+([^,.!?]+?)(?=\s+(?:in|bei|um|heute|morgen|am)\b|[,.!?]|$)'
     ]
-    
     for pattern in calendar_patterns:
-        match = re.search(pattern, message_lower)
+        match = re.search(pattern, message_clean, re.IGNORECASE)
         if match:
             result['calendar_name'] = match.group(1).strip().title()
             break
+
+    # Ort extrahieren
+    location_patterns = [
+        r'\bort[:\s]+([^,.!?]+?)(?=\s+(?:um|heute|morgen|am|im\s+kalender|kalender)\b|[,.!?]|$)',
+        r'\bbei\s+([^,.!?]+?)(?=\s+(?:um|heute|morgen|am|im\s+kalender|kalender)\b|[,.!?]|$)',
+        r'\bin\s+([^,.!?]+?)(?=\s+(?:um|heute|morgen|am|im\s+kalender|kalender)\b|[,.!?]|$)'
+    ]
+    for pattern in location_patterns:
+        match = re.search(pattern, message_clean, re.IGNORECASE)
+        if match:
+            candidate = match.group(1).strip()
+            if candidate and not re.search(r'\d{1,2}:\d{2}|\d{2}\.\d{2}\.\d{4}', candidate):
+                result['location'] = candidate.title()
+                break
+
+    # Titel extrahieren
+    quoted_title = re.search(r'"([^"]+)"', message_clean)
+    if quoted_title:
+        result['title'] = quoted_title.group(1).strip()
+    else:
+        title_candidate = message_clean
+        title_candidate = re.sub(
+            r'^(?:kannst\s+du\s+)?(?:bitte\s+)?(?:erstelle|erstelle\s+mir|lege\s+an|lege|mach|plane|create|add)\s+(?:mir\s+)?(?:einen|eine|ein)?\s*(?:neuen\s+)?(?:termin|ereignis)?\s*',
+            '',
+            title_candidate,
+            flags=re.IGNORECASE
+        )
+        title_candidate = re.sub(r'\b(?:im\s+kalender|kalender|in|bei|um|heute|morgen|am)\b.*$', '', title_candidate, flags=re.IGNORECASE)
+        title_candidate = title_candidate.strip(' .,:;!-')
+        if title_candidate:
+            result['title'] = title_candidate
+
+    # Title-Case nur wenn komplett klein geschrieben
+    if result['title'] and result['title'].islower():
+        result['title'] = result['title'].title()
     
     # Prüfe welche Informationen fehlen
     if not result['title']:
@@ -1234,14 +1501,79 @@ def chat():
     if not message:
         return jsonify({'error': 'Keine Nachricht erhalten'}), 400
     
-    # Intelligente Kalender-Erkennung ohne feste Muster
+    # Intelligente Kalender-/Aktivitäts-Erkennung ohne harte Workflows im Frontend
     calendar_context = None
     todo_context = None
+    activity_context = None
     
     # Lasse die KI entscheiden, ob es eine Kalender-Frage ist
     # durch semantische Analyse statt feste Keywords
     message_lower = message.lower()
     
+    # Direkte Termin-Erstellung aus Chat-Nachricht
+    if is_calendar_create_query(message):
+        event_info = extract_event_info_from_message(message)
+        if event_info['missing_info']:
+            missing = ', '.join(event_info['missing_info'])
+
+            calendars = []
+            if simple_calendar_manager:
+                try:
+                    calendars = simple_calendar_manager.get_calendars()
+                except Exception as e:
+                    logger.warning(f"Could not load calendars for interactive form: {e}")
+
+            return jsonify({
+                'response': f"Ich kann den Termin erstellen, mir fehlen aber noch: {missing}.",
+                'action': 'calendar_missing_input',
+                'requires_input': True,
+                'missing_info': event_info['missing_info'],
+                'extracted_info': {
+                    'title': event_info.get('title'),
+                    'start_time': event_info.get('start_time'),
+                    'end_time': event_info.get('end_time'),
+                    'location': event_info.get('location'),
+                    'calendar_name': event_info.get('calendar_name')
+                },
+                'available_calendars': calendars,
+                'context_used': False,
+                'context_count': 0,
+                'calendar_used': True,
+                'training_saved': False,
+                'sources': []
+            })
+
+        create_result = create_calendar_event(
+            title=event_info['title'],
+            start_time=event_info['start_time'],
+            end_time=event_info['end_time'],
+            calendar_name=event_info['calendar_name'],
+            location=event_info['location'],
+            description=message
+        )
+
+        if create_result.get('success'):
+            return jsonify({
+                'response': create_result.get('message', 'Termin wurde erstellt.'),
+                'action': 'calendar_created',
+                'calendar_used': True,
+                'context_used': False,
+                'context_count': 0,
+                'training_saved': False,
+                'sources': [],
+                'created_event': create_result
+            })
+
+        return jsonify({
+            'response': f"Der Termin konnte nicht erstellt werden: {create_result.get('error', 'Unbekannter Fehler')}",
+            'action': 'calendar_create_failed',
+            'calendar_used': True,
+            'context_used': False,
+            'context_count': 0,
+            'training_saved': False,
+            'sources': []
+        })
+
     # TODOS erkennen - NOW RE-ENABLED: Auto-loading is fast because tasks are loaded from DB (not WebDAV)
     if is_todo_query(message):
         try:
@@ -1250,6 +1582,32 @@ def chat():
                 logger.info(f"Todo context found: {len(todo_context)} characters")
         except Exception as e:
             logger.error(f"Todo error: {e}")
+
+    # Aktivitätsfragen direkt aus Nextcloud Activity API beantworten
+    is_activity_question = is_activity_query(message)
+    if is_activity_question:
+        updates_result = get_updates_context(activity_limit=10, notifications_limit=10)
+        activity_context = updates_result.get('context', '')
+
+        # Für reine Aktivitätsfragen direkt antworten statt KI-Halluzination riskieren
+        if not is_todo_query(message) and not any(k in message_lower for k in ['termin', 'kalender', 'aufgabe', 'todo', 'task']):
+            return jsonify({
+                'response': updates_result.get('summary_text', 'Keine Aktivitätsdaten verfügbar.'),
+                'action': 'activity_lookup',
+                'context_used': bool(activity_context),
+                'context_count': 1 if activity_context else 0,
+                'calendar_used': False,
+                'training_saved': False,
+                'sources': [{
+                    'source': 'Nextcloud Updates API',
+                    'path': 'nextcloud/updates',
+                    'content_preview': activity_context[:200] + '...' if activity_context and len(activity_context) > 200 else activity_context,
+                    'similarity_score': 1.0,
+                    'chunk_id': '',
+                    'document_id': '',
+                    'search_type': 'api'
+                }] if activity_context else []
+            })
     
     # Nur grundlegende Prüfung, ob es zeitbezogen sein könnte
     time_related_indicators = [
@@ -1315,6 +1673,15 @@ def chat():
             'source': 'Kalender',
             'source_type': 'calendar',
             'path': 'calendar',
+            'similarity_score': 1.0,
+            'metadata': {}
+        })
+
+    if activity_context:
+        combined_context.insert(0, {
+            'content': activity_context,
+            'source': 'Nextcloud Activity API',
+            'path': 'nextcloud/activity',
             'similarity_score': 1.0,
             'metadata': {}
         })
@@ -2137,6 +2504,78 @@ def get_calendars():
         
     except Exception as e:
         logger.error(f"Error getting calendars: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/calendar/config', methods=['GET', 'POST'])
+def calendar_config():
+    """Liest oder speichert Kalender-Konfiguration (z.B. Standard-Kalender)."""
+    try:
+        if request.method == 'GET':
+            config = load_calendar_config()
+            return jsonify(config)
+
+        data = request.json or {}
+        default_calendar_name = str(data.get('default_calendar_name', '')).strip()
+
+        save_calendar_config(default_calendar_name)
+
+        return jsonify({
+            'status': 'saved',
+            'default_calendar_name': default_calendar_name
+        })
+    except Exception as e:
+        logger.error(f"Error in calendar_config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/calendar/debug/calendars', methods=['GET'])
+def debug_calendars():
+    """Debug endpoint: zeigt rohe CalDAV-Kalender-Responses inkl. Resource-Typen."""
+    try:
+        if not simple_calendar_manager:
+            return jsonify({'error': 'Kalender nicht verfügbar'}), 500
+
+        url = f"{simple_calendar_manager.nextcloud_url}/remote.php/dav/calendars/{simple_calendar_manager.username}/"
+        response = simple_calendar_manager.session.request('PROPFIND', url, headers={'Depth': '1'})
+
+        debug_entries = []
+        if response.status_code == 207:
+            root = ET.fromstring(response.text)
+            namespaces = {
+                'd': 'DAV:',
+                'c': 'urn:ietf:params:xml:ns:caldav',
+                'cs': 'http://calendarserver.org/ns/'
+            }
+
+            for response_elem in root.findall('.//d:response', namespaces):
+                href_elem = response_elem.find('.//d:href', namespaces)
+                displayname_elem = response_elem.find('.//d:displayname', namespaces)
+
+                resourcetype_elem = response_elem.find('.//d:resourcetype', namespaces)
+                resource_types = []
+                if resourcetype_elem is not None:
+                    for child in list(resourcetype_elem):
+                        tag = child.tag
+                        if '}' in tag:
+                            tag = tag.split('}', 1)[1]
+                        resource_types.append(tag)
+
+                debug_entries.append({
+                    'display_name': displayname_elem.text if displayname_elem is not None else '',
+                    'href': href_elem.text if href_elem is not None else '',
+                    'is_calendar': response_elem.find('.//d:resourcetype/c:calendar', namespaces) is not None,
+                    'is_subscribed': response_elem.find('.//d:resourcetype/cs:subscribed', namespaces) is not None,
+                    'resource_types': resource_types
+                })
+
+        return jsonify({
+            'status_code': response.status_code,
+            'calendar_count': len(debug_entries),
+            'entries': debug_entries
+        })
+
+    except Exception as e:
+        logger.error(f"Error in debug_calendars: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/knowledge/update-embeddings', methods=['POST'])
