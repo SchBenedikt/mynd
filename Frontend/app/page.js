@@ -144,8 +144,36 @@ export default function HomePage() {
   const activeChat = chats.find((chat) => chat.id === activeChatId) || null;
   const messages = activeChat?.messages || [];
   const conversationActive = messages.length > 0;
+  const weatherInfo = securityStatus?.weather || null;
 
   const languageLabel = (code) => languages.find((l) => l.code === code)?.label || code;
+
+  const renderWeatherMiniIcon = (iconType) => {
+    if (iconType === 'rain') {
+      return (
+        <span className="weather-mini-icon rain" aria-hidden="true">
+          <i className="fas fa-cloud"></i>
+          <span className="rain-drop drop-1"></span>
+          <span className="rain-drop drop-2"></span>
+          <span className="rain-drop drop-3"></span>
+        </span>
+      );
+    }
+
+    if (iconType === 'cloud') {
+      return (
+        <span className="weather-mini-icon cloud" aria-hidden="true">
+          <i className="fas fa-cloud"></i>
+        </span>
+      );
+    }
+
+    return (
+      <span className="weather-mini-icon sun" aria-hidden="true">
+        <i className="fas fa-sun"></i>
+      </span>
+    );
+  };
 
   const pickGreeting = (segment, name) => {
     const suffix = name ? `, ${name}` : '';
@@ -1352,6 +1380,12 @@ export default function HomePage() {
           </>
         )}
       </div>
+      {weatherInfo?.success && weatherInfo?.temperature_display && (
+        <div className="weather-mini-widget" title={weatherInfo.description || 'Lokales Wetter'}>
+          {renderWeatherMiniIcon(weatherInfo.icon)}
+          <span className="weather-mini-temp">{weatherInfo.temperature_display}</span>
+        </div>
+      )}
       {photoPreview.open && (
         <div className="image-modal-overlay" onClick={closePhotoPreview}>
           <div className="image-modal" onClick={(e) => e.stopPropagation()}>
