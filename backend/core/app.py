@@ -3219,6 +3219,44 @@ def immich_thumbnail_proxy(asset_id):
         logger.error(f"Immich thumbnail proxy error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/immich/download/<asset_id>', methods=['GET'])
+def immich_download_proxy(asset_id):
+    """Proxy fuer originale Immich-Dateien als Download."""
+    try:
+        username = request.args.get('username')
+
+        client = get_immich_client(username)
+        if not client:
+            return jsonify({'success': False, 'error': 'Immich nicht konfiguriert'}), 400
+
+        filename = f"{asset_id}.jpg"
+        metadata_url = f"{client.url}/api/assets/{asset_id}"
+        metadata_response = requests.get(metadata_url, headers=client._get_headers(), timeout=client.timeout_short)
+        if metadata_response.status_code == 200:
+            metadata = metadata_response.json() if metadata_response.content else {}
+            original_name = metadata.get('originalFileName')
+            if original_name:
+                safe_name = str(original_name).replace('"', '').replace('\n', '').replace('\r', '').strip()
+                if safe_name:
+                    filename = safe_name
+
+        original_url = f"{client.url}/api/assets/{asset_id}/original"
+        upstream = requests.get(original_url, headers=client._get_headers(), timeout=client.timeout_long)
+
+        if upstream.status_code != 200:
+            return jsonify({
+                'success': False,
+                'error': f'Original konnte nicht geladen werden (HTTP {upstream.status_code})'
+            }), upstream.status_code
+
+        response = Response(upstream.content, content_type=upstream.headers.get('Content-Type', 'application/octet-stream'))
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    except Exception as e:
+        logger.error(f"Immich download proxy error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/immich/search-by-context', methods=['POST'])
 def immich_search_by_context():
     """Sucht Fotos basierend auf KI-erkannte Kontextinformationen (Objekte, Tags)"""
