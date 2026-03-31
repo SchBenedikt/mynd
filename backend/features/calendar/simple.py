@@ -6,10 +6,12 @@ Einfacher Nextcloud Kalender-Client (ohne caldav-Dependencies)
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date
+from datetime import timezone
 from typing import List, Dict, Optional, Union
 import logging
 import os
 import sys
+import json
 from urllib.parse import quote
 from dotenv import load_dotenv
 
@@ -52,6 +54,14 @@ class SimpleNextcloudCalendar:
         # Get username from auth provider if not provided
         if not self.username:
             self.username = self.auth_provider.config.get('username', 'unknown')
+
+    def _to_utc(self, dt: datetime) -> datetime:
+        """Konvertiert datetime robust nach UTC für CalDAV time-range Queries."""
+        if dt.tzinfo is None:
+            # Naive Zeiten als lokale Systemzeit interpretieren.
+            local_tz = datetime.now().astimezone().tzinfo
+            dt = dt.replace(tzinfo=local_tz)
+        return dt.astimezone(timezone.utc)
         
     def _make_dav_request(self, endpoint: str) -> requests.Response:
         """Macht eine DAV-Anfrage"""
@@ -125,6 +135,9 @@ class SimpleNextcloudCalendar:
     def get_events(self, calendar_url: str, start_date: datetime, end_date: datetime) -> List[Dict]:
         """Holt Ereignisse für einen Kalender mit korrekter REPORT Methode"""
         try:
+            start_utc = self._to_utc(start_date)
+            end_utc = self._to_utc(end_date)
+
             # Volle URL für den Kalender
             full_url = f"{self.nextcloud_url}{calendar_url}"
             
@@ -137,7 +150,7 @@ class SimpleNextcloudCalendar:
     <c:filter>
         <c:comp-filter name="VCALENDAR">
             <c:comp-filter name="VEVENT">
-                <c:time-range start="{start_date.strftime('%Y%m%dT%H%M%SZ')}" end="{end_date.strftime('%Y%m%dT%H%M%SZ')}"/>
+                    <c:time-range start="{start_utc.strftime('%Y%m%dT%H%M%SZ')}" end="{end_utc.strftime('%Y%m%dT%H%M%SZ')}"/>
             </c:comp-filter>
         </c:comp-filter>
     </c:filter>
@@ -194,7 +207,15 @@ class SimpleNextcloudCalendar:
     def _parse_ical_text(self, ical_text: str) -> List[Dict]:
         """Parst reines iCal-Format in Ereignisse"""
         events = []
-        lines = ical_text.strip().split('\n')
+        # RFC5545 line unfolding: Zeilen mit führendem Leerzeichen gehören zur vorherigen Zeile.
+        raw_lines = ical_text.strip().splitlines()
+        lines = []
+        for raw_line in raw_lines:
+            if raw_line.startswith((' ', '\t')) and lines:
+                lines[-1] += raw_line[1:]
+            else:
+                lines.append(raw_line)
+
         current_event = {}
         
         for line in lines:
@@ -219,23 +240,17 @@ class SimpleNextcloudCalendar:
                     events.append(formatted_event)
                 current_event = {}
             elif ':' in line:
-                # Handle folded lines (continuation lines starting with space)
-                if line.startswith(' ') and current_event:
-                    # Fortsetzungszeile
-                    last_key = list(current_event.keys())[-1]
-                    current_event[last_key] += line[1:]  # Remove leading space
+                # Handle parameterized keys like DTSTART;TZID=Europe/Berlin
+                if ';' in line:
+                    key_part, value = line.split(':', 1)
+                    # Extrahiere den eigentlichen Key vor dem ersten Semikolon
+                    key = key_part.split(';')[0]
+                    current_event[key] = value
+                    # Speichere auch den vollen Key für Referenz
+                    current_event[key_part] = value
                 else:
-                    # Handle parameterized keys like DTSTART;TZID=Europe/Berlin
-                    if ';' in line and ':' in line:
-                        key_part, value = line.split(':', 1)
-                        # Extrahiere den eigentlichen Key vor dem ersten Semikolon
-                        key = key_part.split(';')[0]
-                        current_event[key] = value
-                        # Speichere auch den vollen Key für Referenz
-                        current_event[key_part] = value
-                    else:
-                        key, value = line.split(':', 1)
-                        current_event[key] = value
+                    key, value = line.split(':', 1)
+                    current_event[key] = value
         
         return events
     
@@ -250,15 +265,19 @@ class SimpleNextcloudCalendar:
                 # Entferne Parameter wie TZID
                 dt_str = dt_str.split(':')[-1] if ':' in dt_str else dt_str
             
-            # iCal Format: 20260328T093000 oder 20260328
+            # iCal Format: 20260328T093000, 20260328T093000Z, 20260328T0930 oder 20260328
             if 'T' in dt_str:
-                # Mit Zeit
-                if dt_str.endswith('Z'):
-                    # UTC Zeit
-                    dt = datetime.strptime(dt_str, '%Y%m%dT%H%M%SZ')
-                else:
-                    # Lokale Zeit
-                    dt = datetime.strptime(dt_str, '%Y%m%dT%H%M%S')
+                # Mit Zeit (mehrere häufige Varianten)
+                parsed = None
+                for fmt in ('%Y%m%dT%H%M%SZ', '%Y%m%dT%H%M%S', '%Y%m%dT%H%MZ', '%Y%m%dT%H%M'):
+                    try:
+                        parsed = datetime.strptime(dt_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+                if parsed is None:
+                    raise ValueError(f"Unsupported iCal datetime format: {dt_str}")
+                dt = parsed
                 return dt.strftime('%d.%m.%Y %H:%M')
             else:
                 # Nur Datum
@@ -474,13 +493,35 @@ def create_simple_calendar_manager(nextcloud_url: str = None, username: str = No
         SimpleNextcloudCalendar instance or None if creation failed
     """
     try:
+        def load_indexing_fallback() -> Dict[str, str]:
+            """Lädt Nextcloud-Fallback aus backend/config/indexing_config.json."""
+            try:
+                config_file = os.path.join(
+                    os.path.dirname(__file__), '..', '..', 'config', 'indexing_config.json'
+                )
+                config_file = os.path.abspath(config_file)
+                if not os.path.exists(config_file):
+                    return {}
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                return {
+                    'url': str(data.get('url', '')).strip(),
+                    'username': str(data.get('username', '')).strip(),
+                    'password': str(data.get('password', '')).strip()
+                }
+            except Exception as e:
+                logger.warning(f"Could not load calendar fallback config: {e}")
+                return {}
+
+        fallback = load_indexing_fallback()
+
         # Konfiguration aus .env Datei falls nicht direkt übergeben
         if not nextcloud_url:
-            nextcloud_url = os.getenv('NEXTCLOUD_URL')
+            nextcloud_url = fallback.get('url') or os.getenv('NEXTCLOUD_URL')
         if not username:
-            username = os.getenv('NEXTCLOUD_USERNAME')
+            username = fallback.get('username') or os.getenv('NEXTCLOUD_USERNAME')
         if not password:
-            password = os.getenv('NEXTCLOUD_PASSWORD')
+            password = fallback.get('password') or os.getenv('NEXTCLOUD_PASSWORD')
 
         print(f"DEBUG: URL={nextcloud_url}")
         print(f"DEBUG: Username={username}")
