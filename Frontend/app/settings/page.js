@@ -20,6 +20,9 @@ export default function SettingsPage() {
   const [aiModel, setAiModel] = useState('');
   const [aiModels, setAiModels] = useState([]);
   const [aiStatus, setAiStatus] = useState('');
+  const [immichUrlDefault, setImmichUrlDefault] = useState('');
+  const [immichApiKeyDefault, setImmichApiKeyDefault] = useState('');
+  const [immichStatus, setImmichStatus] = useState('');
   
   const [indexingProgress, setIndexingProgress] = useState(0);
   const [indexingStatus, setIndexingStatus] = useState('idle');
@@ -47,6 +50,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadAIConfig();
+    loadImmichConfig();
     loadOllamaModels();
     loadNextcloudConfig();
     updateStatus();
@@ -197,6 +201,64 @@ export default function SettingsPage() {
       setAiModels(data.models || []);
     } catch (err) {
       console.error('Error loading models:', err);
+    }
+  };
+
+  const loadImmichConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ui/system-config`);
+      const data = await res.json();
+      if (res.ok && data?.success && data?.config) {
+        setImmichUrlDefault(data.config.immich_url_default || '');
+        setImmichApiKeyDefault(data.config.immich_api_key_default || '');
+        setImmichStatus('Loaded');
+      } else {
+        setImmichStatus('Error loading Immich config');
+      }
+    } catch (err) {
+      setImmichStatus('Error loading Immich config');
+    }
+  };
+
+  const saveImmichConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ui/system-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          immich_url_default: immichUrlDefault,
+          immich_api_key_default: immichApiKeyDefault
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setImmichStatus('Saved successfully');
+      } else {
+        setImmichStatus(`Error: ${data?.error || 'Could not save Immich config'}`);
+      }
+    } catch (err) {
+      setImmichStatus('Error: ' + err.message);
+    }
+  };
+
+  const testImmichConnection = async () => {
+    try {
+      setImmichStatus('Testing connection...');
+      const res = await fetch(`${API_BASE}/api/immich/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setImmichStatus('Connection successful');
+      } else {
+        setImmichStatus(`Connection failed: ${data?.error || data?.message || 'Unknown error'}`);
+      }
+    } catch (err) {
+      setImmichStatus('Connection failed: ' + err.message);
     }
   };
 
@@ -420,6 +482,36 @@ export default function SettingsPage() {
                     <button className="btn primary" onClick={saveAIConfig}>Save</button>
                   </div>
                   {aiStatus && <div className="status-text">{aiStatus}</div>}
+                </div>
+
+                <div className="panel-section" style={{marginTop: '2rem'}}>
+                  <div className="section-title">Immich Integration</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                    Configure global Immich defaults for photo search.
+                  </p>
+                  <div className="input-group">
+                    <label>Immich URL</label>
+                    <input
+                      type="text"
+                      value={immichUrlDefault}
+                      onChange={(e) => setImmichUrlDefault(e.target.value)}
+                      placeholder="https://immich.example.com"
+                    />
+                  </div>
+                  <div className="input-group">
+                    <label>Immich API Key</label>
+                    <input
+                      type="password"
+                      value={immichApiKeyDefault}
+                      onChange={(e) => setImmichApiKeyDefault(e.target.value)}
+                      placeholder="immich-api-key"
+                    />
+                  </div>
+                  <div className="button-group">
+                    <button className="btn primary" onClick={saveImmichConfig}>Save Immich</button>
+                    <button className="btn" onClick={testImmichConnection}>Test Connection</button>
+                  </div>
+                  {immichStatus && <div className="status-text">{immichStatus}</div>}
                 </div>
               </div>
             )}
