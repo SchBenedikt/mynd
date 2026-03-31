@@ -240,6 +240,11 @@ body {
   display: grid;
   grid-template-columns: 260px 1fr;
   overflow: hidden;
+  transition: grid-template-columns 0.2s ease;
+}
+
+.container.sidebar-collapsed {
+  grid-template-columns: 72px 1fr;
 }
 
 /* Topbar */
@@ -351,8 +356,56 @@ body {
   padding: 1rem;
 }
 
+.left-sidebar.collapsed {
+  align-items: center;
+  padding: 0.9rem 0.5rem;
+}
+
+.left-sidebar.collapsed .new-chat-btn,
+.left-sidebar.collapsed .history-item,
+.left-sidebar.collapsed .status-badge {
+  justify-content: center;
+  width: 44px;
+  min-width: 44px;
+  padding: 0.65rem;
+}
+
+.left-sidebar.collapsed .new-chat-btn {
+  margin-bottom: 0.7rem;
+}
+
+.left-sidebar.collapsed .chat-history {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.left-sidebar.collapsed .sidebar-footer {
+  width: 100%;
+}
+
 .sidebar-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 1rem;
+}
+
+.sidebar-toggle {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--chip-bg);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sidebar-toggle:hover {
+  background: var(--chip-hover);
+  color: var(--ink);
 }
 
 .new-chat-btn {
@@ -398,6 +451,10 @@ body {
   display: flex;
   align-items: center;
   gap: 0.7rem;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
   padding: 0.6rem 0.8rem;
   border-radius: 10px;
   cursor: pointer;
@@ -450,6 +507,25 @@ body {
   flex-direction: column;
   overflow: hidden;
   background: transparent;
+  position: relative;
+}
+
+.sidebar-fab {
+  position: absolute;
+  top: 0.9rem;
+  left: 0.9rem;
+  z-index: 30;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--chip-bg);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.sidebar-fab:hover {
+  background: var(--chip-hover);
 }
 
 /* Full Settings View */
@@ -1353,6 +1429,10 @@ body {
 
 @media (max-width: 768px) {
   .container {
+    grid-template-columns: 1fr;
+  }
+
+  .container.sidebar-collapsed {
     grid-template-columns: 1fr;
   }
   
