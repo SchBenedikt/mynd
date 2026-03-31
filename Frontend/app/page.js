@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SourceCard from '../components/SourceCard';
+import SuggestionsPanel from '../components/SuggestionsPanel';
 import { useTheme } from '../hooks/useTheme';
 import { useLanguage } from '../hooks/useLanguage';
 
@@ -730,7 +731,21 @@ export default function HomePage() {
                 <i className="fas fa-arrow-right"></i>
               </button>
             </div>
-            
+
+            {/* Query Suggestions Panel */}
+            <SuggestionsPanel
+              language={language}
+              username="default"
+              chatHistory={chats}
+              onSuggestionClick={(suggestion) => {
+                if (inputRef.current) {
+                  inputRef.current.value = suggestion;
+                  sendMessage(suggestion);
+                }
+              }}
+              t={t}
+            />
+
             {/* Indexing Status Panel */}
             {(indexingStatus !== 'idle' || indexingDetails.processedFiles > 0) && (
               <div className="indexing-panel" style={{
