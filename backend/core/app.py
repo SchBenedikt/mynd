@@ -17,6 +17,9 @@ from typing import Optional, List, Dict, Any
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
+# Import package side effects to register all API clients in APIRegistry.
+import backend.features.integration  # noqa: F401
+
 from backend.features.documents.parser import DocumentParser
 from backend.features.integration.nextcloud_client import NextcloudClient
 from backend.features.integration.activity_client import NextcloudActivityClient
@@ -3565,8 +3568,140 @@ def _extract_nina_warning_items(payload: Any, limit: int = 5) -> List[Dict[str, 
     return items[:limit]
 
 
+def _classify_weather_icon(weather_id: Optional[int], weather_main: str) -> str:
+    main = _safe_text(weather_main).lower()
+    if weather_id is not None and 200 <= int(weather_id) < 700:
+        return 'rain'
+    if any(token in main for token in ['rain', 'drizzle', 'thunder', 'snow']):
+        return 'rain'
+    if any(token in main for token in ['cloud', 'mist', 'fog', 'haze', 'smoke']):
+        return 'cloud'
+    return 'sun'
+
+
+def _format_temperature(value: Any, units: str) -> str:
+    try:
+        temp = float(value)
+    except (TypeError, ValueError):
+        return ''
+
+    if units == 'imperial':
+        return f"{round(temp)}°F"
+    if units == 'standard':
+        return f"{round(temp)}K"
+    return f"{round(temp)}°C"
+
+
+def get_local_weather_status() -> Dict[str, Any]:
+    """Collect local weather and forecast from OpenWeather for configured coordinates."""
+    result = {
+        'success': False,
+        'configured': False,
+        'status': 'not_configured',
+        'location_name': '',
+        'lat': None,
+        'lon': None,
+        'temperature': None,
+        'temperature_display': '',
+        'description': '',
+        'icon': 'sun',
+        'alerts': [],
+        'alerts_count': 0,
+        'hourly_preview': '',
+        'daily_preview': '',
+        'summary': ''
+    }
+
+    try:
+        registry = get_api_registry()
+        config = registry.load_config('openweather')
+        result['location_name'] = _safe_text(config.get('location_name'))
+
+        client = registry.create_api_instance('openweather')
+        if not client:
+            result['summary'] = 'OpenWeather ist nicht konfiguriert.'
+            return result
+
+        result['configured'] = True
+        payload = client.get_current_and_forecast(exclude='minutely')
+        current = payload.get('current') if isinstance(payload, dict) else {}
+        weather_entries = current.get('weather') if isinstance(current, dict) else []
+        weather = weather_entries[0] if isinstance(weather_entries, list) and weather_entries else {}
+
+        result['status'] = 'ok'
+        result['success'] = True
+        result['lat'] = payload.get('lat')
+        result['lon'] = payload.get('lon')
+        result['temperature'] = current.get('temp')
+        result['temperature_display'] = _format_temperature(current.get('temp'), client.units)
+        result['description'] = _safe_text(weather.get('description') or weather.get('main'))
+        result['icon'] = _classify_weather_icon(weather.get('id'), weather.get('main'))
+
+        hourly = payload.get('hourly') if isinstance(payload, dict) else []
+        if isinstance(hourly, list) and len(hourly) > 1 and isinstance(hourly[1], dict):
+            next_hour_temp = _format_temperature(hourly[1].get('temp'), client.units)
+            next_hour_pop = hourly[1].get('pop')
+            pop_text = ''
+            try:
+                if next_hour_pop is not None:
+                    pop_text = f", Regenwahrscheinlichkeit {round(float(next_hour_pop) * 100)}%"
+            except (TypeError, ValueError):
+                pop_text = ''
+            if next_hour_temp:
+                result['hourly_preview'] = f"In der naechsten Stunde etwa {next_hour_temp}{pop_text}."
+
+        daily = payload.get('daily') if isinstance(payload, dict) else []
+        if isinstance(daily, list) and len(daily) > 1 and isinstance(daily[1], dict):
+            tomorrow = daily[1]
+            temp_block = tomorrow.get('temp') if isinstance(tomorrow.get('temp'), dict) else {}
+            t_min = _format_temperature(temp_block.get('min'), client.units)
+            t_max = _format_temperature(temp_block.get('max'), client.units)
+            if t_min and t_max:
+                result['daily_preview'] = f"Morgen voraussichtlich zwischen {t_min} und {t_max}."
+
+        alerts = payload.get('alerts') if isinstance(payload, dict) else []
+        if isinstance(alerts, list):
+            normalized = []
+            for entry in alerts[:5]:
+                if not isinstance(entry, dict):
+                    continue
+                normalized.append({
+                    'event': _safe_text(entry.get('event')),
+                    'sender_name': _safe_text(entry.get('sender_name')),
+                    'description': _safe_text(entry.get('description')),
+                    'start': entry.get('start'),
+                    'end': entry.get('end')
+                })
+            result['alerts'] = normalized
+            result['alerts_count'] = len(normalized)
+
+        location_label = result['location_name'] or 'deinem Standort'
+        temp_label = result['temperature_display'] or 'n/a'
+        desc_label = result['description'] or 'unbekannt'
+        if result['alerts_count'] > 0:
+            result['summary'] = (
+                f"Aktuell {temp_label} und {desc_label} in {location_label}. "
+                f"Es liegen {result['alerts_count']} Wetterwarnung(en) vor."
+            )
+        else:
+            result['summary'] = f"Aktuell {temp_label} und {desc_label} in {location_label}."
+
+        if result['hourly_preview']:
+            result['summary'] = f"{result['summary']} {result['hourly_preview']}"
+        if result['daily_preview']:
+            result['summary'] = f"{result['summary']} {result['daily_preview']}"
+
+        return result
+
+    except Exception as exc:
+        logger.warning('OpenWeather status failed: %s', exc)
+        result['status'] = 'error'
+        result['summary'] = f"Wetter konnte nicht geladen werden: {str(exc)}"
+        return result
+
+
 def get_local_security_status() -> Dict[str, Any]:
-    """Collect local security status from configured NINA and DWD sources."""
+    """Collect local security status from configured NINA plus weather from OpenWeather."""
     result = {
         'success': True,
         'ars': '',
@@ -3574,11 +3709,10 @@ def get_local_security_status() -> Dict[str, Any]:
         'nina_warnings': [],
         'headline': '',
         'summary': '',
-        'dwd_station_ids': '',
-        'dwd_status': 'unknown',
+        'weather': {},
         'sources': {
             'nina': False,
-            'dwd': False
+            'openweather': False
         },
         'errors': []
     }
@@ -3608,28 +3742,13 @@ def get_local_security_status() -> Dict[str, Any]:
         logger.error("NINA security status failed: %s", exc)
         result['errors'].append(f"NINA Fehler: {str(exc)}")
 
-    # DWD status probe for configured station IDs
     try:
-        dwd_config = registry.load_config('dwd')
-        station_ids = _safe_text(dwd_config.get('station_ids'))
-        result['dwd_station_ids'] = station_ids
-
-        dwd_client = registry.create_api_instance('dwd')
-        if dwd_client:
-            result['sources']['dwd'] = True
-            if station_ids:
-                ids = [entry.strip() for entry in station_ids.split(',') if entry.strip()]
-                dwd_client.get_station_overview_extended(ids)
-                result['dwd_status'] = 'ok'
-            else:
-                result['dwd_status'] = 'not_configured'
-        else:
-            result['dwd_status'] = 'unavailable'
-            result['errors'].append('DWD Client nicht verfuegbar')
+        weather = get_local_weather_status()
+        result['weather'] = weather
+        result['sources']['openweather'] = weather.get('configured', False)
     except Exception as exc:
-        logger.warning("DWD security status failed: %s", exc)
-        result['dwd_status'] = 'error'
-        result['errors'].append(f"DWD Fehler: {str(exc)}")
+        logger.warning('OpenWeather attach failed: %s', exc)
+        result['errors'].append(f"OpenWeather Fehler: {str(exc)}")
 
     if result['nina_warning_count'] > 0:
         result['headline'] = f"{result['nina_warning_count']} aktive Warnung(en) fuer deinen Standort"
@@ -3666,9 +3785,25 @@ def is_security_query(message: str) -> bool:
     return any(keyword in text for keyword in keywords)
 
 
+def is_weather_query(message: str) -> bool:
+    text = (message or '').lower()
+    keywords = [
+        'wetter',
+        'temperatur',
+        'vorhersage',
+        'forecast',
+        'regen',
+        'sonne',
+        'wind',
+        'wie warm',
+        'weather'
+    ]
+    return any(keyword in text for keyword in keywords)
+
+
 @app.route('/api/location/resolve', methods=['POST'])
 def resolve_location():
-    """Resolve browser location to NINA ARS and nearest DWD station."""
+    """Resolve browser location to NINA ARS and OpenWeather coordinates."""
     try:
         payload = request.get_json() or {}
         latitude = payload.get('lat')
@@ -3703,27 +3838,23 @@ def resolve_location():
                     nina_config['ars'] = resolved.get('ars')
                     registry.save_config('nina', nina_config)
 
-        dwd_result = None
-        dwd_error = None
-        dwd_client = registry.create_api_instance('dwd')
-        if dwd_client:
+        openweather_result = {
+            'lat': latitude,
+            'lon': longitude,
+            'location_name': _safe_text(display_name)
+        }
+        openweather_error = None
+        if save_config:
             try:
-                station = dwd_client.find_nearest_station(latitude, longitude)
-                if station and station.get('station_id'):
-                    dwd_result = {
-                        'station_id': station.get('station_id'),
-                        'name': station.get('name'),
-                        'distance_km': station.get('distance_km')
-                    }
-                    if save_config:
-                        dwd_config = registry.load_config('dwd')
-                        dwd_config['station_ids'] = station.get('station_id')
-                        registry.save_config('dwd', dwd_config)
+                openweather_config = registry.load_config('openweather')
+                openweather_config['lat'] = latitude
+                openweather_config['lon'] = longitude
+                if display_name:
+                    openweather_config['location_name'] = display_name
+                registry.save_config('openweather', openweather_config)
             except Exception as exc:
-                # DWD stationOverview endpoints require stationIds and may fail for nearest lookup.
-                # Location resolution should still succeed for NINA.
-                dwd_error = str(exc)
-                logger.warning("DWD nearest-station resolve failed: %s", exc)
+                openweather_error = str(exc)
+                logger.warning('Could not persist OpenWeather coordinates: %s', exc)
 
         return jsonify({
             'success': True,
@@ -3734,8 +3865,8 @@ def resolve_location():
                 'address': address
             },
             'nina': nina_result,
-            'dwd': dwd_result,
-            'dwd_error': dwd_error
+            'openweather': openweather_result,
+            'openweather_error': openweather_error
         })
 
     except Exception as e:
@@ -3872,12 +4003,23 @@ def nina_regions():
 
 @app.route('/api/security/status', methods=['GET'])
 def security_status():
-    """Get local security status based on configured NINA ARS (+ DWD probe)."""
+    """Get local security status based on configured NINA ARS and OpenWeather."""
     try:
         data = get_local_security_status()
         return jsonify(data)
     except Exception as e:
         logger.error(f"Security status error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/weather/current', methods=['GET'])
+def weather_current():
+    """Get local current weather and forecast summary from OpenWeather."""
+    try:
+        data = get_local_weather_status()
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Weather current error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/autobahn/roads', methods=['GET'])
@@ -4462,6 +4604,38 @@ def agent_query():
                 'context_used': False,
                 'context_count': 0,
                 'intent': 'tasks',
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': False
+                }
+            })
+
+        # Weather shortcut: direct response without LLM
+        if is_weather_query(prompt):
+            weather = get_local_weather_status()
+            response_text = weather.get('summary') or 'Wetter konnte aktuell nicht ermittelt werden.'
+            if weather.get('alerts_count', 0) > 0:
+                alert_lines = []
+                for idx, alert in enumerate((weather.get('alerts') or [])[:3], 1):
+                    event = alert.get('event') or f'Warnung {idx}'
+                    sender = _safe_text(alert.get('sender_name'))
+                    if sender:
+                        alert_lines.append(f"{idx}. {event} ({sender})")
+                    else:
+                        alert_lines.append(f"{idx}. {event}")
+                if alert_lines:
+                    response_text = response_text + "\n" + "\n".join(alert_lines)
+
+            return jsonify({
+                'success': True,
+                'response': response_text,
+                'action': 'weather_status',
+                'context_used': True,
+                'context_count': weather.get('alerts_count', 0),
+                'intent': 'weather',
+                'weather': weather,
                 'sources_used': {
                     'photos': False,
                     'files': False,
