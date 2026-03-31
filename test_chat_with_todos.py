@@ -34,8 +34,13 @@ def test_chat_with_todos():
             
             # Chat API aufrufen
             response = requests.post(
-                f"{BASE_URL}/api/chat",
-                json={"message": message},
+                f"{BASE_URL}/api/agent/query",
+                json={
+                    "prompt": message,
+                    "language": "de",
+                    "preferred_source": "auto",
+                    "context": ""
+                },
                 timeout=30
             )
             

@@ -1492,303 +1492,6 @@ def try_migrate_existing_data():
     except Exception as e:
         logger.warning(f"Migration failed: {str(e)}")
 
-@app.route('/api/chat', methods=['POST'])
-def chat():
-    data = request.json
-    message = data.get('message', '')
-    feedback = data.get('feedback', None)  # Optionales Feedback für Training
-    
-    if not message:
-        return jsonify({'error': 'Keine Nachricht erhalten'}), 400
-    
-    # Intelligente Kalender-/Aktivitäts-Erkennung ohne harte Workflows im Frontend
-    calendar_context = None
-    todo_context = None
-    activity_context = None
-    
-    # Lasse die KI entscheiden, ob es eine Kalender-Frage ist
-    # durch semantische Analyse statt feste Keywords
-    message_lower = message.lower()
-    
-    # Direkte Termin-Erstellung aus Chat-Nachricht
-    if is_calendar_create_query(message):
-        event_info = extract_event_info_from_message(message)
-        if event_info['missing_info']:
-            missing = ', '.join(event_info['missing_info'])
-
-            calendars = []
-            if simple_calendar_manager:
-                try:
-                    calendars = simple_calendar_manager.get_calendars()
-                except Exception as e:
-                    logger.warning(f"Could not load calendars for interactive form: {e}")
-
-            return jsonify({
-                'response': f"Ich kann den Termin erstellen, mir fehlen aber noch: {missing}.",
-                'action': 'calendar_missing_input',
-                'requires_input': True,
-                'missing_info': event_info['missing_info'],
-                'extracted_info': {
-                    'title': event_info.get('title'),
-                    'start_time': event_info.get('start_time'),
-                    'end_time': event_info.get('end_time'),
-                    'location': event_info.get('location'),
-                    'calendar_name': event_info.get('calendar_name')
-                },
-                'available_calendars': calendars,
-                'context_used': False,
-                'context_count': 0,
-                'calendar_used': True,
-                'training_saved': False,
-                'sources': []
-            })
-
-        create_result = create_calendar_event(
-            title=event_info['title'],
-            start_time=event_info['start_time'],
-            end_time=event_info['end_time'],
-            calendar_name=event_info['calendar_name'],
-            location=event_info['location'],
-            description=message
-        )
-
-        if create_result.get('success'):
-            return jsonify({
-                'response': create_result.get('message', 'Termin wurde erstellt.'),
-                'action': 'calendar_created',
-                'calendar_used': True,
-                'context_used': False,
-                'context_count': 0,
-                'training_saved': False,
-                'sources': [],
-                'created_event': create_result
-            })
-
-        return jsonify({
-            'response': f"Der Termin konnte nicht erstellt werden: {create_result.get('error', 'Unbekannter Fehler')}",
-            'action': 'calendar_create_failed',
-            'calendar_used': True,
-            'context_used': False,
-            'context_count': 0,
-            'training_saved': False,
-            'sources': []
-        })
-
-    # TODOS erkennen - NOW RE-ENABLED: Auto-loading is fast because tasks are loaded from DB (not WebDAV)
-    if is_todo_query(message):
-        try:
-            todo_context = get_todo_context(message)
-            if todo_context:
-                logger.info(f"Todo context found: {len(todo_context)} characters")
-        except Exception as e:
-            logger.error(f"Todo error: {e}")
-
-    # Aktivitätsfragen direkt aus Nextcloud Activity API beantworten
-    is_activity_question = is_activity_query(message)
-    if is_activity_question:
-        updates_result = get_updates_context(activity_limit=10, notifications_limit=10)
-        activity_context = updates_result.get('context', '')
-
-        # Für reine Aktivitätsfragen direkt antworten statt KI-Halluzination riskieren
-        if not is_todo_query(message) and not any(k in message_lower for k in ['termin', 'kalender', 'aufgabe', 'todo', 'task']):
-            return jsonify({
-                'response': updates_result.get('summary_text', 'Keine Aktivitätsdaten verfügbar.'),
-                'action': 'activity_lookup',
-                'context_used': bool(activity_context),
-                'context_count': 1 if activity_context else 0,
-                'calendar_used': False,
-                'training_saved': False,
-                'sources': [{
-                    'source': 'Nextcloud Updates API',
-                    'path': 'nextcloud/updates',
-                    'content_preview': activity_context[:200] + '...' if activity_context and len(activity_context) > 200 else activity_context,
-                    'similarity_score': 1.0,
-                    'chunk_id': '',
-                    'document_id': '',
-                    'search_type': 'api'
-                }] if activity_context else []
-            })
-    
-    # Nur grundlegende Prüfung, ob es zeitbezogen sein könnte
-    time_related_indicators = [
-        'wann', 'wann', 'wann', 'zeit', 'datum', 'termin', 'ereignis', 'appointment', 
-        'event', 'kalender', 'heute', 'morgen', 'woche', 'tag', 'monat',
-        'steht an', 'habe ich', 'mache ich', 'ist geplant', 'vorhaben'
-    ]
-    
-    # Prüfe ob zeitbezogene Indikatoren vorhanden sind
-    has_time_indicators = any(indicator in message_lower for indicator in time_related_indicators)
-    
-    # Zusätzliche Prüfung auf Fragewörter die auf Zeit hindeuten
-    question_words = ['was', 'welche', 'wie', 'wann', 'ob', 'kannst du']
-    has_question = any(word in message_lower.split()[:3] for word in question_words)
-    
-    # Die KI soll selbst entscheiden, aber nur wenn es wirklich zeitbezogen sein könnte
-    is_potentially_calendar_query = has_time_indicators and has_question
-    
-    # Wenn potenzielle Kalender-Frage, hole Kalender-Daten mit besserer Fehlerbehandlung
-    if is_potentially_calendar_query and calendar_enabled:
-        try:
-            calendar_context = get_calendar_context(message)
-            if calendar_context:
-                logger.info(f"Calendar context found: {len(calendar_context)} characters")
-            else:
-                logger.info("Potential calendar query but no context generated")
-        except Exception as e:
-            logger.error(f"Calendar error: {e}")
-            # Fallback-Kontext bei Kalenderfehlern
-            calendar_context = f"=== KALENDER-FEHLER ===\n\nLeider konnte ich nicht auf deinen Kalender zugreifen.\nFehler: {str(e)[:100]}\n\nBitte überprüfe deine Kalender-Konfiguration."
-    
-    # Suche nach relevantem Wissen mit mehr Ergebnissen
-    try:
-        relevant_context = knowledge_base.search_knowledge(message, k=10)  # Mehr Kontext!
-        logger.info(f"Found {len(relevant_context)} context items for query: {message[:50]}...")
-    except Exception as e:
-        logger.error(f"Search error: {str(e)}")
-        relevant_context = []
-    
-    # Chat-Nachrichten vorbereiten
-    messages = [
-        {'role': 'user', 'content': message}
-    ]
-    
-    # Kombiniere Kontexte (Wissensbasis + Kalender + Todos)
-    combined_context = relevant_context.copy()
-    
-    # Füge Todo-Kontext hinzu wenn vorhanden
-    if todo_context:
-        combined_context.insert(0, {
-            'content': todo_context,
-            'source': 'Todos',
-            'source_type': 'todo',
-            'path': 'todos',
-            'similarity_score': 1.0,
-            'metadata': {}
-        })
-
-    if calendar_context:
-        # Füge Kalender-Kontext als speziellen Kontext hinzu
-        combined_context.insert(0, {
-            'content': calendar_context,
-            'source': 'Kalender',
-            'source_type': 'calendar',
-            'path': 'calendar',
-            'similarity_score': 1.0,
-            'metadata': {}
-        })
-
-    if activity_context:
-        combined_context.insert(0, {
-            'content': activity_context,
-            'source': 'Nextcloud Activity API',
-            'path': 'nextcloud/activity',
-            'similarity_score': 1.0,
-            'metadata': {}
-        })
-    
-    # Anfrage an Ollama senden mit verbessertem Kontext
-    try:
-        response = ollama_client.chat(messages, combined_context)
-        
-        if 'error' in response:
-            logger.error(f"Ollama error: {response['error']}")
-            return jsonify({'error': response['error']}), 500
-        
-        ai_response = response.get('message', {}).get('content', 'Entschuldigung, ich konnte keine Antwort generieren.')
-        
-        # Speichere Trainings-Interaktion
-        try:
-            training_manager.save_training_interaction(message, combined_context, ai_response, feedback)
-        except Exception as e:
-            logger.warning(f"Failed to save training interaction: {str(e)}")
-        
-        # Debug-Informationen loggen
-        context_used = len(combined_context) > 0
-        logger.info(f"Response generated, context used: {context_used}")
-        if calendar_context:
-            logger.info(f"Calendar context included in response")
-        if todo_context:
-            logger.info(f"Todo context included in response")
-        
-        # ACTION PARSER: Versuche natürlichsprachige Aktionen auszuführen
-        action_response = None
-        try:
-            # Erkenne "erstelle erinnerung/task/todo für [datum]: [titel]"
-            import re
-            
-            # Pattern: "erstelle (erinnerung|aufgabe|task|todo) für (morgen|heute|[datum]) *: *(.+)"
-            pattern = r'(?:erstelle|create)\s+(?:eine?\s+)?(?:erinnerung|aufgabe|task|todo|aufgaben|tasks|reminder)\s+(?:für|um)\s+([^:]+):\s*(.+?)(?:\.|$)'
-            match = re.search(pattern, message.lower())
-            
-            if match:
-                time_ref = match.group(1).strip()
-                title = match.group(2).strip()
-                
-                # Parse the time reference
-                due_date = None
-                if 'morgen' in time_ref or 'tomorrow' in time_ref:
-                    due_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-                elif 'heute' in time_ref or 'today' in time_ref:
-                    due_date = datetime.now().strftime('%Y-%m-%d')
-                
-                # Create the task if we parsed everything
-                if title and tasks_enabled and task_manager.tasks_client:
-                    try:
-                        success = task_manager.create_task(
-                            title=title,
-                            due_date=due_date,
-                            list_name='todo'
-                        )
-                        if success:
-                            action_response = f"✓ Erinnerung '{title}' wurde erstellt (fällig: {due_date or 'unbegrenzt'})"
-                            logger.info(f"Action executed: Created task '{title}'")
-                    except Exception as e:
-                        logger.warning(f"Failed to create task from action: {e}")
-        except Exception as e:
-            logger.debug(f"Action parser error (this is OK): {e}")
-        
-        # Prepare detailed source attribution
-        sources = []
-        for ctx in combined_context:
-            source_type = ctx.get('source_type', 'file')
-
-            source_info = {
-                'source': ctx.get('source', 'Unknown'),
-                'source_type': source_type,
-                'path': ctx.get('path', ''),
-                'content_preview': ctx.get('content', '')[:200] + '...' if len(ctx.get('content', '')) > 200 else ctx.get('content', ''),
-                'similarity_score': ctx.get('similarity_score', 0.0),
-                'chunk_id': ctx.get('chunk_id', ''),
-                'document_id': ctx.get('document_id', ''),
-                'search_type': ctx.get('search_type', 'unknown'),
-                'metadata': ctx.get('metadata', {})
-            }
-            sources.append(source_info)
-        
-        return jsonify({
-            'response': ai_response,
-            'action': action_response,  # Include action result if any
-            'context_used': context_used,
-            'context_count': len(combined_context),
-            'calendar_used': calendar_context is not None,
-            'training_saved': True,
-            'sources': sources,  # Detailed source attribution
-            'debug_info': {
-                'query': message,
-                'found_context': len(relevant_context),
-                'context_sources': [c.get('source', 'Unknown') for c in relevant_context[:3]],
-                'response_length': len(ai_response)
-            }
-        })
-    except Exception as e:
-        logger.error(f"Chat error: {str(e)}")
-        # Fallback-Antwort bei Ollama-Problemen
-        return jsonify({
-            'response': f'Entschuldigung, bei der Verarbeitung deiner Anfrage ist ein Fehler aufgetreten. ({str(e)[:100]}...). Versuche es bitte noch einmal.',
-            'context_used': False,
-            'error': str(e)
-        })
-
 @app.route('/api/indexing/start', methods=['POST'])
 def start_indexing():
     """Startet die Hintergrund-Indexierung"""
@@ -3681,7 +3384,8 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
 
     # Erkenne Kalender-Anfragen
     time_keywords = ['termin', 'termine', 'kalender', 'heute', 'morgen', 'wann', 'woche',
-                    'datum', 'event', 'ereignis', 'meeting', 'appointment']
+                    'datum', 'event', 'ereignis', 'meeting', 'appointment',
+                    'steht an', 'habe ich', 'mache ich', 'ist geplant', 'vorhaben']
     has_time = any(keyword in prompt_lower for keyword in time_keywords)
 
     # Erkenne Task-Anfragen
@@ -3726,6 +3430,150 @@ def agent_query():
                 'success': False,
                 'error': 'Keine Anfrage erhalten'
             }), 400
+
+        message_lower = prompt.lower()
+
+        # Action parser: explicit reminder/task creation
+        action_response = None
+        try:
+            import re
+
+            pattern = r'(?:erstelle|create)\s+(?:eine?\s+)?(?:erinnerung|aufgabe|task|todo|aufgaben|tasks|reminder)\s+(?:fuer|für|um)\s+([^:]+):\s*(.+?)(?:\.|$)'
+            match = re.search(pattern, message_lower)
+
+            if match:
+                time_ref = match.group(1).strip()
+                title = match.group(2).strip()
+
+                due_date = None
+                if 'morgen' in time_ref or 'tomorrow' in time_ref:
+                    due_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                elif 'heute' in time_ref or 'today' in time_ref:
+                    due_date = datetime.now().strftime('%Y-%m-%d')
+
+                if title and tasks_enabled and task_manager.tasks_client:
+                    success = task_manager.create_task(
+                        title=title,
+                        due_date=due_date,
+                        list_name='todo'
+                    )
+                    if success:
+                        action_response = f"✓ Erinnerung '{title}' wurde erstellt (faellig: {due_date or 'unbegrenzt'})"
+        except Exception as e:
+            logger.debug(f"Action parser error (this is OK): {e}")
+
+        if action_response:
+            return jsonify({
+                'success': True,
+                'response': action_response,
+                'action': 'task_created',
+                'context_used': False,
+                'context_count': 0,
+                'intent': 'tasks',
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': False
+                }
+            })
+
+        # Activity shortcut: direct response without LLM
+        activity_context = None
+        is_activity_question = is_activity_query(prompt)
+        if is_activity_question:
+            updates_result = get_updates_context(activity_limit=10, notifications_limit=10)
+            activity_context = updates_result.get('context', '')
+
+            if not is_todo_query(prompt) and not any(k in message_lower for k in ['termin', 'kalender', 'aufgabe', 'todo', 'task']):
+                return jsonify({
+                    'success': True,
+                    'response': updates_result.get('summary_text', 'Keine Aktivitaetsdaten verfuegbar.'),
+                    'action': 'activity_lookup',
+                    'context_used': bool(activity_context),
+                    'context_count': 1 if activity_context else 0,
+                    'intent': 'activity',
+                    'sources_used': {
+                        'photos': False,
+                        'files': False,
+                        'calendar': False,
+                        'todos': False
+                    }
+                })
+
+        # Calendar heuristic (same as legacy /api/chat)
+        time_related_indicators = [
+            'wann', 'zeit', 'datum', 'termin', 'ereignis', 'appointment',
+            'event', 'kalender', 'heute', 'morgen', 'woche', 'tag', 'monat',
+            'steht an', 'habe ich', 'mache ich', 'ist geplant', 'vorhaben'
+        ]
+        question_words = ['was', 'welche', 'wie', 'wann', 'ob', 'kannst du']
+        has_time_indicators = any(indicator in message_lower for indicator in time_related_indicators)
+        has_question = any(word in message_lower.split()[:3] for word in question_words)
+        is_potentially_calendar_query = has_time_indicators and has_question
+
+        # Interaktive Termin-Erstellung: Liefere Missing-Input-Form direkt an das Frontend
+        if is_calendar_create_query(prompt):
+            event_info = extract_event_info_from_message(prompt)
+
+            if event_info.get('missing_info'):
+                calendars = []
+                if simple_calendar_manager:
+                    try:
+                        calendars = simple_calendar_manager.get_calendars()
+                    except Exception as e:
+                        logger.warning(f"Could not load calendars for interactive form: {e}")
+
+                return jsonify({
+                    'response': "Ich kann den Termin erstellen, mir fehlen aber noch: " + ", ".join(event_info['missing_info']) + ".",
+                    'action': 'calendar_missing_input',
+                    'requires_input': True,
+                    'missing_info': event_info['missing_info'],
+                    'extracted_info': {
+                        'title': event_info.get('title'),
+                        'start_time': event_info.get('start_time'),
+                        'end_time': event_info.get('end_time'),
+                        'location': event_info.get('location'),
+                        'calendar_name': event_info.get('calendar_name')
+                    },
+                    'available_calendars': calendars,
+                    'context_used': False,
+                    'context_count': 0,
+                    'calendar_used': True,
+                    'training_saved': False,
+                    'sources': []
+                })
+
+            create_result = create_calendar_event(
+                title=event_info.get('title'),
+                start_time=event_info.get('start_time'),
+                end_time=event_info.get('end_time'),
+                calendar_name=event_info.get('calendar_name'),
+                location=event_info.get('location'),
+                description=prompt
+            )
+
+            if create_result.get('success'):
+                return jsonify({
+                    'response': create_result.get('message', 'Termin wurde erstellt.'),
+                    'action': 'calendar_created',
+                    'calendar_used': True,
+                    'context_used': False,
+                    'context_count': 0,
+                    'training_saved': False,
+                    'sources': [],
+                    'created_event': create_result
+                })
+
+            return jsonify({
+                'response': "Der Termin konnte nicht erstellt werden: " + create_result.get('error', 'Unbekannter Fehler'),
+                'action': 'calendar_create_failed',
+                'calendar_used': True,
+                'context_used': False,
+                'context_count': 0,
+                'training_saved': False,
+                'sources': []
+            })
 
         # Detect query intent
         intent = detect_query_intent(prompt, preferred_source)
@@ -3815,7 +3663,7 @@ def agent_query():
                 logger.error(f"File search error: {e}")
 
         # Gather calendar context if relevant
-        if intent in ['calendar', 'mixed'] and calendar_enabled:
+        if (intent in ['calendar', 'mixed'] or is_potentially_calendar_query) and calendar_enabled:
             try:
                 calendar_context_str = get_calendar_context(prompt)
                 if calendar_context_str:

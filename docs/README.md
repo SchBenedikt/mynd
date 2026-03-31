@@ -93,7 +93,7 @@ Nachdem die Wissensbasis geladen wurde, können Fragen zu den Inhalten der Dokum
 ## API Endpunkte
 
 - `GET /` - Chat-Interface
-- `POST /api/chat` - Chat-Anfrage senden
+- `POST /api/agent/query` - Chat-Anfrage senden
 - `POST /api/knowledge/load-nextcloud` - Wissensbasis von Nextcloud laden
 - `POST /api/knowledge/load-local` - Wissensbasis aus lokalem Verzeichnis laden
 - `GET /api/knowledge/sources` - Informationen über geladene Quellen
