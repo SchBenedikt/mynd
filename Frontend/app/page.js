@@ -5,10 +5,51 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SourceCard from '../components/SourceCard';
+import { useTheme } from '../hooks/useTheme';
+import { useLanguage } from '../hooks/useLanguage';
 
 const API_BASE = '';
 const CHAT_STORAGE_KEY = 'mynd_chat_history_v1';
 const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
+
+const LANGUAGE_COMMANDS = {
+  de: ['deutsch', 'german'],
+  en: ['englisch', 'english'],
+  fr: ['franzoesisch', 'franzosisch', 'french', 'francais'],
+  es: ['spanisch', 'spanish', 'espanol'],
+  it: ['italienisch', 'italian', 'italiano'],
+  pt: ['portugiesisch', 'portuguese', 'portugues'],
+  nl: ['niederlaendisch', 'niederlandisch', 'dutch', 'nederlands'],
+  pl: ['polnisch', 'polish', 'polski'],
+  tr: ['tuerkisch', 'turkisch', 'turkish', 'turkce'],
+  ru: ['russisch', 'russian'],
+  ja: ['japanisch', 'japanese'],
+  zh: ['chinesisch', 'chinese']
+};
+
+const THEME_COMMANDS = {
+  ocean: ['blau', 'blue', 'ocean', 'meer'],
+  classic: ['gruen', 'grun', 'green', 'nature', 'natuerlich'],
+  graphite: ['grau', 'grey', 'gray', 'graphite'],
+  lavender: ['lila', 'violett', 'purple', 'lavender'],
+  rose: ['rosa', 'pink', 'rose', 'rot'],
+  gold: ['gold', 'gelb', 'orange', 'warm']
+};
+
+const MODE_COMMANDS = {
+  dark: ['dark mode', 'dunkelmodus', 'dunkel', 'nachtmodus'],
+  light: ['light mode', 'hellmodus', 'hell'],
+  auto: ['auto mode', 'automatisch', 'systemmodus']
+};
+
+const THEME_LABEL_KEY = {
+  classic: 'Classic',
+  ocean: 'Ocean',
+  graphite: 'Graphite',
+  lavender: 'Lavender',
+  rose: 'Rose',
+  gold: 'Gold'
+};
 
 const createChatId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -36,6 +77,8 @@ const buildChatTitleFromText = (text) => {
 
 export default function HomePage() {
   const router = useRouter();
+  const { theme, setTheme, setDarkMode } = useTheme();
+  const { language, setLanguage, t, languages } = useLanguage();
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
@@ -87,6 +130,82 @@ export default function HomePage() {
   const activeChat = chats.find((chat) => chat.id === activeChatId) || null;
   const messages = activeChat?.messages || [];
   const conversationActive = messages.length > 0;
+
+  const languageLabel = (code) => languages.find((l) => l.code === code)?.label || code;
+
+  const normalizeText = (value) => String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const detectMappedValue = (normalizedText, map) => {
+    const entries = Object.entries(map);
+    for (const [value, keywords] of entries) {
+      if (keywords.some((keyword) => normalizedText.includes(keyword))) {
+        return value;
+      }
+    }
+    return null;
+  };
+
+  const detectLanguageTarget = (normalizedText) => {
+    let bestMatch = null;
+    let bestIndex = -1;
+
+    for (const [value, keywords] of Object.entries(LANGUAGE_COMMANDS)) {
+      for (const keyword of keywords) {
+        const idx = normalizedText.lastIndexOf(keyword);
+        if (idx > bestIndex) {
+          bestIndex = idx;
+          bestMatch = value;
+        }
+      }
+    }
+
+    return bestMatch;
+  };
+
+  const handleUiControlCommand = (text, targetChatId) => {
+    const normalized = normalizeText(text);
+    const languageTarget = detectLanguageTarget(normalized);
+    const themeTarget = detectMappedValue(normalized, THEME_COMMANDS);
+    const modeTarget = detectMappedValue(normalized, MODE_COMMANDS);
+
+    const hasControlIntent = /sprache|language|theme|farbe|color|modus|mode|design|blau|blue|deutsch|englisch/.test(normalized);
+    if (!hasControlIntent && !languageTarget && !themeTarget && !modeTarget) {
+      return false;
+    }
+
+    const confirmations = [];
+
+    if (languageTarget && languageTarget !== language) {
+      setLanguage(languageTarget);
+      confirmations.push(t('cmdLanguageChanged', { value: languageLabel(languageTarget) }));
+    }
+
+    if (themeTarget && themeTarget !== theme) {
+      setTheme(themeTarget);
+      confirmations.push(t('cmdThemeChanged', { value: THEME_LABEL_KEY[themeTarget] || themeTarget }));
+    }
+
+    if (modeTarget) {
+      setDarkMode(modeTarget);
+      const modeKey = modeTarget === 'dark' ? 'modeDark' : modeTarget === 'light' ? 'modeLight' : 'modeAuto';
+      confirmations.push(t('cmdModeChanged', { value: t(modeKey) }));
+    }
+
+    if (!confirmations.length) {
+      return false;
+    }
+
+    appendMessageToChat(targetChatId, {
+      role: 'assistant',
+      content: confirmations.join('\n'),
+      id: Date.now()
+    });
+
+    return true;
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -261,10 +380,10 @@ export default function HomePage() {
                 : 0;
               
               setIndexingStats(
-                `${data.processed_files || 0}/${data.total_files || 0} files | ` +
-                `${Math.round(data.elapsed_time || 0)}s elapsed | ` +
-                `${processingSpeed} files/s | ` +
-                (timeRemaining > 0 ? `~${timeRemaining}s remaining` : 'calculating...')
+                `${data.processed_files || 0}/${data.total_files || 0} ${t('files').toLowerCase()} | ` +
+                `${Math.round(data.elapsed_time || 0)}s ${t('elapsed').toLowerCase()} | ` +
+                `${processingSpeed} ${t('files').toLowerCase()}/s | ` +
+                (timeRemaining > 0 ? `~${timeRemaining}s` : '...')
               );
               
               if (data.status === 'completed' || data.status === 'error') {
@@ -321,8 +440,14 @@ export default function HomePage() {
 
     const userMessage = { role: 'user', content: text, id: Date.now() };
     appendMessageToChat(targetChatId, userMessage, text);
-    setIsThinking(true);
     if (inputRef.current) inputRef.current.value = '';
+
+    const handledByUIControl = handleUiControlCommand(text, targetChatId);
+    if (handledByUIControl) {
+      return;
+    }
+
+    setIsThinking(true);
 
     try {
       const currentMessages = chats.find((chat) => chat.id === targetChatId)?.messages || [];
@@ -336,7 +461,7 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: text,
-          language: 'de',
+          language,
           preferred_source: source,
           context: conversationContext
         })
@@ -536,17 +661,17 @@ export default function HomePage() {
             <i className={`fas ${isSidebarCollapsed ? 'fa-angle-right' : 'fa-angle-left'}`}></i>
           </button>
         </div>
-        <button className="new-chat-btn" onClick={startNewChat} title="Neuer Chat">
+        <button className="new-chat-btn" onClick={startNewChat} title={t('newChat')}>
           <i className="fas fa-plus"></i>
-          {!isSidebarCollapsed && 'New Chat'}
+          {!isSidebarCollapsed && t('newChat')}
         </button>
         <button 
           className="new-chat-btn settings-btn"
           onClick={goToSettings}
-          title="Settings"
+          title={t('settings')}
         >
           <i className="fas fa-cog"></i>
-          {!isSidebarCollapsed && 'Settings'}
+          {!isSidebarCollapsed && t('settings')}
         </button>
         <div className="chat-history">
           {sortedChats.map((chat) => (
@@ -591,14 +716,14 @@ export default function HomePage() {
         {!conversationActive ? (
           <div className="landing">
             <div className="landing-header">
-              <h2>What is on your mind?</h2>
-              <p>Ask anything about your knowledge base.</p>
+              <h2>{t('askHeading')}</h2>
+              <p>{t('askSubheading')}</p>
             </div>
             <div className="input-wrapper">
               <input
                 type="text" 
                 ref={inputRef}
-                placeholder="Ask a question..." 
+                placeholder={t('askPlaceholder')}
                 onKeyPress={(e) => e.key === 'Enter' && sendMessage(e.target.value)}
               />
               <button onClick={() => sendMessage(inputRef.current?.value || '')}>
@@ -618,7 +743,7 @@ export default function HomePage() {
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem'}}>
                   <h4 style={{margin: 0, fontSize: '0.9rem', fontWeight: '600'}}>
                     <i className="fas fa-database" style={{marginRight: '0.5rem'}}></i>
-                    Document Indexing
+                    {t('documentIndexing')}
                   </h4>
                   <span style={{
                     fontSize: '0.8rem',
@@ -656,15 +781,15 @@ export default function HomePage() {
                   
                   {indexingDetails.currentFile && (
                     <div style={{marginBottom: '0.25rem'}}>
-                      <strong>Current:</strong> {indexingDetails.currentFile}
+                      <strong>{t('current')}:</strong> {indexingDetails.currentFile}
                     </div>
                   )}
                   
                   <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.75rem'}}>
-                    <div><strong>Files:</strong> {indexingDetails.processedFiles}/{indexingDetails.totalFiles}</div>
-                    <div><strong>Speed:</strong> {indexingDetails.processingSpeed} files/s</div>
-                    <div><strong>Elapsed:</strong> {indexingDetails.elapsedTime}s</div>
-                    <div><strong>Chunks:</strong> ~{indexingDetails.chunksCreated}</div>
+                    <div><strong>{t('files')}:</strong> {indexingDetails.processedFiles}/{indexingDetails.totalFiles}</div>
+                    <div><strong>{t('speed')}:</strong> {indexingDetails.processingSpeed} files/s</div>
+                    <div><strong>{t('elapsed')}:</strong> {indexingDetails.elapsedTime}s</div>
+                    <div><strong>{t('chunks')}:</strong> ~{indexingDetails.chunksCreated}</div>
                   </div>
                   
                   {/* Last Indexing Times */}
@@ -684,7 +809,7 @@ export default function HomePage() {
                   
                   {indexingDetails.errors.length > 0 && (
                     <div style={{marginTop: '0.5rem', color: 'var(--error)'}}>
-                      <strong>Errors:</strong> {indexingDetails.errors.length}
+                      <strong>{t('errors')}:</strong> {indexingDetails.errors.length}
                     </div>
                   )}
                 </div>
@@ -710,7 +835,7 @@ export default function HomePage() {
                       <div className="sources-container">
                         <div className="sources-header">
                           <i className="fas fa-link"></i>
-                          <span>Quellen ({msg.sources.length})</span>
+                          <span>{t('sources')} ({msg.sources.length})</span>
                         </div>
                         <div className="sources-grid">
                           {msg.sources.map((source, idx) => (
@@ -802,7 +927,7 @@ export default function HomePage() {
                             Abbrechen
                           </button>
                           <button type="submit" className="btn primary" disabled={calendarForm.submitting}>
-                            {calendarForm.submitting ? 'Speichere...' : 'Termin erstellen'}
+                            {calendarForm.submitting ? t('saveEvent') : t('createEvent')}
                           </button>
                         </div>
                       </form>
@@ -816,7 +941,7 @@ export default function HomePage() {
               <input 
                 type="text" 
                 ref={inputRef}
-                placeholder="Your message here..." 
+                placeholder={t('composerPlaceholder')}
                 onKeyPress={(e) => e.key === 'Enter' && !e.ctrlKey && sendMessage(e.target.value)}
               />
               <button onClick={() => sendMessage(inputRef.current?.value || '')} disabled={isThinking}>
