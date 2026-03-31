@@ -2746,7 +2746,7 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
     """
     Erkennt die Intention der Anfrage
 
-    Returns: 'photos', 'files', 'calendar', 'tasks', 'mixed'
+    Returns: 'photos', 'files', 'calendar', 'tasks', 'mixed', 'general'
     """
     prompt_lower = prompt.lower()
 
@@ -2764,10 +2764,6 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
                      'katzen', 'hunde', 'bäume', 'autos', 'häuser', 'menschen']
     has_photo = any(keyword in prompt_lower for keyword in photo_keywords)
     
-    # Zusätzlich: Wenn Query mit Großbuchstaben beginnt (wahrscheinlich Name), könnte es Fotos sein
-    words = prompt.split()
-    has_proper_noun = len(words) > 0 and words[0][0].isupper() if words[0] else False
-
     # Erkenne Datei-Anfragen
     file_keywords = ['datei', 'dateien', 'dokument', 'dokumente', 'pdf', 'unterlage',
                     'unterlagen', 'file', 'files', 'document', 'documents', 'nextcloud']
@@ -2784,18 +2780,20 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
     has_task = any(keyword in prompt_lower for keyword in task_keywords)
 
     # Bestimme primäre Intention
-    if has_photo and not has_file:
+    active_intents = sum([has_photo, has_file, has_time, has_task])
+
+    if has_photo and not has_file and not has_time and not has_task:
         return 'photos'
-    elif has_file and not has_photo:
+    elif has_file and not has_photo and not has_time and not has_task:
         return 'files'
-    elif has_task:
+    elif has_task and not has_photo and not has_file:
         return 'tasks'
-    elif has_time:
+    elif has_time and not has_photo and not has_file and not has_task:
         return 'calendar'
-    elif has_proper_noun:  # Names usually point to photos
-        return 'photos'
-    else:
+    elif active_intents >= 2:
         return 'mixed'
+    else:
+        return 'general'
 
 @app.route('/api/agent/query', methods=['POST'])
 def agent_query():
