@@ -361,6 +361,16 @@ body {
   padding: 0.9rem 0.5rem;
 }
 
+.left-sidebar.collapsed .sidebar-header {
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0.55rem;
+}
+
+.left-sidebar.collapsed .brand {
+  justify-content: center;
+}
+
 .left-sidebar.collapsed .new-chat-btn,
 .left-sidebar.collapsed .history-item,
 .left-sidebar.collapsed .status-badge {
@@ -475,6 +485,10 @@ body {
   border-top: 1px solid var(--line);
 }
 
+.sidebar-footer .settings-btn {
+  margin-bottom: 0.75rem;
+}
+
 .sidebar-actions {
   margin-bottom: 0.75rem;
 }
@@ -508,24 +522,6 @@ body {
   overflow: hidden;
   background: transparent;
   position: relative;
-}
-
-.sidebar-fab {
-  position: absolute;
-  top: 0.9rem;
-  left: 0.9rem;
-  z-index: 30;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--chip-bg);
-  color: var(--ink);
-  cursor: pointer;
-}
-
-.sidebar-fab:hover {
-  background: var(--chip-hover);
 }
 
 /* Full Settings View */
@@ -1079,6 +1075,92 @@ body {
   margin: 1em 0;
 }
 
+.bubble .markdown-image-paragraph {
+  display: inline-block;
+  margin: 0.3rem 0.4rem 0.3rem 0;
+  vertical-align: top;
+}
+
+.chat-thumbnail-trigger {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: zoom-in;
+}
+
+.bubble img.chat-thumbnail {
+  width: 112px;
+  height: 112px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  display: block;
+  background: var(--chip-bg);
+}
+
+.bubble a:has(> img.chat-thumbnail) {
+  display: inline-block;
+}
+
+.image-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 18, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 2000;
+}
+
+.image-modal {
+  width: min(90vw, 760px);
+  background: var(--bubble-assistant);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.9rem;
+  position: relative;
+}
+
+.image-modal-close {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--chip-bg);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.image-modal-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0.15rem 2rem 0.6rem 0.1rem;
+}
+
+.image-modal-preview {
+  width: 100%;
+  max-height: min(65vh, 620px);
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--chip-bg);
+}
+
+.image-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
 .bubble table {
   border-collapse: collapse;
   width: 100%;
@@ -1094,6 +1176,17 @@ body {
 .bubble th {
   background: var(--chip-bg);
   font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .bubble img.chat-thumbnail {
+    width: 88px;
+    height: 88px;
+  }
+
+  .image-modal {
+    width: 95vw;
+  }
 }
 
 .message.user .bubble {
