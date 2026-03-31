@@ -9,6 +9,15 @@ import { ThemeSelector } from '../../components/ThemeSelector';
 const API_BASE = '';
 const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
+const API_DISPLAY_NAMES = {
+  homeassistant: 'Home Assistant',
+  uptimekuma: 'Uptime Kuma',
+  dwd: 'DWD',
+  nina: 'NINA',
+  autobahn: 'Autobahn',
+  dashboard_deutschland: 'Dashboard Deutschland',
+  deutschland_atlas: 'Deutschland Atlas'
+};
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -65,8 +74,15 @@ export default function SettingsPage() {
   const [selectedApi, setSelectedApi] = useState(null);
   const [apiConfig, setApiConfig] = useState({});
   const [apiConfigStatus, setApiConfigStatus] = useState('');
+  const [ninaRegions, setNinaRegions] = useState([]);
+  const [ninaRegionStatus, setNinaRegionStatus] = useState('');
+  const [ninaRegionQuery, setNinaRegionQuery] = useState('');
+  const [ninaWarnings, setNinaWarnings] = useState([]);
+  const [ninaWarningsStatus, setNinaWarningsStatus] = useState('');
+  const [ninaWarningsArs, setNinaWarningsArs] = useState('');
 
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
+  const getApiDisplayName = (apiName) => API_DISPLAY_NAMES[apiName] || apiName;
 
   useEffect(() => {
     loadAIConfig();
@@ -548,9 +564,113 @@ export default function SettingsPage() {
         const data = await res.json();
         setApiConfig(data.config || {});
         setSelectedApi({ ...data, api_name: apiName });
+        setNinaRegions([]);
+        setNinaRegionStatus('');
+        setNinaWarnings([]);
+        setNinaWarningsStatus('');
+        setNinaWarningsArs('');
       }
     } catch (err) {
       console.error('Error loading API config:', err);
+    }
+  };
+
+  const loadNinaRegions = async () => {
+    try {
+      setNinaRegionStatus(tr('Lade Regionalschluessel...', 'Loading regional keys...'));
+      const params = new URLSearchParams();
+      if (ninaRegionQuery.trim()) {
+        params.set('query', ninaRegionQuery.trim());
+      }
+      params.set('limit', '200');
+
+      const res = await fetch(`${API_BASE}/api/nina/regions?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        const items = (data.data && data.data.items) ? data.data.items : [];
+        setNinaRegions(items);
+        setNinaRegionStatus(
+          items.length > 0
+            ? tr(`✓ ${items.length} Treffer`, `✓ ${items.length} matches`)
+            : tr('Keine Treffer', 'No matches')
+        );
+      } else {
+        const data = await res.json();
+        setNinaRegionStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      setNinaRegionStatus(tr('Fehler: ', 'Error: ') + err.message);
+    }
+  };
+
+  const extractNinaWarnings = (payload) => {
+    if (!payload || typeof payload !== 'object') {
+      return [];
+    }
+
+    const candidates = [
+      payload.warnings,
+      payload.alerts,
+      payload.items,
+      payload.data,
+      payload.dashboard
+    ];
+
+    for (const entry of candidates) {
+      if (Array.isArray(entry)) {
+        return entry;
+      }
+    }
+
+    return [];
+  };
+
+  const getNinaWarningTitle = (warning) => {
+    if (!warning || typeof warning !== 'object') {
+      return tr('Unbekannte Warnung', 'Unknown warning');
+    }
+
+    return (
+      warning.headline ||
+      warning.event ||
+      warning.title ||
+      warning.name ||
+      warning.identifier ||
+      warning.id ||
+      tr('Warnung', 'Warning')
+    );
+  };
+
+  const getNinaWarningDescription = (warning) => {
+    if (!warning || typeof warning !== 'object') {
+      return '';
+    }
+
+    return warning.description || warning.instruction || warning.content || warning.type || '';
+  };
+
+  const loadNinaWarnings = async () => {
+    try {
+      setNinaWarningsStatus(tr('Lade Warnungen...', 'Loading warnings...'));
+
+      const res = await fetch(`${API_BASE}/api/nina/dashboard`);
+      if (res.ok) {
+        const data = await res.json();
+        const warnings = extractNinaWarnings(data.data);
+
+        setNinaWarnings(warnings);
+        setNinaWarningsArs(data.ars || '');
+        setNinaWarningsStatus(
+          warnings.length > 0
+            ? tr(`✓ ${warnings.length} Warnungen`, `✓ ${warnings.length} warnings`)
+            : tr('Keine Warnungen', 'No warnings')
+        );
+      } else {
+        const data = await res.json();
+        setNinaWarningsStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      setNinaWarningsStatus(tr('Fehler: ', 'Error: ') + err.message);
     }
   };
 
@@ -853,8 +973,7 @@ export default function SettingsPage() {
                               }}></div>
                               <div>
                                 <div style={{fontWeight: '600', textTransform: 'capitalize'}}>
-                                  {api.api_name === 'homeassistant' ? 'Home Assistant' :
-                                   api.api_name === 'uptimekuma' ? 'Uptime Kuma' : api.api_name}
+                                  {getApiDisplayName(api.api_name)}
                                 </div>
                                 <div style={{fontSize: '0.85rem', color: 'var(--muted)'}}>
                                   {isConfigured ?
@@ -879,8 +998,7 @@ export default function SettingsPage() {
                     <div style={{marginTop: '2rem', padding: '1.5rem', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px'}}>
                       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
                         <div className="section-title" style={{textTransform: 'capitalize'}}>
-                          {selectedApi.api_name === 'homeassistant' ? 'Home Assistant' :
-                           selectedApi.api_name === 'uptimekuma' ? 'Uptime Kuma' : selectedApi.api_name}
+                          {getApiDisplayName(selectedApi.api_name)}
                         </div>
                         <button
                           className="btn"
@@ -894,6 +1012,94 @@ export default function SettingsPage() {
                           {tr('Schließen', 'Close')}
                         </button>
                       </div>
+
+                      {selectedApi.api_name === 'nina' && (
+                        <div style={{marginBottom: '1.5rem'}}>
+                          <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
+                            {tr('Regionalschluessel (ARS) suchen', 'Search regional keys (ARS)')}
+                          </div>
+                          <div className="input-group">
+                            <label>{tr('Suche nach Ort oder ARS', 'Search by place or ARS')}</label>
+                            <input
+                              type="text"
+                              value={ninaRegionQuery}
+                              onChange={(e) => setNinaRegionQuery(e.target.value)}
+                              placeholder={tr('z.B. Berlin oder 110000000000', 'e.g. Berlin or 110000000000')}
+                            />
+                          </div>
+                          <div className="button-group" style={{marginTop: '0.5rem'}}>
+                            <button className="btn" onClick={loadNinaRegions}>
+                              {tr('Regionen laden', 'Load regions')}
+                            </button>
+                          </div>
+                          {ninaRegionStatus && (
+                            <div className="status-text" style={{marginTop: '0.5rem'}}>{ninaRegionStatus}</div>
+                          )}
+                          {ninaRegions.length > 0 && (
+                            <div className="input-group" style={{marginTop: '0.75rem'}}>
+                              <label>{tr('Treffer', 'Matches')}</label>
+                              <select
+                                value=""
+                                onChange={(e) => {
+                                  const ars = e.target.value;
+                                  if (ars) {
+                                    setApiConfig(prev => ({ ...prev, ars }));
+                                  }
+                                }}
+                              >
+                                <option value="">{tr('Auswaehlen...', 'Select...')}</option>
+                                {ninaRegions.map((entry) => (
+                                  <option key={`${entry.ars}-${entry.name}`} value={entry.ars}>
+                                    {entry.ars} - {entry.name}{entry.hint ? ` (${entry.hint})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          <div style={{marginTop: '1rem'}}>
+                            <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
+                              {tr('Warnungen fuer konfigurierten ARS', 'Warnings for configured ARS')}
+                            </div>
+                            <div className="button-group">
+                              <button className="btn" onClick={loadNinaWarnings}>
+                                {tr('Warnungen laden', 'Load warnings')}
+                              </button>
+                            </div>
+                            {ninaWarningsStatus && (
+                              <div className="status-text" style={{marginTop: '0.5rem'}}>
+                                {ninaWarningsStatus}
+                              </div>
+                            )}
+                            {ninaWarningsArs && (
+                              <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.25rem'}}>
+                                {tr('ARS', 'ARS')}: {ninaWarningsArs}
+                              </div>
+                            )}
+                            {ninaWarnings.length > 0 && (
+                              <div style={{marginTop: '0.75rem', display: 'grid', gap: '0.5rem'}}>
+                                {ninaWarnings.slice(0, 10).map((warning, index) => (
+                                  <div
+                                    key={`${warning.identifier || warning.id || index}`}
+                                    style={{
+                                      padding: '0.75rem',
+                                      borderRadius: '6px',
+                                      background: 'var(--panel-bg)',
+                                      border: '1px solid var(--border)'
+                                    }}
+                                  >
+                                    <div style={{fontWeight: '600'}}>{getNinaWarningTitle(warning)}</div>
+                                    {getNinaWarningDescription(warning) && (
+                                      <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.35rem'}}>
+                                        {getNinaWarningDescription(warning)}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Dynamic config fields based on schema */}
                       {selectedApi.schema && Object.entries(selectedApi.schema).map(([key, fieldSchema]) => (
@@ -929,6 +1135,17 @@ export default function SettingsPage() {
                         >
                           {tr('Verbindung testen', 'Test Connection')}
                         </button>
+                        {selectedApi.api_name === 'homeassistant' && (
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              const url = apiConfig.url || 'https://my.home-assistant.io/redirect/profile/';
+                              window.open(url, '_blank', 'noopener,noreferrer');
+                            }}
+                          >
+                            {tr('Home Assistant oeffnen', 'Open Home Assistant')}
+                          </button>
+                        )}
                         {selectedApi.configured && (
                           <button
                             className="btn"
