@@ -14,6 +14,16 @@ from abc import ABC, abstractmethod
 class APIClient(ABC):
     """Base class for all API clients"""
 
+    @classmethod
+    def requires_config(cls) -> bool:
+        """Return True if this API requires user-provided configuration"""
+        return True
+
+    @classmethod
+    def get_default_config(cls) -> Dict[str, Any]:
+        """Return default config for optional/public APIs"""
+        return {}
+
     @abstractmethod
     def test_connection(self) -> bool:
         """Test if the API connection is working"""
@@ -95,6 +105,11 @@ class APIRegistry:
     def get_registered_api_types(cls) -> List[str]:
         """Get list of registered API types"""
         return list(cls._api_types.keys())
+
+    @classmethod
+    def get_api_class(cls, api_name: str) -> Optional[Type[APIClient]]:
+        """Get API client class for a registered API name"""
+        return cls._api_types.get(api_name)
 
     def get_config_path(self, api_name: str, username: str = None) -> str:
         """Get the config file path for an API"""
@@ -184,8 +199,11 @@ class APIRegistry:
         if config is None:
             config = self.load_config(api_name, username)
             if not config:
-                self.logger.warning(f"No configuration found for {api_name}")
-                return None
+                api_class = self._api_types[api_name]
+                if api_class.requires_config():
+                    self.logger.warning(f"No configuration found for {api_name}")
+                    return None
+                config = api_class.get_default_config()
 
         try:
             api_class = self._api_types[api_name]
@@ -212,14 +230,20 @@ class APIRegistry:
         apis = []
 
         for api_name in self.get_registered_api_types():
+            api_class = self._api_types[api_name]
             config = self.load_config(api_name, username)
+            configured = bool(config)
+
+            if not config and not api_class.requires_config():
+                config = api_class.get_default_config()
+                configured = True
 
             # Try to create instance to get schema
             instance = self.create_api_instance(api_name, config if config else {}, username, use_cache=False)
 
             apis.append({
                 'api_name': api_name,
-                'configured': bool(config),
+                'configured': configured,
                 'config_schema': instance.get_config_schema() if instance else {},
                 'config': config if config else {}
             })
@@ -279,8 +303,9 @@ class APIRegistry:
         results = {}
 
         for api_name in self.get_registered_api_types():
+            api_class = self._api_types[api_name]
             config = self.load_config(api_name, username)
-            if config:  # Only check configured APIs
+            if config or not api_class.requires_config():
                 results[api_name] = self.check_api_health(api_name, username)
 
         return results
