@@ -78,9 +78,10 @@ class SimpleNextcloudCalendar:
                     if href_elem is not None:
                         href = href_elem.text
                         
-                        # Prüfe ob es ein Kalender ist (hat calendar resource type)
+                        # Prüfe nur auf echten CalDAV-Resource-Typ, nicht auf URL-Namensmuster.
+                        # Geteilte Kalender können Pfade ohne den String "calendar" haben.
                         resource_type_elem = response_elem.find('.//d:resourcetype/c:calendar', namespaces)
-                        if resource_type_elem is not None and href and 'calendar' in href:
+                        if resource_type_elem is not None and href:
                             # Extrahiere Kalendername aus displayname
                             displayname_elem = response_elem.find('.//d:displayname', namespaces)
                             calendar_name = displayname_elem.text if displayname_elem is not None else 'Unknown'
