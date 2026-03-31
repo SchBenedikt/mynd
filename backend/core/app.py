@@ -3215,7 +3215,9 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
     # Bestimme primäre Intention
     active_intents = sum([has_photo, has_file, has_time, has_task])
 
-    if has_photo and not has_file and not has_time and not has_task:
+    # Fotoanfragen mit Zeitbezug (z. B. "Foto von heute") sollen als
+    # Foto-Intent laufen und nicht in den gemischten Pfad fallen.
+    if has_photo and not has_file and not has_task:
         return 'photos'
     elif has_file and not has_photo and not has_time and not has_task:
         return 'files'
