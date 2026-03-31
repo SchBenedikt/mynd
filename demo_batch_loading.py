@@ -105,8 +105,13 @@ def demo():
     # 6. TEST CHAT WITH TODOS
     print("\n6️⃣  💬 TESTING CHAT WITH TODOS...")
     response = requests.post(
-        f"{BASE_URL}/api/chat",
-        json={'message': 'welche todos habe ich?'},
+        f"{BASE_URL}/api/agent/query",
+        json={
+            'prompt': 'welche todos habe ich?',
+            'language': 'de',
+            'preferred_source': 'auto',
+            'context': ''
+        },
         timeout=10
     )
     
