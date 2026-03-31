@@ -4020,6 +4020,502 @@ Antworte auf {language}."""
             'error': str(e)
         }), 500
 
+@app.route('/api/suggestions/query', methods=['POST'])
+def get_query_suggestions():
+    """
+    Generate personalized query suggestions based on time of day,
+    user behavior, and conversation history.
+    """
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        language = data.get('language', 'de')
+
+        # Get current time context
+        now = datetime.now()
+        hour = now.hour
+        day_of_week = now.strftime('%A')
+
+        # Determine time period
+        if 5 <= hour < 12:
+            time_period = 'morning'
+        elif 12 <= hour < 17:
+            time_period = 'afternoon'
+        elif 17 <= hour < 22:
+            time_period = 'evening'
+        else:
+            time_period = 'night'
+
+        # Load user's chat history from request (sent from frontend)
+        chat_history = data.get('chatHistory', [])
+
+        # Analyze user behavior patterns
+        user_patterns = analyze_user_patterns(chat_history, hour, day_of_week)
+
+        # Generate suggestions using AI
+        suggestions = generate_ai_suggestions(
+            username=username,
+            language=language,
+            time_period=time_period,
+            day_of_week=day_of_week,
+            user_patterns=user_patterns
+        )
+
+        return jsonify({
+            'success': True,
+            'suggestions': suggestions,
+            'time_period': time_period,
+            'personalized': len(user_patterns) > 0
+        })
+
+    except Exception as e:
+        logger.error(f"Error generating query suggestions: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'suggestions': []  # Return empty suggestions on error
+        }), 500
+
+def analyze_user_patterns(chat_history, current_hour, current_day):
+    """
+    Analyze user's chat history to identify patterns:
+    - Frequent topics
+    - Time-based query patterns
+    - Common question types
+    """
+    patterns = {}
+
+    if not chat_history or len(chat_history) == 0:
+        return patterns
+
+    # Analyze message topics and timing
+    topic_frequency = {}
+    hourly_topics = {}
+    daily_topics = {}
+
+    for chat in chat_history:
+        messages = chat.get('messages', [])
+        created_at = chat.get('createdAt', 0)
+
+        # Parse timestamp
+        if created_at:
+            try:
+                chat_time = datetime.fromtimestamp(created_at / 1000)
+                chat_hour = chat_time.hour
+                chat_day = chat_time.strftime('%A')
+
+                # Track hourly patterns
+                if chat_hour not in hourly_topics:
+                    hourly_topics[chat_hour] = []
+
+                # Track daily patterns
+                if chat_day not in daily_topics:
+                    daily_topics[chat_day] = []
+
+                # Extract topics from user messages
+                for msg in messages:
+                    if msg.get('role') == 'user':
+                        content = msg.get('content', '').lower()
+                        # Track topics
+                        hourly_topics[chat_hour].append(content)
+                        daily_topics[chat_day].append(content)
+
+                        # Count topic frequency (simple keyword extraction)
+                        words = content.split()
+                        for word in words:
+                            if len(word) > 4:  # Only consider words longer than 4 chars
+                                topic_frequency[word] = topic_frequency.get(word, 0) + 1
+            except:
+                pass
+
+    # Identify patterns for current context
+    patterns['frequent_topics'] = sorted(topic_frequency.items(), key=lambda x: x[1], reverse=True)[:5]
+    patterns['same_hour_queries'] = hourly_topics.get(current_hour, [])[:3]
+    patterns['same_day_queries'] = daily_topics.get(current_day, [])[:3]
+
+    return patterns
+
+def generate_ai_suggestions(username, language, time_period, day_of_week, user_patterns):
+    """
+    Generate contextual query suggestions using the AI model.
+    Falls back to template-based suggestions if AI is unavailable.
+    """
+
+    # Template-based suggestions by time period and language
+    template_suggestions = {
+        'de': {
+            'morning': [
+                'Was steht heute auf meinem Kalender?',
+                'Zeige mir meine Aufgaben für heute',
+                'Was ist neu in meinen Dateien?',
+                'Gib mir eine Zusammenfassung meiner E-Mails'
+            ],
+            'afternoon': [
+                'Wie viel habe ich heute geschafft?',
+                'Zeige mir wichtige Dokumente',
+                'Was sind meine nächsten Termine?',
+                'Suche nach Notizen vom letzten Meeting'
+            ],
+            'evening': [
+                'Was muss ich morgen erledigen?',
+                'Zeige mir Fotos von heute',
+                'Zusammenfassung meines Tages',
+                'Welche Aufgaben sind noch offen?'
+            ],
+            'night': [
+                'Plane meinen morgigen Tag',
+                'Was steht morgen an?',
+                'Zeige mir entspannende Fotos',
+                'Erstelle eine To-Do-Liste für morgen'
+            ]
+        },
+        'en': {
+            'morning': [
+                'What\'s on my calendar today?',
+                'Show me my tasks for today',
+                'What\'s new in my files?',
+                'Give me a summary of my emails'
+            ],
+            'afternoon': [
+                'How much have I accomplished today?',
+                'Show me important documents',
+                'What are my next appointments?',
+                'Search for notes from last meeting'
+            ],
+            'evening': [
+                'What do I need to do tomorrow?',
+                'Show me photos from today',
+                'Summary of my day',
+                'Which tasks are still open?'
+            ],
+            'night': [
+                'Plan my tomorrow',
+                'What\'s scheduled for tomorrow?',
+                'Show me relaxing photos',
+                'Create a to-do list for tomorrow'
+            ]
+        },
+        'fr': {
+            'morning': [
+                'Qu\'est-ce qui est prévu sur mon calendrier aujourd\'hui?',
+                'Montre-moi mes tâches pour aujourd\'hui',
+                'Quoi de neuf dans mes fichiers?',
+                'Donne-moi un résumé de mes e-mails'
+            ],
+            'afternoon': [
+                'Combien ai-je accompli aujourd\'hui?',
+                'Montre-moi les documents importants',
+                'Quels sont mes prochains rendez-vous?',
+                'Recherche des notes de la dernière réunion'
+            ],
+            'evening': [
+                'Que dois-je faire demain?',
+                'Montre-moi les photos d\'aujourd\'hui',
+                'Résumé de ma journée',
+                'Quelles tâches sont encore ouvertes?'
+            ],
+            'night': [
+                'Planifie ma journée de demain',
+                'Qu\'est-ce qui est prévu demain?',
+                'Montre-moi des photos relaxantes',
+                'Crée une liste de tâches pour demain'
+            ]
+        },
+        'es': {
+            'morning': [
+                '¿Qué hay en mi calendario hoy?',
+                'Muéstrame mis tareas para hoy',
+                '¿Qué hay de nuevo en mis archivos?',
+                'Dame un resumen de mis correos'
+            ],
+            'afternoon': [
+                '¿Cuánto he logrado hoy?',
+                'Muéstrame documentos importantes',
+                '¿Cuáles son mis próximas citas?',
+                'Busca notas de la última reunión'
+            ],
+            'evening': [
+                '¿Qué necesito hacer mañana?',
+                'Muéstrame fotos de hoy',
+                'Resumen de mi día',
+                '¿Qué tareas están aún pendientes?'
+            ],
+            'night': [
+                'Planifica mi día de mañana',
+                '¿Qué está programado para mañana?',
+                'Muéstrame fotos relajantes',
+                'Crea una lista de tareas para mañana'
+            ]
+        },
+        'it': {
+            'morning': [
+                'Cosa c\'è nel mio calendario oggi?',
+                'Mostrami le mie attività per oggi',
+                'Cosa c\'è di nuovo nei miei file?',
+                'Dammi un riepilogo delle mie email'
+            ],
+            'afternoon': [
+                'Quanto ho realizzato oggi?',
+                'Mostrami documenti importanti',
+                'Quali sono i miei prossimi appuntamenti?',
+                'Cerca note dell\'ultima riunione'
+            ],
+            'evening': [
+                'Cosa devo fare domani?',
+                'Mostrami le foto di oggi',
+                'Riepilogo della mia giornata',
+                'Quali attività sono ancora aperte?'
+            ],
+            'night': [
+                'Pianifica il mio domani',
+                'Cosa è programmato per domani?',
+                'Mostrami foto rilassanti',
+                'Crea una lista di cose da fare per domani'
+            ]
+        },
+        'pt': {
+            'morning': [
+                'O que está no meu calendário hoje?',
+                'Mostre-me minhas tarefas para hoje',
+                'O que há de novo nos meus arquivos?',
+                'Me dê um resumo dos meus e-mails'
+            ],
+            'afternoon': [
+                'Quanto realizei hoje?',
+                'Mostre-me documentos importantes',
+                'Quais são meus próximos compromissos?',
+                'Procure notas da última reunião'
+            ],
+            'evening': [
+                'O que preciso fazer amanhã?',
+                'Mostre-me fotos de hoje',
+                'Resumo do meu dia',
+                'Quais tarefas ainda estão pendentes?'
+            ],
+            'night': [
+                'Planeje meu dia de amanhã',
+                'O que está agendado para amanhã?',
+                'Mostre-me fotos relaxantes',
+                'Crie uma lista de tarefas para amanhã'
+            ]
+        },
+        'nl': {
+            'morning': [
+                'Wat staat er vandaag op mijn agenda?',
+                'Laat me mijn taken voor vandaag zien',
+                'Wat is er nieuw in mijn bestanden?',
+                'Geef me een samenvatting van mijn e-mails'
+            ],
+            'afternoon': [
+                'Hoeveel heb ik vandaag bereikt?',
+                'Laat me belangrijke documenten zien',
+                'Wat zijn mijn volgende afspraken?',
+                'Zoek naar notities van de laatste vergadering'
+            ],
+            'evening': [
+                'Wat moet ik morgen doen?',
+                'Laat me foto\'s van vandaag zien',
+                'Samenvatting van mijn dag',
+                'Welke taken staan nog open?'
+            ],
+            'night': [
+                'Plan mijn dag van morgen',
+                'Wat staat er morgen gepland?',
+                'Laat me ontspannende foto\'s zien',
+                'Maak een takenlijst voor morgen'
+            ]
+        },
+        'pl': {
+            'morning': [
+                'Co jest w moim kalendarzu dzisiaj?',
+                'Pokaż mi moje zadania na dziś',
+                'Co nowego w moich plikach?',
+                'Daj mi podsumowanie moich e-maili'
+            ],
+            'afternoon': [
+                'Ile osiągnąłem dzisiaj?',
+                'Pokaż mi ważne dokumenty',
+                'Jakie są moje następne spotkania?',
+                'Szukaj notatek z ostatniego spotkania'
+            ],
+            'evening': [
+                'Co muszę zrobić jutro?',
+                'Pokaż mi zdjęcia z dzisiaj',
+                'Podsumowanie mojego dnia',
+                'Które zadania są jeszcze otwarte?'
+            ],
+            'night': [
+                'Zaplanuj mój jutrzejszy dzień',
+                'Co jest zaplanowane na jutro?',
+                'Pokaż mi relaksujące zdjęcia',
+                'Stwórz listę zadań na jutro'
+            ]
+        },
+        'tr': {
+            'morning': [
+                'Bugün takvimimde ne var?',
+                'Bugün için görevlerimi göster',
+                'Dosyalarımda ne yeni var?',
+                'E-postalarımın özetini ver'
+            ],
+            'afternoon': [
+                'Bugün ne kadar başardım?',
+                'Önemli belgeleri göster',
+                'Bir sonraki randevularım neler?',
+                'Son toplantıdan notları ara'
+            ],
+            'evening': [
+                'Yarın ne yapmam gerekiyor?',
+                'Bugünkü fotoğrafları göster',
+                'Günümün özeti',
+                'Hangi görevler hala açık?'
+            ],
+            'night': [
+                'Yarınımı planla',
+                'Yarın için ne planlandı?',
+                'Rahatlatıcı fotoğraflar göster',
+                'Yarın için yapılacaklar listesi oluştur'
+            ]
+        },
+        'ru': {
+            'morning': [
+                'Что у меня в календаре на сегодня?',
+                'Покажи мои задачи на сегодня',
+                'Что нового в моих файлах?',
+                'Дай мне резюме моих электронных писем'
+            ],
+            'afternoon': [
+                'Сколько я сделал сегодня?',
+                'Покажи важные документы',
+                'Какие мои следующие встречи?',
+                'Найди заметки с последней встречи'
+            ],
+            'evening': [
+                'Что мне нужно сделать завтра?',
+                'Покажи фотографии сегодняшнего дня',
+                'Резюме моего дня',
+                'Какие задачи еще открыты?'
+            ],
+            'night': [
+                'Спланируй мой завтрашний день',
+                'Что запланировано на завтра?',
+                'Покажи расслабляющие фотографии',
+                'Создай список дел на завтра'
+            ]
+        },
+        'ja': {
+            'morning': [
+                '今日のカレンダーには何がありますか？',
+                '今日のタスクを表示',
+                'ファイルに何か新しいものは？',
+                'メールの要約を教えて'
+            ],
+            'afternoon': [
+                '今日どれだけ達成しましたか？',
+                '重要な文書を表示',
+                '次の予定は何ですか？',
+                '最後の会議のメモを検索'
+            ],
+            'evening': [
+                '明日は何をする必要がありますか？',
+                '今日の写真を表示',
+                '今日の要約',
+                'どのタスクがまだ開いていますか？'
+            ],
+            'night': [
+                '明日を計画する',
+                '明日は何が予定されていますか？',
+                'リラックスできる写真を表示',
+                '明日のToDoリストを作成'
+            ]
+        },
+        'zh': {
+            'morning': [
+                '我今天的日历上有什么？',
+                '显示我今天的任务',
+                '我的文件中有什么新内容？',
+                '给我一个电子邮件摘要'
+            ],
+            'afternoon': [
+                '我今天完成了多少？',
+                '显示重要文档',
+                '我的下一个约会是什么？',
+                '搜索上次会议的笔记'
+            ],
+            'evening': [
+                '我明天需要做什么？',
+                '显示今天的照片',
+                '我的一天总结',
+                '哪些任务还未完成？'
+            ],
+            'night': [
+                '计划我的明天',
+                '明天有什么安排？',
+                '显示放松的照片',
+                '为明天创建待办事项列表'
+            ]
+        }
+    }
+
+    # Get base suggestions for language and time period
+    lang = language if language in template_suggestions else 'en'
+    base_suggestions = template_suggestions[lang].get(time_period, template_suggestions[lang]['morning'])
+
+    # Personalize based on user patterns
+    personalized_suggestions = []
+
+    # Add personalized suggestions based on frequent topics
+    if user_patterns.get('frequent_topics'):
+        # Language-specific personalization templates
+        personalization_templates = {
+            'de': 'Mehr zu {topic}',
+            'en': 'More about {topic}',
+            'fr': 'En savoir plus sur {topic}',
+            'es': 'Más sobre {topic}',
+            'it': 'Maggiori informazioni su {topic}',
+            'pt': 'Mais sobre {topic}',
+            'nl': 'Meer over {topic}',
+            'pl': 'Więcej o {topic}',
+            'tr': '{topic} hakkında daha fazla',
+            'ru': 'Больше о {topic}',
+            'ja': '{topic}についてもっと',
+            'zh': '更多关于{topic}'
+        }
+
+        template = personalization_templates.get(lang, personalization_templates['en'])
+        for topic, count in user_patterns['frequent_topics'][:2]:
+            personalized_suggestions.append(template.format(topic=topic))
+
+    # Combine: 3 template-based + up to 2 personalized
+    final_suggestions = base_suggestions[:3] + personalized_suggestions[:2]
+
+    # Try to enhance with AI if available
+    try:
+        if ollama_client and ollama_client.check_connection():
+            # Generate AI-enhanced suggestions
+            prompt = f"""Generate 3 helpful query suggestions for a personal knowledge assistant.
+Context:
+- Time: {time_period} ({day_of_week})
+- Language: {language}
+- User frequently asks about: {', '.join([t[0] for t in user_patterns.get('frequent_topics', [])][:3]) if user_patterns.get('frequent_topics') else 'various topics'}
+
+Requirements:
+- Return ONLY 3 short, actionable questions
+- Each on a new line
+- No numbering, no markdown
+- In {language} language
+- Relevant to time of day and user interests"""
+
+            response = ollama_client.generate(prompt, stream=False)
+            if response and response.get('text'):
+                ai_suggestions = [s.strip() for s in response['text'].strip().split('\n') if s.strip()]
+                if len(ai_suggestions) >= 3:
+                    return ai_suggestions[:5]  # Return up to 5 AI-generated suggestions
+    except Exception as e:
+        logger.warning(f"Could not generate AI suggestions, using templates: {e}")
+
+    return final_suggestions[:5]  # Return max 5 suggestions
+
 # Tasks/Todos Manager initialisieren wenn Konfiguration vorhanden
 # IMPORTANT: Initialize BEFORE if __name__ == '__main__' so it runs on module import too
 try:
