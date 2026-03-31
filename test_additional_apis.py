@@ -10,7 +10,7 @@ import logging
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
 from backend.features.integration import (
-    DWDClient,
+    OpenWeatherClient,
     NINAClient,
     AutobahnClient,
     DashboardDeutschlandClient,
@@ -21,20 +21,33 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
-def test_dwd():
-    logger.info("=== Testing DWD API ===")
-    client = DWDClient({})
+def test_openweather():
+    logger.info("=== Testing OpenWeather API ===")
+    api_key = os.getenv('OPENWEATHER_API_KEY', '').strip()
+    if not api_key:
+        logger.warning("! OPENWEATHER_API_KEY not set, skipping OpenWeather test")
+        return True
+
+    client = OpenWeatherClient({
+        'api_key': api_key,
+        'lat': 52.52,
+        'lon': 13.405,
+        'units': 'metric',
+        'lang': 'de'
+    })
+
     if client.test_connection():
-        logger.info("✓ DWD connection OK")
+        logger.info("✓ OpenWeather connection OK")
     else:
-        logger.error("✗ DWD connection failed")
+        logger.error("✗ OpenWeather connection failed")
         return False
 
     try:
-        stations = client.get_station_overview_extended(["G005"])
-        logger.info("✓ DWD stationOverviewExtended fetched (%s keys)", len(stations))
+        data = client.get_current_and_forecast(exclude='minutely')
+        current = data.get('current', {}) if isinstance(data, dict) else {}
+        logger.info("✓ OpenWeather forecast fetched (temp=%s)", current.get('temp'))
     except Exception as exc:
-        logger.error("✗ DWD stationOverviewExtended failed: %s", exc)
+        logger.error("✗ OpenWeather forecast failed: %s", exc)
         return False
 
     return True
@@ -154,7 +167,7 @@ def test_deutschland_atlas():
 
 def main():
     results = [
-        test_dwd(),
+        test_openweather(),
         test_nina(),
         test_autobahn(),
         test_dashboard_deutschland(),

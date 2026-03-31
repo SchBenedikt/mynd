@@ -12,7 +12,7 @@ const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
 const API_DISPLAY_NAMES = {
   homeassistant: 'Home Assistant',
   uptimekuma: 'Uptime Kuma',
-  dwd: 'DWD',
+  openweather: 'OpenWeather',
   nina: 'NINA',
   autobahn: 'Autobahn',
   dashboard_deutschland: 'Dashboard Deutschland',
@@ -726,11 +726,11 @@ export default function SettingsPage() {
           if (data.nina && data.nina.ars) {
             setApiConfig(prev => ({ ...prev, ars: data.nina.ars }));
           }
-          if (data.dwd_error) {
+          if (data.openweather_error) {
             setLocationStatus(
               tr(
-                '✓ Standort fuer NINA uebernommen (DWD-Station konnte nicht automatisch gesetzt werden)',
-                '✓ Location applied for NINA (DWD station could not be auto-resolved)'
+                '✓ Standort fuer NINA uebernommen (OpenWeather konnte nicht automatisch gesetzt werden)',
+                '✓ Location applied for NINA (OpenWeather could not be auto-configured)'
               )
             );
           } else {
@@ -1090,7 +1090,7 @@ export default function SettingsPage() {
                         </button>
                       </div>
 
-                      {selectedApi.api_name === 'nina' && (
+                      {(selectedApi.api_name === 'nina' || selectedApi.api_name === 'openweather') && (
                         <div style={{marginBottom: '1.5rem'}}>
                           <div style={{marginBottom: '1rem'}}>
                             <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
@@ -1112,95 +1112,102 @@ export default function SettingsPage() {
                                 {locationResult.nina?.ars && (
                                   <div>{tr('NINA ARS', 'NINA ARS')}: {locationResult.nina.ars} {locationResult.nina.name ? `(${locationResult.nina.name})` : ''}</div>
                                 )}
-                                {locationResult.dwd?.station_id && (
-                                  <div>{tr('DWD Station', 'DWD station')}: {locationResult.dwd.station_id} {locationResult.dwd.name ? `(${locationResult.dwd.name})` : ''}</div>
+                                {locationResult.openweather?.lat != null && locationResult.openweather?.lon != null && (
+                                  <div>
+                                    {tr('OpenWeather Koordinaten', 'OpenWeather coordinates')}: {locationResult.openweather.lat}, {locationResult.openweather.lon}
+                                    {locationResult.openweather.location_name ? ` (${locationResult.openweather.location_name})` : ''}
+                                  </div>
                                 )}
                               </div>
                             )}
                           </div>
-                          <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
-                            {tr('Regionalschluessel (ARS) suchen', 'Search regional keys (ARS)')}
-                          </div>
-                          <div className="input-group">
-                            <label>{tr('Suche nach Ort oder ARS', 'Search by place or ARS')}</label>
-                            <input
-                              type="text"
-                              value={ninaRegionQuery}
-                              onChange={(e) => setNinaRegionQuery(e.target.value)}
-                              placeholder={tr('z.B. Berlin oder 110000000000', 'e.g. Berlin or 110000000000')}
-                            />
-                          </div>
-                          <div className="button-group" style={{marginTop: '0.5rem'}}>
-                            <button className="btn" onClick={loadNinaRegions}>
-                              {tr('Regionen laden', 'Load regions')}
-                            </button>
-                          </div>
-                          {ninaRegionStatus && (
-                            <div className="status-text" style={{marginTop: '0.5rem'}}>{ninaRegionStatus}</div>
-                          )}
-                          {ninaRegions.length > 0 && (
-                            <div className="input-group" style={{marginTop: '0.75rem'}}>
-                              <label>{tr('Treffer', 'Matches')}</label>
-                              <select
-                                value=""
-                                onChange={(e) => {
-                                  const ars = e.target.value;
-                                  if (ars) {
-                                    setApiConfig(prev => ({ ...prev, ars }));
-                                  }
-                                }}
-                              >
-                                <option value="">{tr('Auswaehlen...', 'Select...')}</option>
-                                {ninaRegions.map((entry) => (
-                                  <option key={`${entry.ars}-${entry.name}`} value={entry.ars}>
-                                    {entry.ars} - {entry.name}{entry.hint ? ` (${entry.hint})` : ''}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-                          <div style={{marginTop: '1rem'}}>
-                            <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
-                              {tr('Warnungen fuer konfigurierten ARS', 'Warnings for configured ARS')}
-                            </div>
-                            <div className="button-group">
-                              <button className="btn" onClick={loadNinaWarnings}>
-                                {tr('Warnungen laden', 'Load warnings')}
-                              </button>
-                            </div>
-                            {ninaWarningsStatus && (
-                              <div className="status-text" style={{marginTop: '0.5rem'}}>
-                                {ninaWarningsStatus}
+                          {selectedApi.api_name === 'nina' && (
+                            <>
+                              <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
+                                {tr('Regionalschluessel (ARS) suchen', 'Search regional keys (ARS)')}
                               </div>
-                            )}
-                            {ninaWarningsArs && (
-                              <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.25rem'}}>
-                                {tr('ARS', 'ARS')}: {ninaWarningsArs}
+                              <div className="input-group">
+                                <label>{tr('Suche nach Ort oder ARS', 'Search by place or ARS')}</label>
+                                <input
+                                  type="text"
+                                  value={ninaRegionQuery}
+                                  onChange={(e) => setNinaRegionQuery(e.target.value)}
+                                  placeholder={tr('z.B. Berlin oder 110000000000', 'e.g. Berlin or 110000000000')}
+                                />
                               </div>
-                            )}
-                            {ninaWarnings.length > 0 && (
-                              <div style={{marginTop: '0.75rem', display: 'grid', gap: '0.5rem'}}>
-                                {ninaWarnings.slice(0, 10).map((warning, index) => (
-                                  <div
-                                    key={`${warning.identifier || warning.id || index}`}
-                                    style={{
-                                      padding: '0.75rem',
-                                      borderRadius: '6px',
-                                      background: 'var(--panel-bg)',
-                                      border: '1px solid var(--border)'
+                              <div className="button-group" style={{marginTop: '0.5rem'}}>
+                                <button className="btn" onClick={loadNinaRegions}>
+                                  {tr('Regionen laden', 'Load regions')}
+                                </button>
+                              </div>
+                              {ninaRegionStatus && (
+                                <div className="status-text" style={{marginTop: '0.5rem'}}>{ninaRegionStatus}</div>
+                              )}
+                              {ninaRegions.length > 0 && (
+                                <div className="input-group" style={{marginTop: '0.75rem'}}>
+                                  <label>{tr('Treffer', 'Matches')}</label>
+                                  <select
+                                    value=""
+                                    onChange={(e) => {
+                                      const ars = e.target.value;
+                                      if (ars) {
+                                        setApiConfig(prev => ({ ...prev, ars }));
+                                      }
                                     }}
                                   >
-                                    <div style={{fontWeight: '600'}}>{getNinaWarningTitle(warning)}</div>
-                                    {getNinaWarningDescription(warning) && (
-                                      <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.35rem'}}>
-                                        {getNinaWarningDescription(warning)}
-                                      </div>
-                                    )}
+                                    <option value="">{tr('Auswaehlen...', 'Select...')}</option>
+                                    {ninaRegions.map((entry) => (
+                                      <option key={`${entry.ars}-${entry.name}`} value={entry.ars}>
+                                        {entry.ars} - {entry.name}{entry.hint ? ` (${entry.hint})` : ''}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                              <div style={{marginTop: '1rem'}}>
+                                <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
+                                  {tr('Warnungen fuer konfigurierten ARS', 'Warnings for configured ARS')}
+                                </div>
+                                <div className="button-group">
+                                  <button className="btn" onClick={loadNinaWarnings}>
+                                    {tr('Warnungen laden', 'Load warnings')}
+                                  </button>
+                                </div>
+                                {ninaWarningsStatus && (
+                                  <div className="status-text" style={{marginTop: '0.5rem'}}>
+                                    {ninaWarningsStatus}
                                   </div>
-                                ))}
+                                )}
+                                {ninaWarningsArs && (
+                                  <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.25rem'}}>
+                                    {tr('ARS', 'ARS')}: {ninaWarningsArs}
+                                  </div>
+                                )}
+                                {ninaWarnings.length > 0 && (
+                                  <div style={{marginTop: '0.75rem', display: 'grid', gap: '0.5rem'}}>
+                                    {ninaWarnings.slice(0, 10).map((warning, index) => (
+                                      <div
+                                        key={`${warning.identifier || warning.id || index}`}
+                                        style={{
+                                          padding: '0.75rem',
+                                          borderRadius: '6px',
+                                          background: 'var(--panel-bg)',
+                                          border: '1px solid var(--border)'
+                                        }}
+                                      >
+                                        <div style={{fontWeight: '600'}}>{getNinaWarningTitle(warning)}</div>
+                                        {getNinaWarningDescription(warning) && (
+                                          <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.35rem'}}>
+                                            {getNinaWarningDescription(warning)}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
+                            </>
+                          )}
                         </div>
                       )}
 
