@@ -8,6 +8,7 @@ import { ThemeSelector } from '../../components/ThemeSelector';
 
 const API_BASE = '';
 const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
+const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function SettingsPage() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
+  const [displayName, setDisplayName] = useState('');
   
   const [aiProtocol, setAiProtocol] = useState('http');
   const [aiHost, setAiHost] = useState('127.0.0.1');
@@ -87,6 +89,17 @@ export default function SettingsPage() {
 
   useEffect(() => {
     try {
+      const storedName = localStorage.getItem(DISPLAY_NAME_STORAGE_KEY);
+      if (storedName) {
+        setDisplayName(storedName);
+      }
+    } catch (err) {
+      console.error('Error loading display name:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isSidebarCollapsed));
     } catch (err) {
       console.error('Error saving sidebar state:', err);
@@ -103,6 +116,17 @@ export default function SettingsPage() {
           setNextcloudConfigured(true);
           setNextcloudDisplayName(config.display_name || config.username || '');
           setNextcloudUrl(config.nextcloud_url || '');
+          if (config.display_name || config.username) {
+            try {
+              const existing = localStorage.getItem(DISPLAY_NAME_STORAGE_KEY);
+              if (!existing) {
+                localStorage.setItem(DISPLAY_NAME_STORAGE_KEY, config.display_name || config.username);
+                setDisplayName(config.display_name || config.username);
+              }
+            } catch (err) {
+              console.error('Error saving display name:', err);
+            }
+          }
         }
       }
     } catch (err) {
@@ -142,6 +166,17 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error('Error loading calendar options:', err);
+    }
+  };
+
+  const saveDisplayName = () => {
+    const trimmed = displayName.trim();
+    if (!trimmed) return;
+    try {
+      localStorage.setItem(DISPLAY_NAME_STORAGE_KEY, trimmed);
+      setDisplayName(trimmed);
+    } catch (err) {
+      console.error('Error saving display name:', err);
     }
   };
 
@@ -479,10 +514,15 @@ export default function SettingsPage() {
       {/* LEFT SIDEBAR */}
       <div className={`left-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
-          <div className="brand">
+          <button
+            type="button"
+            className="brand brand-button"
+            onClick={() => router.push('/')}
+            aria-label="Zur Startseite"
+          >
             <div className="brand-icon">M</div>
             {!isSidebarCollapsed && <span>MYND</span>}
-          </div>
+          </button>
           <button
             className="sidebar-toggle"
             type="button"
@@ -492,7 +532,11 @@ export default function SettingsPage() {
             <i className={`fas ${isSidebarCollapsed ? 'fa-angle-right' : 'fa-angle-left'}`}></i>
           </button>
         </div>
-        {!isSidebarCollapsed && (
+        {isSidebarCollapsed ? (
+          <button className="new-chat-btn compact" onClick={startNewChat} title={t('newChat')}>
+            <i className="fas fa-plus"></i>
+          </button>
+        ) : (
           <button className="new-chat-btn" onClick={startNewChat}>
             <i className="fas fa-plus"></i> {t('newChat')}
           </button>
@@ -514,13 +558,19 @@ export default function SettingsPage() {
             <i className="fas fa-cog"></i> {!isSidebarCollapsed && t('settings')}
           </button>
           <div className="status-badges">
-            <div className="status-badge">
-              <div className={`status-dot ${health.ollama === 'ok' ? 'ok' : 'error'}`}></div>
-              {!isSidebarCollapsed && <span>Ollama</span>}
+            <div className={`status-badge ${health.ollama}`}>
+              <div className={`status-dot ${health.ollama}`}></div>
+              <div className="status-meta">
+                <span className="status-label">Ollama</span>
+                <span className="status-value">{health.ollama === 'ok' ? 'Online' : 'Offline'}</span>
+              </div>
             </div>
-            <div className="status-badge">
-              <div className={`status-dot ${health.kb === 'ok' ? 'ok' : 'error'}`}></div>
-              {!isSidebarCollapsed && <span>KB</span>}
+            <div className={`status-badge ${health.kb}`}>
+              <div className={`status-dot ${health.kb}`}></div>
+              <div className="status-meta">
+                <span className="status-label">KB</span>
+                <span className="status-value">{health.kb === 'ok' ? 'Verbunden' : 'Offline'}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -566,6 +616,25 @@ export default function SettingsPage() {
                     <button className="btn primary" onClick={saveAIConfig}>{t('save')}</button>
                   </div>
                   {aiStatus && <div className="status-text">{aiStatus}</div>}
+                </div>
+
+                <div className="panel-section" style={{marginTop: '2rem'}}>
+                  <div className="section-title">Personalisierung</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                    Dieser Name wird fuer die persoenliche Begruessung auf der Startseite genutzt.
+                  </p>
+                  <div className="input-group">
+                    <label>Anzeigename</label>
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder="z.B. Vinzenz"
+                    />
+                  </div>
+                  <div className="button-group">
+                    <button className="btn primary" onClick={saveDisplayName}>Speichern</button>
+                  </div>
                 </div>
 
                 <div className="panel-section" style={{marginTop: '2rem'}}>

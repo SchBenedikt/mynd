@@ -13,6 +13,7 @@ const API_BASE = '';
 const CHAT_STORAGE_KEY = 'mynd_chat_history_v1';
 const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
 const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
+const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
 
 const LANGUAGE_COMMANDS = {
   de: ['deutsch', 'german'],
@@ -87,6 +88,7 @@ export default function HomePage() {
   const [isThinking, setIsThinking] = useState(false);
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
+  const [displayName, setDisplayName] = useState('');
   
   const [aiProtocol, setAiProtocol] = useState('http');
   const [aiHost, setAiHost] = useState('127.0.0.1');
@@ -141,6 +143,55 @@ export default function HomePage() {
   const conversationActive = messages.length > 0;
 
   const languageLabel = (code) => languages.find((l) => l.code === code)?.label || code;
+
+  const pickGreeting = (segment, name) => {
+    const suffix = name ? `, ${name}` : '';
+    const greetings = {
+      de: {
+        morning: [
+          'Guten Morgen',
+          'Guten Morgen! Bereit fuer den Tag',
+          'Was liegt dir am Morgen auf dem Herzen'
+        ],
+        afternoon: [
+          'Guten Tag',
+          'Wie laeuft dein Tag',
+          'Was kann ich fuer dich tun'
+        ],
+        evening: [
+          'Guten Abend',
+          'Wie war dein Tag',
+          'Was liegt dir auf dem Herzen'
+        ],
+        night: [
+          'Noch wach',
+          'Was brauchst du noch heute',
+          'Wie kann ich dir helfen'
+        ]
+      },
+      en: {
+        morning: ['Good morning', 'Morning! Ready for the day', "What's on your mind this morning"],
+        afternoon: ['Good afternoon', 'How is your day going', 'What can I do for you'],
+        evening: ['Good evening', 'How was your day', "What's on your mind"],
+        night: ['Still up', 'What do you need today', 'How can I help']
+      }
+    };
+
+    const list = (greetings[language] || greetings.en)[segment] || greetings.en.morning;
+    const seed = new Date().getDate();
+    const base = list[seed % list.length];
+    return `${base}${suffix}`;
+  };
+
+  const getTimeSegment = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'morning';
+    if (hour >= 12 && hour < 17) return 'afternoon';
+    if (hour >= 17 && hour < 22) return 'evening';
+    return 'night';
+  };
+
+  const personalGreeting = pickGreeting(getTimeSegment(), displayName);
 
   const normalizeText = (value) => String(value || '')
     .toLowerCase()
@@ -233,6 +284,11 @@ export default function HomePage() {
 
   useEffect(() => {
     try {
+      const rawDisplayName = localStorage.getItem(DISPLAY_NAME_STORAGE_KEY);
+      if (rawDisplayName) {
+        setDisplayName(rawDisplayName);
+      }
+
       const rawChats = localStorage.getItem(CHAT_STORAGE_KEY);
       const rawActiveChatId = localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
       const rawSidebarCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
@@ -770,6 +826,38 @@ export default function HomePage() {
     setActiveChatId(chatId);
   };
 
+  const renameChat = (chatId) => {
+    const chat = chats.find((item) => item.id === chatId);
+    if (!chat) return;
+    const nextTitle = window.prompt('Chat umbenennen:', chat.title);
+    if (!nextTitle || !nextTitle.trim()) return;
+    const trimmed = nextTitle.trim();
+
+    setChats((prevChats) => prevChats.map((item) => (
+      item.id === chatId ? { ...item, title: trimmed, updatedAt: Date.now() } : item
+    )));
+  };
+
+  const deleteChat = (chatId) => {
+    const chat = chats.find((item) => item.id === chatId);
+    if (!chat) return;
+    const confirmed = window.confirm(`Chat "${chat.title}" wirklich loeschen?`);
+    if (!confirmed) return;
+
+    setChats((prevChats) => {
+      const remaining = prevChats.filter((item) => item.id !== chatId);
+      if (!remaining.length) {
+        const newChat = createEmptyChat();
+        setActiveChatId(newChat.id);
+        return [newChat];
+      }
+      if (chatId === activeChatId) {
+        setActiveChatId(remaining[0].id);
+      }
+      return remaining;
+    });
+  };
+
   const sortedChats = [...chats].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
   const goToSettings = () => {
@@ -781,10 +869,15 @@ export default function HomePage() {
       {/* LEFT SIDEBAR */}
       <div className={`left-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
-          <div className="brand">
+          <button
+            type="button"
+            className="brand brand-button"
+            onClick={startNewChat}
+            aria-label="Zur Startseite"
+          >
             <div className="brand-icon">M</div>
             {!isSidebarCollapsed && <span>MYND</span>}
-          </div>
+          </button>
           <button
             className="sidebar-toggle"
             type="button"
@@ -794,7 +887,11 @@ export default function HomePage() {
             <i className={`fas ${isSidebarCollapsed ? 'fa-angle-right' : 'fa-angle-left'}`}></i>
           </button>
         </div>
-        {!isSidebarCollapsed && (
+        {isSidebarCollapsed ? (
+          <button className="new-chat-btn compact" onClick={startNewChat} title={t('newChat')}>
+            <i className="fas fa-plus"></i>
+          </button>
+        ) : (
           <button className="new-chat-btn" onClick={startNewChat} title={t('newChat')}>
             <i className="fas fa-plus"></i>
             {t('newChat')}
@@ -812,16 +909,47 @@ export default function HomePage() {
             </button>
           ) : (
             sortedChats.map((chat) => (
-              <button
+              <div
                 key={chat.id}
-                type="button"
                 className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}
                 onClick={() => openChat(chat.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openChat(chat.id);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
                 title={chat.title}
               >
                 <i className="fas fa-message"></i>
-                <span>{chat.title}</span>
-              </button>
+                <span className="history-title">{chat.title}</span>
+                <div className="history-actions">
+                  <button
+                    type="button"
+                    className="history-action"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      renameChat(chat.id);
+                    }}
+                    title="Umbenennen"
+                  >
+                    <i className="fas fa-pen"></i>
+                  </button>
+                  <button
+                    type="button"
+                    className="history-action danger"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteChat(chat.id);
+                    }}
+                    title="Loeschen"
+                  >
+                    <i className="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
             ))
           )}
         </div>
@@ -835,13 +963,19 @@ export default function HomePage() {
             {!isSidebarCollapsed && t('settings')}
           </button>
           <div className="status-badges">
-            <div className="status-badge">
-              <div className={`status-dot ${health.ollama === 'ok' ? 'ok' : 'error'}`}></div>
-              {!isSidebarCollapsed && <span>Ollama</span>}
+            <div className={`status-badge ${health.ollama}`}>
+              <div className={`status-dot ${health.ollama}`}></div>
+              <div className="status-meta">
+                <span className="status-label">Ollama</span>
+                <span className="status-value">{health.ollama === 'ok' ? 'Online' : 'Offline'}</span>
+              </div>
             </div>
-            <div className="status-badge">
-              <div className={`status-dot ${health.kb === 'ok' ? 'ok' : 'error'}`}></div>
-              {!isSidebarCollapsed && <span>KB</span>}
+            <div className={`status-badge ${health.kb}`}>
+              <div className={`status-dot ${health.kb}`}></div>
+              <div className="status-meta">
+                <span className="status-label">KB</span>
+                <span className="status-value">{health.kb === 'ok' ? 'Verbunden' : 'Offline'}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -852,7 +986,7 @@ export default function HomePage() {
         {!conversationActive ? (
           <div className="landing">
             <div className="landing-header">
-              <h2>{t('askHeading')}</h2>
+              <h2>{personalGreeting}</h2>
               <p>{t('askSubheading')}</p>
             </div>
             <div className="input-wrapper">
