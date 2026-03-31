@@ -233,7 +233,8 @@ class ImmichClient:
             'im', 'in', 'aus', 'dem', 'der', 'die', 'das', 'den', 'des', 'und', 'oder', 'mit',
             'foto', 'fotos', 'bild', 'bilder', 'photo', 'photos', 'image', 'images',
             'bitte', 'kannst', 'kann', 'suche', 'finde', 'find', 'show', 'me', 'all',
-            'jahr', 'jahren', 'monat', 'monaten', 'tag', 'tagen', 'heute', 'gestern', 'morgen'
+            'jahr', 'jahren', 'monat', 'monaten', 'tag', 'tagen', 'heute', 'gestern', 'morgen',
+            'woche', 'wochen', 'letzte', 'letzter', 'letzten', 'diese', 'diesen', 'this', 'last', 'week'
         }
 
         terms = [w for w in words if len(w) >= 3 and w not in stop_words]
@@ -273,6 +274,7 @@ class ImmichClient:
     def _detect_people_in_query(self, query: str, people: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Erkennt genannte Personen aus der Query anhand der Immich-Personenliste."""
         query_lower = (query or '').lower()
+        query_parts = [part for part in re.findall(r"[\wäöüÄÖÜß]+", query_lower) if len(part) >= 3]
         matches = []
 
         for person in people:
@@ -285,9 +287,14 @@ class ImmichClient:
                 matches.append(person)
                 continue
 
-            # Match on word boundaries for first/last name parts
+            # Match on name parts with stricter threshold to avoid surname-only false positives.
             name_parts = [part for part in re.findall(r"[\wäöüÄÖÜß]+", name_lower) if len(part) >= 3]
-            if any(re.search(rf"\b{re.escape(part)}\b", query_lower) for part in name_parts):
+            matched_parts = [part for part in name_parts if re.search(rf"\b{re.escape(part)}\b", query_lower)]
+
+            # If user query likely contains full name (>=2 tokens), require at least 2 matching parts.
+            # Otherwise allow single-part match for short queries like just a first name.
+            required_parts = 2 if len(query_parts) >= 2 else 1
+            if len(matched_parts) >= required_parts:
                 matches.append(person)
 
         # Deduplicate by id
@@ -305,11 +312,18 @@ class ImmichClient:
             # Erst alle Personen holen
             people = self.get_people()
 
-            # Person nach Name finden (case-insensitive)
-            matching_people = [
-                p for p in people
-                if p.get('name', '').lower().find(person_name.lower()) >= 0
-            ]
+            # Person nach Name finden (case-insensitive), mit Priorität auf exakte Volltreffer.
+            target_name = (person_name or '').strip().lower()
+            exact_matches = [p for p in people if (p.get('name') or '').strip().lower() == target_name]
+
+            if exact_matches:
+                matching_people = exact_matches
+            else:
+                # Fallback auf Teiltreffer, falls kein exakter Name gefunden wurde.
+                matching_people = [
+                    p for p in people
+                    if (p.get('name', '').lower().find(target_name) >= 0)
+                ]
 
             if not matching_people:
                 self.logger.info(f"No person found matching: {person_name}")
@@ -480,6 +494,18 @@ class ImmichClient:
         today = date.today()
         query_lower = query.lower()
 
+        # Normalize common typos so date intent is still detected reliably.
+        typo_map = {
+            'lezte': 'letzte',
+            'lezter': 'letzter',
+            'lezten': 'letzten',
+            'letze': 'letzte',
+            'letzer': 'letzter',
+            'letzen': 'letzten',
+        }
+        for wrong, correct in typo_map.items():
+            query_lower = re.sub(rf"\b{wrong}\b", correct, query_lower)
+
         # Spezifisches Jahr, z.B. "aus dem Jahr 2026" oder "von 2026"
         year_match = re.search(r"\b(19\d{2}|20\d{2})\b", query_lower)
         if year_match and any(token in query_lower for token in ['jahr', 'year', 'von', 'aus']):
@@ -509,8 +535,14 @@ class ImmichClient:
                 last_day = today.replace(month=today.month+1, day=1)
             return first_day.isoformat(), last_day.isoformat()
         
+        # Letzte Woche (vorherige Kalenderwoche, Montag bis Montag)
+        elif any(word in query_lower for word in ['letzte woche', 'letzter woche', 'letzten woche', 'last week']):
+            this_monday = today - timedelta(days=today.weekday())
+            last_monday = this_monday - timedelta(days=7)
+            return last_monday.isoformat(), this_monday.isoformat()
+
         # Letzte 7 Tage
-        elif any(word in query_lower for word in ['letzte 7 tage', 'last 7 days', 'letzte woche']):
+        elif any(word in query_lower for word in ['letzte 7 tage', 'last 7 days']):
             week_ago = today - timedelta(days=7)
             return week_ago.isoformat(), (today + timedelta(days=1)).isoformat()
         
@@ -544,13 +576,27 @@ class ImmichClient:
         # Erkenne genannte Personen robust anhand der Immich-Personenliste
         people = self.get_people()
         mentioned_people = self._detect_people_in_query(query, people)
+        mentioned_person_names = [p.get('name', '').strip() for p in mentioned_people if p.get('name')]
 
-        # Für Kontext-/Objektsuche gezielte Keywords statt ganzer Satz
+        # Extrahiere relevante Terme für gezielte Suchanfragen und UI-Search-Kontext.
         relevant_terms = self._extract_relevant_terms(query)
-        context_queries = self._expand_terms_with_synonyms(relevant_terms)
-        if not context_queries:
-            context_queries = [query]
-        self.logger.info(f"Context queries for '{query}': {context_queries[:4]}")
+        if (date_from or date_to) and mentioned_person_names:
+            # Bei Person+Zeitraum nur Person(en) als Query-Kontext nutzen.
+            metadata_query = ' '.join(mentioned_person_names[:2])
+        else:
+            metadata_query = ' '.join(relevant_terms[:3]) if relevant_terms else None
+
+        # Für Kontext-/Objektsuche gezielte Keywords statt ganzer Satz.
+        # Bei aktivem Datumsfilter überspringen wir Context- und Smart-Suche vollständig.
+        use_context_search = not (date_from or date_to)
+        context_queries = [query]
+        if use_context_search:
+            context_queries = self._expand_terms_with_synonyms(relevant_terms)
+            if not context_queries:
+                context_queries = [query]
+            self.logger.info(f"Context queries for '{query}': {context_queries[:4]}")
+        else:
+            self.logger.info("Date filter active - skipping context and smart query expansion")
 
         try:
             # Use ThreadPoolExecutor for parallel execution to avoid sequential timeout stacking
@@ -573,26 +619,32 @@ class ImmichClient:
                         futures[f'person_{i}_{person_name}'] = person_future
 
                 # Strategie 2: Smart Search auf Keywords/Synonyme statt vollem Satz
-                for i, smart_query in enumerate(context_queries[:max_parallel]):
-                    smart_future = executor.submit(self.search_smart, smart_query, limit)
-                    futures[f'smart_{i}_{smart_query}'] = smart_future
+                if not (date_from or date_to):
+                    for i, smart_query in enumerate(context_queries[:max_parallel]):
+                        smart_future = executor.submit(self.search_smart, smart_query, limit)
+                        futures[f'smart_{i}_{smart_query}'] = smart_future
+                else:
+                    self.logger.info("Date filter active - skipping smart search")
                 
                 # Strategie 3: Metadata search mit Datums-Filter falls verfügbar
                 if date_from or date_to:
-                    metadata_query = context_queries[0] if context_queries else query
-                    metadata_future = executor.submit(
-                        self.search_assets, 
-                        query=metadata_query,
-                        person_ids=None,
-                        date_from=date_from, 
-                        date_to=date_to, 
-                        limit=limit
-                    )
-                    futures['metadata_date'] = metadata_future
+                    if mentioned_people:
+                        self.logger.info("Date+person query detected - prioritizing person/date search")
+                    else:
+                        metadata_future = executor.submit(
+                            self.search_assets,
+                            query=metadata_query,
+                            person_ids=None,
+                            date_from=date_from,
+                            date_to=date_to,
+                            limit=limit
+                        )
+                        futures['metadata_date'] = metadata_future
                 
                 # Strategie 4: Context search (Objekte/Tags)
-                context_future = executor.submit(self.search_by_context, query, limit)
-                futures['context'] = context_future
+                if use_context_search:
+                    context_future = executor.submit(self.search_by_context, query, limit)
+                    futures['context'] = context_future
 
                 # Sammle Ergebnisse mit timeout protection
                 total_timeout = self.timeout_long + 10  # Add buffer to timeout
@@ -625,13 +677,36 @@ class ImmichClient:
                     except Exception as e:
                         self.logger.error(f"Error getting results from {future_name}: {e}")
 
+                # Falls Person+Datum keine Treffer liefert, fallback auf breite Datumssuche.
+                if (date_from or date_to) and mentioned_people and len(results) == 0:
+                    fallback_assets = self.search_assets(
+                        query=metadata_query,
+                        person_ids=None,
+                        date_from=date_from,
+                        date_to=date_to,
+                        limit=limit
+                    )
+                    if fallback_assets:
+                        self.logger.info(f"Fallback date metadata search returned {len(fallback_assets)} assets")
+                        results.extend(fallback_assets)
+
         except Exception as e:
             self.logger.error(f"Error in parallel search execution: {e}")
             # Fallback to sequential search if parallel fails
             try:
-                smart_results = self.search_smart(query, limit=limit)
-                if smart_results:
-                    results.extend(smart_results)
+                if date_from or date_to:
+                    metadata_results = self.search_assets(
+                        query=metadata_query,
+                        date_from=date_from,
+                        date_to=date_to,
+                        limit=limit
+                    )
+                    if metadata_results:
+                        results.extend(metadata_results)
+                else:
+                    smart_results = self.search_smart(query, limit=limit)
+                    if smart_results:
+                        results.extend(smart_results)
             except Exception as fallback_error:
                 self.logger.error(f"Fallback search also failed: {fallback_error}")
 
@@ -646,9 +721,15 @@ class ImmichClient:
                 seen_ids.add(asset_id)
                 unique_results.append(asset)
 
+        # Für Datumsanfragen den UI-Suchkontext nicht mit dem kompletten Satz befüllen.
+        if date_from or date_to:
+            ui_search_query = ' '.join(mentioned_person_names[:2]) if mentioned_person_names else metadata_query
+        else:
+            ui_search_query = query
+
         # Formatiere nur die gewünschten Ergebnisse für Anzeige MIT Suchkontext
         formatted_results = [
-            self.format_asset_for_display(asset, search_query=query, date_from=date_from, date_to=date_to) 
+            self.format_asset_for_display(asset, search_query=ui_search_query, date_from=date_from, date_to=date_to) 
             for asset in unique_results
         ]
 
