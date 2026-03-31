@@ -3137,9 +3137,28 @@ def manage_api_config(api_name):
             data = request.get_json()
             config = data.get('config', {})
 
+            # Preserve existing secret values when UI sends masked placeholders (***).
+            existing_config = registry.load_config(api_name, username) or {}
+            api_class = registry.get_api_class(api_name)
+            schema = {}
+            if api_class:
+                schema_instance = registry.create_api_instance(
+                    api_name,
+                    existing_config if existing_config else (api_class.get_default_config() if not api_class.requires_config() else config),
+                    username,
+                    use_cache=False
+                )
+                if schema_instance:
+                    schema = schema_instance.get_config_schema()
+
+            merged_config = dict(config)
+            for key, field_meta in schema.items():
+                if field_meta.get('secret') and merged_config.get(key) == '***' and existing_config.get(key):
+                    merged_config[key] = existing_config.get(key)
+
             # Validate by trying to create instance
             try:
-                instance = registry.create_api_instance(api_name, config, username, use_cache=False)
+                instance = registry.create_api_instance(api_name, merged_config, username, use_cache=False)
                 if not instance:
                     return jsonify({
                         'success': False,
@@ -3160,7 +3179,7 @@ def manage_api_config(api_name):
                 }), 400
 
             # Save config
-            if registry.save_config(api_name, config, username):
+            if registry.save_config(api_name, merged_config, username):
                 return jsonify({
                     'success': True,
                     'message': f'{api_name} configuration saved successfully'
@@ -3197,8 +3216,27 @@ def test_api_connection(api_name):
 
         registry = get_api_registry()
 
+        # Preserve existing secret values when UI sends masked placeholders (***).
+        existing_config = registry.load_config(api_name, username) or {}
+        api_class = registry.get_api_class(api_name)
+        schema = {}
+        if api_class:
+            schema_instance = registry.create_api_instance(
+                api_name,
+                existing_config if existing_config else (api_class.get_default_config() if not api_class.requires_config() else config),
+                username,
+                use_cache=False
+            )
+            if schema_instance:
+                schema = schema_instance.get_config_schema()
+
+        merged_config = dict(config)
+        for key, field_meta in schema.items():
+            if field_meta.get('secret') and merged_config.get(key) == '***' and existing_config.get(key):
+                merged_config[key] = existing_config.get(key)
+
         # Create instance with provided config
-        instance = registry.create_api_instance(api_name, config, username, use_cache=False)
+        instance = registry.create_api_instance(api_name, merged_config, username, use_cache=False)
         if not instance:
             return jsonify({
                 'success': False,

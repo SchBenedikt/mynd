@@ -56,7 +56,7 @@ class APIClient(ABC):
                 'status': 'healthy' if is_healthy else 'unhealthy',
                 'last_checked': datetime.now().isoformat(),
                 'response_time': response_time,
-                'error': None
+                'error': None if is_healthy else 'Connection test failed'
             }
         except Exception as e:
             return {

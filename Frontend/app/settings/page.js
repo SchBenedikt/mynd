@@ -789,7 +789,8 @@ export default function SettingsPage() {
         if (data.health.status === 'healthy') {
           setApiConfigStatus(tr('✓ Verbindung erfolgreich', '✓ Connection successful'));
         } else {
-          setApiConfigStatus(tr('Verbindung fehlgeschlagen: ', 'Connection failed: ') + data.health.error);
+          const errorMessage = data?.health?.error || tr('Unbekannter Fehler', 'Unknown error');
+          setApiConfigStatus(tr('Verbindung fehlgeschlagen: ', 'Connection failed: ') + errorMessage);
         }
       } else {
         const data = await res.json();
