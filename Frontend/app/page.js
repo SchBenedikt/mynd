@@ -11,6 +11,7 @@ import { useLanguage } from '../hooks/useLanguage';
 const API_BASE = '';
 const CHAT_STORAGE_KEY = 'mynd_chat_history_v1';
 const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
+const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 
 const LANGUAGE_COMMANDS = {
   de: ['deutsch', 'german'],
@@ -122,6 +123,13 @@ export default function HomePage() {
     submitting: false,
     error: ''
   });
+  const [photoPreview, setPhotoPreview] = useState({
+    open: false,
+    title: '',
+    thumbnailUrl: '',
+    immichUrl: '',
+    downloadUrl: ''
+  });
   const progressIntervalRef = useRef(null);
   
   const messagesEndRef = useRef(null);
@@ -226,6 +234,12 @@ export default function HomePage() {
     try {
       const rawChats = localStorage.getItem(CHAT_STORAGE_KEY);
       const rawActiveChatId = localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+      const rawSidebarCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+
+      if (rawSidebarCollapsed === 'true' || rawSidebarCollapsed === 'false') {
+        setIsSidebarCollapsed(rawSidebarCollapsed === 'true');
+      }
+
       if (rawChats) {
         const parsedChats = JSON.parse(rawChats);
         if (Array.isArray(parsedChats) && parsedChats.length > 0) {
@@ -253,6 +267,29 @@ export default function HomePage() {
       console.error('Error saving chat history:', err);
     }
   }, [chats, activeChatId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isSidebarCollapsed));
+    } catch (err) {
+      console.error('Error saving sidebar state:', err);
+    }
+  }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    if (!photoPreview.open) return undefined;
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setPhotoPreview((prev) => ({ ...prev, open: false }));
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [photoPreview.open]);
 
   const appendMessageToChat = (chatId, message, originalUserText = null) => {
     const now = Date.now();
@@ -553,6 +590,103 @@ export default function HomePage() {
     return `${day}.${month}.${year} ${timePart}`;
   };
 
+  const getImageDownloadUrl = (thumbnailUrl, fallbackUrl = '') => {
+    if (!thumbnailUrl) return fallbackUrl;
+
+    try {
+      const parsedUrl = new URL(thumbnailUrl, window.location.origin);
+      const assetMatch = parsedUrl.pathname.match(/\/api\/immich\/thumbnail\/([^/?#]+)/);
+      const assetId = assetMatch?.[1];
+
+      if (!assetId) return fallbackUrl;
+
+      const params = new URLSearchParams();
+      const username = parsedUrl.searchParams.get('username');
+      if (username) {
+        params.set('username', username);
+      }
+
+      const query = params.toString();
+      return `${API_BASE}/api/immich/download/${assetId}${query ? `?${query}` : ''}`;
+    } catch (_) {
+      return fallbackUrl;
+    }
+  };
+
+  const openPhotoPreview = ({ title = 'Vorschau', thumbnailUrl = '', immichUrl = '' }) => {
+    setPhotoPreview({
+      open: true,
+      title,
+      thumbnailUrl,
+      immichUrl,
+      downloadUrl: getImageDownloadUrl(thumbnailUrl, immichUrl)
+    });
+  };
+
+  const closePhotoPreview = () => {
+    setPhotoPreview((prev) => ({ ...prev, open: false }));
+  };
+
+  const markdownComponents = {
+    p: ({ node, children, ...props }) => {
+      const hasOnlyImageLink =
+        node?.children?.length === 1
+        && node.children[0]?.type === 'link'
+        && node.children[0]?.children?.length === 1
+        && node.children[0].children[0]?.type === 'image';
+
+      const hasOnlyImage =
+        node?.children?.length === 1
+        && node.children[0]?.type === 'image';
+
+      const className = hasOnlyImageLink || hasOnlyImage
+        ? 'markdown-image-paragraph'
+        : undefined;
+
+      return (
+        <p className={className} {...props}>
+          {children}
+        </p>
+      );
+    },
+    a: ({ node, href, children, ...props }) => {
+      const isImageLink =
+        node?.children?.length === 1
+        && node.children[0]?.type === 'image';
+
+      if (isImageLink) {
+        const imageNode = node.children[0];
+        const thumbnailUrl = imageNode?.url || '';
+        const title = imageNode?.alt || 'Vorschau';
+
+        return (
+          <button
+            type="button"
+            className="chat-thumbnail-trigger"
+            onClick={() => openPhotoPreview({ title, thumbnailUrl, immichUrl: href || '' })}
+          >
+            {children}
+          </button>
+        );
+      }
+
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+          {children}
+        </a>
+      );
+    },
+    img: ({ src, alt, ...props }) => (
+      <img
+        {...props}
+        src={src}
+        alt={alt}
+        className="chat-thumbnail"
+        loading="lazy"
+      />
+    )
+  };
+
   const submitCalendarForm = async (e) => {
     e.preventDefault();
 
@@ -661,33 +795,46 @@ export default function HomePage() {
             <i className={`fas ${isSidebarCollapsed ? 'fa-angle-right' : 'fa-angle-left'}`}></i>
           </button>
         </div>
-        <button className="new-chat-btn" onClick={startNewChat} title={t('newChat')}>
-          <i className="fas fa-plus"></i>
-          {!isSidebarCollapsed && t('newChat')}
-        </button>
-        <button 
-          className="new-chat-btn settings-btn"
-          onClick={goToSettings}
-          title={t('settings')}
-        >
-          <i className="fas fa-cog"></i>
-          {!isSidebarCollapsed && t('settings')}
-        </button>
+        {!isSidebarCollapsed && (
+          <button className="new-chat-btn" onClick={startNewChat} title={t('newChat')}>
+            <i className="fas fa-plus"></i>
+            {t('newChat')}
+          </button>
+        )}
         <div className="chat-history">
-          {sortedChats.map((chat) => (
+          {isSidebarCollapsed ? (
             <button
-              key={chat.id}
               type="button"
-              className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}
-              onClick={() => openChat(chat.id)}
-              title={chat.title}
+              className="history-item active"
+              onClick={() => setIsSidebarCollapsed(false)}
+              title={t('currentChat')}
             >
               <i className="fas fa-message"></i>
-              {!isSidebarCollapsed && <span>{chat.title}</span>}
             </button>
-          ))}
+          ) : (
+            sortedChats.map((chat) => (
+              <button
+                key={chat.id}
+                type="button"
+                className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}
+                onClick={() => openChat(chat.id)}
+                title={chat.title}
+              >
+                <i className="fas fa-message"></i>
+                <span>{chat.title}</span>
+              </button>
+            ))
+          )}
         </div>
         <div className="sidebar-footer">
+          <button
+            className="new-chat-btn settings-btn"
+            onClick={goToSettings}
+            title={t('settings')}
+          >
+            <i className="fas fa-cog"></i>
+            {!isSidebarCollapsed && t('settings')}
+          </button>
           <div className="status-badges">
             <div className="status-badge">
               <div className={`status-dot ${health.ollama === 'ok' ? 'ok' : 'error'}`}></div>
@@ -703,16 +850,6 @@ export default function HomePage() {
 
       {/* CENTER - Chat */}
       <div className="center-area">
-        {isSidebarCollapsed && (
-          <button
-            className="sidebar-fab"
-            type="button"
-            onClick={() => setIsSidebarCollapsed(false)}
-            aria-label="Seitenleiste ausklappen"
-          >
-            <i className="fas fa-bars"></i>
-          </button>
-        )}
         {!conversationActive ? (
           <div className="landing">
             <div className="landing-header">
@@ -824,7 +961,7 @@ export default function HomePage() {
                   <div key={msg.id} className={`message ${msg.role}`}>
                     <div className="bubble">
                       {msg.role === 'assistant' ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                           {msg.content}
                         </ReactMarkdown>
                       ) : (
@@ -951,6 +1088,39 @@ export default function HomePage() {
           </>
         )}
       </div>
+      {photoPreview.open && (
+        <div className="image-modal-overlay" onClick={closePhotoPreview}>
+          <div className="image-modal" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="image-modal-close"
+              onClick={closePhotoPreview}
+              aria-label="Vorschau schliessen"
+            >
+              ×
+            </button>
+            <div className="image-modal-title">{photoPreview.title || 'Vorschau'}</div>
+            <img
+              src={photoPreview.thumbnailUrl}
+              alt={photoPreview.title || 'Vorschau'}
+              className="image-modal-preview"
+              loading="lazy"
+            />
+            <div className="image-modal-actions">
+              {photoPreview.downloadUrl && (
+                <a className="btn primary" href={photoPreview.downloadUrl}>
+                  Original herunterladen
+                </a>
+              )}
+              {photoPreview.immichUrl && (
+                <a className="btn" href={photoPreview.immichUrl} target="_blank" rel="noopener noreferrer">
+                  In Immich oeffnen
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

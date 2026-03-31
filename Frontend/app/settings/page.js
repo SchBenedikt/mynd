@@ -7,12 +7,14 @@ import { useLanguage } from '../../hooks/useLanguage';
 import { ThemeSelector } from '../../components/ThemeSelector';
 
 const API_BASE = '';
+const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 
 export default function SettingsPage() {
   const router = useRouter();
   const { theme, darkMode, contrastColor, setTheme, setDarkMode, setContrastColor } = useTheme();
   const { language, setLanguage, t, languages } = useLanguage();
   const [activeTab, setActiveTab] = useState('config');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
   
@@ -71,6 +73,25 @@ export default function SettingsPage() {
       clearInterval(statusInterval);
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      const rawSidebarCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+      if (rawSidebarCollapsed === 'true' || rawSidebarCollapsed === 'false') {
+        setIsSidebarCollapsed(rawSidebarCollapsed === 'true');
+      }
+    } catch (err) {
+      console.error('Error loading sidebar state:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(isSidebarCollapsed));
+    } catch (err) {
+      console.error('Error saving sidebar state:', err);
+    }
+  }, [isSidebarCollapsed]);
 
   const loadNextcloudConfig = async () => {
     try {
@@ -453,44 +474,53 @@ export default function SettingsPage() {
     router.push('/');
   };
 
-  const goToSettings = () => {
-    // Already on settings, do nothing
-  };
-
   return (
-    <div className="container">
+    <div className={`container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       {/* LEFT SIDEBAR */}
-      <div className="left-sidebar">
+      <div className={`left-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
           <div className="brand">
             <div className="brand-icon">M</div>
-            <span>MYND</span>
+            {!isSidebarCollapsed && <span>MYND</span>}
           </div>
+          <button
+            className="sidebar-toggle"
+            type="button"
+            onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+            aria-label={isSidebarCollapsed ? 'Seitenleiste ausklappen' : 'Seitenleiste einklappen'}
+          >
+            <i className={`fas ${isSidebarCollapsed ? 'fa-angle-right' : 'fa-angle-left'}`}></i>
+          </button>
         </div>
-        <button className="new-chat-btn" onClick={startNewChat}>
-          <i className="fas fa-plus"></i> {t('newChat')}
-        </button>
-        <button 
-          className="new-chat-btn settings-btn active"
-          onClick={goToSettings}
-        >
-          <i className="fas fa-cog"></i> {t('settings')}
-        </button>
+        {!isSidebarCollapsed && (
+          <button className="new-chat-btn" onClick={startNewChat}>
+            <i className="fas fa-plus"></i> {t('newChat')}
+          </button>
+        )}
         <div className="chat-history">
-          <div className="history-item">
-            <i className="fas fa-message"></i>
-            <span>{t('currentChat')}</span>
-          </div>
+          {isSidebarCollapsed ? (
+            <button type="button" className="history-item active" onClick={startNewChat} title={t('currentChat')}>
+              <i className="fas fa-message"></i>
+            </button>
+          ) : (
+            <div className="history-item">
+              <i className="fas fa-message"></i>
+              <span>{t('currentChat')}</span>
+            </div>
+          )}
         </div>
         <div className="sidebar-footer">
+          <button className="new-chat-btn settings-btn active" type="button">
+            <i className="fas fa-cog"></i> {!isSidebarCollapsed && t('settings')}
+          </button>
           <div className="status-badges">
             <div className="status-badge">
               <div className={`status-dot ${health.ollama === 'ok' ? 'ok' : 'error'}`}></div>
-              <span>Ollama</span>
+              {!isSidebarCollapsed && <span>Ollama</span>}
             </div>
             <div className="status-badge">
               <div className={`status-dot ${health.kb === 'ok' ? 'ok' : 'error'}`}></div>
-              <span>KB</span>
+              {!isSidebarCollapsed && <span>KB</span>}
             </div>
           </div>
         </div>
