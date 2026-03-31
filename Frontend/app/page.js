@@ -40,9 +40,9 @@ const THEME_COMMANDS = {
 };
 
 const MODE_COMMANDS = {
-  dark: ['dark mode', 'dunkelmodus', 'dunkel', 'nachtmodus'],
-  light: ['light mode', 'hellmodus', 'hell'],
-  auto: ['auto mode', 'automatisch', 'systemmodus']
+  dark: ['dark mode', 'dark-mode', 'dunkelmodus', 'dunkel', 'nachtmodus'],
+  light: ['light mode', 'light-mode', 'hellmodus', 'hell'],
+  auto: ['auto mode', 'auto-mode', 'automatisch', 'systemmodus']
 };
 
 const THEME_LABEL_KEY = {
@@ -829,14 +829,32 @@ export default function HomePage() {
     setCalendarForm(prev => ({ ...prev, visible: false, error: '' }));
   };
 
+  const resetCalendarForm = () => {
+    setCalendarForm({
+      visible: false,
+      missingInfo: [],
+      title: '',
+      startTime: '',
+      endTime: '',
+      calendarName: '',
+      location: '',
+      description: '',
+      availableCalendars: [],
+      submitting: false,
+      error: ''
+    });
+  };
+
   const startNewChat = () => {
     const newChat = createEmptyChat();
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
+    resetCalendarForm();
   };
 
   const openChat = (chatId) => {
     setActiveChatId(chatId);
+    resetCalendarForm();
   };
 
   const renameChat = (chatId) => {
@@ -856,6 +874,10 @@ export default function HomePage() {
     if (!chat) return;
     const confirmed = window.confirm(`Chat "${chat.title}" wirklich loeschen?`);
     if (!confirmed) return;
+
+    if (chatId === activeChatId) {
+      resetCalendarForm();
+    }
 
     setChats((prevChats) => {
       const remaining = prevChats.filter((item) => item.id !== chatId);
