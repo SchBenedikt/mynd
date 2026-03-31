@@ -19,3 +19,4 @@ odfpy==1.4.1
 PyYAML==6.0.1
 icalendar==5.0.11
 extract-msg==0.45.0
+requests-oauthlib==1.3.0
