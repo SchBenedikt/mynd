@@ -3,18 +3,23 @@ import json
 import sys
 import requests
 import numpy as np
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect, url_for, session
 from dotenv import load_dotenv
 import re
 import logging
 from datetime import datetime, timedelta, date
 import time
+import secrets
+from urllib.parse import urljoin
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from backend.features.documents.parser import DocumentParser
 from backend.features.integration.nextcloud_client import NextcloudClient
+from backend.features.integration.auth_manager import get_auth_manager, AuthManager
+from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
+from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
 from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
 # from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
@@ -34,6 +39,8 @@ import xml.etree.ElementTree as ET
 
 load_dotenv()
 
+NEXTCLOUD_LOGINFLOW_USER_AGENT = 'MYND Assistant'
+
 # Define base directories BEFORE Flask app creation
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CONFIG_DIR = os.path.join(BASE_DIR, 'backend', 'config')
@@ -48,6 +55,11 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 # Create Flask app with correct template folder
 app = Flask(__name__, template_folder=TEMPLATES_DIR)
+
+# Konfiguriere Session für OAuth2 State Management
+app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO)
@@ -1288,6 +1300,427 @@ def indexing_config():
             
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+@app.route('/api/nextcloud/oauth/authorize', methods=['POST'])
+def nextcloud_oauth_authorize():
+    """
+    Initiiert den OAuth2 Flow mit Nextcloud
+    Erwartet Nextcloud URL, Client ID und Client Secret
+    """
+    try:
+        data = request.json
+        nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
+        client_id = data.get('client_id', '')
+        client_secret = data.get('client_secret', '')
+
+        if not all([nextcloud_url, client_id, client_secret]):
+            return jsonify({'error': 'Missing required parameters'}), 400
+
+        # Redirect URI - muss mit der Nextcloud OAuth2 App Konfiguration übereinstimmen
+        redirect_uri = request.url_root.rstrip('/') + '/api/nextcloud/oauth/callback'
+
+        # Erstelle OAuth2 Provider
+        oauth_provider = OAuth2NextcloudProvider({
+            'nextcloud_url': nextcloud_url,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'scope': 'files'
+        })
+
+        # Generiere Authorization URL
+        authorization_url, state = oauth_provider.get_authorization_url(redirect_uri)
+
+        # Speichere State und OAuth2 Config in Session für späteren Callback
+        session['oauth2_state'] = state
+        session['oauth2_nextcloud_url'] = nextcloud_url
+        session['oauth2_client_id'] = client_id
+        session['oauth2_client_secret'] = client_secret
+        session['oauth2_redirect_uri'] = redirect_uri
+
+        logger.info(f"OAuth2 Authorization initiated for {nextcloud_url}")
+
+        return jsonify({
+            'authorization_url': authorization_url,
+            'state': state
+        })
+
+    except Exception as e:
+        logger.error(f"Error initiating OAuth2: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/nextcloud/oauth/callback', methods=['GET'])
+def nextcloud_oauth_callback():
+    """
+    Nextcloud OAuth2 Callback Handler
+    Wird aufgerufen nach erfolgreicher Authentifizierung auf Nextcloud
+    """
+    try:
+        # Hole Authorization Code
+        authorization_code = request.args.get('code')
+        state = request.args.get('state')
+
+        if not authorization_code:
+            return jsonify({'error': 'Missing authorization code'}), 400
+
+        # Verifiziere State
+        if state != session.get('oauth2_state'):
+            logger.warning(f"State mismatch in OAuth2 callback")
+            return jsonify({'error': 'Invalid state parameter'}), 400
+
+        # Hole Konfiguration aus Session
+        nextcloud_url = session.get('oauth2_nextcloud_url')
+        client_id = session.get('oauth2_client_id')
+        client_secret = session.get('oauth2_client_secret')
+        redirect_uri = session.get('oauth2_redirect_uri')
+
+        if not all([nextcloud_url, client_id, client_secret]):
+            return jsonify({'error': 'OAuth2 configuration not found in session'}), 400
+
+        # Erstelle OAuth2 Provider
+        oauth_provider = OAuth2NextcloudProvider({
+            'nextcloud_url': nextcloud_url,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'scope': 'files'
+        })
+
+        # Tausche Code gegen Token aus
+        access_token, refresh_token = oauth_provider.exchange_code_for_token(
+            authorization_code,
+            redirect_uri
+        )
+
+        logger.info(f"OAuth2 token obtained successfully for {nextcloud_url}")
+
+        # Hole User Info
+        user_info = oauth_provider.get_user_info()
+        username = user_info.get('id', 'unknown')
+
+        logger.info(f"Authenticated as user: {username}")
+
+        # Speichere OAuth2 Konfiguration
+        oauth_config = {
+            'nextcloud_url': nextcloud_url,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'access_token': access_token,
+            'refresh_token': refresh_token,
+            'username': username,
+            'auth_type': 'oauth2',
+            'scope': 'files'
+        }
+
+        # Speichere in Indexing Manager
+        config_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
+        with open(config_file, 'w') as f:
+            json.dump(oauth_config, f, indent=2)
+
+        # Speichere auch die Basis-Konfiguration für Indexing
+        indexing_manager.save_nextcloud_config(
+            nextcloud_url,
+            username,
+            '',  # Leeres Password, verwenden zu stattdessen OAuth2 Token
+            '/'
+        )
+
+        # Cleanup Session
+        session.pop('oauth2_state', None)
+        session.pop('oauth2_nextcloud_url', None)
+        session.pop('oauth2_client_id', None)
+        session.pop('oauth2_client_secret', None)
+        session.pop('oauth2_redirect_uri', None)
+
+        # Erfolgreiche Antwort für Frontend
+        return jsonify({
+            'status': 'success',
+            'message': 'OAuth2 authentication successful',
+            'username': username,
+            'nextcloud_url': nextcloud_url
+        })
+
+    except Exception as e:
+        logger.error(f"Error in OAuth2 callback: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/nextcloud/oauth/config', methods=['GET'])
+def nextcloud_oauth_config():
+    """
+    Gibt die aktuelle OAuth2 Konfiguration zurück (ohne sensitive Daten)
+    """
+    try:
+        config_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
+        
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            
+            # Entferne sensitive Daten
+            safe_config = {
+                'nextcloud_url': config.get('nextcloud_url', ''),
+                'username': config.get('username', ''),
+                'auth_type': config.get('auth_type', ''),
+                'configured': True
+            }
+            return jsonify(safe_config)
+        else:
+            return jsonify({'configured': False})
+
+    except Exception as e:
+        logger.error(f"Error getting OAuth2 config: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/nextcloud/loginflow/start', methods=['POST'])
+def nextcloud_loginflow_start():
+    """Startet Nextcloud Login Flow v2 ohne manuelle OAuth-Client-Registrierung."""
+    try:
+        data = request.json or {}
+        nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
+
+        if not nextcloud_url:
+            return jsonify({'error': 'nextcloud_url parameter required'}), 400
+
+        # Basic URL validation against Nextcloud status endpoint.
+        status_url = f"{nextcloud_url}/status.php"
+        status_res = requests.get(status_url, timeout=8)
+        status_res.raise_for_status()
+        status_data = status_res.json()
+        if not status_data.get('installed', False):
+            return jsonify({'error': 'Invalid Nextcloud instance'}), 400
+
+        flow_url = f"{nextcloud_url}/index.php/login/v2"
+        flow_res = requests.post(
+            flow_url,
+            headers={'User-Agent': NEXTCLOUD_LOGINFLOW_USER_AGENT},
+            timeout=10
+        )
+        flow_res.raise_for_status()
+        flow_data = flow_res.json()
+
+        login_url = flow_data.get('login')
+        poll_data = flow_data.get('poll', {})
+        poll_token = poll_data.get('token')
+        poll_endpoint = poll_data.get('endpoint')
+
+        if not all([login_url, poll_token, poll_endpoint]):
+            return jsonify({'error': 'Nextcloud login flow response incomplete'}), 502
+
+        session['loginflow_nextcloud_url'] = nextcloud_url
+        session['loginflow_poll_token'] = poll_token
+        session['loginflow_poll_endpoint'] = poll_endpoint
+        session.permanent = True
+
+        logger.info(f"Nextcloud Login Flow v2 started for {nextcloud_url}")
+        return jsonify({'status': 'started', 'login_url': login_url})
+    except Exception as e:
+        logger.error(f"Error starting Nextcloud Login Flow v2: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/nextcloud/loginflow/poll', methods=['GET'])
+def nextcloud_loginflow_poll():
+    """Pollt den Nextcloud Login Flow v2 Status und speichert bei Erfolg App-Credentials."""
+    try:
+        nextcloud_url = session.get('loginflow_nextcloud_url')
+        poll_token = session.get('loginflow_poll_token')
+        poll_endpoint = session.get('loginflow_poll_endpoint')
+
+        if not all([nextcloud_url, poll_token, poll_endpoint]):
+            return jsonify({'error': 'No active login flow', 'status': 'idle'}), 400
+
+        poll_res = requests.post(
+            poll_endpoint,
+            headers={'User-Agent': NEXTCLOUD_LOGINFLOW_USER_AGENT},
+            data={'token': poll_token},
+            timeout=10
+        )
+
+        if poll_res.status_code in [404, 202]:
+            return jsonify({'status': 'pending'})
+
+        poll_res.raise_for_status()
+        poll_data = poll_res.json()
+
+        username = poll_data.get('loginName')
+        app_password = poll_data.get('appPassword')
+        server = (poll_data.get('server') or nextcloud_url).rstrip('/')
+
+        if not all([username, app_password]):
+            return jsonify({'status': 'pending'})
+
+        nextcloud_config = {
+            'nextcloud_url': server,
+            'username': username,
+            'password': app_password,
+            'auth_type': 'login_flow_v2',
+            'display_name': username
+        }
+
+        config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+        with open(config_file, 'w') as f:
+            json.dump(nextcloud_config, f, indent=2)
+
+        indexing_manager.save_nextcloud_config(server, username, app_password, '/')
+
+        session.pop('loginflow_nextcloud_url', None)
+        session.pop('loginflow_poll_token', None)
+        session.pop('loginflow_poll_endpoint', None)
+
+        logger.info(f"Nextcloud Login Flow v2 successful for {username}@{server}")
+        return jsonify({
+            'status': 'connected',
+            'username': username,
+            'display_name': username,
+            'nextcloud_url': server
+        })
+    except Exception as e:
+        logger.error(f"Error polling Nextcloud Login Flow v2: {str(e)}")
+        return jsonify({'error': str(e), 'status': 'error'}), 500
+
+
+@app.route('/api/nextcloud/login', methods=['POST'])
+def nextcloud_direct_login():
+    """
+    Vereinfachter Nextcloud Direct Login
+    Der Nutzer gibt nur URL + Username + Password ein
+    Keine OAuth2-App-Registration nötig!
+    """
+    try:
+        data = request.json
+        nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
+        username = data.get('username', '')
+        password = data.get('password', '')
+
+        if not all([nextcloud_url, username, password]):
+            return jsonify({'error': 'Missing required parameters'}), 400
+
+        # Erstelle Direct Provider
+        direct_provider = DirectNextcloudProvider({
+            'nextcloud_url': nextcloud_url,
+            'username': username,
+            'password': password
+        })
+
+        # Validiere Config
+        if not direct_provider.validate_config():
+            return jsonify({'error': 'Invalid configuration'}), 400
+
+        # Teste Verbindung
+        success, message = direct_provider.test_connection()
+        if not success:
+            return jsonify({'error': message}), 401
+
+        logger.info(f"Direct login successful for {username}@{nextcloud_url}")
+
+        # Hole User Info
+        user_info = direct_provider.get_user_info()
+
+        # Speichere Konfiguration
+        nextcloud_config = {
+            'nextcloud_url': nextcloud_url,
+            'username': username,
+            'password': password,
+            'auth_type': 'direct',
+            'display_name': user_info.get('displayName', username)
+        }
+
+        config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+        with open(config_file, 'w') as f:
+            json.dump(nextcloud_config, f, indent=2)
+
+        # Speichere auch die Basis-Konfiguration für Indexing
+        indexing_manager.save_nextcloud_config(
+            nextcloud_url,
+            username,
+            password,
+            '/'
+        )
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Logged in successfully as {user_info.get("displayName", username)}',
+            'username': username,
+            'nextcloud_url': nextcloud_url,
+            'display_name': user_info.get('displayName', username)
+        })
+
+    except Exception as e:
+        logger.error(f"Error in direct login: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/nextcloud/config', methods=['GET'])
+def nextcloud_config_get():
+    """
+    Gibt die aktuelle Nextcloud Konfiguration zurück (ohne Passwort!)
+    """
+    try:
+        config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+        
+        if os.path.exists(config_file):
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            
+            # Entferne Passwort
+            safe_config = {
+                'nextcloud_url': config.get('nextcloud_url', ''),
+                'username': config.get('username', ''),
+                'display_name': config.get('display_name', ''),
+                'auth_type': config.get('auth_type', ''),
+                'configured': True
+            }
+            return jsonify(safe_config)
+        else:
+            return jsonify({'configured': False})
+
+    except Exception as e:
+        logger.error(f"Error getting config: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/nextcloud/disconnect', methods=['POST'])
+def nextcloud_disconnect():
+    """Trennt die Nextcloud-Verbindung und entfernt gespeicherte Credentials."""
+    try:
+        removed_files = []
+
+        config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+        if os.path.exists(config_file):
+            os.remove(config_file)
+            removed_files.append('nextcloud_config.json')
+
+        legacy_oauth_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
+        if os.path.exists(legacy_oauth_file):
+            os.remove(legacy_oauth_file)
+            removed_files.append('nextcloud_oauth2.json')
+
+        # Reset indexing credentials so indexing cannot start with stale auth data.
+        indexing_manager.save_nextcloud_config('', '', '', '/')
+
+        # Cleanup potentially remaining auth session state.
+        session.pop('pkce_code_verifier', None)
+        session.pop('pkce_nextcloud_url', None)
+        session.pop('loginflow_nextcloud_url', None)
+        session.pop('loginflow_poll_token', None)
+        session.pop('loginflow_poll_endpoint', None)
+        session.pop('oauth2_state', None)
+        session.pop('oauth2_nextcloud_url', None)
+        session.pop('oauth2_client_id', None)
+        session.pop('oauth2_client_secret', None)
+        session.pop('oauth2_redirect_uri', None)
+
+        logger.info(f"Nextcloud disconnected. Removed files: {removed_files}")
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Nextcloud connection removed',
+            'removed_files': removed_files
+        })
+    except Exception as e:
+        logger.error(f"Error disconnecting Nextcloud: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/knowledge/sources', methods=['GET'])
 def get_knowledge_sources():
