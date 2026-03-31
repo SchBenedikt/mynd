@@ -301,8 +301,24 @@ class ImmichClient:
         }
 
         terms = [w for w in words if len(w) >= 3 and w not in stop_words]
+
+        # Simple compound handling for common German nouns (e.g. "katzenfoto" -> "katze/katzen")
+        compound_map = {
+            'katze': ['katze', 'katzen'],
+            'katzen': ['katze', 'katzen'],
+            'hund': ['hund', 'hunde'],
+            'hunde': ['hund', 'hunde'],
+        }
+
+        expanded = []
+        for term in terms:
+            expanded.append(term)
+            for needle, additions in compound_map.items():
+                if needle in term and term not in additions:
+                    expanded.extend(additions)
+
         # Preserve order while removing duplicates
-        return list(dict.fromkeys(terms))
+        return list(dict.fromkeys(expanded))
 
     def _expand_terms_with_synonyms(self, terms: List[str]) -> List[str]:
         """Erweitert Suchbegriffe um einfache DE/EN-Synonyme."""
@@ -790,12 +806,20 @@ class ImmichClient:
                 seen_ids.add(asset_id)
                 unique_results.append(asset)
 
+        # Prefer short, meaningful keyword for UI search context.
+        preferred_ui_query = None
+        if context_queries:
+            preferred_terms = {'cat', 'dog', 'tree', 'car', 'home', 'person'}
+            preferred_ui_query = next((term for term in context_queries if term in preferred_terms), None)
+            if not preferred_ui_query:
+                preferred_ui_query = min(context_queries, key=len)
+
         # Für Datumsanfragen den UI-Suchkontext nicht mit dem kompletten Satz befüllen.
         if date_from or date_to:
             # Bei Person+Datum keinen natürlichsprachlichen Query-Text in den UI-Kontext übernehmen.
             ui_search_query = None if mentioned_person_names else metadata_query
         else:
-            ui_search_query = query
+            ui_search_query = preferred_ui_query or metadata_query or query
 
         # Formatiere nur die gewünschten Ergebnisse für Anzeige MIT Suchkontext
         formatted_results = [
