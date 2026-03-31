@@ -259,11 +259,33 @@ body {
   background: var(--chip-bg);
   border-color: var(--line);
   color: var(--muted);
+  position: relative;
 }
 
 .composer button.queue-ready:hover {
   background: var(--chip-hover);
   color: var(--ink);
+}
+.queue-tooltip {
+  position: absolute;
+  right: calc(100% + 0.5rem);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.25rem 0.5rem;
+  border-radius: 8px;
+  background: var(--chip-bg);
+  border: 1px solid var(--line);
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.composer button.queue-ready:hover .queue-tooltip,
+.input-wrapper button.queue-ready:hover .queue-tooltip {
+  opacity: 1;
 }
 .composer-hint {
   font-size: 0.75rem;
@@ -1115,6 +1137,7 @@ body {
   place-items: center;
   transition: all 0.2s ease;
   flex-shrink: 0;
+  position: relative;
 }
 
 .input-wrapper button:hover {
