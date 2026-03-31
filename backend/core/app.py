@@ -24,6 +24,9 @@ from backend.features.integration.notifications_client import NextcloudNotificat
 from backend.features.integration.auth_manager import get_auth_manager, AuthManager
 from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
+from backend.features.integration.api_registry import get_api_registry
+from backend.features.integration.homeassistant_client import HomeAssistantClient
+from backend.features.integration.uptimekuma_client import UptimeKumaClient
 from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
 # from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
@@ -3036,6 +3039,415 @@ def immich_search_by_context():
 
     except Exception as e:
         logger.error(f"Immich context search error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== API Registry Endpoints ====================
+
+@app.route('/api/registry/apis', methods=['GET'])
+def get_all_apis():
+    """Get all available APIs with their configuration status"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+        apis = registry.get_all_configured_apis(username)
+
+        return jsonify({
+            'success': True,
+            'apis': apis
+        })
+    except Exception as e:
+        logger.error(f"Error getting APIs: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/registry/health', methods=['GET'])
+def check_all_apis_health():
+    """Check health of all configured APIs"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+        health = registry.check_all_apis_health(username)
+
+        return jsonify({
+            'success': True,
+            'health': health
+        })
+    except Exception as e:
+        logger.error(f"Error checking API health: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/registry/<api_name>/health', methods=['GET'])
+def check_api_health(api_name):
+    """Check health of a specific API"""
+    try:
+        username = request.args.get('username')
+        use_cache = request.args.get('use_cache', 'true').lower() == 'true'
+
+        registry = get_api_registry()
+        health = registry.check_api_health(api_name, username, use_cache=use_cache)
+
+        return jsonify({
+            'success': True,
+            'api_name': api_name,
+            'health': health
+        })
+    except Exception as e:
+        logger.error(f"Error checking {api_name} health: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/registry/<api_name>/config', methods=['GET', 'POST', 'DELETE'])
+def manage_api_config(api_name):
+    """Get, update, or delete API configuration"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        if request.method == 'GET':
+            config = registry.load_config(api_name, username)
+
+            # Get schema
+            instance = registry.create_api_instance(api_name, config if config else {}, username, use_cache=False)
+            schema = instance.get_config_schema() if instance else {}
+
+            # Remove sensitive values from response
+            safe_config = {}
+            for key, value in config.items():
+                if schema.get(key, {}).get('secret'):
+                    safe_config[key] = '***' if value else ''
+                else:
+                    safe_config[key] = value
+
+            return jsonify({
+                'success': True,
+                'api_name': api_name,
+                'config': safe_config,
+                'schema': schema,
+                'configured': bool(config)
+            })
+
+        elif request.method == 'POST':
+            data = request.get_json()
+            config = data.get('config', {})
+
+            # Validate by trying to create instance
+            try:
+                instance = registry.create_api_instance(api_name, config, username, use_cache=False)
+                if not instance:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Failed to create API instance with provided config'
+                    }), 400
+
+                # Test connection
+                if not instance.test_connection():
+                    return jsonify({
+                        'success': False,
+                        'error': 'Connection test failed with provided configuration'
+                    }), 400
+
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid configuration: {str(e)}'
+                }), 400
+
+            # Save config
+            if registry.save_config(api_name, config, username):
+                return jsonify({
+                    'success': True,
+                    'message': f'{api_name} configuration saved successfully'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to save configuration'
+                }), 500
+
+        elif request.method == 'DELETE':
+            if registry.delete_config(api_name, username):
+                return jsonify({
+                    'success': True,
+                    'message': f'{api_name} configuration deleted successfully'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to delete configuration'
+                }), 500
+
+    except Exception as e:
+        logger.error(f"Error managing {api_name} config: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/registry/<api_name>/test', methods=['POST'])
+def test_api_connection(api_name):
+    """Test API connection with provided config"""
+    try:
+        data = request.get_json()
+        config = data.get('config', {})
+        username = data.get('username')
+
+        registry = get_api_registry()
+
+        # Create instance with provided config
+        instance = registry.create_api_instance(api_name, config, username, use_cache=False)
+        if not instance:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to create API instance'
+            }), 400
+
+        # Test connection and get health info
+        health = instance.get_health_info()
+
+        return jsonify({
+            'success': True,
+            'api_name': api_name,
+            'health': health
+        })
+
+    except Exception as e:
+        logger.error(f"Error testing {api_name}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# ==================== HomeAssistant Endpoints ====================
+
+@app.route('/api/homeassistant/states', methods=['GET'])
+def homeassistant_get_states():
+    """Get all Home Assistant entity states"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        client = registry.create_api_instance('homeassistant', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Home Assistant not configured'
+            }), 400
+
+        states = client.get_states()
+
+        return jsonify({
+            'success': True,
+            'states': states
+        })
+
+    except Exception as e:
+        logger.error(f"HomeAssistant get states error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/homeassistant/state/<path:entity_id>', methods=['GET'])
+def homeassistant_get_state(entity_id):
+    """Get state of a specific Home Assistant entity"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        client = registry.create_api_instance('homeassistant', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Home Assistant not configured'
+            }), 400
+
+        state = client.get_state(entity_id)
+
+        if state:
+            return jsonify({
+                'success': True,
+                'entity_id': entity_id,
+                'state': state
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Entity not found'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"HomeAssistant get state error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/homeassistant/service', methods=['POST'])
+def homeassistant_call_service():
+    """Call a Home Assistant service"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        domain = data.get('domain')
+        service = data.get('service')
+        entity_id = data.get('entity_id')
+        service_data = data.get('data', {})
+
+        if not domain or not service:
+            return jsonify({
+                'success': False,
+                'error': 'domain and service are required'
+            }), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('homeassistant', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Home Assistant not configured'
+            }), 400
+
+        success = client.call_service(domain, service, entity_id, service_data)
+
+        return jsonify({
+            'success': success,
+            'message': f'Service {domain}.{service} called' if success else 'Service call failed'
+        })
+
+    except Exception as e:
+        logger.error(f"HomeAssistant service call error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/homeassistant/search', methods=['POST'])
+def homeassistant_search():
+    """Search Home Assistant entities"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        query = data.get('query', '')
+        domains = data.get('domains')
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('homeassistant', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Home Assistant not configured'
+            }), 400
+
+        results = client.search_entities(query, domains)
+
+        return jsonify({
+            'success': True,
+            'query': query,
+            'count': len(results),
+            'results': results
+        })
+
+    except Exception as e:
+        logger.error(f"HomeAssistant search error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== Uptime Kuma Endpoints ====================
+
+@app.route('/api/uptimekuma/monitors', methods=['GET'])
+def uptimekuma_get_monitors():
+    """Get all Uptime Kuma monitors"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        client = registry.create_api_instance('uptimekuma', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Uptime Kuma not configured'
+            }), 400
+
+        monitors = client.get_monitors()
+
+        return jsonify({
+            'success': True,
+            'monitors': monitors
+        })
+
+    except Exception as e:
+        logger.error(f"Uptime Kuma get monitors error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/uptimekuma/monitor/<int:monitor_id>', methods=['GET'])
+def uptimekuma_get_monitor(monitor_id):
+    """Get a specific Uptime Kuma monitor"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        client = registry.create_api_instance('uptimekuma', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Uptime Kuma not configured'
+            }), 400
+
+        monitor = client.get_monitor(monitor_id)
+
+        if monitor:
+            return jsonify({
+                'success': True,
+                'monitor': monitor
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Monitor not found'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Uptime Kuma get monitor error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/uptimekuma/stats', methods=['GET'])
+def uptimekuma_get_stats():
+    """Get Uptime Kuma statistics"""
+    try:
+        username = request.args.get('username')
+        monitor_id = request.args.get('monitor_id', type=int)
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('uptimekuma', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Uptime Kuma not configured'
+            }), 400
+
+        stats = client.get_uptime_stats(monitor_id)
+
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+
+    except Exception as e:
+        logger.error(f"Uptime Kuma get stats error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/uptimekuma/search', methods=['POST'])
+def uptimekuma_search():
+    """Search Uptime Kuma monitors"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        query = data.get('query', '')
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('uptimekuma', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Uptime Kuma not configured'
+            }), 400
+
+        results = client.search_monitors(query)
+
+        return jsonify({
+            'success': True,
+            'query': query,
+            'count': len(results),
+            'results': results
+        })
+
+    except Exception as e:
+        logger.error(f"Uptime Kuma search error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== UI Configuration Endpoints ====================
