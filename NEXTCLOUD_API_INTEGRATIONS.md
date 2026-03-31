@@ -4,11 +4,12 @@ This document describes the new Nextcloud API integrations added to the mynd app
 
 ## Overview
 
-Three new Nextcloud API clients have been implemented:
+Four new Nextcloud API clients have been implemented:
 
 1. **CardDAV Client** - Manage contacts and addressbooks
 2. **Search API Client** - Unified search across Nextcloud resources
 3. **Notifications API Client** - Access and manage notifications
+4. **Activity API Client** - Access activity stream (What's new on Nextcloud)
 
 ## 1. CardDAV Client
 
@@ -271,6 +272,124 @@ capabilities = client.get_notification_capabilities()
 }
 ```
 
+## 4. Activity API Client
+
+**File:** `backend/features/integration/activity_client.py`
+
+### Purpose
+Provides access to Nextcloud Activity stream - answering questions like "What's new on my Nextcloud?"
+
+### Key Features
+- Test Activity API connection
+- Get activity stream with filters
+- Get available activity filters
+- Get activities by filter type
+- Activity summary and statistics
+- Filter by app, type, object
+- Pagination support
+
+### Usage Example
+
+```python
+from backend.features.integration import NextcloudActivityClient
+
+# Initialize client
+client = NextcloudActivityClient(
+    url="https://cloud.example.com",
+    username="your-username",
+    password="your-password"
+)
+
+# Test connection
+if client.test_connection():
+    print("Connected successfully")
+
+# Get recent activities (What's new?)
+recent = client.get_recent_activities(limit=10)
+for activity in recent:
+    print(f"[{activity['app']}] {activity['subject']}")
+    print(f"  Time: {activity['datetime']}")
+
+# Get activity summary
+summary = client.get_activity_summary(limit=50)
+print(f"Total activities: {summary['total']}")
+print(f"By app: {summary['by_app']}")
+print(f"By type: {summary['by_type']}")
+
+# Get available filters
+filters = client.get_filters()
+for f in filters:
+    print(f"Filter: {f['name']} (id: {f['id']})")
+
+# Get activities by specific filter
+result = client.get_activity_by_filter('all', limit=20)
+activities = result['activities']
+
+# Get full activity stream with pagination
+result = client.get_activity(limit=50, sort='desc')
+for activity in result['activities']:
+    print(activity['subject'])
+
+# Filter by object
+result = client.get_activity(
+    object_type='files',
+    object_id='123',
+    limit=10
+)
+```
+
+### Methods
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `test_connection()` | Test Activity API connection | bool |
+| `get_activity(limit, since, sort, object_type, object_id)` | Get activity stream | Dict |
+| `get_activity_by_filter(filter_id, limit, since, sort)` | Get filtered activities | Dict |
+| `get_filters()` | Get available filters | List[Dict] |
+| `get_recent_activities(limit)` | Convenience method for recent activities | List[Dict] |
+| `get_activities_by_app(app, limit)` | Filter activities by app | List[Dict] |
+| `get_activities_by_type(activity_type, limit)` | Filter activities by type | List[Dict] |
+| `get_activity_summary(limit)` | Get summary statistics | Dict |
+
+### Activity Structure
+
+```python
+{
+    'activity_id': 12345,
+    'datetime': '2026-03-31T10:30:00+00:00',
+    'timestamp': datetime_object,
+    'app': 'files',
+    'type': 'file_created',
+    'user': 'admin',
+    'subject': 'You created document.pdf',
+    'subject_rich': {
+        '0': 'You created {file}',
+        '1': {'file': {'type': 'file', 'id': 42, 'name': 'document.pdf'}}
+    },
+    'message': '',
+    'message_rich': {},
+    'icon': 'https://cloud.example.com/apps/files/img/add-color.svg',
+    'link': 'https://cloud.example.com/index.php/f/42',
+    'object_type': 'files',
+    'object_id': 42,
+    'object_name': '/documents/document.pdf',
+    'objects': {},
+    'previews': []
+}
+```
+
+### Activity Result Structure
+
+```python
+{
+    'activities': [...],  # List of activity dictionaries
+    'since': 0,           # Last activity ID seen
+    'first_known': 100,   # First known activity ID
+    'last_given': 150,    # Last activity ID in this response
+    'has_more': True      # Whether more activities are available
+}
+```
+
 ## Testing
 
 A comprehensive test script is provided: `test_nextcloud_apis.py`
@@ -321,6 +440,14 @@ unread = notifications.get_notifications()
 # Show notifications in UI or process automatically
 ```
 
+### 4. Activity Stream Integration
+```python
+# Use Activity API to answer "What's new on my Nextcloud?"
+activity = NextcloudActivityClient(url, username, password)
+recent = activity.get_recent_activities(limit=20)
+# Present recent activities to user or use in AI context
+```
+
 ## API Endpoints
 
 ### CardDAV
@@ -341,6 +468,16 @@ unread = notifications.get_notifications()
 - Protocol: OCS API v2
 - Methods: GET, POST, DELETE
 - Response: JSON
+
+### Activity API
+- Base: `/ocs/v2.php/apps/activity/api/v2/`
+- Protocol: OCS API v2
+- Methods: GET
+- Response: JSON
+- Endpoints:
+  - `/ocs/v2.php/apps/activity/api/v2/activity` - Get all activities
+  - `/ocs/v2.php/apps/activity/api/v2/activity/{filter}` - Get filtered activities
+  - `/ocs/v2.php/apps/activity/api/v2/activity/filters` - Get available filters
 
 ## Error Handling
 

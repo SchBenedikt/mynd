@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from backend.features.integration import (
     NextcloudCardDAVClient,
     NextcloudSearchClient,
-    NextcloudNotificationsClient
+    NextcloudNotificationsClient,
+    NextcloudActivityClient
 )
 
 # Configure logging
@@ -156,6 +157,56 @@ def test_notifications_client(url: str, username: str, password: str):
         return False
 
 
+def test_activity_client(url: str, username: str, password: str):
+    """Test Activity API client functionality"""
+    logger.info("\n=== Testing Activity API Client ===")
+
+    try:
+        client = NextcloudActivityClient(url, username, password)
+
+        # Test connection
+        logger.info("Testing connection...")
+        if client.test_connection():
+            logger.info("✓ Activity API connection successful")
+        else:
+            logger.error("✗ Activity API connection failed")
+            return False
+
+        # Get available filters
+        logger.info("Getting activity filters...")
+        filters = client.get_filters()
+        logger.info(f"✓ Found {len(filters)} activity filters")
+        for filter_item in filters:
+            logger.info(f"  - {filter_item['name']} (id: {filter_item['id']})")
+
+        # Get recent activities
+        logger.info("Getting recent activities...")
+        recent = client.get_recent_activities(limit=10)
+        logger.info(f"✓ Found {len(recent)} recent activities")
+
+        # Display first few activities
+        for i, activity in enumerate(recent[:5]):
+            logger.info(f"  - [{activity['app']}] {activity['subject']}")
+            logger.info(f"    Type: {activity['type']}, Time: {activity['datetime']}")
+
+        # Get activity summary
+        logger.info("Getting activity summary...")
+        summary = client.get_activity_summary(limit=50)
+        logger.info(f"✓ Activity Summary:")
+        logger.info(f"  Total activities: {summary['total']}")
+        logger.info(f"  By app: {summary['by_app']}")
+        logger.info(f"  By type: {summary['by_type']}")
+
+        logger.info("✓ Activity API client tests completed successfully")
+        return True
+
+    except Exception as e:
+        logger.error(f"✗ Activity API client test failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def main():
     """Main test function"""
 
@@ -174,13 +225,15 @@ def main():
     results = {
         'carddav': False,
         'search': False,
-        'notifications': False
+        'notifications': False,
+        'activity': False
     }
 
     # Run tests
     results['carddav'] = test_carddav_client(url, username, password)
     results['search'] = test_search_client(url, username, password)
     results['notifications'] = test_notifications_client(url, username, password)
+    results['activity'] = test_activity_client(url, username, password)
 
     # Summary
     logger.info("\n" + "=" * 70)
@@ -189,6 +242,7 @@ def main():
     logger.info(f"CardDAV Client:       {'✓ PASS' if results['carddav'] else '✗ FAIL'}")
     logger.info(f"Search API Client:    {'✓ PASS' if results['search'] else '✗ FAIL'}")
     logger.info(f"Notifications Client: {'✓ PASS' if results['notifications'] else '✗ FAIL'}")
+    logger.info(f"Activity Client:      {'✓ PASS' if results['activity'] else '✗ FAIL'}")
     logger.info("=" * 70)
 
     # Exit with appropriate code

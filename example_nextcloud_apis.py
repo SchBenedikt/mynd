@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from backend.features.integration import (
     NextcloudCardDAVClient,
     NextcloudSearchClient,
-    NextcloudNotificationsClient
+    NextcloudNotificationsClient,
+    NextcloudActivityClient
 )
 
 # Configure logging
@@ -179,6 +180,48 @@ def example_combined_search(url: str, username: str, password: str):
         print("   No tasks found")
 
 
+def example_activity_stream(url: str, username: str, password: str):
+    """Example: View recent activity stream (What's new on Nextcloud)"""
+    print("\n" + "="*70)
+    print("Example 5: Activity Stream - What's New on Nextcloud")
+    print("="*70)
+
+    activity = NextcloudActivityClient(url, username, password)
+
+    if not activity.test_connection():
+        print("❌ Activity API connection failed")
+        return
+
+    # Get activity summary
+    print("\n📊 Activity Summary:")
+    summary = activity.get_activity_summary(limit=50)
+    print(f"   Total recent activities: {summary['total']}")
+
+    if summary['by_app']:
+        print("\n   Activities by app:")
+        for app, count in sorted(summary['by_app'].items(), key=lambda x: x[1], reverse=True):
+            print(f"      • {app}: {count}")
+
+    # Get recent activities
+    print("\n📰 Recent Activity Stream:")
+    recent = activity.get_recent_activities(limit=10)
+
+    if recent:
+        for i, act in enumerate(recent, 1):
+            print(f"\n   {i}. [{act['app'].upper()}] {act['subject']}")
+            print(f"      ⏰ {act['datetime']}")
+            if act['object_name']:
+                print(f"      📎 {act['object_name']}")
+    else:
+        print("   No recent activities found")
+
+    # Show available filters
+    print("\n🔍 Available Activity Filters:")
+    filters = activity.get_filters()
+    for f in filters:
+        print(f"   • {f['name']} (id: {f['id']})")
+
+
 def main():
     """Main function"""
 
@@ -208,10 +251,11 @@ def main():
         print("2. Unified Search (Search API)")
         print("3. Notifications Monitor (Notifications API)")
         print("4. Combined Resource Search")
+        print("5. Activity Stream - What's New on Nextcloud")
         print("0. Exit")
         print()
 
-        choice = input("Enter choice (0-4): ").strip()
+        choice = input("Enter choice (0-5): ").strip()
 
         if choice == '0':
             print("\n👋 Goodbye!")
@@ -224,8 +268,10 @@ def main():
             example_notifications_monitor(url, username, password)
         elif choice == '4':
             example_combined_search(url, username, password)
+        elif choice == '5':
+            example_activity_stream(url, username, password)
         else:
-            print("❌ Invalid choice. Please select 0-4.")
+            print("❌ Invalid choice. Please select 0-5.")
 
     return 0
 
