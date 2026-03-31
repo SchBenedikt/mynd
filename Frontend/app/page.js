@@ -7,12 +7,39 @@ import remarkGfm from 'remark-gfm';
 import SourceCard from '../components/SourceCard';
 
 const API_BASE = '';
+const CHAT_STORAGE_KEY = 'mynd_chat_history_v1';
+const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
+
+const createChatId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+};
+
+const createEmptyChat = () => {
+  const now = Date.now();
+  return {
+    id: createChatId(),
+    title: 'Neuer Chat',
+    messages: [],
+    createdAt: now,
+    updatedAt: now
+  };
+};
+
+const buildChatTitleFromText = (text) => {
+  const cleaned = String(text || '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return 'Neuer Chat';
+  return cleaned.length > 38 ? `${cleaned.slice(0, 38)}...` : cleaned;
+};
 
 export default function HomePage() {
   const router = useRouter();
-  const [messages, setMessages] = useState([]);
+  const [chats, setChats] = useState([]);
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [isThinking, setIsThinking] = useState(false);
-  const [conversationActive, setConversationActive] = useState(false);
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
   
@@ -57,6 +84,10 @@ export default function HomePage() {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
+  const activeChat = chats.find((chat) => chat.id === activeChatId) || null;
+  const messages = activeChat?.messages || [];
+  const conversationActive = messages.length > 0;
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -71,6 +102,53 @@ export default function HomePage() {
       clearInterval(statusInterval);
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      const rawChats = localStorage.getItem(CHAT_STORAGE_KEY);
+      const rawActiveChatId = localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+      if (rawChats) {
+        const parsedChats = JSON.parse(rawChats);
+        if (Array.isArray(parsedChats) && parsedChats.length > 0) {
+          setChats(parsedChats);
+          const activeExists = parsedChats.some((chat) => chat.id === rawActiveChatId);
+          setActiveChatId(activeExists ? rawActiveChatId : parsedChats[0].id);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error('Error loading chat history:', err);
+    }
+
+    const initialChat = createEmptyChat();
+    setChats([initialChat]);
+    setActiveChatId(initialChat.id);
+  }, []);
+
+  useEffect(() => {
+    if (!chats.length || !activeChatId) return;
+    try {
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chats));
+      localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, activeChatId);
+    } catch (err) {
+      console.error('Error saving chat history:', err);
+    }
+  }, [chats, activeChatId]);
+
+  const appendMessageToChat = (chatId, message, originalUserText = null) => {
+    const now = Date.now();
+    setChats((prevChats) => prevChats.map((chat) => {
+      if (chat.id !== chatId) return chat;
+      const nextMessages = [...(chat.messages || []), message];
+      const shouldUpdateTitle = chat.title === 'Neuer Chat' && message.role === 'user' && originalUserText;
+      return {
+        ...chat,
+        messages: nextMessages,
+        title: shouldUpdateTitle ? buildChatTitleFromText(originalUserText) : chat.title,
+        updatedAt: now
+      };
+    }));
+  };
 
   const loadAIConfig = async () => {
     try {
@@ -231,13 +309,24 @@ export default function HomePage() {
   const sendMessage = async (text) => {
     if (!text.trim() || isThinking) return;
     text = text.trim();
-    if (!conversationActive) setConversationActive(true);
-    setMessages(prev => [...prev, { role: 'user', content: text, id: Date.now() }]);
+    setIsSidebarCollapsed(false);
+
+    let targetChatId = activeChatId;
+    if (!targetChatId) {
+      const newChat = createEmptyChat();
+      setChats([newChat]);
+      setActiveChatId(newChat.id);
+      targetChatId = newChat.id;
+    }
+
+    const userMessage = { role: 'user', content: text, id: Date.now() };
+    appendMessageToChat(targetChatId, userMessage, text);
     setIsThinking(true);
     if (inputRef.current) inputRef.current.value = '';
 
     try {
-      const conversationContext = messages
+      const currentMessages = chats.find((chat) => chat.id === targetChatId)?.messages || [];
+      const conversationContext = [...currentMessages, userMessage]
         .slice(-8)
         .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
         .join('\n');
@@ -255,16 +344,16 @@ export default function HomePage() {
       const data = await res.json();
       if (!res.ok || data?.success === false) {
         const errorMessage = data?.error || `Request failed with status ${res.status}`;
-        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errorMessage}`, id: Date.now() }]);
+        appendMessageToChat(targetChatId, { role: 'assistant', content: `Error: ${errorMessage}`, id: Date.now() });
         return;
       }
 
-      setMessages(prev => [...prev, {
+      appendMessageToChat(targetChatId, {
         role: 'assistant',
         content: data.response,
         sources: data.sources || [],
         id: Date.now()
-      }]);
+      });
 
       if (data?.requires_input && data?.action === 'calendar_missing_input') {
         const extracted = data?.extracted_info || {};
@@ -300,7 +389,7 @@ export default function HomePage() {
         });
       }
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}`, id: Date.now() }]);
+      appendMessageToChat(targetChatId, { role: 'assistant', content: `Error: ${err.message}`, id: Date.now() });
     } finally {
       setIsThinking(false);
     }
@@ -379,11 +468,13 @@ export default function HomePage() {
         return;
       }
 
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: data.message || 'Termin wurde erstellt.',
-        id: Date.now()
-      }]);
+      if (activeChatId) {
+        appendMessageToChat(activeChatId, {
+          role: 'assistant',
+          content: data.message || 'Termin wurde erstellt.',
+          id: Date.now()
+        });
+      }
 
       setCalendarForm({
         visible: false,
@@ -412,48 +503,74 @@ export default function HomePage() {
   };
 
   const startNewChat = () => {
-    setMessages([]);
-    setConversationActive(false);
+    const newChat = createEmptyChat();
+    setChats((prev) => [newChat, ...prev]);
+    setActiveChatId(newChat.id);
   };
+
+  const openChat = (chatId) => {
+    setActiveChatId(chatId);
+  };
+
+  const sortedChats = [...chats].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
   const goToSettings = () => {
     router.push('/settings');
   };
 
   return (
-    <div className="container">
+    <div className={`container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       {/* LEFT SIDEBAR */}
-      <div className="left-sidebar">
+      <div className={`left-sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
           <div className="brand">
             <div className="brand-icon">M</div>
-            <span>MYND</span>
+            {!isSidebarCollapsed && <span>MYND</span>}
           </div>
+          <button
+            className="sidebar-toggle"
+            type="button"
+            onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+            aria-label={isSidebarCollapsed ? 'Seitenleiste ausklappen' : 'Seitenleiste einklappen'}
+          >
+            <i className={`fas ${isSidebarCollapsed ? 'fa-angle-right' : 'fa-angle-left'}`}></i>
+          </button>
         </div>
-        <button className="new-chat-btn" onClick={startNewChat}>
-          <i className="fas fa-plus"></i> New Chat
+        <button className="new-chat-btn" onClick={startNewChat} title="Neuer Chat">
+          <i className="fas fa-plus"></i>
+          {!isSidebarCollapsed && 'New Chat'}
         </button>
         <button 
           className="new-chat-btn settings-btn"
           onClick={goToSettings}
+          title="Settings"
         >
-          <i className="fas fa-cog"></i> Settings
+          <i className="fas fa-cog"></i>
+          {!isSidebarCollapsed && 'Settings'}
         </button>
         <div className="chat-history">
-          <div className="history-item active">
-            <i className="fas fa-message"></i>
-            <span>Current Chat</span>
-          </div>
+          {sortedChats.map((chat) => (
+            <button
+              key={chat.id}
+              type="button"
+              className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}
+              onClick={() => openChat(chat.id)}
+              title={chat.title}
+            >
+              <i className="fas fa-message"></i>
+              {!isSidebarCollapsed && <span>{chat.title}</span>}
+            </button>
+          ))}
         </div>
         <div className="sidebar-footer">
           <div className="status-badges">
             <div className="status-badge">
               <div className={`status-dot ${health.ollama === 'ok' ? 'ok' : 'error'}`}></div>
-              <span>Ollama</span>
+              {!isSidebarCollapsed && <span>Ollama</span>}
             </div>
             <div className="status-badge">
               <div className={`status-dot ${health.kb === 'ok' ? 'ok' : 'error'}`}></div>
-              <span>KB</span>
+              {!isSidebarCollapsed && <span>KB</span>}
             </div>
           </div>
         </div>
@@ -461,6 +578,16 @@ export default function HomePage() {
 
       {/* CENTER - Chat */}
       <div className="center-area">
+        {isSidebarCollapsed && (
+          <button
+            className="sidebar-fab"
+            type="button"
+            onClick={() => setIsSidebarCollapsed(false)}
+            aria-label="Seitenleiste ausklappen"
+          >
+            <i className="fas fa-bars"></i>
+          </button>
+        )}
         {!conversationActive ? (
           <div className="landing">
             <div className="landing-header">
@@ -468,7 +595,7 @@ export default function HomePage() {
               <p>Ask anything about your knowledge base.</p>
             </div>
             <div className="input-wrapper">
-              <input 
+              <input
                 type="text" 
                 ref={inputRef}
                 placeholder="Ask a question..." 
