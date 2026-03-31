@@ -3103,6 +3103,12 @@ def manage_api_config(api_name):
 
         if request.method == 'GET':
             config = registry.load_config(api_name, username)
+            api_class = registry.get_api_class(api_name)
+            configured = bool(config)
+
+            if api_class and not config and not api_class.requires_config():
+                config = api_class.get_default_config()
+                configured = True
 
             # Get schema
             instance = registry.create_api_instance(api_name, config if config else {}, username, use_cache=False)
@@ -3121,7 +3127,7 @@ def manage_api_config(api_name):
                 'api_name': api_name,
                 'config': safe_config,
                 'schema': schema,
-                'configured': bool(config)
+                'configured': configured
             })
 
         elif request.method == 'POST':
@@ -3448,6 +3454,235 @@ def uptimekuma_search():
 
     except Exception as e:
         logger.error(f"Uptime Kuma search error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== Public API Endpoints ====================
+
+@app.route('/api/dwd/warnings/nowcast', methods=['GET'])
+def dwd_get_warnings_nowcast():
+    """Get DWD nowcast warnings"""
+    try:
+        language = request.args.get('lang', 'de')
+        registry = get_api_registry()
+        client = registry.create_api_instance('dwd')
+        if not client:
+            return jsonify({'success': False, 'error': 'DWD client unavailable'}), 400
+
+        data = client.get_warnings_nowcast(language)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"DWD warnings error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dwd/station-overview', methods=['GET'])
+def dwd_station_overview():
+    """Get DWD station overview by station IDs"""
+    try:
+        station_ids = request.args.get('station_ids', '')
+        if not station_ids:
+            return jsonify({'success': False, 'error': 'station_ids required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('dwd')
+        if not client:
+            return jsonify({'success': False, 'error': 'DWD client unavailable'}), 400
+
+        data = client.get_station_overview_extended(
+            [entry.strip() for entry in station_ids.split(',') if entry.strip()]
+        )
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"DWD station overview error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/nina/event-codes', methods=['GET'])
+def nina_event_codes():
+    """Get NINA event codes"""
+    try:
+        registry = get_api_registry()
+        client = registry.create_api_instance('nina')
+        if not client:
+            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
+
+        data = client.get_event_codes()
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"NINA event codes error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/nina/dashboard', methods=['GET'])
+def nina_dashboard():
+    """Get NINA dashboard data for an ARS"""
+    try:
+        ars = request.args.get('ars')
+        if not ars:
+            registry = get_api_registry()
+            config = registry.load_config('nina')
+            ars = str(config.get('ars', '')).strip()
+        if not ars:
+            return jsonify({'success': False, 'error': 'ars required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('nina')
+        if not client:
+            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
+
+        data = client.get_dashboard(ars)
+        return jsonify({'success': True, 'ars': ars, 'data': data})
+
+    except Exception as e:
+        logger.error(f"NINA dashboard error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/nina/map-data', methods=['GET'])
+def nina_map_data():
+    """Get NINA map data for a specific source"""
+    try:
+        source = request.args.get('source')
+        if not source:
+            return jsonify({'success': False, 'error': 'source required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('nina')
+        if not client:
+            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
+
+        data = client.get_map_data(source)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"NINA map data error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/nina/regions', methods=['GET'])
+def nina_regions():
+    """Get NINA regional keys (ARS) list"""
+    try:
+        query = request.args.get('query', '').strip()
+        limit = int(request.args.get('limit', 200))
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('nina')
+        if not client:
+            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
+
+        data = client.get_regional_keys(query=query, limit=limit)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"NINA regions error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/autobahn/roads', methods=['GET'])
+def autobahn_list_roads():
+    """List available Autobahn roads"""
+    try:
+        registry = get_api_registry()
+        client = registry.create_api_instance('autobahn')
+        if not client:
+            return jsonify({'success': False, 'error': 'Autobahn client unavailable'}), 400
+
+        data = client.list_roads()
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Autobahn list roads error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/autobahn/road-services', methods=['GET'])
+def autobahn_road_services():
+    """Get Autobahn services for a road"""
+    try:
+        road_id = request.args.get('road_id')
+        service = request.args.get('service')
+        if not road_id or not service:
+            return jsonify({'success': False, 'error': 'road_id and service required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('autobahn')
+        if not client:
+            return jsonify({'success': False, 'error': 'Autobahn client unavailable'}), 400
+
+        data = client.get_road_services(road_id, service)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Autobahn road services error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dashboard-deutschland/dashboard', methods=['GET'])
+def dashboard_deutschland_dashboard():
+    """Get Dashboard Deutschland entries"""
+    try:
+        registry = get_api_registry()
+        client = registry.create_api_instance('dashboard_deutschland')
+        if not client:
+            return jsonify({'success': False, 'error': 'Dashboard client unavailable'}), 400
+
+        data = client.get_dashboard_entries()
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Dashboard Deutschland dashboard error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dashboard-deutschland/indicators', methods=['GET'])
+def dashboard_deutschland_indicators():
+    """Get Dashboard Deutschland indicators by ids"""
+    try:
+        ids = request.args.get('ids', '')
+        if not ids:
+            return jsonify({'success': False, 'error': 'ids required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('dashboard_deutschland')
+        if not client:
+            return jsonify({'success': False, 'error': 'Dashboard client unavailable'}), 400
+
+        data = client.get_indicators([entry.strip() for entry in ids.split(',') if entry.strip()])
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Dashboard Deutschland indicators error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dashboard-deutschland/geojson', methods=['GET'])
+def dashboard_deutschland_geojson():
+    """Get Dashboard Deutschland GeoJSON"""
+    try:
+        registry = get_api_registry()
+        client = registry.create_api_instance('dashboard_deutschland')
+        if not client:
+            return jsonify({'success': False, 'error': 'Dashboard client unavailable'}), 400
+
+        data = client.get_geojson()
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Dashboard Deutschland geojson error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/deutschland-atlas/service-info', methods=['GET'])
+def deutschland_atlas_service_info():
+    """Get Deutschland Atlas service info"""
+    try:
+        service = request.args.get('service')
+        if not service:
+            return jsonify({'success': False, 'error': 'service required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('deutschland_atlas')
+        if not client:
+            return jsonify({'success': False, 'error': 'Deutschland Atlas client unavailable'}), 400
+
+        data = client.get_service_info(service)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Deutschland Atlas service info error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== UI Configuration Endpoints ====================
