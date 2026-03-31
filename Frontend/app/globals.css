@@ -72,6 +72,7 @@ body {
   --accent: #166534;
   --accent-light: #14532d;
   --accent-warm: #1a4728;
+  --bubble-user: #1f3b2a;
 }
 
 [data-theme="ocean"] {
@@ -180,6 +181,7 @@ body {
   --accent: #92400e;
   --accent-light: #3d2515;
   --accent-warm: #583818;
+  --bubble-user: #3b2914;
 }
 
 [data-theme="ocean"][data-mode="dark"] {
@@ -188,6 +190,7 @@ body {
   --accent: #1e40af;
   --accent-light: #1e293b;
   --accent-warm: #334155;
+  --bubble-user: #1a2b4d;
 }
 
 [data-theme="lavender"][data-mode="dark"] {
@@ -196,6 +199,7 @@ body {
   --accent: #5b21b6;
   --accent-light: #2e1065;
   --accent-warm: #4c1d95;
+  --bubble-user: #2a1b44;
 }
 
 [data-theme="rose"][data-mode="dark"] {
@@ -204,6 +208,7 @@ body {
   --accent: #9f1239;
   --accent-light: #4c0519;
   --accent-warm: #881337;
+  --bubble-user: #3b1624;
 }
 
 [data-theme="graphite"][data-mode="dark"] {
@@ -212,6 +217,7 @@ body {
   --accent: #4b5563;
   --accent-light: #1f2937;
   --accent-warm: #374151;
+  --bubble-user: #2a2f36;
 }
 
 * {
