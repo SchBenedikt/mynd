@@ -14,6 +14,7 @@ const CHAT_STORAGE_KEY = 'mynd_chat_history_v1';
 const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
 const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
+const LOCATION_AUTO_RESOLVE_KEY = 'mynd_location_auto_resolve_v1';
 
 const LANGUAGE_COMMANDS = {
   de: ['deutsch', 'german'],
@@ -97,6 +98,8 @@ export default function HomePage() {
   const [inputValue, setInputValue] = useState('');
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
+  const [securityStatus, setSecurityStatus] = useState(null);
+  const [securityLoading, setSecurityLoading] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [, setGreetingTick] = useState(0);
   
@@ -152,8 +155,36 @@ export default function HomePage() {
   const activeChat = chats.find((chat) => chat.id === activeChatId) || null;
   const messages = activeChat?.messages || [];
   const conversationActive = messages.length > 0;
+  const weatherInfo = securityStatus?.weather || null;
 
   const languageLabel = (code) => languages.find((l) => l.code === code)?.label || code;
+
+  const renderWeatherMiniIcon = (iconType) => {
+    if (iconType === 'rain') {
+      return (
+        <span className="weather-mini-icon rain" aria-hidden="true">
+          <i className="fas fa-cloud"></i>
+          <span className="rain-drop drop-1"></span>
+          <span className="rain-drop drop-2"></span>
+          <span className="rain-drop drop-3"></span>
+        </span>
+      );
+    }
+
+    if (iconType === 'cloud') {
+      return (
+        <span className="weather-mini-icon cloud" aria-hidden="true">
+          <i className="fas fa-cloud"></i>
+        </span>
+      );
+    }
+
+    return (
+      <span className="weather-mini-icon sun" aria-hidden="true">
+        <i className="fas fa-sun"></i>
+      </span>
+    );
+  };
 
   const pickGreeting = (segment, name) => {
     const suffix = name ? `, ${name}` : '';
@@ -297,12 +328,69 @@ export default function HomePage() {
     loadAIConfig();
     loadOllamaModels();
     updateStatus();
+    loadSecurityStatus();
+    autoResolveLocationOnOpen();
     
     const statusInterval = setInterval(updateStatus, 8000);
+    const securityInterval = setInterval(loadSecurityStatus, 60000);
     return () => {
       clearInterval(statusInterval);
+      clearInterval(securityInterval);
     };
   }, []);
+
+  const autoResolveLocationOnOpen = async () => {
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      return;
+    }
+
+    // Avoid repeated permission prompts during the same browser session.
+    try {
+      const marker = sessionStorage.getItem(LOCATION_AUTO_RESOLVE_KEY);
+      if (marker === 'done') {
+        return;
+      }
+    } catch (err) {
+      console.error('Could not read location auto-resolve marker:', err);
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          await fetch(`${API_BASE}/api/location/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lat: position.coords.latitude,
+              lon: position.coords.longitude,
+              save: true
+            })
+          });
+        } catch (err) {
+          console.error('Automatic location resolve failed:', err);
+        } finally {
+          try {
+            sessionStorage.setItem(LOCATION_AUTO_RESOLVE_KEY, 'done');
+          } catch (storageErr) {
+            console.error('Could not persist location auto-resolve marker:', storageErr);
+          }
+          loadSecurityStatus();
+        }
+      },
+      () => {
+        try {
+          sessionStorage.setItem(LOCATION_AUTO_RESOLVE_KEY, 'done');
+        } catch (storageErr) {
+          console.error('Could not persist location auto-resolve marker:', storageErr);
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 60000
+      }
+    );
+  };
 
   useEffect(() => {
     try {
@@ -505,6 +593,31 @@ export default function HomePage() {
       });
     } catch (err) {
       setHealth({ ollama: 'error', kb: 'error' });
+    }
+  };
+
+  const loadSecurityStatus = async () => {
+    try {
+      setSecurityLoading(true);
+      const res = await fetch(`${API_BASE}/api/security/status`);
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        setSecurityStatus({
+          headline: 'Sicherheitslage aktuell nicht verfuegbar',
+          nina_warning_count: 0,
+          nina_warnings: []
+        });
+        return;
+      }
+      setSecurityStatus(data);
+    } catch (err) {
+      setSecurityStatus({
+        headline: 'Sicherheitslage aktuell nicht verfuegbar',
+        nina_warning_count: 0,
+        nina_warnings: []
+      });
+    } finally {
+      setSecurityLoading(false);
     }
   };
 
@@ -1186,6 +1299,36 @@ export default function HomePage() {
 
       {/* CENTER - Chat */}
       <div className="center-area">
+        {(securityStatus?.nina_warning_count || 0) > 0 && (
+          <div className="security-banner alert">
+            <div className="security-banner-header">
+              <div className="security-banner-title">
+                <i className="fas fa-triangle-exclamation"></i>
+                <span>{securityStatus?.headline || 'Aktive Warnungen erkannt'}</span>
+              </div>
+              <button
+                type="button"
+                className="security-refresh"
+                onClick={loadSecurityStatus}
+                disabled={securityLoading}
+                title="Sicherheitslage aktualisieren"
+              >
+                {securityLoading ? '...' : 'Aktualisieren'}
+              </button>
+            </div>
+            {(securityStatus?.nina_warnings || []).length > 0 && (
+              <ul className="security-warning-list">
+                {securityStatus.nina_warnings.slice(0, 3).map((warning, idx) => (
+                  <li key={`${warning.id || warning.headline || 'warning'}-${idx}`}>
+                    <strong>{warning.headline || `Warnung ${idx + 1}`}</strong>
+                    {warning.severity ? ` (${warning.severity})` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {!conversationActive ? (
           <div className="landing">
             <div className="landing-header">
@@ -1465,6 +1608,12 @@ export default function HomePage() {
           </>
         )}
       </div>
+      {weatherInfo?.success && weatherInfo?.temperature_display && (
+        <div className="weather-mini-widget" title={weatherInfo.description || 'Lokales Wetter'}>
+          {renderWeatherMiniIcon(weatherInfo.icon)}
+          <span className="weather-mini-temp">{weatherInfo.temperature_display}</span>
+        </div>
+      )}
       {photoPreview.open && (
         <div className="image-modal-overlay" onClick={closePhotoPreview}>
           <div className="image-modal" onClick={(e) => e.stopPropagation()}>

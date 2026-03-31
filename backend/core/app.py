@@ -12,10 +12,13 @@ import time
 import secrets
 from urllib.parse import urljoin
 from urllib.parse import urlencode
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+
+# Import package side effects to register all API clients in APIRegistry.
+import backend.features.integration  # noqa: F401
 
 from backend.features.documents.parser import DocumentParser
 from backend.features.integration.nextcloud_client import NextcloudClient
@@ -24,6 +27,9 @@ from backend.features.integration.notifications_client import NextcloudNotificat
 from backend.features.integration.auth_manager import get_auth_manager, AuthManager
 from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
+from backend.features.integration.api_registry import get_api_registry
+from backend.features.integration.homeassistant_client import HomeAssistantClient
+from backend.features.integration.uptimekuma_client import UptimeKumaClient
 from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
 # from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
@@ -3038,6 +3044,1131 @@ def immich_search_by_context():
         logger.error(f"Immich context search error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# ==================== API Registry Endpoints ====================
+
+@app.route('/api/registry/apis', methods=['GET'])
+def get_all_apis():
+    """Get all available APIs with their configuration status"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+        apis = registry.get_all_configured_apis(username)
+
+        return jsonify({
+            'success': True,
+            'apis': apis
+        })
+    except Exception as e:
+        logger.error(f"Error getting APIs: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/registry/health', methods=['GET'])
+def check_all_apis_health():
+    """Check health of all configured APIs"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+        health = registry.check_all_apis_health(username)
+
+        return jsonify({
+            'success': True,
+            'health': health
+        })
+    except Exception as e:
+        logger.error(f"Error checking API health: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/registry/<api_name>/health', methods=['GET'])
+def check_api_health(api_name):
+    """Check health of a specific API"""
+    try:
+        username = request.args.get('username')
+        use_cache = request.args.get('use_cache', 'true').lower() == 'true'
+
+        registry = get_api_registry()
+        health = registry.check_api_health(api_name, username, use_cache=use_cache)
+
+        return jsonify({
+            'success': True,
+            'api_name': api_name,
+            'health': health
+        })
+    except Exception as e:
+        logger.error(f"Error checking {api_name} health: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/registry/<api_name>/config', methods=['GET', 'POST', 'DELETE'])
+def manage_api_config(api_name):
+    """Get, update, or delete API configuration"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        if request.method == 'GET':
+            config = registry.load_config(api_name, username)
+            api_class = registry.get_api_class(api_name)
+            configured = bool(config)
+
+            if api_class and not config and not api_class.requires_config():
+                config = api_class.get_default_config()
+                configured = True
+
+            # Get schema
+            instance = registry.create_api_instance(api_name, config if config else {}, username, use_cache=False)
+            schema = instance.get_config_schema() if instance else {}
+
+            # Remove sensitive values from response
+            safe_config = {}
+            for key, value in config.items():
+                if schema.get(key, {}).get('secret'):
+                    safe_config[key] = '***' if value else ''
+                else:
+                    safe_config[key] = value
+
+            return jsonify({
+                'success': True,
+                'api_name': api_name,
+                'config': safe_config,
+                'schema': schema,
+                'configured': configured
+            })
+
+        elif request.method == 'POST':
+            data = request.get_json()
+            config = data.get('config', {})
+
+            # Preserve existing secret values when UI sends masked placeholders (***).
+            existing_config = registry.load_config(api_name, username) or {}
+            api_class = registry.get_api_class(api_name)
+            schema = {}
+            if api_class:
+                schema_instance = registry.create_api_instance(
+                    api_name,
+                    existing_config if existing_config else (api_class.get_default_config() if not api_class.requires_config() else config),
+                    username,
+                    use_cache=False
+                )
+                if schema_instance:
+                    schema = schema_instance.get_config_schema()
+
+            merged_config = dict(config)
+            for key, field_meta in schema.items():
+                if field_meta.get('secret') and merged_config.get(key) == '***' and existing_config.get(key):
+                    merged_config[key] = existing_config.get(key)
+
+            # Validate by trying to create instance
+            try:
+                instance = registry.create_api_instance(api_name, merged_config, username, use_cache=False)
+                if not instance:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Failed to create API instance with provided config'
+                    }), 400
+
+                # Test connection
+                if not instance.test_connection():
+                    return jsonify({
+                        'success': False,
+                        'error': 'Connection test failed with provided configuration'
+                    }), 400
+
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid configuration: {str(e)}'
+                }), 400
+
+            # Save config
+            if registry.save_config(api_name, merged_config, username):
+                return jsonify({
+                    'success': True,
+                    'message': f'{api_name} configuration saved successfully'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to save configuration'
+                }), 500
+
+        elif request.method == 'DELETE':
+            if registry.delete_config(api_name, username):
+                return jsonify({
+                    'success': True,
+                    'message': f'{api_name} configuration deleted successfully'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to delete configuration'
+                }), 500
+
+    except Exception as e:
+        logger.error(f"Error managing {api_name} config: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/registry/<api_name>/test', methods=['POST'])
+def test_api_connection(api_name):
+    """Test API connection with provided config"""
+    try:
+        data = request.get_json()
+        config = data.get('config', {})
+        username = data.get('username')
+
+        registry = get_api_registry()
+
+        # Preserve existing secret values when UI sends masked placeholders (***).
+        existing_config = registry.load_config(api_name, username) or {}
+        api_class = registry.get_api_class(api_name)
+        schema = {}
+        if api_class:
+            schema_instance = registry.create_api_instance(
+                api_name,
+                existing_config if existing_config else (api_class.get_default_config() if not api_class.requires_config() else config),
+                username,
+                use_cache=False
+            )
+            if schema_instance:
+                schema = schema_instance.get_config_schema()
+
+        merged_config = dict(config)
+        for key, field_meta in schema.items():
+            if field_meta.get('secret') and merged_config.get(key) == '***' and existing_config.get(key):
+                merged_config[key] = existing_config.get(key)
+
+        # Create instance with provided config
+        instance = registry.create_api_instance(api_name, merged_config, username, use_cache=False)
+        if not instance:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to create API instance'
+            }), 400
+
+        # Test connection and get health info
+        health = instance.get_health_info()
+
+        return jsonify({
+            'success': True,
+            'api_name': api_name,
+            'health': health
+        })
+
+    except Exception as e:
+        logger.error(f"Error testing {api_name}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# ==================== HomeAssistant Endpoints ====================
+
+@app.route('/api/homeassistant/states', methods=['GET'])
+def homeassistant_get_states():
+    """Get all Home Assistant entity states"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        client = registry.create_api_instance('homeassistant', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Home Assistant not configured'
+            }), 400
+
+        states = client.get_states()
+
+        return jsonify({
+            'success': True,
+            'states': states
+        })
+
+    except Exception as e:
+        logger.error(f"HomeAssistant get states error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/homeassistant/state/<path:entity_id>', methods=['GET'])
+def homeassistant_get_state(entity_id):
+    """Get state of a specific Home Assistant entity"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        client = registry.create_api_instance('homeassistant', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Home Assistant not configured'
+            }), 400
+
+        state = client.get_state(entity_id)
+
+        if state:
+            return jsonify({
+                'success': True,
+                'entity_id': entity_id,
+                'state': state
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Entity not found'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"HomeAssistant get state error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/homeassistant/service', methods=['POST'])
+def homeassistant_call_service():
+    """Call a Home Assistant service"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        domain = data.get('domain')
+        service = data.get('service')
+        entity_id = data.get('entity_id')
+        service_data = data.get('data', {})
+
+        if not domain or not service:
+            return jsonify({
+                'success': False,
+                'error': 'domain and service are required'
+            }), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('homeassistant', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Home Assistant not configured'
+            }), 400
+
+        success = client.call_service(domain, service, entity_id, service_data)
+
+        return jsonify({
+            'success': success,
+            'message': f'Service {domain}.{service} called' if success else 'Service call failed'
+        })
+
+    except Exception as e:
+        logger.error(f"HomeAssistant service call error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/homeassistant/search', methods=['POST'])
+def homeassistant_search():
+    """Search Home Assistant entities"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        query = data.get('query', '')
+        domains = data.get('domains')
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('homeassistant', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Home Assistant not configured'
+            }), 400
+
+        results = client.search_entities(query, domains)
+
+        return jsonify({
+            'success': True,
+            'query': query,
+            'count': len(results),
+            'results': results
+        })
+
+    except Exception as e:
+        logger.error(f"HomeAssistant search error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== Uptime Kuma Endpoints ====================
+
+@app.route('/api/uptimekuma/monitors', methods=['GET'])
+def uptimekuma_get_monitors():
+    """Get all Uptime Kuma monitors"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        client = registry.create_api_instance('uptimekuma', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Uptime Kuma not configured'
+            }), 400
+
+        monitors = client.get_monitors()
+
+        return jsonify({
+            'success': True,
+            'monitors': monitors
+        })
+
+    except Exception as e:
+        logger.error(f"Uptime Kuma get monitors error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/uptimekuma/monitor/<int:monitor_id>', methods=['GET'])
+def uptimekuma_get_monitor(monitor_id):
+    """Get a specific Uptime Kuma monitor"""
+    try:
+        username = request.args.get('username')
+        registry = get_api_registry()
+
+        client = registry.create_api_instance('uptimekuma', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Uptime Kuma not configured'
+            }), 400
+
+        monitor = client.get_monitor(monitor_id)
+
+        if monitor:
+            return jsonify({
+                'success': True,
+                'monitor': monitor
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Monitor not found'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Uptime Kuma get monitor error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/uptimekuma/stats', methods=['GET'])
+def uptimekuma_get_stats():
+    """Get Uptime Kuma statistics"""
+    try:
+        username = request.args.get('username')
+        monitor_id = request.args.get('monitor_id', type=int)
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('uptimekuma', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Uptime Kuma not configured'
+            }), 400
+
+        stats = client.get_uptime_stats(monitor_id)
+
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+
+    except Exception as e:
+        logger.error(f"Uptime Kuma get stats error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/uptimekuma/search', methods=['POST'])
+def uptimekuma_search():
+    """Search Uptime Kuma monitors"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        query = data.get('query', '')
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('uptimekuma', username=username)
+        if not client:
+            return jsonify({
+                'success': False,
+                'error': 'Uptime Kuma not configured'
+            }), 400
+
+        results = client.search_monitors(query)
+
+        return jsonify({
+            'success': True,
+            'query': query,
+            'count': len(results),
+            'results': results
+        })
+
+    except Exception as e:
+        logger.error(f"Uptime Kuma search error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ==================== Public API Endpoints ====================
+
+def _reverse_geocode(latitude: float, longitude: float) -> Optional[Dict[str, Any]]:
+    try:
+        response = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={
+                'format': 'jsonv2',
+                'lat': latitude,
+                'lon': longitude,
+                'addressdetails': 1
+            },
+            headers={'User-Agent': 'MYND Assistant'},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        logger.warning("Reverse geocoding failed: %s", exc)
+        return None
+
+
+def _collect_place_candidates(address: Dict[str, Any]) -> List[str]:
+    candidates = [
+        address.get('city'),
+        address.get('town'),
+        address.get('village'),
+        address.get('municipality'),
+        address.get('county'),
+        address.get('state')
+    ]
+    return [entry for entry in candidates if entry]
+
+
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ''
+    return str(value).strip()
+
+
+def _extract_nina_warning_items(payload: Any, limit: int = 5) -> List[Dict[str, Any]]:
+    """Normalize NINA dashboard payload into a stable warning list."""
+    items = []
+    data = payload
+
+    if isinstance(payload, dict):
+        data = payload.get('warnings', payload)
+
+    if isinstance(data, list):
+        for raw in data:
+            if not isinstance(raw, dict):
+                continue
+
+            payload_data = raw.get('payload') if isinstance(raw.get('payload'), dict) else {}
+            detail_data = payload_data.get('data') if isinstance(payload_data.get('data'), dict) else {}
+            i18n_title = raw.get('i18nTitle') if isinstance(raw.get('i18nTitle'), dict) else {}
+            translated_headline = _safe_text(i18n_title.get('de') or i18n_title.get('en'))
+
+            identifier = _safe_text(raw.get('id') or raw.get('identifier') or raw.get('warningId'))
+            headline = _safe_text(
+                raw.get('headline')
+                or detail_data.get('headline')
+                or translated_headline
+                or raw.get('title')
+                or raw.get('i18nTitle')
+                or raw.get('event')
+                or raw.get('msgType')
+            )
+            severity = _safe_text(
+                raw.get('severity')
+                or detail_data.get('severity')
+                or raw.get('warnLevel')
+                or raw.get('level')
+            )
+            sent = _safe_text(raw.get('sent') or raw.get('effective') or raw.get('published'))
+            expires = _safe_text(raw.get('expires') or raw.get('until') or raw.get('ends'))
+            provider = _safe_text(
+                raw.get('provider')
+                or detail_data.get('provider')
+                or raw.get('sender')
+                or raw.get('source')
+            )
+            description = _safe_text(
+                raw.get('description')
+                or detail_data.get('description')
+                or detail_data.get('event')
+                or raw.get('text')
+                or raw.get('body')
+            )
+
+            if not headline and identifier:
+                headline = f"Warnung {identifier}"
+
+            if not headline:
+                continue
+
+            items.append({
+                'id': identifier,
+                'headline': headline,
+                'severity': severity,
+                'sent': sent,
+                'expires': expires,
+                'provider': provider,
+                'description': description
+            })
+
+    return items[:limit]
+
+
+def _classify_weather_icon(weather_id: Optional[int], weather_main: str) -> str:
+    main = _safe_text(weather_main).lower()
+    if weather_id is not None and 200 <= int(weather_id) < 700:
+        return 'rain'
+    if any(token in main for token in ['rain', 'drizzle', 'thunder', 'snow']):
+        return 'rain'
+    if any(token in main for token in ['cloud', 'mist', 'fog', 'haze', 'smoke']):
+        return 'cloud'
+    return 'sun'
+
+
+def _format_temperature(value: Any, units: str) -> str:
+    try:
+        temp = float(value)
+    except (TypeError, ValueError):
+        return ''
+
+    if units == 'imperial':
+        return f"{round(temp)}°F"
+    if units == 'standard':
+        return f"{round(temp)}K"
+    return f"{round(temp)}°C"
+
+
+def get_local_weather_status() -> Dict[str, Any]:
+    """Collect local weather and forecast from OpenWeather for configured coordinates."""
+    result = {
+        'success': False,
+        'configured': False,
+        'status': 'not_configured',
+        'location_name': '',
+        'lat': None,
+        'lon': None,
+        'temperature': None,
+        'temperature_display': '',
+        'description': '',
+        'icon': 'sun',
+        'alerts': [],
+        'alerts_count': 0,
+        'hourly_preview': '',
+        'daily_preview': '',
+        'summary': ''
+    }
+
+    try:
+        registry = get_api_registry()
+        config = registry.load_config('openweather')
+        result['location_name'] = _safe_text(config.get('location_name'))
+
+        client = registry.create_api_instance('openweather')
+        if not client:
+            result['summary'] = 'OpenWeather ist nicht konfiguriert.'
+            return result
+
+        result['configured'] = True
+        payload = client.get_current_and_forecast(exclude='minutely')
+        current = payload.get('current') if isinstance(payload, dict) else {}
+        weather_entries = current.get('weather') if isinstance(current, dict) else []
+        weather = weather_entries[0] if isinstance(weather_entries, list) and weather_entries else {}
+
+        result['status'] = 'ok'
+        result['success'] = True
+        result['lat'] = payload.get('lat')
+        result['lon'] = payload.get('lon')
+        result['temperature'] = current.get('temp')
+        result['temperature_display'] = _format_temperature(current.get('temp'), client.units)
+        result['description'] = _safe_text(weather.get('description') or weather.get('main'))
+        result['icon'] = _classify_weather_icon(weather.get('id'), weather.get('main'))
+
+        hourly = payload.get('hourly') if isinstance(payload, dict) else []
+        if isinstance(hourly, list) and len(hourly) > 1 and isinstance(hourly[1], dict):
+            next_hour_temp = _format_temperature(hourly[1].get('temp'), client.units)
+            next_hour_pop = hourly[1].get('pop')
+            pop_text = ''
+            try:
+                if next_hour_pop is not None:
+                    pop_text = f", Regenwahrscheinlichkeit {round(float(next_hour_pop) * 100)}%"
+            except (TypeError, ValueError):
+                pop_text = ''
+            if next_hour_temp:
+                result['hourly_preview'] = f"In der naechsten Stunde etwa {next_hour_temp}{pop_text}."
+
+        daily = payload.get('daily') if isinstance(payload, dict) else []
+        if isinstance(daily, list) and len(daily) > 1 and isinstance(daily[1], dict):
+            tomorrow = daily[1]
+            temp_block = tomorrow.get('temp') if isinstance(tomorrow.get('temp'), dict) else {}
+            t_min = _format_temperature(temp_block.get('min'), client.units)
+            t_max = _format_temperature(temp_block.get('max'), client.units)
+            if t_min and t_max:
+                result['daily_preview'] = f"Morgen voraussichtlich zwischen {t_min} und {t_max}."
+
+        alerts = payload.get('alerts') if isinstance(payload, dict) else []
+        if isinstance(alerts, list):
+            normalized = []
+            for entry in alerts[:5]:
+                if not isinstance(entry, dict):
+                    continue
+                normalized.append({
+                    'event': _safe_text(entry.get('event')),
+                    'sender_name': _safe_text(entry.get('sender_name')),
+                    'description': _safe_text(entry.get('description')),
+                    'start': entry.get('start'),
+                    'end': entry.get('end')
+                })
+            result['alerts'] = normalized
+            result['alerts_count'] = len(normalized)
+
+        location_label = result['location_name'] or 'deinem Standort'
+        temp_label = result['temperature_display'] or 'n/a'
+        desc_label = result['description'] or 'unbekannt'
+        if result['alerts_count'] > 0:
+            result['summary'] = (
+                f"Aktuell {temp_label} und {desc_label} in {location_label}. "
+                f"Es liegen {result['alerts_count']} Wetterwarnung(en) vor."
+            )
+        else:
+            result['summary'] = f"Aktuell {temp_label} und {desc_label} in {location_label}."
+
+        if result['hourly_preview']:
+            result['summary'] = f"{result['summary']} {result['hourly_preview']}"
+        if result['daily_preview']:
+            result['summary'] = f"{result['summary']} {result['daily_preview']}"
+
+        return result
+
+    except Exception as exc:
+        logger.warning('OpenWeather status failed: %s', exc)
+        result['status'] = 'error'
+        result['summary'] = f"Wetter konnte nicht geladen werden: {str(exc)}"
+        return result
+
+
+def get_local_security_status() -> Dict[str, Any]:
+    """Collect local security status from configured NINA plus weather from OpenWeather."""
+    result = {
+        'success': True,
+        'ars': '',
+        'nina_warning_count': 0,
+        'nina_warnings': [],
+        'headline': '',
+        'summary': '',
+        'weather': {},
+        'sources': {
+            'nina': False,
+            'openweather': False
+        },
+        'errors': []
+    }
+
+    registry = get_api_registry()
+
+    # NINA warnings for configured ARS
+    try:
+        nina_config = registry.load_config('nina')
+        ars = _safe_text(nina_config.get('ars'))
+        result['ars'] = ars
+
+        nina_client = registry.create_api_instance('nina')
+        if nina_client:
+            result['sources']['nina'] = True
+            if ars:
+                dashboard_result = nina_client.get_dashboard_with_fallback(ars)
+                result['ars'] = _safe_text(dashboard_result.get('ars_used') or ars)
+                warnings = _extract_nina_warning_items(dashboard_result.get('data'), limit=6)
+                result['nina_warnings'] = warnings
+                result['nina_warning_count'] = len(warnings)
+            else:
+                result['errors'].append('NINA ARS ist nicht konfiguriert')
+        else:
+            result['errors'].append('NINA Client nicht verfuegbar')
+    except Exception as exc:
+        logger.error("NINA security status failed: %s", exc)
+        result['errors'].append(f"NINA Fehler: {str(exc)}")
+
+    try:
+        weather = get_local_weather_status()
+        result['weather'] = weather
+        result['sources']['openweather'] = weather.get('configured', False)
+    except Exception as exc:
+        logger.warning('OpenWeather attach failed: %s', exc)
+        result['errors'].append(f"OpenWeather Fehler: {str(exc)}")
+
+    if result['nina_warning_count'] > 0:
+        result['headline'] = f"{result['nina_warning_count']} aktive Warnung(en) fuer deinen Standort"
+        lines = [result['headline'] + '.']
+        for idx, warning in enumerate(result['nina_warnings'][:3], 1):
+            label = warning.get('headline') or f"Warnung {idx}"
+            severity = warning.get('severity')
+            if severity:
+                lines.append(f"{idx}. {label} (Stufe: {severity})")
+            else:
+                lines.append(f"{idx}. {label}")
+        result['summary'] = "\n".join(lines)
+    else:
+        result['headline'] = 'Keine akuten NINA-Warnungen fuer deinen Standort'
+        result['summary'] = (
+            'Aktuell liegen laut NINA keine akuten Warnungen fuer deinen Standort vor.'
+        )
+
+    return result
+
+
+def is_security_query(message: str) -> bool:
+    text = (message or '').lower()
+    keywords = [
+        'sicherheitslage',
+        'warnung',
+        'warnungen',
+        'nina',
+        'gefahrenlage',
+        'alarm',
+        'katastrophenschutz',
+        'lage bei mir'
+    ]
+    return any(keyword in text for keyword in keywords)
+
+
+def is_weather_query(message: str) -> bool:
+    text = (message or '').lower()
+    keywords = [
+        'wetter',
+        'temperatur',
+        'vorhersage',
+        'forecast',
+        'regen',
+        'sonne',
+        'wind',
+        'wie warm',
+        'weather'
+    ]
+    return any(keyword in text for keyword in keywords)
+
+
+@app.route('/api/location/resolve', methods=['POST'])
+def resolve_location():
+    """Resolve browser location to NINA ARS and OpenWeather coordinates."""
+    try:
+        payload = request.get_json() or {}
+        latitude = payload.get('lat')
+        longitude = payload.get('lon')
+        save_config = payload.get('save', True)
+
+        if latitude is None or longitude is None:
+            return jsonify({'success': False, 'error': 'lat and lon required'}), 400
+
+        latitude = float(latitude)
+        longitude = float(longitude)
+
+        reverse = _reverse_geocode(latitude, longitude)
+        address = reverse.get('address', {}) if reverse else {}
+        display_name = reverse.get('display_name', '') if reverse else ''
+        candidates = _collect_place_candidates(address)
+
+        registry = get_api_registry()
+        nina_result = None
+        nina_client = registry.create_api_instance('nina')
+        if nina_client:
+            resolved = nina_client.resolve_ars_for_places(candidates)
+            if resolved:
+                nina_result = {
+                    'ars': resolved.get('ars'),
+                    'name': resolved.get('name'),
+                    'hint': resolved.get('hint'),
+                    'score': resolved.get('score')
+                }
+                if save_config:
+                    nina_config = registry.load_config('nina')
+                    nina_config['ars'] = resolved.get('ars')
+                    registry.save_config('nina', nina_config)
+
+        openweather_result = {
+            'lat': latitude,
+            'lon': longitude,
+            'location_name': _safe_text(display_name)
+        }
+        openweather_error = None
+        if save_config:
+            try:
+                openweather_config = registry.load_config('openweather')
+                openweather_config['lat'] = latitude
+                openweather_config['lon'] = longitude
+                if display_name:
+                    openweather_config['location_name'] = display_name
+                registry.save_config('openweather', openweather_config)
+            except Exception as exc:
+                openweather_error = str(exc)
+                logger.warning('Could not persist OpenWeather coordinates: %s', exc)
+
+        return jsonify({
+            'success': True,
+            'location': {
+                'latitude': latitude,
+                'longitude': longitude,
+                'display_name': display_name,
+                'address': address
+            },
+            'nina': nina_result,
+            'openweather': openweather_result,
+            'openweather_error': openweather_error
+        })
+
+    except Exception as e:
+        logger.error(f"Location resolve error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dwd/warnings/nowcast', methods=['GET'])
+def dwd_get_warnings_nowcast():
+    """Get DWD nowcast warnings"""
+    try:
+        language = request.args.get('lang', 'de')
+        registry = get_api_registry()
+        client = registry.create_api_instance('dwd')
+        if not client:
+            return jsonify({'success': False, 'error': 'DWD client unavailable'}), 400
+
+        data = client.get_warnings_nowcast(language)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"DWD warnings error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dwd/station-overview', methods=['GET'])
+def dwd_station_overview():
+    """Get DWD station overview by station IDs"""
+    try:
+        registry = get_api_registry()
+        station_ids = request.args.get('station_ids', '').strip()
+        if not station_ids:
+            config = registry.load_config('dwd')
+            station_ids = str(config.get('station_ids', '')).strip()
+        if not station_ids:
+            return jsonify({'success': False, 'error': 'station_ids required'}), 400
+
+        client = registry.create_api_instance('dwd')
+        if not client:
+            return jsonify({'success': False, 'error': 'DWD client unavailable'}), 400
+
+        data = client.get_station_overview_extended(
+            [entry.strip() for entry in station_ids.split(',') if entry.strip()]
+        )
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"DWD station overview error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/nina/event-codes', methods=['GET'])
+def nina_event_codes():
+    """Get NINA event codes"""
+    try:
+        registry = get_api_registry()
+        client = registry.create_api_instance('nina')
+        if not client:
+            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
+
+        data = client.get_event_codes()
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"NINA event codes error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/nina/dashboard', methods=['GET'])
+def nina_dashboard():
+    """Get NINA dashboard data for an ARS"""
+    try:
+        ars = request.args.get('ars')
+        if not ars:
+            registry = get_api_registry()
+            config = registry.load_config('nina')
+            ars = str(config.get('ars', '')).strip()
+        if not ars:
+            return jsonify({'success': False, 'error': 'ars required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('nina')
+        if not client:
+            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
+
+        dashboard_result = client.get_dashboard_with_fallback(ars)
+        return jsonify({
+            'success': True,
+            'ars': dashboard_result.get('ars_requested', ars),
+            'ars_used': dashboard_result.get('ars_used', ars),
+            'fallback_used': bool(dashboard_result.get('fallback_used')),
+            'data': dashboard_result.get('data')
+        })
+
+    except Exception as e:
+        logger.error(f"NINA dashboard error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/nina/map-data', methods=['GET'])
+def nina_map_data():
+    """Get NINA map data for a specific source"""
+    try:
+        source = request.args.get('source')
+        if not source:
+            return jsonify({'success': False, 'error': 'source required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('nina')
+        if not client:
+            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
+
+        data = client.get_map_data(source)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"NINA map data error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/nina/regions', methods=['GET'])
+def nina_regions():
+    """Get NINA regional keys (ARS) list"""
+    try:
+        query = request.args.get('query', '').strip()
+        limit = int(request.args.get('limit', 200))
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('nina')
+        if not client:
+            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
+
+        data = client.get_regional_keys(query=query, limit=limit)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"NINA regions error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/security/status', methods=['GET'])
+def security_status():
+    """Get local security status based on configured NINA ARS and OpenWeather."""
+    try:
+        data = get_local_security_status()
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Security status error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/weather/current', methods=['GET'])
+def weather_current():
+    """Get local current weather and forecast summary from OpenWeather."""
+    try:
+        data = get_local_weather_status()
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Weather current error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/autobahn/roads', methods=['GET'])
+def autobahn_list_roads():
+    """List available Autobahn roads"""
+    try:
+        registry = get_api_registry()
+        client = registry.create_api_instance('autobahn')
+        if not client:
+            return jsonify({'success': False, 'error': 'Autobahn client unavailable'}), 400
+
+        data = client.list_roads()
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Autobahn list roads error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/autobahn/road-services', methods=['GET'])
+def autobahn_road_services():
+    """Get Autobahn services for a road"""
+    try:
+        road_id = request.args.get('road_id')
+        service = request.args.get('service')
+        if not road_id or not service:
+            return jsonify({'success': False, 'error': 'road_id and service required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('autobahn')
+        if not client:
+            return jsonify({'success': False, 'error': 'Autobahn client unavailable'}), 400
+
+        data = client.get_road_services(road_id, service)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Autobahn road services error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dashboard-deutschland/dashboard', methods=['GET'])
+def dashboard_deutschland_dashboard():
+    """Get Dashboard Deutschland entries"""
+    try:
+        registry = get_api_registry()
+        client = registry.create_api_instance('dashboard_deutschland')
+        if not client:
+            return jsonify({'success': False, 'error': 'Dashboard client unavailable'}), 400
+
+        data = client.get_dashboard_entries()
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Dashboard Deutschland dashboard error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dashboard-deutschland/indicators', methods=['GET'])
+def dashboard_deutschland_indicators():
+    """Get Dashboard Deutschland indicators by ids"""
+    try:
+        ids = request.args.get('ids', '')
+        if not ids:
+            return jsonify({'success': False, 'error': 'ids required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('dashboard_deutschland')
+        if not client:
+            return jsonify({'success': False, 'error': 'Dashboard client unavailable'}), 400
+
+        data = client.get_indicators([entry.strip() for entry in ids.split(',') if entry.strip()])
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Dashboard Deutschland indicators error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/dashboard-deutschland/geojson', methods=['GET'])
+def dashboard_deutschland_geojson():
+    """Get Dashboard Deutschland GeoJSON"""
+    try:
+        registry = get_api_registry()
+        client = registry.create_api_instance('dashboard_deutschland')
+        if not client:
+            return jsonify({'success': False, 'error': 'Dashboard client unavailable'}), 400
+
+        data = client.get_geojson()
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Dashboard Deutschland geojson error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/deutschland-atlas/service-info', methods=['GET'])
+def deutschland_atlas_service_info():
+    """Get Deutschland Atlas service info"""
+    try:
+        service = request.args.get('service')
+        if not service:
+            return jsonify({'success': False, 'error': 'service required'}), 400
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('deutschland_atlas')
+        if not client:
+            return jsonify({'success': False, 'error': 'Deutschland Atlas client unavailable'}), 400
+
+        data = client.get_service_info(service)
+        return jsonify({'success': True, 'data': data})
+
+    except Exception as e:
+        logger.error(f"Deutschland Atlas service info error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # ==================== UI Configuration Endpoints ====================
 
 @app.route('/api/ui/system-config', methods=['GET', 'POST'])
@@ -3511,6 +4642,57 @@ def agent_query():
                 'context_used': False,
                 'context_count': 0,
                 'intent': 'tasks',
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': False
+                }
+            })
+
+        # Weather shortcut: direct response without LLM
+        if is_weather_query(prompt):
+            weather = get_local_weather_status()
+            response_text = weather.get('summary') or 'Wetter konnte aktuell nicht ermittelt werden.'
+            if weather.get('alerts_count', 0) > 0:
+                alert_lines = []
+                for idx, alert in enumerate((weather.get('alerts') or [])[:3], 1):
+                    event = alert.get('event') or f'Warnung {idx}'
+                    sender = _safe_text(alert.get('sender_name'))
+                    if sender:
+                        alert_lines.append(f"{idx}. {event} ({sender})")
+                    else:
+                        alert_lines.append(f"{idx}. {event}")
+                if alert_lines:
+                    response_text = response_text + "\n" + "\n".join(alert_lines)
+
+            return jsonify({
+                'success': True,
+                'response': response_text,
+                'action': 'weather_status',
+                'context_used': True,
+                'context_count': weather.get('alerts_count', 0),
+                'intent': 'weather',
+                'weather': weather,
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': False
+                }
+            })
+
+        # Security shortcut: direct response without LLM
+        if is_security_query(prompt):
+            security = get_local_security_status()
+            return jsonify({
+                'success': True,
+                'response': security.get('summary', 'Sicherheitslage konnte nicht ermittelt werden.'),
+                'action': 'security_status',
+                'context_used': True,
+                'context_count': security.get('nina_warning_count', 0),
+                'intent': 'security',
+                'security': security,
                 'sources_used': {
                     'photos': False,
                     'files': False,
