@@ -535,6 +535,9 @@ calendar_enabled = os.getenv('CALENDAR_ENABLED', 'False').lower() == 'true'
 
 # Tasks/Todos Manager initialisieren
 tasks_enabled = False
+TASKS_AUTO_SYNC_ENABLED = os.getenv('TASKS_AUTO_SYNC_ENABLED', 'true').lower() == 'true'
+TASKS_AUTO_SYNC_INTERVAL_SECONDS = int(os.getenv('TASKS_AUTO_SYNC_INTERVAL_SECONDS', '300'))
+TASKS_AUTO_SYNC_LIST_NAME = os.getenv('TASKS_AUTO_SYNC_LIST_NAME', 'todo')
 
 def initialize_tasks_from_config():
     """Initialisiert Task-Manager wenn Nextcloud-Config vorhanden"""
@@ -568,6 +571,12 @@ def initialize_tasks_from_config():
             tasks_enabled = success
             if success:
                 logger.info(f"✅ Tasks manager initialized: tasks_enabled={tasks_enabled}")
+                if TASKS_AUTO_SYNC_ENABLED:
+                    auto_sync_started = task_manager.start_auto_sync(
+                        list_name=TASKS_AUTO_SYNC_LIST_NAME,
+                        interval_seconds=TASKS_AUTO_SYNC_INTERVAL_SECONDS
+                    )
+                    logger.info(f"🔁 Task auto-sync {'enabled' if auto_sync_started else 'not started'}")
             else:
                 logger.warning(f"❌ Failed to initialize tasks manager: tasks_enabled={tasks_enabled}")
         else:
@@ -2079,10 +2088,12 @@ def complete_task(task_uid):
 def tasks_status():
     """Gibt Status der Task-Integration zurück"""
     try:
+        auto_sync_status = task_manager.get_auto_sync_status()
         return jsonify({
             'enabled': tasks_enabled,
             'connected': tasks_enabled and task_manager.tasks_client is not None,
-            'message': 'Tasks sind aktiviert und verbunden' if tasks_enabled else 'Tasks nicht verfügbar'
+            'message': 'Tasks sind aktiviert und verbunden' if tasks_enabled else 'Tasks nicht verfügbar',
+            'auto_sync': auto_sync_status
         })
     except Exception as e:
         logger.error(f"Task status error: {e}")
