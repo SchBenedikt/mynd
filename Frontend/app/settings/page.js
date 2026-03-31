@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTheme } from '../../hooks/useTheme';
+import { useLanguage } from '../../hooks/useLanguage';
 import { ThemeSelector } from '../../components/ThemeSelector';
 
 const API_BASE = '';
@@ -10,6 +11,7 @@ const API_BASE = '';
 export default function SettingsPage() {
   const router = useRouter();
   const { theme, darkMode, contrastColor, setTheme, setDarkMode, setContrastColor } = useTheme();
+  const { language, setLanguage, t, languages } = useLanguage();
   const [activeTab, setActiveTab] = useState('config');
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
@@ -52,6 +54,8 @@ export default function SettingsPage() {
   const [nextcloudConfigured, setNextcloudConfigured] = useState(false);
   const [nextcloudDisplayName, setNextcloudDisplayName] = useState('');
   const [nextcloudLoggingIn, setNextcloudLoggingIn] = useState(false);
+
+  const tr = (deText, enText) => (language === 'de' ? deText : enText);
 
   useEffect(() => {
     loadAIConfig();
@@ -140,12 +144,12 @@ export default function SettingsPage() {
 
   const handleNextcloudLogin = async () => {
     if (!nextcloudUrl.trim()) {
-      setNextcloudStatus('Please enter your Nextcloud URL');
+      setNextcloudStatus(tr('Bitte gib deine Nextcloud-URL ein', 'Please enter your Nextcloud URL'));
       return;
     }
     try {
       setNextcloudLoggingIn(true);
-      setNextcloudStatus('Opening Nextcloud login...');
+      setNextcloudStatus(tr('Nextcloud-Login wird geoeffnet...', 'Opening Nextcloud login...'));
 
       const startRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/start`, {
         method: 'POST',
@@ -156,12 +160,12 @@ export default function SettingsPage() {
       const startData = await startRes.json();
       if (!startRes.ok) {
         setNextcloudLoggingIn(false);
-        setNextcloudStatus('Error: ' + (startData.error || 'Could not start Nextcloud login flow'));
+        setNextcloudStatus('Error: ' + (startData.error || tr('Nextcloud-Login-Flow konnte nicht gestartet werden', 'Could not start Nextcloud login flow')));
         return;
       }
 
       window.open(startData.login_url, '_blank', 'noopener,noreferrer');
-      setNextcloudStatus('Please confirm login in the opened Nextcloud tab...');
+      setNextcloudStatus(tr('Bitte bestaetige den Login im geoeffneten Nextcloud-Tab...', 'Please confirm login in the opened Nextcloud tab...'));
 
       let attempts = 0;
       const maxAttempts = 120;
@@ -191,7 +195,7 @@ export default function SettingsPage() {
           if (attempts >= maxAttempts) {
             clearInterval(pollInterval);
             setNextcloudLoggingIn(false);
-            setNextcloudStatus('Login timeout. Please try again.');
+            setNextcloudStatus(tr('Login-Timeout. Bitte versuche es erneut.', 'Login timeout. Please try again.'));
           }
         } catch (pollErr) {
           clearInterval(pollInterval);
@@ -208,7 +212,7 @@ export default function SettingsPage() {
 
   const handleNextcloudDisconnect = async () => {
     try {
-      setNextcloudStatus('Disconnecting...');
+      setNextcloudStatus(tr('Verbindung wird getrennt...', 'Disconnecting...'));
       const res = await fetch(`${API_BASE}/api/nextcloud/disconnect`, {
         method: 'POST'
       });
@@ -223,7 +227,7 @@ export default function SettingsPage() {
       setNextcloudDisplayName('');
       setNextcloudUrl('');
       setNextcloudLoggingIn(false);
-      setNextcloudStatus('Nextcloud connection removed');
+      setNextcloudStatus(tr('Nextcloud-Verbindung entfernt', 'Nextcloud connection removed'));
     } catch (err) {
       setNextcloudStatus('Error: ' + err.message);
     }
@@ -238,9 +242,9 @@ export default function SettingsPage() {
       setAiHost(url.hostname);
       setAiPort(url.port || '11434');
       setAiModel(config.model);
-      setAiStatus('Loaded');
+      setAiStatus(tr('Geladen', 'Loaded'));
     } catch (err) {
-      setAiStatus('Error loading config');
+      setAiStatus(tr('Fehler beim Laden der Konfiguration', 'Error loading config'));
     }
   };
 
@@ -261,12 +265,12 @@ export default function SettingsPage() {
       if (res.ok && data?.success && data?.config) {
         setImmichUrlDefault(data.config.immich_url_default || '');
         setImmichApiKeyDefault(data.config.immich_api_key_default || '');
-        setImmichStatus('Loaded');
+        setImmichStatus(tr('Geladen', 'Loaded'));
       } else {
-        setImmichStatus('Error loading Immich config');
+        setImmichStatus(tr('Fehler beim Laden der Immich-Konfiguration', 'Error loading Immich config'));
       }
     } catch (err) {
-      setImmichStatus('Error loading Immich config');
+      setImmichStatus(tr('Fehler beim Laden der Immich-Konfiguration', 'Error loading Immich config'));
     }
   };
 
@@ -283,9 +287,9 @@ export default function SettingsPage() {
 
       const data = await res.json();
       if (res.ok && data?.success) {
-        setImmichStatus('Saved successfully');
+        setImmichStatus(tr('Erfolgreich gespeichert', 'Saved successfully'));
       } else {
-        setImmichStatus(`Error: ${data?.error || 'Could not save Immich config'}`);
+        setImmichStatus(`Error: ${data?.error || tr('Immich-Konfiguration konnte nicht gespeichert werden', 'Could not save Immich config')}`);
       }
     } catch (err) {
       setImmichStatus('Error: ' + err.message);
@@ -294,7 +298,7 @@ export default function SettingsPage() {
 
   const testImmichConnection = async () => {
     try {
-      setImmichStatus('Testing connection...');
+      setImmichStatus(tr('Verbindung wird getestet...', 'Testing connection...'));
       const res = await fetch(`${API_BASE}/api/immich/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -303,12 +307,12 @@ export default function SettingsPage() {
 
       const data = await res.json();
       if (res.ok && data?.success) {
-        setImmichStatus('Connection successful');
+        setImmichStatus(tr('Verbindung erfolgreich', 'Connection successful'));
       } else {
-        setImmichStatus(`Connection failed: ${data?.error || data?.message || 'Unknown error'}`);
+        setImmichStatus(`Connection failed: ${data?.error || data?.message || tr('Unbekannter Fehler', 'Unknown error')}`);
       }
     } catch (err) {
-      setImmichStatus('Connection failed: ' + err.message);
+      setImmichStatus(tr('Verbindung fehlgeschlagen: ', 'Connection failed: ') + err.message);
     }
   };
 
@@ -321,10 +325,10 @@ export default function SettingsPage() {
         body: JSON.stringify({ base_url: baseUrl, model: aiModel })
       });
       if (res.ok) {
-        setAiStatus('Saved successfully');
+        setAiStatus(tr('Erfolgreich gespeichert', 'Saved successfully'));
         updateStatus();
       } else {
-        setAiStatus('Error saving');
+        setAiStatus(tr('Fehler beim Speichern', 'Error saving'));
       }
     } catch (err) {
       setAiStatus('Error: ' + err.message);
@@ -464,18 +468,18 @@ export default function SettingsPage() {
           </div>
         </div>
         <button className="new-chat-btn" onClick={startNewChat}>
-          <i className="fas fa-plus"></i> New Chat
+          <i className="fas fa-plus"></i> {t('newChat')}
         </button>
         <button 
           className="new-chat-btn settings-btn active"
           onClick={goToSettings}
         >
-          <i className="fas fa-cog"></i> Settings
+          <i className="fas fa-cog"></i> {t('settings')}
         </button>
         <div className="chat-history">
           <div className="history-item">
             <i className="fas fa-message"></i>
-            <span>Current Chat</span>
+            <span>{t('currentChat')}</span>
           </div>
         </div>
         <div className="sidebar-footer">
@@ -496,48 +500,48 @@ export default function SettingsPage() {
       <div className="center-area">
         <div className="settings-full">
           <div className="settings-tabs">
-            <button className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>Config</button>
-            <button className={`tab-btn ${activeTab === 'indexing' ? 'active' : ''}`} onClick={() => setActiveTab('indexing')}>Indexing</button>
-            <button className={`tab-btn ${activeTab === 'sources' ? 'active' : ''}`} onClick={() => setActiveTab('sources')}>Sources</button>
-            <button className={`tab-btn ${activeTab === 'design' ? 'active' : ''}`} onClick={() => setActiveTab('design')}>Design</button>
+            <button className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>{t('tabConfig')}</button>
+            <button className={`tab-btn ${activeTab === 'indexing' ? 'active' : ''}`} onClick={() => setActiveTab('indexing')}>{t('tabIndexing')}</button>
+            <button className={`tab-btn ${activeTab === 'sources' ? 'active' : ''}`} onClick={() => setActiveTab('sources')}>{t('tabSources')}</button>
+            <button className={`tab-btn ${activeTab === 'design' ? 'active' : ''}`} onClick={() => setActiveTab('design')}>{t('tabDesign')}</button>
           </div>
           <div className="settings-content">
             {activeTab === 'config' && (
               <div className="settings-panel">
                 <div className="panel-section">
-                  <div className="section-title">AI Model</div>
+                  <div className="section-title">{t('aiModel')}</div>
                   <div className="input-group">
-                    <label>Protocol</label>
+                    <label>{t('protocol')}</label>
                     <select value={aiProtocol} onChange={(e) => setAiProtocol(e.target.value)}>
                       <option>http</option>
                       <option>https</option>
                     </select>
                   </div>
                   <div className="input-group">
-                    <label>Host</label>
+                    <label>{t('host')}</label>
                     <input type="text" value={aiHost} onChange={(e) => setAiHost(e.target.value)} />
                   </div>
                   <div className="input-group">
-                    <label>Port</label>
+                    <label>{t('port')}</label>
                     <input type="text" value={aiPort} onChange={(e) => setAiPort(e.target.value)} />
                   </div>
                   <div className="input-group">
-                    <label>Model</label>
+                    <label>{t('model')}</label>
                     <select value={aiModel} onChange={(e) => setAiModel(e.target.value)}>
-                      <option value="">Select model...</option>
+                      <option value="">{t('selectModel')}</option>
                       {aiModels.map(model => <option key={model} value={model}>{model}</option>)}
                     </select>
                   </div>
                   <div className="button-group">
-                    <button className="btn primary" onClick={saveAIConfig}>Save</button>
+                    <button className="btn primary" onClick={saveAIConfig}>{t('save')}</button>
                   </div>
                   {aiStatus && <div className="status-text">{aiStatus}</div>}
                 </div>
 
                 <div className="panel-section" style={{marginTop: '2rem'}}>
-                  <div className="section-title">Immich Integration</div>
+                  <div className="section-title">{tr('Immich-Integration', 'Immich Integration')}</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
-                    Configure global Immich defaults for photo search.
+                    {tr('Globale Immich-Standards fuer die Fotosuche konfigurieren.', 'Configure global Immich defaults for photo search.')}
                   </p>
                   <div className="input-group">
                     <label>Immich URL</label>
@@ -558,8 +562,8 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div className="button-group">
-                    <button className="btn primary" onClick={saveImmichConfig}>Save Immich</button>
-                    <button className="btn" onClick={testImmichConnection}>Test Connection</button>
+                    <button className="btn primary" onClick={saveImmichConfig}>{tr('Immich speichern', 'Save Immich')}</button>
+                    <button className="btn" onClick={testImmichConnection}>{tr('Verbindung testen', 'Test Connection')}</button>
                   </div>
                   {immichStatus && <div className="status-text">{immichStatus}</div>}
                 </div>
@@ -583,7 +587,7 @@ export default function SettingsPage() {
                   </div>
                   <div className="button-group">
                     <button className="btn primary" onClick={saveCalendarConfig}>Standard speichern</button>
-                    <button className="btn" onClick={loadCalendarOptions}>Kalender neu laden</button>
+                    <button className="btn" onClick={loadCalendarOptions}>{tr('Kalender neu laden', 'Reload calendars')}</button>
                   </div>
                   {calendarConfigStatus && <div className="status-text">{calendarConfigStatus}</div>}
                 </div>
@@ -592,16 +596,16 @@ export default function SettingsPage() {
             {activeTab === 'indexing' && (
               <div className="settings-panel">
                 <div className="panel-section">
-                  <div className="section-title">Nextcloud Login</div>
+                  <div className="section-title">{tr('Nextcloud-Login', 'Nextcloud Login')}</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
-                    Connect to your Nextcloud instance for document indexing
+                    {tr('Verbinde deine Nextcloud-Instanz fuer die Dokumenten-Indexierung', 'Connect to your Nextcloud instance for document indexing')}
                   </p>
 
                   {nextcloudConfigured ? (
                     <div style={{padding: '1rem', background: 'var(--background)', borderRadius: '8px', border: '2px solid var(--success)', marginBottom: '1.5rem'}}>
                       <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
                         <i className="fas fa-check-circle" style={{color: 'var(--success)', marginRight: '0.5rem', fontSize: '1.4rem'}}></i>
-                        <span style={{fontWeight: '600', fontSize: '1.1rem'}}>Connected</span>
+                        <span style={{fontWeight: '600', fontSize: '1.1rem'}}>{tr('Verbunden', 'Connected')}</span>
                       </div>
                       <div style={{marginLeft: '2rem', color: 'var(--muted)'}}>
                         <p style={{margin: '0.25rem 0'}}>
@@ -628,13 +632,13 @@ export default function SettingsPage() {
                           placeholder="https://cloud.example.com"
                         />
                         <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
-                          Enter your Nextcloud URL. You'll be redirected to your Nextcloud instance to log in with your normal credentials.
+                          {tr('Gib deine Nextcloud-URL ein. Du wirst zur Anmeldung auf deine Nextcloud-Seite weitergeleitet.', "Enter your Nextcloud URL. You'll be redirected to your Nextcloud instance to log in with your normal credentials.")}
                         </small>
                       </div>
                       <div className="button-group">
                         <button className="btn primary" onClick={handleNextcloudLogin} disabled={nextcloudLoggingIn || !nextcloudUrl.trim()}>
                           <i className="fas fa-sign-in-alt" style={{marginRight: '0.5rem'}}></i>
-                          {nextcloudLoggingIn ? 'Waiting for confirmation...' : 'Login with Nextcloud'}
+                          {nextcloudLoggingIn ? tr('Warte auf Bestaetigung...', 'Waiting for confirmation...') : tr('Mit Nextcloud anmelden', 'Login with Nextcloud')}
                         </button>
                       </div>
                       {nextcloudStatus && <div className="status-text">{nextcloudStatus}</div>}
@@ -643,17 +647,17 @@ export default function SettingsPage() {
                 </div>
                 
                 <div className="panel-section" style={{marginTop: '2rem'}}>
-                  <div className="section-title">Document Indexing</div>
+                  <div className="section-title">{tr('Dokumenten-Indexierung', 'Document Indexing')}</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
-                    Index your documents for semantic search with detailed progress tracking
+                    {tr('Indexiere deine Dokumente fuer die semantische Suche mit detaillierter Fortschrittsanzeige', 'Index your documents for semantic search with detailed progress tracking')}
                   </p>
                   <div className="button-group">
                     <button className="btn primary" onClick={startIndexing} disabled={indexingStatus === 'running'}>
-                      {indexingStatus === 'running' ? 'Indexing...' : 'Start Indexing'}
+                      {indexingStatus === 'running' ? tr('Indexierung laeuft...', 'Indexing...') : tr('Indexierung starten', 'Start Indexing')}
                     </button>
                     {indexingStatus === 'running' && (
                       <button className="btn secondary" onClick={() => fetch(`${API_BASE}/api/indexing/stop`, {method: 'POST'})}>
-                        Stop
+                        {tr('Stoppen', 'Stop')}
                       </button>
                     )}
                   </div>
@@ -664,7 +668,7 @@ export default function SettingsPage() {
                       <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
                         <h4 style={{margin: 0, fontSize: '1rem', fontWeight: '600'}}>
                           <i className="fas fa-chart-line" style={{marginRight: '0.5rem'}}></i>
-                          Indexing Progress
+                          {tr('Indexierungsfortschritt', 'Indexing Progress')}
                         </h4>
                         <span style={{
                           fontSize: '0.8rem',
@@ -698,8 +702,8 @@ export default function SettingsPage() {
                             }}></div>
                           </div>
                           <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.5rem'}}>
-                            <span>{indexingProgress}% Complete</span>
-                            <span>{indexingDetails.processedFiles} / {indexingDetails.totalFiles} files</span>
+                            <span>{indexingProgress}% {tr('abgeschlossen', 'Complete')}</span>
+                            <span>{indexingDetails.processedFiles} / {indexingDetails.totalFiles} {tr('Dateien', 'files')}</span>
                           </div>
                         </div>
                       )}
@@ -710,25 +714,25 @@ export default function SettingsPage() {
                           <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)'}}>
                             {indexingDetails.processedFiles}
                           </div>
-                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>Files Processed</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Dateien verarbeitet', 'Files Processed')}</div>
                         </div>
                         <div style={{textAlign: 'center', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px'}}>
                           <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)'}}>
                             {indexingDetails.processingSpeed}
                           </div>
-                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>Files/Second</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Dateien/Sekunde', 'Files/Second')}</div>
                         </div>
                         <div style={{textAlign: 'center', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px'}}>
                           <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--accent)'}}>
                             {Math.floor(indexingDetails.elapsedTime / 60)}:{(indexingDetails.elapsedTime % 60).toString().padStart(2, '0')}
                           </div>
-                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>Time Elapsed</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Verstrichene Zeit', 'Time Elapsed')}</div>
                         </div>
                         <div style={{textAlign: 'center', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px'}}>
                           <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--warning)'}}>
                             {indexingDetails.estimatedTimeRemaining > 0 ? `${Math.floor(indexingDetails.estimatedTimeRemaining / 60)}:${(indexingDetails.estimatedTimeRemaining % 60).toString().padStart(2, '0')}` : '--:--'}
                           </div>
-                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>Time Remaining</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Restzeit', 'Time Remaining')}</div>
                         </div>
                       </div>
                       
@@ -737,7 +741,7 @@ export default function SettingsPage() {
                         <div style={{marginBottom: '1rem', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px', fontSize: '0.85rem'}}>
                           <div style={{fontWeight: '600', marginBottom: '0.25rem', color: 'var(--text)'}}>
                             <i className="fas fa-file-alt" style={{marginRight: '0.5rem'}}></i>
-                            Currently Processing:
+                            {tr('Wird gerade verarbeitet:', 'Currently Processing:')}
                           </div>
                           <div style={{color: 'var(--muted)', wordBreak: 'break-all'}}>{indexingDetails.currentFile}</div>
                         </div>
@@ -748,10 +752,10 @@ export default function SettingsPage() {
                         {indexingStats && <div style={{marginBottom: '0.5rem', fontWeight: '500'}}>{indexingStats}</div>}
                         
                         <div style={{display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem'}}>
-                          <span><strong>Documents:</strong> {indexingDetails.documentsProcessed}</span>
-                          <span><strong>Chunks Created:</strong> ~{indexingDetails.chunksCreated}</span>
+                          <span><strong>{tr('Dokumente', 'Documents')}:</strong> {indexingDetails.documentsProcessed}</span>
+                          <span><strong>{tr('Chunks erstellt', 'Chunks Created')}:</strong> ~{indexingDetails.chunksCreated}</span>
                           {indexingDetails.errors.length > 0 && (
-                            <span style={{color: 'var(--error)'}}><strong>Errors:</strong> {indexingDetails.errors.length}</span>
+                            <span style={{color: 'var(--error)'}}><strong>{tr('Fehler', 'Errors')}:</strong> {indexingDetails.errors.length}</span>
                           )}
                         </div>
                         
@@ -776,7 +780,7 @@ export default function SettingsPage() {
                         <div style={{marginTop: '1rem', padding: '0.75rem', background: 'var(--error-bg)', border: '1px solid var(--error)', borderRadius: '6px'}}>
                           <div style={{fontWeight: '600', marginBottom: '0.5rem', color: 'var(--error)'}}>
                             <i className="fas fa-exclamation-triangle" style={{marginRight: '0.5rem'}}></i>
-                            Recent Errors:
+                            {tr('Letzte Fehler:', 'Recent Errors:')}
                           </div>
                           <div style={{fontSize: '0.75rem', color: 'var(--error)', maxHeight: '100px', overflowY: 'auto'}}>
                             {indexingDetails.errors.slice(-3).map((error, index) => (
@@ -793,17 +797,25 @@ export default function SettingsPage() {
             {activeTab === 'sources' && (
               <div className="settings-panel">
                 <div className="panel-section">
-                  <div className="section-title">Message Sources</div>
+                  <div className="section-title">{tr('Nachrichtenquellen', 'Message Sources')}</div>
                   <div className="input-group">
                     <label><input type="radio" name="source" value="auto" checked={source === 'auto'} onChange={(e) => setSource(e.target.value)} /> Auto</label>
-                    <label><input type="radio" name="source" value="files" checked={source === 'files'} onChange={(e) => setSource(e.target.value)} /> Files</label>
-                    <label><input type="radio" name="source" value="photos" checked={source === 'photos'} onChange={(e) => setSource(e.target.value)} /> Photos</label>
+                    <label><input type="radio" name="source" value="files" checked={source === 'files'} onChange={(e) => setSource(e.target.value)} /> {tr('Dateien', 'Files')}</label>
+                    <label><input type="radio" name="source" value="photos" checked={source === 'photos'} onChange={(e) => setSource(e.target.value)} /> {tr('Fotos', 'Photos')}</label>
                   </div>
                 </div>
               </div>
             )}
             {activeTab === 'design' && (
               <div className="settings-panel">
+                <div className="input-group" style={{ marginBottom: '1rem' }}>
+                  <label>{t('language')}</label>
+                  <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+                    {languages.map((entry) => (
+                      <option key={entry.code} value={entry.code}>{entry.label}</option>
+                    ))}
+                  </select>
+                </div>
                 <ThemeSelector
                   currentTheme={theme}
                   onThemeChange={setTheme}
@@ -812,6 +824,25 @@ export default function SettingsPage() {
                   contrastColor={contrastColor}
                   onContrastColorChange={setContrastColor}
                   showContrastColor={true}
+                  labels={{
+                    theme: t('theme'),
+                    darkMode: t('darkMode'),
+                    reset: 'Reset',
+                    contrastColor: 'Kontrastfarbe (optional)',
+                    themes: {
+                      classic: 'Classic',
+                      ocean: 'Ocean',
+                      graphite: 'Graphite',
+                      lavender: 'Lavender',
+                      rose: 'Rose',
+                      gold: 'Gold'
+                    },
+                    modes: {
+                      light: t('modeLight'),
+                      dark: t('modeDark'),
+                      auto: t('modeAuto')
+                    }
+                  }}
                 />
               </div>
             )}
