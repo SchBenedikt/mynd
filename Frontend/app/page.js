@@ -89,6 +89,7 @@ export default function HomePage() {
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
   const [displayName, setDisplayName] = useState('');
+  const [, setGreetingTick] = useState(0);
   
   const [aiProtocol, setAiProtocol] = useState('http');
   const [aiHost, setAiHost] = useState('127.0.0.1');
@@ -178,9 +179,14 @@ export default function HomePage() {
     };
 
     const list = (greetings[language] || greetings.en)[segment] || greetings.en.morning;
-    const seed = new Date().getDate();
+    const seed = Math.floor(Date.now() / (1000 * 60 * 15));
     const base = list[seed % list.length];
-    return `${base}${suffix}`;
+    const full = `${base}${suffix}`;
+    const needsQuestion = /\b(was|wie|noch wach|what|how|still up)\b/i.test(base);
+    if (needsQuestion && !/[?!]$/.test(full)) {
+      return `${full}?`;
+    }
+    return full;
   };
 
   const getTimeSegment = () => {
@@ -313,6 +319,13 @@ export default function HomePage() {
     const initialChat = createEmptyChat();
     setChats([initialChat]);
     setActiveChatId(initialChat.id);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setGreetingTick(Date.now());
+    }, 15 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
