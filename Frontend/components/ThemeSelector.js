@@ -1,30 +1,51 @@
 'use client';
 
-export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, onDarkModeChange, contrastColor, onContrastColorChange, showContrastColor = false }) {
+export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, onDarkModeChange, contrastColor, onContrastColorChange, showContrastColor = false, labels = {} }) {
+  const l = {
+    theme: labels.theme || 'Theme',
+    darkMode: labels.darkMode || 'Dark Mode',
+    contrastColor: labels.contrastColor || 'Contrast Color (optional)',
+    reset: labels.reset || 'Reset',
+    themes: labels.themes || {
+      classic: 'Classic',
+      ocean: 'Ocean',
+      graphite: 'Graphite',
+      lavender: 'Lavender',
+      rose: 'Rose',
+      gold: 'Gold'
+    },
+    modes: labels.modes || {
+      light: 'Light',
+      dark: 'Dark',
+      auto: 'Auto'
+    }
+  };
+
   const themes = [
-    { id: 'classic', name: 'Classic' },
-    { id: 'ocean', name: 'Ocean' },
-    { id: 'graphite', name: 'Graphite' },
-    { id: 'lavender', name: 'Lavender' },
-    { id: 'rose', name: 'Rose' },
-    { id: 'gold', name: 'Gold' }
+    { id: 'classic', name: l.themes.classic },
+    { id: 'ocean', name: l.themes.ocean },
+    { id: 'graphite', name: l.themes.graphite },
+    { id: 'lavender', name: l.themes.lavender },
+    { id: 'rose', name: l.themes.rose },
+    { id: 'gold', name: l.themes.gold }
   ];
 
   const darkModes = [
-    { id: 'light', name: 'Light', icon: '☀️' },
-    { id: 'dark', name: 'Dark', icon: '🌙' },
-    { id: 'auto', name: 'Auto', icon: '🔄' }
+    { id: 'light', name: l.modes.light, icon: '☀️' },
+    { id: 'dark', name: l.modes.dark, icon: '🌙' },
+    { id: 'auto', name: l.modes.auto, icon: '🔄' }
   ];
 
   return (
     <>
       {/* Theme Selector */}
       <div className="input-group">
-        <label>Theme</label>
+        <label>{l.theme}</label>
         <div className="theme-selector">
           {themes.map((theme) => (
             <button
               key={theme.id}
+              type="button"
               className={`theme-btn ${theme.id} ${currentTheme === theme.id ? 'active' : ''}`}
               onClick={() => onThemeChange(theme.id)}
               title={theme.name}
@@ -35,11 +56,12 @@ export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, on
 
       {/* Dark Mode Selector */}
       <div className="input-group">
-        <label>Dark Mode</label>
+        <label>{l.darkMode}</label>
         <div className="dark-mode-selector">
           {darkModes.map((mode) => (
             <button
               key={mode.id}
+              type="button"
               className={`mode-btn ${currentDarkMode === mode.id ? 'active' : ''}`}
               onClick={() => onDarkModeChange(mode.id)}
             >
@@ -53,7 +75,7 @@ export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, on
       {/* Contrast Color Picker (optional) */}
       {showContrastColor && (
         <div className="input-group">
-          <label>Contrast Color (optional)</label>
+          <label>{l.contrastColor}</label>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <input
               type="color"
@@ -77,10 +99,11 @@ export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, on
             {contrastColor && (
               <button
                 className="btn"
+                type="button"
                 onClick={() => onContrastColorChange('')}
                 style={{ padding: '0.5rem 0.75rem' }}
               >
-                Reset
+                {l.reset}
               </button>
             )}
           </div>
