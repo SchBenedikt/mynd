@@ -4156,6 +4156,266 @@ def generate_ai_suggestions(username, language, time_period, day_of_week, user_p
                 'Show me relaxing photos',
                 'Create a to-do list for tomorrow'
             ]
+        },
+        'fr': {
+            'morning': [
+                'Qu\'est-ce qui est prévu sur mon calendrier aujourd\'hui?',
+                'Montre-moi mes tâches pour aujourd\'hui',
+                'Quoi de neuf dans mes fichiers?',
+                'Donne-moi un résumé de mes e-mails'
+            ],
+            'afternoon': [
+                'Combien ai-je accompli aujourd\'hui?',
+                'Montre-moi les documents importants',
+                'Quels sont mes prochains rendez-vous?',
+                'Recherche des notes de la dernière réunion'
+            ],
+            'evening': [
+                'Que dois-je faire demain?',
+                'Montre-moi les photos d\'aujourd\'hui',
+                'Résumé de ma journée',
+                'Quelles tâches sont encore ouvertes?'
+            ],
+            'night': [
+                'Planifie ma journée de demain',
+                'Qu\'est-ce qui est prévu demain?',
+                'Montre-moi des photos relaxantes',
+                'Crée une liste de tâches pour demain'
+            ]
+        },
+        'es': {
+            'morning': [
+                '¿Qué hay en mi calendario hoy?',
+                'Muéstrame mis tareas para hoy',
+                '¿Qué hay de nuevo en mis archivos?',
+                'Dame un resumen de mis correos'
+            ],
+            'afternoon': [
+                '¿Cuánto he logrado hoy?',
+                'Muéstrame documentos importantes',
+                '¿Cuáles son mis próximas citas?',
+                'Busca notas de la última reunión'
+            ],
+            'evening': [
+                '¿Qué necesito hacer mañana?',
+                'Muéstrame fotos de hoy',
+                'Resumen de mi día',
+                '¿Qué tareas están aún pendientes?'
+            ],
+            'night': [
+                'Planifica mi día de mañana',
+                '¿Qué está programado para mañana?',
+                'Muéstrame fotos relajantes',
+                'Crea una lista de tareas para mañana'
+            ]
+        },
+        'it': {
+            'morning': [
+                'Cosa c\'è nel mio calendario oggi?',
+                'Mostrami le mie attività per oggi',
+                'Cosa c\'è di nuovo nei miei file?',
+                'Dammi un riepilogo delle mie email'
+            ],
+            'afternoon': [
+                'Quanto ho realizzato oggi?',
+                'Mostrami documenti importanti',
+                'Quali sono i miei prossimi appuntamenti?',
+                'Cerca note dell\'ultima riunione'
+            ],
+            'evening': [
+                'Cosa devo fare domani?',
+                'Mostrami le foto di oggi',
+                'Riepilogo della mia giornata',
+                'Quali attività sono ancora aperte?'
+            ],
+            'night': [
+                'Pianifica il mio domani',
+                'Cosa è programmato per domani?',
+                'Mostrami foto rilassanti',
+                'Crea una lista di cose da fare per domani'
+            ]
+        },
+        'pt': {
+            'morning': [
+                'O que está no meu calendário hoje?',
+                'Mostre-me minhas tarefas para hoje',
+                'O que há de novo nos meus arquivos?',
+                'Me dê um resumo dos meus e-mails'
+            ],
+            'afternoon': [
+                'Quanto realizei hoje?',
+                'Mostre-me documentos importantes',
+                'Quais são meus próximos compromissos?',
+                'Procure notas da última reunião'
+            ],
+            'evening': [
+                'O que preciso fazer amanhã?',
+                'Mostre-me fotos de hoje',
+                'Resumo do meu dia',
+                'Quais tarefas ainda estão pendentes?'
+            ],
+            'night': [
+                'Planeje meu dia de amanhã',
+                'O que está agendado para amanhã?',
+                'Mostre-me fotos relaxantes',
+                'Crie uma lista de tarefas para amanhã'
+            ]
+        },
+        'nl': {
+            'morning': [
+                'Wat staat er vandaag op mijn agenda?',
+                'Laat me mijn taken voor vandaag zien',
+                'Wat is er nieuw in mijn bestanden?',
+                'Geef me een samenvatting van mijn e-mails'
+            ],
+            'afternoon': [
+                'Hoeveel heb ik vandaag bereikt?',
+                'Laat me belangrijke documenten zien',
+                'Wat zijn mijn volgende afspraken?',
+                'Zoek naar notities van de laatste vergadering'
+            ],
+            'evening': [
+                'Wat moet ik morgen doen?',
+                'Laat me foto\'s van vandaag zien',
+                'Samenvatting van mijn dag',
+                'Welke taken staan nog open?'
+            ],
+            'night': [
+                'Plan mijn dag van morgen',
+                'Wat staat er morgen gepland?',
+                'Laat me ontspannende foto\'s zien',
+                'Maak een takenlijst voor morgen'
+            ]
+        },
+        'pl': {
+            'morning': [
+                'Co jest w moim kalendarzu dzisiaj?',
+                'Pokaż mi moje zadania na dziś',
+                'Co nowego w moich plikach?',
+                'Daj mi podsumowanie moich e-maili'
+            ],
+            'afternoon': [
+                'Ile osiągnąłem dzisiaj?',
+                'Pokaż mi ważne dokumenty',
+                'Jakie są moje następne spotkania?',
+                'Szukaj notatek z ostatniego spotkania'
+            ],
+            'evening': [
+                'Co muszę zrobić jutro?',
+                'Pokaż mi zdjęcia z dzisiaj',
+                'Podsumowanie mojego dnia',
+                'Które zadania są jeszcze otwarte?'
+            ],
+            'night': [
+                'Zaplanuj mój jutrzejszy dzień',
+                'Co jest zaplanowane na jutro?',
+                'Pokaż mi relaksujące zdjęcia',
+                'Stwórz listę zadań na jutro'
+            ]
+        },
+        'tr': {
+            'morning': [
+                'Bugün takvimimde ne var?',
+                'Bugün için görevlerimi göster',
+                'Dosyalarımda ne yeni var?',
+                'E-postalarımın özetini ver'
+            ],
+            'afternoon': [
+                'Bugün ne kadar başardım?',
+                'Önemli belgeleri göster',
+                'Bir sonraki randevularım neler?',
+                'Son toplantıdan notları ara'
+            ],
+            'evening': [
+                'Yarın ne yapmam gerekiyor?',
+                'Bugünkü fotoğrafları göster',
+                'Günümün özeti',
+                'Hangi görevler hala açık?'
+            ],
+            'night': [
+                'Yarınımı planla',
+                'Yarın için ne planlandı?',
+                'Rahatlatıcı fotoğraflar göster',
+                'Yarın için yapılacaklar listesi oluştur'
+            ]
+        },
+        'ru': {
+            'morning': [
+                'Что у меня в календаре на сегодня?',
+                'Покажи мои задачи на сегодня',
+                'Что нового в моих файлах?',
+                'Дай мне резюме моих электронных писем'
+            ],
+            'afternoon': [
+                'Сколько я сделал сегодня?',
+                'Покажи важные документы',
+                'Какие мои следующие встречи?',
+                'Найди заметки с последней встречи'
+            ],
+            'evening': [
+                'Что мне нужно сделать завтра?',
+                'Покажи фотографии сегодняшнего дня',
+                'Резюме моего дня',
+                'Какие задачи еще открыты?'
+            ],
+            'night': [
+                'Спланируй мой завтрашний день',
+                'Что запланировано на завтра?',
+                'Покажи расслабляющие фотографии',
+                'Создай список дел на завтра'
+            ]
+        },
+        'ja': {
+            'morning': [
+                '今日のカレンダーには何がありますか？',
+                '今日のタスクを表示',
+                'ファイルに何か新しいものは？',
+                'メールの要約を教えて'
+            ],
+            'afternoon': [
+                '今日どれだけ達成しましたか？',
+                '重要な文書を表示',
+                '次の予定は何ですか？',
+                '最後の会議のメモを検索'
+            ],
+            'evening': [
+                '明日は何をする必要がありますか？',
+                '今日の写真を表示',
+                '今日の要約',
+                'どのタスクがまだ開いていますか？'
+            ],
+            'night': [
+                '明日を計画する',
+                '明日は何が予定されていますか？',
+                'リラックスできる写真を表示',
+                '明日のToDoリストを作成'
+            ]
+        },
+        'zh': {
+            'morning': [
+                '我今天的日历上有什么？',
+                '显示我今天的任务',
+                '我的文件中有什么新内容？',
+                '给我一个电子邮件摘要'
+            ],
+            'afternoon': [
+                '我今天完成了多少？',
+                '显示重要文档',
+                '我的下一个约会是什么？',
+                '搜索上次会议的笔记'
+            ],
+            'evening': [
+                '我明天需要做什么？',
+                '显示今天的照片',
+                '我的一天总结',
+                '哪些任务还未完成？'
+            ],
+            'night': [
+                '计划我的明天',
+                '明天有什么安排？',
+                '显示放松的照片',
+                '为明天创建待办事项列表'
+            ]
         }
     }
 
@@ -4168,11 +4428,25 @@ def generate_ai_suggestions(username, language, time_period, day_of_week, user_p
 
     # Add personalized suggestions based on frequent topics
     if user_patterns.get('frequent_topics'):
+        # Language-specific personalization templates
+        personalization_templates = {
+            'de': 'Mehr zu {topic}',
+            'en': 'More about {topic}',
+            'fr': 'En savoir plus sur {topic}',
+            'es': 'Más sobre {topic}',
+            'it': 'Maggiori informazioni su {topic}',
+            'pt': 'Mais sobre {topic}',
+            'nl': 'Meer over {topic}',
+            'pl': 'Więcej o {topic}',
+            'tr': '{topic} hakkında daha fazla',
+            'ru': 'Больше о {topic}',
+            'ja': '{topic}についてもっと',
+            'zh': '更多关于{topic}'
+        }
+
+        template = personalization_templates.get(lang, personalization_templates['en'])
         for topic, count in user_patterns['frequent_topics'][:2]:
-            if lang == 'de':
-                personalized_suggestions.append(f'Mehr zu {topic}')
-            else:
-                personalized_suggestions.append(f'More about {topic}')
+            personalized_suggestions.append(template.format(topic=topic))
 
     # Combine: 3 template-based + up to 2 personalized
     final_suggestions = base_suggestions[:3] + personalized_suggestions[:2]
