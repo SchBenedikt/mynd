@@ -58,7 +58,9 @@ const TRANSLATIONS = {
     host: 'Host',
     port: 'Port',
     model: 'Modell',
-    selectModel: 'Modell auswählen...'
+    selectModel: 'Modell auswählen...',
+    suggestions: 'Vorschläge',
+    personalizedSuggestions: 'Personalisierte Vorschläge basierend auf deinem Nutzungsverhalten'
   },
   en: {
     newChat: 'New Chat',
@@ -98,7 +100,9 @@ const TRANSLATIONS = {
     host: 'Host',
     port: 'Port',
     model: 'Model',
-    selectModel: 'Select model...'
+    selectModel: 'Select model...',
+    suggestions: 'Suggestions',
+    personalizedSuggestions: 'Personalized suggestions based on your usage patterns'
   }
 };
 

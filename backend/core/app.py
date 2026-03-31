@@ -3982,6 +3982,228 @@ Antworte auf {language}."""
             'error': str(e)
         }), 500
 
+@app.route('/api/suggestions/query', methods=['POST'])
+def get_query_suggestions():
+    """
+    Generate personalized query suggestions based on time of day,
+    user behavior, and conversation history.
+    """
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        language = data.get('language', 'de')
+
+        # Get current time context
+        now = datetime.now()
+        hour = now.hour
+        day_of_week = now.strftime('%A')
+
+        # Determine time period
+        if 5 <= hour < 12:
+            time_period = 'morning'
+        elif 12 <= hour < 17:
+            time_period = 'afternoon'
+        elif 17 <= hour < 22:
+            time_period = 'evening'
+        else:
+            time_period = 'night'
+
+        # Load user's chat history from request (sent from frontend)
+        chat_history = data.get('chatHistory', [])
+
+        # Analyze user behavior patterns
+        user_patterns = analyze_user_patterns(chat_history, hour, day_of_week)
+
+        # Generate suggestions using AI
+        suggestions = generate_ai_suggestions(
+            username=username,
+            language=language,
+            time_period=time_period,
+            day_of_week=day_of_week,
+            user_patterns=user_patterns
+        )
+
+        return jsonify({
+            'success': True,
+            'suggestions': suggestions,
+            'time_period': time_period,
+            'personalized': len(user_patterns) > 0
+        })
+
+    except Exception as e:
+        logger.error(f"Error generating query suggestions: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'suggestions': []  # Return empty suggestions on error
+        }), 500
+
+def analyze_user_patterns(chat_history, current_hour, current_day):
+    """
+    Analyze user's chat history to identify patterns:
+    - Frequent topics
+    - Time-based query patterns
+    - Common question types
+    """
+    patterns = {}
+
+    if not chat_history or len(chat_history) == 0:
+        return patterns
+
+    # Analyze message topics and timing
+    topic_frequency = {}
+    hourly_topics = {}
+    daily_topics = {}
+
+    for chat in chat_history:
+        messages = chat.get('messages', [])
+        created_at = chat.get('createdAt', 0)
+
+        # Parse timestamp
+        if created_at:
+            try:
+                chat_time = datetime.fromtimestamp(created_at / 1000)
+                chat_hour = chat_time.hour
+                chat_day = chat_time.strftime('%A')
+
+                # Track hourly patterns
+                if chat_hour not in hourly_topics:
+                    hourly_topics[chat_hour] = []
+
+                # Track daily patterns
+                if chat_day not in daily_topics:
+                    daily_topics[chat_day] = []
+
+                # Extract topics from user messages
+                for msg in messages:
+                    if msg.get('role') == 'user':
+                        content = msg.get('content', '').lower()
+                        # Track topics
+                        hourly_topics[chat_hour].append(content)
+                        daily_topics[chat_day].append(content)
+
+                        # Count topic frequency (simple keyword extraction)
+                        words = content.split()
+                        for word in words:
+                            if len(word) > 4:  # Only consider words longer than 4 chars
+                                topic_frequency[word] = topic_frequency.get(word, 0) + 1
+            except:
+                pass
+
+    # Identify patterns for current context
+    patterns['frequent_topics'] = sorted(topic_frequency.items(), key=lambda x: x[1], reverse=True)[:5]
+    patterns['same_hour_queries'] = hourly_topics.get(current_hour, [])[:3]
+    patterns['same_day_queries'] = daily_topics.get(current_day, [])[:3]
+
+    return patterns
+
+def generate_ai_suggestions(username, language, time_period, day_of_week, user_patterns):
+    """
+    Generate contextual query suggestions using the AI model.
+    Falls back to template-based suggestions if AI is unavailable.
+    """
+
+    # Template-based suggestions by time period and language
+    template_suggestions = {
+        'de': {
+            'morning': [
+                'Was steht heute auf meinem Kalender?',
+                'Zeige mir meine Aufgaben für heute',
+                'Was ist neu in meinen Dateien?',
+                'Gib mir eine Zusammenfassung meiner E-Mails'
+            ],
+            'afternoon': [
+                'Wie viel habe ich heute geschafft?',
+                'Zeige mir wichtige Dokumente',
+                'Was sind meine nächsten Termine?',
+                'Suche nach Notizen vom letzten Meeting'
+            ],
+            'evening': [
+                'Was muss ich morgen erledigen?',
+                'Zeige mir Fotos von heute',
+                'Zusammenfassung meines Tages',
+                'Welche Aufgaben sind noch offen?'
+            ],
+            'night': [
+                'Plane meinen morgigen Tag',
+                'Was steht morgen an?',
+                'Zeige mir entspannende Fotos',
+                'Erstelle eine To-Do-Liste für morgen'
+            ]
+        },
+        'en': {
+            'morning': [
+                'What\'s on my calendar today?',
+                'Show me my tasks for today',
+                'What\'s new in my files?',
+                'Give me a summary of my emails'
+            ],
+            'afternoon': [
+                'How much have I accomplished today?',
+                'Show me important documents',
+                'What are my next appointments?',
+                'Search for notes from last meeting'
+            ],
+            'evening': [
+                'What do I need to do tomorrow?',
+                'Show me photos from today',
+                'Summary of my day',
+                'Which tasks are still open?'
+            ],
+            'night': [
+                'Plan my tomorrow',
+                'What\'s scheduled for tomorrow?',
+                'Show me relaxing photos',
+                'Create a to-do list for tomorrow'
+            ]
+        }
+    }
+
+    # Get base suggestions for language and time period
+    lang = language if language in template_suggestions else 'en'
+    base_suggestions = template_suggestions[lang].get(time_period, template_suggestions[lang]['morning'])
+
+    # Personalize based on user patterns
+    personalized_suggestions = []
+
+    # Add personalized suggestions based on frequent topics
+    if user_patterns.get('frequent_topics'):
+        for topic, count in user_patterns['frequent_topics'][:2]:
+            if lang == 'de':
+                personalized_suggestions.append(f'Mehr zu {topic}')
+            else:
+                personalized_suggestions.append(f'More about {topic}')
+
+    # Combine: 3 template-based + up to 2 personalized
+    final_suggestions = base_suggestions[:3] + personalized_suggestions[:2]
+
+    # Try to enhance with AI if available
+    try:
+        if ollama_client and ollama_client.check_connection():
+            # Generate AI-enhanced suggestions
+            prompt = f"""Generate 3 helpful query suggestions for a personal knowledge assistant.
+Context:
+- Time: {time_period} ({day_of_week})
+- Language: {language}
+- User frequently asks about: {', '.join([t[0] for t in user_patterns.get('frequent_topics', [])][:3]) if user_patterns.get('frequent_topics') else 'various topics'}
+
+Requirements:
+- Return ONLY 3 short, actionable questions
+- Each on a new line
+- No numbering, no markdown
+- In {language} language
+- Relevant to time of day and user interests"""
+
+            response = ollama_client.generate(prompt, stream=False)
+            if response and response.get('text'):
+                ai_suggestions = [s.strip() for s in response['text'].strip().split('\n') if s.strip()]
+                if len(ai_suggestions) >= 3:
+                    return ai_suggestions[:5]  # Return up to 5 AI-generated suggestions
+    except Exception as e:
+        logger.warning(f"Could not generate AI suggestions, using templates: {e}")
+
+    return final_suggestions[:5]  # Return max 5 suggestions
+
 # Tasks/Todos Manager initialisieren wenn Konfiguration vorhanden
 # IMPORTANT: Initialize BEFORE if __name__ == '__main__' so it runs on module import too
 try:

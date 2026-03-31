@@ -1486,3 +1486,145 @@ body {
     font-size: 0.85rem;
   }
 }
+
+/* Suggestions Panel - AI-generated query suggestions */
+.suggestions-panel {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--chip-bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  animation: slideInUp 0.4s ease-out;
+}
+
+.suggestions-panel.loading {
+  padding: 1.5rem;
+}
+
+.suggestions-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.suggestions-header i {
+  font-size: 0.9rem;
+  color: var(--brand);
+}
+
+.personalized-badge {
+  margin-left: auto;
+  background: var(--brand);
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: help;
+}
+
+.personalized-badge i {
+  font-size: 0.75rem;
+  color: white;
+}
+
+.suggestions-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.suggestion-chip {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  white-space: nowrap;
+  animation: fadeInScale 0.3s ease-out both;
+}
+
+.suggestion-chip:hover {
+  background: var(--chip-hover);
+  border-color: var(--brand);
+  transform: translateY(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.suggestion-chip:active {
+  transform: translateY(0);
+}
+
+.suggestions-shimmer {
+  height: 60px;
+  background: linear-gradient(
+    90deg,
+    var(--chip-bg) 0%,
+    var(--chip-hover) 50%,
+    var(--chip-bg) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: 8px;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Responsive adjustments for suggestions */
+@media (max-width: 768px) {
+  .suggestions-panel {
+    margin-top: 1rem;
+    padding: 0.75rem;
+  }
+
+  .suggestion-chip {
+    font-size: 0.8rem;
+    padding: 0.4rem 0.8rem;
+  }
+
+  .personalized-badge {
+    font-size: 0.65rem;
+    padding: 0.2rem 0.4rem;
+  }
+}
