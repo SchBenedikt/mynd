@@ -1,9 +1,59 @@
 {
   "model_name": "gemma3:latest",
-  "training_version": "2.0",
-  "last_reset": "2026-03-26T20:01:31.236168",
+  "training_version": "3.0",
+  "last_updated": "2026-03-31T19:04:29.000Z",
   "context_window": 4096,
-  "max_response_tokens": 2048,
+  "max_response_tokens": 3072,
   "metadata_extraction": true,
-  "enhanced_search": true
+  "enhanced_search": true,
+  "query_intent_classification": true,
+  "advanced_reasoning": true,
+  "mirostat_enabled": true,
+  "features": {
+    "intent_classification": {
+      "enabled": true,
+      "types": [
+        "personal",
+        "factual",
+        "temporal",
+        "comparative",
+        "procedural",
+        "exploratory",
+        "specific",
+        "aggregative"
+      ],
+      "confidence_threshold": 0.5
+    },
+    "context_optimization": {
+      "enabled": true,
+      "intent_based_limits": true,
+      "relevance_sorting": true,
+      "metadata_filtering": true
+    },
+    "reasoning_capabilities": {
+      "enabled": true,
+      "multi_step_analysis": true,
+      "context_synthesis": true,
+      "source_prioritization": true
+    },
+    "response_quality": {
+      "temperature": 0.2,
+      "top_p": 0.85,
+      "top_k": 40,
+      "repeat_penalty": 1.15,
+      "mirostat": 2,
+      "mirostat_tau": 5.0,
+      "mirostat_eta": 0.1
+    }
+  },
+  "improvements_v3": [
+    "Intelligent query intent classification system",
+    "Intent-based context optimization and filtering",
+    "Advanced reasoning instructions in system prompt",
+    "Improved AI parameters with Mirostat for consistent quality",
+    "Enhanced metadata extraction with location support",
+    "Dynamic content limits based on query type",
+    "Multi-source information synthesis",
+    "Relevance-based result sorting and re-ranking"
+  ]
 }
