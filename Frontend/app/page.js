@@ -86,6 +86,8 @@ export default function HomePage() {
   const [activeChatId, setActiveChatId] = useState(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [isThinking, setIsThinking] = useState(false);
+  const [pendingQueue, setPendingQueue] = useState([]);
+  const [inputValue, setInputValue] = useState('');
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
   const [displayName, setDisplayName] = useState('');
@@ -279,6 +281,12 @@ export default function HomePage() {
   }, [messages]);
 
   useEffect(() => {
+    if (!isThinking && pendingQueue.length > 0) {
+      processNextQueued();
+    }
+  }, [isThinking, pendingQueue]);
+
+  useEffect(() => {
     loadAIConfig();
     loadOllamaModels();
     updateStatus();
@@ -404,6 +412,17 @@ export default function HomePage() {
         title: shouldUpdateTitle ? buildChatTitleFromText(originalUserText) : chat.title,
         updatedAt: now
       };
+    }));
+  };
+
+  const updateMessageInChat = (chatId, messageId, updater) => {
+    setChats((prevChats) => prevChats.map((chat) => {
+      if (chat.id !== chatId) return chat;
+      const nextMessages = (chat.messages || []).map((msg) => {
+        if (msg.id !== messageId) return msg;
+        return updater(msg);
+      });
+      return { ...chat, messages: nextMessages };
     }));
   };
 
@@ -563,12 +582,41 @@ export default function HomePage() {
     }
   };
 
-  const sendMessage = async (text) => {
-    if (!text.trim() || isThinking) return;
+  const queueMessage = (text, chatId) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const messageId = Date.now();
+    appendMessageToChat(chatId, { role: 'user', content: trimmed, id: messageId, queued: true }, trimmed);
+    setPendingQueue((prev) => [...prev, { chatId, text: trimmed, messageId }]);
+    setInputValue('');
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+  const processNextQueued = () => {
+    if (pendingQueue.length === 0) return;
+    const [next, ...rest] = pendingQueue;
+    setPendingQueue(rest);
+    sendMessage(next.text, { fromQueue: true, chatId: next.chatId, messageId: next.messageId });
+  };
+
+  const sendMessage = async (text, options = {}) => {
+    if (!text.trim()) return;
+    if (isThinking && !options.fromQueue) {
+      const targetId = activeChatId || createEmptyChat().id;
+      if (!activeChatId) {
+        const newChat = createEmptyChat();
+        setChats([newChat]);
+        setActiveChatId(newChat.id);
+        queueMessage(text, newChat.id);
+        return;
+      }
+      queueMessage(text, targetId);
+      return;
+    }
     text = text.trim();
     setIsSidebarCollapsed(false);
 
-    let targetChatId = activeChatId;
+    let targetChatId = options.chatId || activeChatId;
     if (!targetChatId) {
       const newChat = createEmptyChat();
       setChats([newChat]);
@@ -576,8 +624,15 @@ export default function HomePage() {
       targetChatId = newChat.id;
     }
 
-    const userMessage = { role: 'user', content: text, id: Date.now() };
-    appendMessageToChat(targetChatId, userMessage, text);
+    const userMessage = options.messageId
+      ? null
+      : { role: 'user', content: text, id: Date.now() };
+    if (userMessage) {
+      appendMessageToChat(targetChatId, userMessage, text);
+    } else if (options.messageId) {
+      updateMessageInChat(targetChatId, options.messageId, (msg) => ({ ...msg, queued: false }));
+    }
+    setInputValue('');
     if (inputRef.current) inputRef.current.value = '';
 
     const handledByUIControl = handleUiControlCommand(text, targetChatId);
@@ -591,7 +646,8 @@ export default function HomePage() {
 
     try {
       const currentMessages = chats.find((chat) => chat.id === targetChatId)?.messages || [];
-      const conversationContext = [...currentMessages, userMessage]
+      const contextMessages = userMessage ? [...currentMessages, userMessage] : currentMessages;
+      const conversationContext = contextMessages
         .slice(-8)
         .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
         .join('\n');
@@ -976,6 +1032,9 @@ export default function HomePage() {
     router.push('/settings');
   };
 
+  const canSend = inputValue.trim().length > 0;
+  const queueReady = isThinking && canSend;
+
   return (
     <div className={`container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       {/* LEFT SIDEBAR */}
@@ -1110,11 +1169,18 @@ export default function HomePage() {
               <input
                 type="text" 
                 ref={inputRef}
+                value={inputValue}
                 placeholder={t('askPlaceholder')}
+                onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && sendMessage(e.target.value)}
               />
-              <button onClick={() => sendMessage(inputRef.current?.value || '')}>
-                <i className="fas fa-arrow-right"></i>
+              <button
+                onClick={() => sendMessage(inputRef.current?.value || '')}
+                disabled={!canSend}
+                className={queueReady ? 'queue-ready' : ''}
+                title={queueReady ? 'In die Warteschlange' : undefined}
+              >
+                <i className={`fas ${queueReady ? 'fa-arrow-up' : 'fa-arrow-right'}`}></i>
               </button>
             </div>
 
@@ -1126,6 +1192,7 @@ export default function HomePage() {
               onSuggestionClick={(suggestion) => {
                 if (inputRef.current) {
                   inputRef.current.value = suggestion;
+                  setInputValue(suggestion);
                   sendMessage(suggestion);
                 }
               }}
@@ -1222,7 +1289,7 @@ export default function HomePage() {
             <div className="conversation">
               <div className="messages">
                 {messages.map((msg) => (
-                  <div key={msg.id} className={`message ${msg.role}`}>
+                  <div key={msg.id} className={`message ${msg.role} ${msg.queued ? 'queued' : ''}`}>
                     <div className="bubble">
                       {msg.role === 'assistant' ? (
                         <div onClickCapture={handleMarkdownContentClick}>
@@ -1234,6 +1301,9 @@ export default function HomePage() {
                         msg.content
                       )}
                     </div>
+                    {msg.role === 'user' && msg.queued && (
+                      <div className="queued-tag">In der Warteschlange</div>
+                    )}
                     {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
                       <div className="sources-container">
                         <div className="sources-header">
@@ -1348,12 +1418,18 @@ export default function HomePage() {
                 <input 
                   type="text" 
                   ref={inputRef}
+                  value={inputValue}
                   placeholder={t('composerPlaceholder')}
+                  onChange={(e) => setInputValue(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && !e.ctrlKey && sendMessage(e.target.value)}
-                  disabled={isThinking}
                 />
-                <button onClick={() => sendMessage(inputRef.current?.value || '')} disabled={isThinking}>
-                  <i className="fas fa-arrow-right"></i>
+                <button
+                  onClick={() => sendMessage(inputRef.current?.value || '')}
+                  disabled={!canSend}
+                  className={queueReady ? 'queue-ready' : ''}
+                  title={queueReady ? 'In die Warteschlange' : undefined}
+                >
+                  <i className={`fas ${queueReady ? 'fa-arrow-up' : 'fa-arrow-right'}`}></i>
                 </button>
               </div>
             </div>
