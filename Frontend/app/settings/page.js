@@ -59,6 +59,13 @@ export default function SettingsPage() {
   const [nextcloudDisplayName, setNextcloudDisplayName] = useState('');
   const [nextcloudLoggingIn, setNextcloudLoggingIn] = useState(false);
 
+  // API Registry State
+  const [apis, setApis] = useState([]);
+  const [apiHealth, setApiHealth] = useState({});
+  const [selectedApi, setSelectedApi] = useState(null);
+  const [apiConfig, setApiConfig] = useState({});
+  const [apiConfigStatus, setApiConfigStatus] = useState('');
+
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
 
   useEffect(() => {
@@ -68,9 +75,13 @@ export default function SettingsPage() {
     loadNextcloudConfig();
     loadCalendarConfig();
     loadCalendarOptions();
+    loadAllApis();
     updateStatus();
-    
-    const statusInterval = setInterval(updateStatus, 8000);
+
+    const statusInterval = setInterval(() => {
+      updateStatus();
+      loadApiHealth();
+    }, 8000);
     return () => {
       clearInterval(statusInterval);
     };
@@ -505,6 +516,114 @@ export default function SettingsPage() {
     }
   };
 
+  // API Registry Functions
+  const loadAllApis = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/registry/apis`);
+      if (res.ok) {
+        const data = await res.json();
+        setApis(data.apis || []);
+      }
+    } catch (err) {
+      console.error('Error loading APIs:', err);
+    }
+  };
+
+  const loadApiHealth = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/registry/health`);
+      if (res.ok) {
+        const data = await res.json();
+        setApiHealth(data.health || {});
+      }
+    } catch (err) {
+      console.error('Error loading API health:', err);
+    }
+  };
+
+  const loadApiConfig = async (apiName) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/registry/${apiName}/config`);
+      if (res.ok) {
+        const data = await res.json();
+        setApiConfig(data.config || {});
+        setSelectedApi({ ...data, api_name: apiName });
+      }
+    } catch (err) {
+      console.error('Error loading API config:', err);
+    }
+  };
+
+  const saveApiConfig = async (apiName) => {
+    try {
+      setApiConfigStatus(tr('Speichern...', 'Saving...'));
+
+      const res = await fetch(`${API_BASE}/api/registry/${apiName}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: apiConfig })
+      });
+
+      if (res.ok) {
+        setApiConfigStatus(tr('✓ Gespeichert und Verbindung erfolgreich getestet', '✓ Saved and connection tested successfully'));
+        loadAllApis();
+        loadApiHealth();
+      } else {
+        const data = await res.json();
+        setApiConfigStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      setApiConfigStatus(tr('Fehler: ', 'Error: ') + err.message);
+    }
+  };
+
+  const testApiConfig = async (apiName) => {
+    try {
+      setApiConfigStatus(tr('Teste Verbindung...', 'Testing connection...'));
+
+      const res = await fetch(`${API_BASE}/api/registry/${apiName}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: apiConfig })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.health.status === 'healthy') {
+          setApiConfigStatus(tr('✓ Verbindung erfolgreich', '✓ Connection successful'));
+        } else {
+          setApiConfigStatus(tr('Verbindung fehlgeschlagen: ', 'Connection failed: ') + data.health.error);
+        }
+      } else {
+        const data = await res.json();
+        setApiConfigStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Test failed'));
+      }
+    } catch (err) {
+      setApiConfigStatus(tr('Fehler: ', 'Error: ') + err.message);
+    }
+  };
+
+  const deleteApiConfig = async (apiName) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/registry/${apiName}/config`, {
+        method: 'DELETE'
+      });
+
+      if (res.ok) {
+        setApiConfigStatus(tr('✓ Konfiguration gelöscht', '✓ Configuration deleted'));
+        setSelectedApi(null);
+        setApiConfig({});
+        loadAllApis();
+        loadApiHealth();
+      } else {
+        const data = await res.json();
+        setApiConfigStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      setApiConfigStatus(tr('Fehler: ', 'Error: ') + err.message);
+    }
+  };
+
   const startNewChat = () => {
     router.push('/');
   };
@@ -581,6 +700,7 @@ export default function SettingsPage() {
         <div className="settings-full">
           <div className="settings-tabs">
             <button className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>{t('tabConfig')}</button>
+            <button className={`tab-btn ${activeTab === 'apis' ? 'active' : ''}`} onClick={() => setActiveTab('apis')}>{tr('APIs', 'APIs')}</button>
             <button className={`tab-btn ${activeTab === 'indexing' ? 'active' : ''}`} onClick={() => setActiveTab('indexing')}>{t('tabIndexing')}</button>
             <button className={`tab-btn ${activeTab === 'sources' ? 'active' : ''}`} onClick={() => setActiveTab('sources')}>{t('tabSources')}</button>
             <button className={`tab-btn ${activeTab === 'design' ? 'active' : ''}`} onClick={() => setActiveTab('design')}>{t('tabDesign')}</button>
@@ -689,6 +809,143 @@ export default function SettingsPage() {
                     <button className="btn" onClick={loadCalendarOptions}>{tr('Kalender neu laden', 'Reload calendars')}</button>
                   </div>
                   {calendarConfigStatus && <div className="status-text">{calendarConfigStatus}</div>}
+                </div>
+              </div>
+            )}
+            {activeTab === 'apis' && (
+              <div className="settings-panel">
+                <div className="panel-section">
+                  <div className="section-title">{tr('API Integrationen', 'API Integrations')}</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1.5rem 0'}}>
+                    {tr('Konfiguriere externe APIs für erweiterte Funktionen', 'Configure external APIs for extended functionality')}
+                  </p>
+
+                  {/* API List */}
+                  <div style={{display: 'grid', gap: '1rem', marginBottom: '2rem'}}>
+                    {apis.map((api) => {
+                      const health = apiHealth[api.api_name] || {};
+                      const isHealthy = health.status === 'healthy';
+                      const isConfigured = api.configured;
+
+                      return (
+                        <div
+                          key={api.api_name}
+                          style={{
+                            padding: '1rem',
+                            background: 'var(--panel-bg)',
+                            border: '1px solid var(--border)',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          onClick={() => {
+                            loadApiConfig(api.api_name);
+                            setApiConfigStatus('');
+                          }}
+                        >
+                          <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+                              <div style={{
+                                width: '12px',
+                                height: '12px',
+                                borderRadius: '50%',
+                                background: isConfigured ? (isHealthy ? 'var(--success)' : 'var(--error)') : 'var(--muted)'
+                              }}></div>
+                              <div>
+                                <div style={{fontWeight: '600', textTransform: 'capitalize'}}>
+                                  {api.api_name === 'homeassistant' ? 'Home Assistant' :
+                                   api.api_name === 'uptimekuma' ? 'Uptime Kuma' : api.api_name}
+                                </div>
+                                <div style={{fontSize: '0.85rem', color: 'var(--muted)'}}>
+                                  {isConfigured ?
+                                    (isHealthy ? tr('✓ Verbunden', '✓ Connected') : tr('✗ Nicht erreichbar', '✗ Not reachable')) :
+                                    tr('Nicht konfiguriert', 'Not configured')}
+                                </div>
+                              </div>
+                            </div>
+                            {health.response_time && (
+                              <div style={{fontSize: '0.85rem', color: 'var(--muted)'}}>
+                                {Math.round(health.response_time * 1000)}ms
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* API Configuration Form */}
+                  {selectedApi && (
+                    <div style={{marginTop: '2rem', padding: '1.5rem', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px'}}>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
+                        <div className="section-title" style={{textTransform: 'capitalize'}}>
+                          {selectedApi.api_name === 'homeassistant' ? 'Home Assistant' :
+                           selectedApi.api_name === 'uptimekuma' ? 'Uptime Kuma' : selectedApi.api_name}
+                        </div>
+                        <button
+                          className="btn"
+                          onClick={() => {
+                            setSelectedApi(null);
+                            setApiConfig({});
+                            setApiConfigStatus('');
+                          }}
+                          style={{padding: '0.5rem 1rem'}}
+                        >
+                          {tr('Schließen', 'Close')}
+                        </button>
+                      </div>
+
+                      {/* Dynamic config fields based on schema */}
+                      {selectedApi.schema && Object.entries(selectedApi.schema).map(([key, fieldSchema]) => (
+                        <div key={key} className="input-group">
+                          <label>
+                            {fieldSchema.description || key}
+                            {fieldSchema.required && <span style={{color: 'var(--error)'}}>*</span>}
+                          </label>
+                          <input
+                            type={fieldSchema.secret ? 'password' : fieldSchema.type === 'number' ? 'number' : 'text'}
+                            value={apiConfig[key] || ''}
+                            onChange={(e) => setApiConfig(prev => ({...prev, [key]: e.target.value}))}
+                            placeholder={fieldSchema.example || fieldSchema.default || ''}
+                          />
+                          {fieldSchema.description && (
+                            <small style={{fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                              {fieldSchema.type === 'string' && fieldSchema.example ? `${tr('Beispiel', 'Example')}: ${fieldSchema.example}` : ''}
+                            </small>
+                          )}
+                        </div>
+                      ))}
+
+                      <div className="button-group" style={{marginTop: '1.5rem'}}>
+                        <button
+                          className="btn primary"
+                          onClick={() => saveApiConfig(selectedApi.api_name)}
+                        >
+                          {tr('Speichern', 'Save')}
+                        </button>
+                        <button
+                          className="btn"
+                          onClick={() => testApiConfig(selectedApi.api_name)}
+                        >
+                          {tr('Verbindung testen', 'Test Connection')}
+                        </button>
+                        {selectedApi.configured && (
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              if (confirm(tr('Möchtest du diese API-Konfiguration wirklich löschen?', 'Do you really want to delete this API configuration?'))) {
+                                deleteApiConfig(selectedApi.api_name);
+                              }
+                            }}
+                            style={{background: 'var(--error)', color: 'white'}}
+                          >
+                            {tr('Löschen', 'Delete')}
+                          </button>
+                        )}
+                      </div>
+                      {apiConfigStatus && <div className="status-text" style={{marginTop: '1rem'}}>{apiConfigStatus}</div>}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
