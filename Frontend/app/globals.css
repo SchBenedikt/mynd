@@ -255,6 +255,16 @@ body {
 .composer.is-thinking {
   opacity: 0.75;
 }
+.composer button.queue-ready {
+  background: var(--chip-bg);
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.composer button.queue-ready:hover {
+  background: var(--chip-hover);
+  color: var(--ink);
+}
 .composer-hint {
   font-size: 0.75rem;
   color: var(--muted);
@@ -604,6 +614,18 @@ body {
 .history-action.danger:hover {
   color: #ef4444;
   border-color: rgba(239, 68, 68, 0.35);
+}
+
+.message.queued .bubble {
+  background: var(--chip-bg);
+  color: var(--muted);
+  border: 1px dashed var(--line);
+}
+
+.queued-tag {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .history-item:hover,
