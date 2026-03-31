@@ -80,6 +80,8 @@ export default function SettingsPage() {
   const [ninaWarnings, setNinaWarnings] = useState([]);
   const [ninaWarningsStatus, setNinaWarningsStatus] = useState('');
   const [ninaWarningsArs, setNinaWarningsArs] = useState('');
+  const [locationStatus, setLocationStatus] = useState('');
+  const [locationResult, setLocationResult] = useState(null);
 
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
   const getApiDisplayName = (apiName) => API_DISPLAY_NAMES[apiName] || apiName;
@@ -569,6 +571,8 @@ export default function SettingsPage() {
         setNinaWarnings([]);
         setNinaWarningsStatus('');
         setNinaWarningsArs('');
+        setLocationStatus('');
+        setLocationResult(null);
       }
     } catch (err) {
       console.error('Error loading API config:', err);
@@ -589,9 +593,18 @@ export default function SettingsPage() {
         const data = await res.json();
         const items = (data.data && data.data.items) ? data.data.items : [];
         setNinaRegions(items);
+
+        // Auto-apply best match so users do not need an extra manual selection step.
+        if (items.length > 0 && items[0].ars) {
+          setApiConfig(prev => ({ ...prev, ars: items[0].ars }));
+        }
+
         setNinaRegionStatus(
           items.length > 0
-            ? tr(`✓ ${items.length} Treffer`, `✓ ${items.length} matches`)
+            ? tr(
+                `✓ ${items.length} Treffer (ARS automatisch gesetzt: ${items[0].ars})`,
+                `✓ ${items.length} matches (ARS auto-set: ${items[0].ars})`
+              )
             : tr('Keine Treffer', 'No matches')
         );
       } else {
@@ -604,7 +617,15 @@ export default function SettingsPage() {
   };
 
   const extractNinaWarnings = (payload) => {
-    if (!payload || typeof payload !== 'object') {
+    if (!payload) {
+      return [];
+    }
+
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+
+    if (typeof payload !== 'object') {
       return [];
     }
 
@@ -652,8 +673,14 @@ export default function SettingsPage() {
   const loadNinaWarnings = async () => {
     try {
       setNinaWarningsStatus(tr('Lade Warnungen...', 'Loading warnings...'));
+      const arsValue = String(apiConfig?.ars || '').trim();
+      const params = new URLSearchParams();
+      if (arsValue) {
+        params.set('ars', arsValue);
+      }
 
-      const res = await fetch(`${API_BASE}/api/nina/dashboard`);
+      const query = params.toString();
+      const res = await fetch(`${API_BASE}/api/nina/dashboard${query ? `?${query}` : ''}`);
       if (res.ok) {
         const data = await res.json();
         const warnings = extractNinaWarnings(data.data);
@@ -672,6 +699,56 @@ export default function SettingsPage() {
     } catch (err) {
       setNinaWarningsStatus(tr('Fehler: ', 'Error: ') + err.message);
     }
+  };
+
+  const resolveLocation = async () => {
+    if (!navigator.geolocation) {
+      setLocationStatus(tr('Geolocation wird nicht unterstuetzt', 'Geolocation not supported'));
+      return;
+    }
+
+    setLocationStatus(tr('Standort wird ermittelt...', 'Resolving location...'));
+    navigator.geolocation.getCurrentPosition(async (position) => {
+      try {
+        const res = await fetch(`${API_BASE}/api/location/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat: position.coords.latitude,
+            lon: position.coords.longitude,
+            save: true
+          })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          setLocationResult(data);
+          if (data.nina && data.nina.ars) {
+            setApiConfig(prev => ({ ...prev, ars: data.nina.ars }));
+          }
+          if (data.dwd_error) {
+            setLocationStatus(
+              tr(
+                '✓ Standort fuer NINA uebernommen (DWD-Station konnte nicht automatisch gesetzt werden)',
+                '✓ Location applied for NINA (DWD station could not be auto-resolved)'
+              )
+            );
+          } else {
+            setLocationStatus(tr('✓ Standort uebernommen', '✓ Location applied'));
+          }
+        } else {
+          setLocationStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        setLocationStatus(tr('Fehler: ', 'Error: ') + err.message);
+      }
+    }, (error) => {
+      setLocationStatus(tr('Fehler: ', 'Error: ') + error.message);
+    }, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 60000
+    });
   };
 
   const saveApiConfig = async (apiName) => {
@@ -1015,6 +1092,32 @@ export default function SettingsPage() {
 
                       {selectedApi.api_name === 'nina' && (
                         <div style={{marginBottom: '1.5rem'}}>
+                          <div style={{marginBottom: '1rem'}}>
+                            <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
+                              {tr('Standort automatisch uebernehmen', 'Auto-detect location')}
+                            </div>
+                            <div className="button-group">
+                              <button className="btn" onClick={resolveLocation}>
+                                {tr('Standort ermitteln', 'Detect location')}
+                              </button>
+                            </div>
+                            {locationStatus && (
+                              <div className="status-text" style={{marginTop: '0.5rem'}}>{locationStatus}</div>
+                            )}
+                            {locationResult && (
+                              <div style={{marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--muted)'}}>
+                                {locationResult.location?.display_name && (
+                                  <div>{tr('Standort', 'Location')}: {locationResult.location.display_name}</div>
+                                )}
+                                {locationResult.nina?.ars && (
+                                  <div>{tr('NINA ARS', 'NINA ARS')}: {locationResult.nina.ars} {locationResult.nina.name ? `(${locationResult.nina.name})` : ''}</div>
+                                )}
+                                {locationResult.dwd?.station_id && (
+                                  <div>{tr('DWD Station', 'DWD station')}: {locationResult.dwd.station_id} {locationResult.dwd.name ? `(${locationResult.dwd.name})` : ''}</div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                           <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
                             {tr('Regionalschluessel (ARS) suchen', 'Search regional keys (ARS)')}
                           </div>

@@ -5,7 +5,8 @@ Public API for civil protection warnings.
 
 import logging
 import time
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, Optional, List
 import requests
 from .api_registry import APIClient
 
@@ -107,16 +108,75 @@ class NINAClient(APIClient):
     def get_dashboard(self, ars: str) -> Dict[str, Any]:
         return self._get_json(f"/dashboard/{ars}.json")
 
+    def get_dashboard_with_fallback(self, ars: str) -> Dict[str, Any]:
+        """Get dashboard data and automatically try broader ARS keys on 404."""
+        normalized = self._normalize_ars(ars)
+        if not normalized:
+            raise ValueError('ARS is required')
+
+        candidates = self._build_ars_fallbacks(normalized)
+        last_error = None
+
+        for candidate in candidates:
+            try:
+                data = self.get_dashboard(candidate)
+                return {
+                    'ars_requested': normalized,
+                    'ars_used': candidate,
+                    'fallback_used': candidate != normalized,
+                    'data': data
+                }
+            except requests.HTTPError as exc:
+                status = exc.response.status_code if exc.response is not None else None
+                # Try next broader ARS only for 404. Other statuses should fail fast.
+                if status == 404:
+                    last_error = exc
+                    continue
+                raise
+
+        if last_error:
+            raise last_error
+        raise RuntimeError('No ARS fallback candidates available')
+
     def get_regional_keys(self, query: str = '', limit: int = 200) -> Dict[str, Any]:
         """Fetch and normalize regional keys (ARS) list."""
         normalized = self._get_cached_regional_keys()
 
         if query:
             lowered = query.lower()
-            normalized = [
-                entry for entry in normalized
-                if lowered in entry['ars'].lower() or lowered in entry['name'].lower()
-            ]
+            query_norm = self._normalize_text(query)
+            ranked = []
+            for entry in normalized:
+                ars = str(entry.get('ars', ''))
+                name = str(entry.get('name', ''))
+                hint = str(entry.get('hint', ''))
+
+                if lowered not in ars.lower() and lowered not in name.lower() and lowered not in hint.lower():
+                    continue
+
+                score = 0
+                if query_norm:
+                    name_norm = self._normalize_text(name)
+                    hint_norm = self._normalize_text(hint)
+                    score = max(score, self._score_match(query_norm, name_norm))
+                    score = max(score, int(self._score_match(query_norm, hint_norm) * 0.9))
+
+                    # Prefer exact word matches (e.g. "berlin" in "berlin stadt") over partials (e.g. "berlingen").
+                    name_tokens = [token for token in name_norm.split(' ') if token]
+                    if query_norm in name_tokens:
+                        score = max(score, 108)
+                    elif name_norm.startswith(f"{query_norm} "):
+                        score = max(score, 102)
+
+                if lowered == ars.lower():
+                    score = max(score, 110)
+                elif ars.lower().startswith(lowered):
+                    score = max(score, 95)
+
+                ranked.append((score, entry))
+
+            ranked.sort(key=lambda item: item[0], reverse=True)
+            normalized = [entry for _, entry in ranked]
 
         if limit > 0:
             normalized = normalized[:limit]
@@ -125,6 +185,40 @@ class NINAClient(APIClient):
             'total': len(normalized),
             'items': normalized
         }
+
+    def resolve_ars_for_places(self, place_names: List[str]) -> Optional[Dict[str, Any]]:
+        """Resolve the best matching ARS entry for a list of place names."""
+        candidates = [self._normalize_text(name) for name in place_names if name]
+        candidates = [entry for entry in candidates if entry]
+        if not candidates:
+            return None
+
+        entries = self._get_cached_regional_keys()
+        best = None
+        best_score = 0
+
+        for entry in entries:
+            entry_name = self._normalize_text(entry.get('name', ''))
+            entry_hint = self._normalize_text(entry.get('hint', ''))
+            if not entry_name:
+                continue
+
+            score = 0
+            for candidate in candidates:
+                score = max(score, self._score_match(candidate, entry_name))
+                if entry_hint:
+                    score = max(score, int(self._score_match(candidate, entry_hint) * 0.85))
+
+            if score > best_score:
+                best_score = score
+                best = entry
+
+        if best and best_score >= 60:
+            resolved = dict(best)
+            resolved['score'] = best_score
+            return resolved
+
+        return None
 
     def _get_cached_regional_keys(self) -> list:
         now = time.time()
@@ -237,3 +331,52 @@ class NINAClient(APIClient):
             })
 
         return normalized
+
+    def _normalize_text(self, value: str) -> str:
+        if not value:
+            return ''
+        cleaned = re.sub(r"[^\w\s-]", " ", str(value).lower())
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
+
+    def _score_match(self, query: str, target: str) -> int:
+        if not query or not target:
+            return 0
+        if query == target:
+            return 100
+        if target.startswith(query) or query.startswith(target):
+            return 85
+        if query in target:
+            return 70
+        return 0
+
+    def _normalize_ars(self, ars: Any) -> str:
+        if ars is None:
+            return ''
+        cleaned = re.sub(r"\D", "", str(ars))
+        if len(cleaned) >= 12:
+            return cleaned[:12]
+        return cleaned
+
+    def _build_ars_fallbacks(self, ars: str) -> List[str]:
+        if not ars:
+            return []
+
+        # The NINA dashboard is not available for every municipality-level ARS.
+        # Try broader administrative levels by zeroing trailing segments.
+        fallbacks = [
+            ars,
+            ars[:8] + '0000',
+            ars[:6] + '000000',
+            ars[:5] + '0000000',
+            ars[:3] + '000000000',
+            ars[:2] + '0000000000',
+        ]
+
+        seen = set()
+        unique = []
+        for candidate in fallbacks:
+            if len(candidate) == 12 and candidate not in seen:
+                seen.add(candidate)
+                unique.append(candidate)
+        return unique

@@ -12,7 +12,7 @@ import time
 import secrets
 from urllib.parse import urljoin
 from urllib.parse import urlencode
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -3458,6 +3458,290 @@ def uptimekuma_search():
 
 # ==================== Public API Endpoints ====================
 
+def _reverse_geocode(latitude: float, longitude: float) -> Optional[Dict[str, Any]]:
+    try:
+        response = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={
+                'format': 'jsonv2',
+                'lat': latitude,
+                'lon': longitude,
+                'addressdetails': 1
+            },
+            headers={'User-Agent': 'MYND Assistant'},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        logger.warning("Reverse geocoding failed: %s", exc)
+        return None
+
+
+def _collect_place_candidates(address: Dict[str, Any]) -> List[str]:
+    candidates = [
+        address.get('city'),
+        address.get('town'),
+        address.get('village'),
+        address.get('municipality'),
+        address.get('county'),
+        address.get('state')
+    ]
+    return [entry for entry in candidates if entry]
+
+
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ''
+    return str(value).strip()
+
+
+def _extract_nina_warning_items(payload: Any, limit: int = 5) -> List[Dict[str, Any]]:
+    """Normalize NINA dashboard payload into a stable warning list."""
+    items = []
+    data = payload
+
+    if isinstance(payload, dict):
+        data = payload.get('warnings', payload)
+
+    if isinstance(data, list):
+        for raw in data:
+            if not isinstance(raw, dict):
+                continue
+
+            payload_data = raw.get('payload') if isinstance(raw.get('payload'), dict) else {}
+            detail_data = payload_data.get('data') if isinstance(payload_data.get('data'), dict) else {}
+            i18n_title = raw.get('i18nTitle') if isinstance(raw.get('i18nTitle'), dict) else {}
+            translated_headline = _safe_text(i18n_title.get('de') or i18n_title.get('en'))
+
+            identifier = _safe_text(raw.get('id') or raw.get('identifier') or raw.get('warningId'))
+            headline = _safe_text(
+                raw.get('headline')
+                or detail_data.get('headline')
+                or translated_headline
+                or raw.get('title')
+                or raw.get('i18nTitle')
+                or raw.get('event')
+                or raw.get('msgType')
+            )
+            severity = _safe_text(
+                raw.get('severity')
+                or detail_data.get('severity')
+                or raw.get('warnLevel')
+                or raw.get('level')
+            )
+            sent = _safe_text(raw.get('sent') or raw.get('effective') or raw.get('published'))
+            expires = _safe_text(raw.get('expires') or raw.get('until') or raw.get('ends'))
+            provider = _safe_text(
+                raw.get('provider')
+                or detail_data.get('provider')
+                or raw.get('sender')
+                or raw.get('source')
+            )
+            description = _safe_text(
+                raw.get('description')
+                or detail_data.get('description')
+                or detail_data.get('event')
+                or raw.get('text')
+                or raw.get('body')
+            )
+
+            if not headline and identifier:
+                headline = f"Warnung {identifier}"
+
+            if not headline:
+                continue
+
+            items.append({
+                'id': identifier,
+                'headline': headline,
+                'severity': severity,
+                'sent': sent,
+                'expires': expires,
+                'provider': provider,
+                'description': description
+            })
+
+    return items[:limit]
+
+
+def get_local_security_status() -> Dict[str, Any]:
+    """Collect local security status from configured NINA and DWD sources."""
+    result = {
+        'success': True,
+        'ars': '',
+        'nina_warning_count': 0,
+        'nina_warnings': [],
+        'headline': '',
+        'summary': '',
+        'dwd_station_ids': '',
+        'dwd_status': 'unknown',
+        'sources': {
+            'nina': False,
+            'dwd': False
+        },
+        'errors': []
+    }
+
+    registry = get_api_registry()
+
+    # NINA warnings for configured ARS
+    try:
+        nina_config = registry.load_config('nina')
+        ars = _safe_text(nina_config.get('ars'))
+        result['ars'] = ars
+
+        nina_client = registry.create_api_instance('nina')
+        if nina_client:
+            result['sources']['nina'] = True
+            if ars:
+                dashboard_result = nina_client.get_dashboard_with_fallback(ars)
+                result['ars'] = _safe_text(dashboard_result.get('ars_used') or ars)
+                warnings = _extract_nina_warning_items(dashboard_result.get('data'), limit=6)
+                result['nina_warnings'] = warnings
+                result['nina_warning_count'] = len(warnings)
+            else:
+                result['errors'].append('NINA ARS ist nicht konfiguriert')
+        else:
+            result['errors'].append('NINA Client nicht verfuegbar')
+    except Exception as exc:
+        logger.error("NINA security status failed: %s", exc)
+        result['errors'].append(f"NINA Fehler: {str(exc)}")
+
+    # DWD status probe for configured station IDs
+    try:
+        dwd_config = registry.load_config('dwd')
+        station_ids = _safe_text(dwd_config.get('station_ids'))
+        result['dwd_station_ids'] = station_ids
+
+        dwd_client = registry.create_api_instance('dwd')
+        if dwd_client:
+            result['sources']['dwd'] = True
+            if station_ids:
+                ids = [entry.strip() for entry in station_ids.split(',') if entry.strip()]
+                dwd_client.get_station_overview_extended(ids)
+                result['dwd_status'] = 'ok'
+            else:
+                result['dwd_status'] = 'not_configured'
+        else:
+            result['dwd_status'] = 'unavailable'
+            result['errors'].append('DWD Client nicht verfuegbar')
+    except Exception as exc:
+        logger.warning("DWD security status failed: %s", exc)
+        result['dwd_status'] = 'error'
+        result['errors'].append(f"DWD Fehler: {str(exc)}")
+
+    if result['nina_warning_count'] > 0:
+        result['headline'] = f"{result['nina_warning_count']} aktive Warnung(en) fuer deinen Standort"
+        lines = [result['headline'] + '.']
+        for idx, warning in enumerate(result['nina_warnings'][:3], 1):
+            label = warning.get('headline') or f"Warnung {idx}"
+            severity = warning.get('severity')
+            if severity:
+                lines.append(f"{idx}. {label} (Stufe: {severity})")
+            else:
+                lines.append(f"{idx}. {label}")
+        result['summary'] = "\n".join(lines)
+    else:
+        result['headline'] = 'Keine akuten NINA-Warnungen fuer deinen Standort'
+        result['summary'] = (
+            'Aktuell liegen laut NINA keine akuten Warnungen fuer deinen Standort vor.'
+        )
+
+    return result
+
+
+def is_security_query(message: str) -> bool:
+    text = (message or '').lower()
+    keywords = [
+        'sicherheitslage',
+        'warnung',
+        'warnungen',
+        'nina',
+        'gefahrenlage',
+        'alarm',
+        'katastrophenschutz',
+        'lage bei mir'
+    ]
+    return any(keyword in text for keyword in keywords)
+
+
+@app.route('/api/location/resolve', methods=['POST'])
+def resolve_location():
+    """Resolve browser location to NINA ARS and nearest DWD station."""
+    try:
+        payload = request.get_json() or {}
+        latitude = payload.get('lat')
+        longitude = payload.get('lon')
+        save_config = payload.get('save', True)
+
+        if latitude is None or longitude is None:
+            return jsonify({'success': False, 'error': 'lat and lon required'}), 400
+
+        latitude = float(latitude)
+        longitude = float(longitude)
+
+        reverse = _reverse_geocode(latitude, longitude)
+        address = reverse.get('address', {}) if reverse else {}
+        display_name = reverse.get('display_name', '') if reverse else ''
+        candidates = _collect_place_candidates(address)
+
+        registry = get_api_registry()
+        nina_result = None
+        nina_client = registry.create_api_instance('nina')
+        if nina_client:
+            resolved = nina_client.resolve_ars_for_places(candidates)
+            if resolved:
+                nina_result = {
+                    'ars': resolved.get('ars'),
+                    'name': resolved.get('name'),
+                    'hint': resolved.get('hint'),
+                    'score': resolved.get('score')
+                }
+                if save_config:
+                    nina_config = registry.load_config('nina')
+                    nina_config['ars'] = resolved.get('ars')
+                    registry.save_config('nina', nina_config)
+
+        dwd_result = None
+        dwd_error = None
+        dwd_client = registry.create_api_instance('dwd')
+        if dwd_client:
+            try:
+                station = dwd_client.find_nearest_station(latitude, longitude)
+                if station and station.get('station_id'):
+                    dwd_result = {
+                        'station_id': station.get('station_id'),
+                        'name': station.get('name'),
+                        'distance_km': station.get('distance_km')
+                    }
+                    if save_config:
+                        dwd_config = registry.load_config('dwd')
+                        dwd_config['station_ids'] = station.get('station_id')
+                        registry.save_config('dwd', dwd_config)
+            except Exception as exc:
+                # DWD stationOverview endpoints require stationIds and may fail for nearest lookup.
+                # Location resolution should still succeed for NINA.
+                dwd_error = str(exc)
+                logger.warning("DWD nearest-station resolve failed: %s", exc)
+
+        return jsonify({
+            'success': True,
+            'location': {
+                'latitude': latitude,
+                'longitude': longitude,
+                'display_name': display_name,
+                'address': address
+            },
+            'nina': nina_result,
+            'dwd': dwd_result,
+            'dwd_error': dwd_error
+        })
+
+    except Exception as e:
+        logger.error(f"Location resolve error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/dwd/warnings/nowcast', methods=['GET'])
 def dwd_get_warnings_nowcast():
     """Get DWD nowcast warnings"""
@@ -3479,11 +3763,14 @@ def dwd_get_warnings_nowcast():
 def dwd_station_overview():
     """Get DWD station overview by station IDs"""
     try:
-        station_ids = request.args.get('station_ids', '')
+        registry = get_api_registry()
+        station_ids = request.args.get('station_ids', '').strip()
+        if not station_ids:
+            config = registry.load_config('dwd')
+            station_ids = str(config.get('station_ids', '')).strip()
         if not station_ids:
             return jsonify({'success': False, 'error': 'station_ids required'}), 400
 
-        registry = get_api_registry()
         client = registry.create_api_instance('dwd')
         if not client:
             return jsonify({'success': False, 'error': 'DWD client unavailable'}), 400
@@ -3530,8 +3817,14 @@ def nina_dashboard():
         if not client:
             return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
 
-        data = client.get_dashboard(ars)
-        return jsonify({'success': True, 'ars': ars, 'data': data})
+        dashboard_result = client.get_dashboard_with_fallback(ars)
+        return jsonify({
+            'success': True,
+            'ars': dashboard_result.get('ars_requested', ars),
+            'ars_used': dashboard_result.get('ars_used', ars),
+            'fallback_used': bool(dashboard_result.get('fallback_used')),
+            'data': dashboard_result.get('data')
+        })
 
     except Exception as e:
         logger.error(f"NINA dashboard error: {e}")
@@ -3574,6 +3867,17 @@ def nina_regions():
 
     except Exception as e:
         logger.error(f"NINA regions error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/security/status', methods=['GET'])
+def security_status():
+    """Get local security status based on configured NINA ARS (+ DWD probe)."""
+    try:
+        data = get_local_security_status()
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Security status error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/autobahn/roads', methods=['GET'])
@@ -4158,6 +4462,25 @@ def agent_query():
                 'context_used': False,
                 'context_count': 0,
                 'intent': 'tasks',
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': False
+                }
+            })
+
+        # Security shortcut: direct response without LLM
+        if is_security_query(prompt):
+            security = get_local_security_status()
+            return jsonify({
+                'success': True,
+                'response': security.get('summary', 'Sicherheitslage konnte nicht ermittelt werden.'),
+                'action': 'security_status',
+                'context_used': True,
+                'context_count': security.get('nina_warning_count', 0),
+                'intent': 'security',
+                'security': security,
                 'sources_used': {
                     'photos': False,
                     'files': False,
