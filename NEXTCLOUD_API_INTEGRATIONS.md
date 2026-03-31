@@ -4,12 +4,13 @@ This document describes the new Nextcloud API integrations added to the mynd app
 
 ## Overview
 
-Four new Nextcloud API clients have been implemented:
+Four new Nextcloud API clients have been implemented, plus WebDAV write operations:
 
 1. **CardDAV Client** - Manage contacts and addressbooks
 2. **Search API Client** - Unified search across Nextcloud resources
 3. **Notifications API Client** - Access and manage notifications
 4. **Activity API Client** - Access activity stream (What's new on Nextcloud)
+5. **WebDAV Write Operations** - Create, upload, delete, move, copy files and folders
 
 ## 1. CardDAV Client
 
@@ -389,6 +390,87 @@ result = client.get_activity(
     'has_more': True      # Whether more activities are available
 }
 ```
+
+## 5. WebDAV Write Operations (NextcloudClient)
+
+**File:** `backend/features/integration/nextcloud_client.py`
+
+### Purpose
+The NextcloudClient has been enhanced with WebDAV write operations to enable file creation, manipulation, and organization.
+
+### Key Features
+- Upload files from local filesystem or text content
+- Create folders
+- Delete files and folders
+- Move and copy files
+- Mark/unmark files as favorites
+- List favorite files
+
+### Usage Example
+
+```python
+from backend.features.integration import NextcloudClient
+
+# Initialize client
+client = NextcloudClient(
+    url="https://cloud.example.com",
+    username="your-username",
+    password="your-password"
+)
+
+# Upload a file
+client.upload_file('/local/path/document.pdf', '/Documents/document.pdf')
+
+# Upload text content directly
+client.upload_content('Hello World!', '/Documents/hello.txt')
+
+# Create a folder
+client.create_folder('/Documents/NewFolder')
+
+# Move a file
+client.move_file('/Documents/old.txt', '/Documents/new.txt')
+
+# Copy a file
+client.copy_file('/Documents/file.txt', '/Backup/file.txt')
+
+# Mark as favorite
+client.set_favorite('/Documents/important.txt', favorite=True)
+
+# List all favorites
+favorites = client.list_favorites()
+for fav in favorites:
+    print(f"{fav['name']} - {fav['size']} bytes")
+
+# Delete a file
+client.delete_file('/Documents/old_file.txt')
+```
+
+### Methods
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `upload_file(local_path, remote_path, overwrite)` | Upload file from local filesystem | bool |
+| `upload_content(content, remote_path, overwrite)` | Upload text content directly | bool |
+| `create_folder(remote_path)` | Create a folder | bool |
+| `delete_file(remote_path)` | Delete file or folder | bool |
+| `move_file(source_path, destination_path, overwrite)` | Move file or folder | bool |
+| `copy_file(source_path, destination_path, overwrite)` | Copy file or folder | bool |
+| `set_favorite(remote_path, favorite)` | Mark/unmark as favorite | bool |
+| `list_favorites(remote_path)` | List favorite files | List[Dict] |
+
+### WebDAV Operations Reference
+
+These methods implement standard WebDAV operations:
+
+- **PUT** - Upload files (RFC 4918)
+- **MKCOL** - Create folders (RFC 4918)
+- **DELETE** - Delete files/folders (RFC 4918)
+- **MOVE** - Move files/folders (RFC 4918)
+- **COPY** - Copy files/folders (RFC 4918)
+- **PROPPATCH** - Set properties like favorites (RFC 4918)
+- **REPORT** - Query with filters like favorites (RFC 3253)
+
+All operations use HTTP Basic Authentication and follow Nextcloud's WebDAV endpoint structure: `/remote.php/dav/files/{username}/`
 
 ## Testing
 
