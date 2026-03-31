@@ -61,6 +61,13 @@ const createChatId = () => {
   return `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 };
 
+const createMessageId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+};
+
 const createEmptyChat = () => {
   const now = Date.now();
   return {
@@ -270,7 +277,7 @@ export default function HomePage() {
     appendMessageToChat(targetChatId, {
       role: 'assistant',
       content: confirmations.join('\n'),
-      id: Date.now()
+      id: createMessageId()
     });
 
     return true;
@@ -395,7 +402,7 @@ export default function HomePage() {
       appendMessageToChat(activeChatId, {
         role: 'assistant',
         content: 'Anfrage abgebrochen.',
-        id: Date.now()
+        id: createMessageId()
       });
     }
   };
@@ -422,6 +429,20 @@ export default function HomePage() {
         if (msg.id !== messageId) return msg;
         return updater(msg);
       });
+      return { ...chat, messages: nextMessages };
+    }));
+  };
+
+  const insertMessageAfter = (chatId, afterMessageId, message) => {
+    setChats((prevChats) => prevChats.map((chat) => {
+      if (chat.id !== chatId) return chat;
+      const messagesList = chat.messages || [];
+      const index = messagesList.findIndex((msg) => msg.id === afterMessageId);
+      if (index === -1) {
+        return { ...chat, messages: [...messagesList, message] };
+      }
+      const nextMessages = [...messagesList];
+      nextMessages.splice(index + 1, 0, message);
       return { ...chat, messages: nextMessages };
     }));
   };
@@ -585,7 +606,7 @@ export default function HomePage() {
   const queueMessage = (text, chatId) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const messageId = Date.now();
+    const messageId = createMessageId();
     appendMessageToChat(chatId, { role: 'user', content: trimmed, id: messageId, queued: true }, trimmed);
     setPendingQueue((prev) => [...prev, { chatId, text: trimmed, messageId }]);
     setInputValue('');
@@ -624,13 +645,11 @@ export default function HomePage() {
       targetChatId = newChat.id;
     }
 
-    const userMessage = options.messageId
-      ? null
-      : { role: 'user', content: text, id: Date.now() };
-    if (userMessage) {
-      appendMessageToChat(targetChatId, userMessage, text);
-    } else if (options.messageId) {
+    const userMessageId = options.messageId || createMessageId();
+    if (options.messageId) {
       updateMessageInChat(targetChatId, options.messageId, (msg) => ({ ...msg, queued: false }));
+    } else {
+      appendMessageToChat(targetChatId, { role: 'user', content: text, id: userMessageId }, text);
     }
     setInputValue('');
     if (inputRef.current) inputRef.current.value = '';
@@ -646,7 +665,7 @@ export default function HomePage() {
 
     try {
       const currentMessages = chats.find((chat) => chat.id === targetChatId)?.messages || [];
-      const contextMessages = userMessage ? [...currentMessages, userMessage] : currentMessages;
+      const contextMessages = options.messageId ? currentMessages : [...currentMessages, { role: 'user', content: text, id: userMessageId }];
       const conversationContext = contextMessages
         .slice(-8)
         .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
@@ -666,15 +685,19 @@ export default function HomePage() {
       const data = await res.json();
       if (!res.ok || data?.success === false) {
         const errorMessage = data?.error || `Request failed with status ${res.status}`;
-        appendMessageToChat(targetChatId, { role: 'assistant', content: `Error: ${errorMessage}`, id: Date.now() });
+        insertMessageAfter(targetChatId, userMessageId, {
+          role: 'assistant',
+          content: `Error: ${errorMessage}`,
+          id: createMessageId()
+        });
         return;
       }
 
-      appendMessageToChat(targetChatId, {
+      insertMessageAfter(targetChatId, userMessageId, {
         role: 'assistant',
         content: data.response,
         sources: data.sources || [],
-        id: Date.now()
+        id: createMessageId()
       });
 
       if (data?.requires_input && data?.action === 'calendar_missing_input') {
@@ -714,7 +737,11 @@ export default function HomePage() {
       if (err?.name === 'AbortError') {
         return;
       }
-      appendMessageToChat(targetChatId, { role: 'assistant', content: `Error: ${err.message}`, id: Date.now() });
+      insertMessageAfter(targetChatId, userMessageId, {
+        role: 'assistant',
+        content: `Error: ${err.message}`,
+        id: createMessageId()
+      });
     } finally {
       setIsThinking(false);
       requestAbortRef.current = null;
@@ -893,7 +920,7 @@ export default function HomePage() {
         appendMessageToChat(activeChatId, {
           role: 'assistant',
           content: data.message || 'Termin wurde erstellt.',
-          id: Date.now()
+          id: createMessageId()
         });
       }
 
@@ -1181,6 +1208,7 @@ export default function HomePage() {
                 title={queueReady ? 'In die Warteschlange' : undefined}
               >
                 <i className={`fas ${queueReady ? 'fa-arrow-up' : 'fa-arrow-right'}`}></i>
+                {queueReady && <span className="queue-tooltip">In die Warteschlange</span>}
               </button>
             </div>
 
@@ -1430,6 +1458,7 @@ export default function HomePage() {
                   title={queueReady ? 'In die Warteschlange' : undefined}
                 >
                   <i className={`fas ${queueReady ? 'fa-arrow-up' : 'fa-arrow-right'}`}></i>
+                  {queueReady && <span className="queue-tooltip">In die Warteschlange</span>}
                 </button>
               </div>
             </div>
