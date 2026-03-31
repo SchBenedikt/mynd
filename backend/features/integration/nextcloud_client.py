@@ -295,3 +295,414 @@ class NextcloudClient:
         
         self.logger.info(f"Knowledge base built: {knowledge_base['files_processed']} files processed")
         return knowledge_base
+
+    # Write Operations (WebDAV)
+
+    def upload_file(self, local_path: str, remote_path: str, overwrite: bool = True) -> bool:
+        """
+        Upload a file to Nextcloud via WebDAV PUT
+
+        Args:
+            local_path: Path to local file
+            remote_path: Destination path in Nextcloud (e.g., '/Documents/file.txt')
+            overwrite: Whether to overwrite existing files (default: True)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            if not os.path.exists(local_path):
+                self.logger.error(f"Local file not found: {local_path}")
+                return False
+
+            url = f"{self.url}/remote.php/dav/files/{self.username}{remote_path}"
+            self.logger.info(f"Uploading {local_path} to {remote_path}")
+
+            with open(local_path, 'rb') as f:
+                file_data = f.read()
+
+            headers = {}
+            if not overwrite:
+                headers['If-None-Match'] = '*'  # Only create if doesn't exist
+
+            response = requests.put(
+                url,
+                auth=HTTPBasicAuth(self.username, self.password),
+                data=file_data,
+                headers=headers,
+                timeout=120
+            )
+
+            if response.status_code in [200, 201, 204]:
+                self.logger.info(f"Successfully uploaded {remote_path}")
+                return True
+            elif response.status_code == 412:
+                self.logger.error(f"File already exists and overwrite is disabled: {remote_path}")
+                return False
+            elif response.status_code == 401:
+                self.logger.error("Authentication failed")
+                return False
+            else:
+                self.logger.error(f"Upload failed with status {response.status_code}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error uploading file: {str(e)}")
+            return False
+
+    def upload_content(self, content: str, remote_path: str, overwrite: bool = True) -> bool:
+        """
+        Upload text content directly to Nextcloud without creating a local file
+
+        Args:
+            content: Text content to upload
+            remote_path: Destination path in Nextcloud (e.g., '/Documents/file.txt')
+            overwrite: Whether to overwrite existing files (default: True)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            url = f"{self.url}/remote.php/dav/files/{self.username}{remote_path}"
+            self.logger.info(f"Uploading content to {remote_path}")
+
+            headers = {'Content-Type': 'text/plain; charset=utf-8'}
+            if not overwrite:
+                headers['If-None-Match'] = '*'
+
+            response = requests.put(
+                url,
+                auth=HTTPBasicAuth(self.username, self.password),
+                data=content.encode('utf-8'),
+                headers=headers,
+                timeout=60
+            )
+
+            if response.status_code in [200, 201, 204]:
+                self.logger.info(f"Successfully uploaded content to {remote_path}")
+                return True
+            elif response.status_code == 412:
+                self.logger.error(f"File already exists and overwrite is disabled: {remote_path}")
+                return False
+            else:
+                self.logger.error(f"Upload failed with status {response.status_code}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error uploading content: {str(e)}")
+            return False
+
+    def create_folder(self, remote_path: str) -> bool:
+        """
+        Create a folder in Nextcloud via WebDAV MKCOL
+
+        Args:
+            remote_path: Path to folder to create (e.g., '/Documents/NewFolder')
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            url = f"{self.url}/remote.php/dav/files/{self.username}{remote_path}"
+            self.logger.info(f"Creating folder: {remote_path}")
+
+            response = requests.request(
+                'MKCOL',
+                url,
+                auth=HTTPBasicAuth(self.username, self.password),
+                timeout=30
+            )
+
+            if response.status_code in [201, 405]:  # 201 = created, 405 = already exists
+                self.logger.info(f"Folder created or already exists: {remote_path}")
+                return True
+            elif response.status_code == 401:
+                self.logger.error("Authentication failed")
+                return False
+            elif response.status_code == 409:
+                self.logger.error(f"Parent folder doesn't exist: {remote_path}")
+                return False
+            else:
+                self.logger.error(f"Create folder failed with status {response.status_code}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error creating folder: {str(e)}")
+            return False
+
+    def delete_file(self, remote_path: str) -> bool:
+        """
+        Delete a file or folder in Nextcloud via WebDAV DELETE
+
+        Args:
+            remote_path: Path to file/folder to delete (e.g., '/Documents/file.txt')
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            url = f"{self.url}/remote.php/dav/files/{self.username}{remote_path}"
+            self.logger.info(f"Deleting: {remote_path}")
+
+            response = requests.delete(
+                url,
+                auth=HTTPBasicAuth(self.username, self.password),
+                timeout=30
+            )
+
+            if response.status_code in [200, 204]:
+                self.logger.info(f"Successfully deleted: {remote_path}")
+                return True
+            elif response.status_code == 404:
+                self.logger.warning(f"File not found: {remote_path}")
+                return False
+            elif response.status_code == 401:
+                self.logger.error("Authentication failed")
+                return False
+            else:
+                self.logger.error(f"Delete failed with status {response.status_code}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error deleting file: {str(e)}")
+            return False
+
+    def move_file(self, source_path: str, destination_path: str, overwrite: bool = False) -> bool:
+        """
+        Move a file or folder in Nextcloud via WebDAV MOVE
+
+        Args:
+            source_path: Source path (e.g., '/Documents/old.txt')
+            destination_path: Destination path (e.g., '/Documents/new.txt')
+            overwrite: Whether to overwrite if destination exists (default: False)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            source_url = f"{self.url}/remote.php/dav/files/{self.username}{source_path}"
+            dest_url = f"{self.url}/remote.php/dav/files/{self.username}{destination_path}"
+
+            self.logger.info(f"Moving {source_path} to {destination_path}")
+
+            headers = {
+                'Destination': dest_url,
+                'Overwrite': 'T' if overwrite else 'F'
+            }
+
+            response = requests.request(
+                'MOVE',
+                source_url,
+                auth=HTTPBasicAuth(self.username, self.password),
+                headers=headers,
+                timeout=30
+            )
+
+            if response.status_code in [201, 204]:
+                self.logger.info(f"Successfully moved to {destination_path}")
+                return True
+            elif response.status_code == 412:
+                self.logger.error(f"Destination already exists and overwrite is disabled")
+                return False
+            elif response.status_code == 404:
+                self.logger.error(f"Source not found: {source_path}")
+                return False
+            else:
+                self.logger.error(f"Move failed with status {response.status_code}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error moving file: {str(e)}")
+            return False
+
+    def copy_file(self, source_path: str, destination_path: str, overwrite: bool = False) -> bool:
+        """
+        Copy a file or folder in Nextcloud via WebDAV COPY
+
+        Args:
+            source_path: Source path (e.g., '/Documents/file.txt')
+            destination_path: Destination path (e.g., '/Backup/file.txt')
+            overwrite: Whether to overwrite if destination exists (default: False)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            source_url = f"{self.url}/remote.php/dav/files/{self.username}{source_path}"
+            dest_url = f"{self.url}/remote.php/dav/files/{self.username}{destination_path}"
+
+            self.logger.info(f"Copying {source_path} to {destination_path}")
+
+            headers = {
+                'Destination': dest_url,
+                'Overwrite': 'T' if overwrite else 'F'
+            }
+
+            response = requests.request(
+                'COPY',
+                source_url,
+                auth=HTTPBasicAuth(self.username, self.password),
+                headers=headers,
+                timeout=30
+            )
+
+            if response.status_code in [201, 204]:
+                self.logger.info(f"Successfully copied to {destination_path}")
+                return True
+            elif response.status_code == 412:
+                self.logger.error(f"Destination already exists and overwrite is disabled")
+                return False
+            elif response.status_code == 404:
+                self.logger.error(f"Source not found: {source_path}")
+                return False
+            else:
+                self.logger.error(f"Copy failed with status {response.status_code}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error copying file: {str(e)}")
+            return False
+
+    def set_favorite(self, remote_path: str, favorite: bool = True) -> bool:
+        """
+        Mark a file or folder as favorite via WebDAV PROPPATCH
+
+        Args:
+            remote_path: Path to file/folder (e.g., '/Documents/important.txt')
+            favorite: True to mark as favorite, False to unmark (default: True)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            url = f"{self.url}/remote.php/dav/files/{self.username}{remote_path}"
+            self.logger.info(f"Setting favorite={favorite} for {remote_path}")
+
+            favorite_value = '1' if favorite else '0'
+
+            proppatch_body = f'''<?xml version="1.0"?>
+<d:propertyupdate xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+  <d:set>
+    <d:prop>
+      <oc:favorite>{favorite_value}</oc:favorite>
+    </d:prop>
+  </d:set>
+</d:propertyupdate>'''
+
+            headers = {'Content-Type': 'application/xml; charset=utf-8'}
+
+            response = requests.request(
+                'PROPPATCH',
+                url,
+                auth=HTTPBasicAuth(self.username, self.password),
+                data=proppatch_body.encode('utf-8'),
+                headers=headers,
+                timeout=30
+            )
+
+            if response.status_code in [200, 207]:
+                self.logger.info(f"Successfully set favorite for {remote_path}")
+                return True
+            elif response.status_code == 404:
+                self.logger.error(f"File not found: {remote_path}")
+                return False
+            else:
+                self.logger.error(f"Set favorite failed with status {response.status_code}")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Error setting favorite: {str(e)}")
+            return False
+
+    def list_favorites(self, remote_path: str = '/') -> List[Dict]:
+        """
+        List favorite files and folders via WebDAV REPORT
+
+        Args:
+            remote_path: Base path to search for favorites (default: '/')
+
+        Returns:
+            List of dictionaries containing favorite file information
+        """
+        try:
+            url = f"{self.url}/remote.php/dav/files/{self.username}{remote_path}"
+            self.logger.info(f"Listing favorites in {remote_path}")
+
+            report_body = '''<?xml version="1.0"?>
+<oc:filter-files xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+     <oc:filter-rules>
+         <oc:favorite>1</oc:favorite>
+     </oc:filter-rules>
+     <d:prop>
+        <d:getlastmodified/>
+        <d:getetag/>
+        <d:getcontenttype/>
+        <d:resourcetype/>
+        <oc:fileid/>
+        <oc:permissions/>
+        <oc:size/>
+        <d:getcontentlength/>
+        <oc:favorite/>
+     </d:prop>
+</oc:filter-files>'''
+
+            headers = {'Content-Type': 'application/xml; charset=utf-8'}
+
+            response = requests.request(
+                'REPORT',
+                url,
+                auth=HTTPBasicAuth(self.username, self.password),
+                data=report_body.encode('utf-8'),
+                headers=headers,
+                timeout=60
+            )
+
+            favorites = []
+
+            if response.status_code == 207:
+                import xml.etree.ElementTree as ET
+
+                root = ET.fromstring(response.text)
+                namespaces = {
+                    'd': 'DAV:',
+                    'oc': 'http://owncloud.org/ns',
+                    'nc': 'http://nextcloud.org/ns'
+                }
+
+                for response_elem in root.findall('.//d:response', namespaces):
+                    href_elem = response_elem.find('d:href', namespaces)
+                    if href_elem is not None:
+                        href = href_elem.text
+                        file_path = href.replace(f"/remote.php/dav/files/{self.username}", '')
+
+                        # Get file properties
+                        propstat = response_elem.find('.//d:propstat', namespaces)
+                        if propstat is not None:
+                            prop = propstat.find('d:prop', namespaces)
+                            if prop is not None:
+                                file_name = file_path.split('/')[-1]
+
+                                # Check if it's a folder
+                                resourcetype = prop.find('d:resourcetype', namespaces)
+                                is_folder = resourcetype is not None and resourcetype.find('d:collection', namespaces) is not None
+
+                                # Get size
+                                size_elem = prop.find('oc:size', namespaces)
+                                size = int(size_elem.text) if size_elem is not None and size_elem.text else 0
+
+                                favorites.append({
+                                    'path': file_path,
+                                    'name': file_name,
+                                    'is_folder': is_folder,
+                                    'size': size
+                                })
+
+                self.logger.info(f"Found {len(favorites)} favorites")
+            else:
+                self.logger.error(f"List favorites failed with status {response.status_code}")
+
+            return favorites
+
+        except Exception as e:
+            self.logger.error(f"Error listing favorites: {str(e)}")
+            return []
