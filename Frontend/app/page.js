@@ -38,6 +38,19 @@ export default function HomePage() {
     lastIndexingEnd: 0,
     lastIndexingDuration: 0
   });
+  const [calendarForm, setCalendarForm] = useState({
+    visible: false,
+    missingInfo: [],
+    title: '',
+    startTime: '',
+    endTime: '',
+    calendarName: '',
+    location: '',
+    description: '',
+    availableCalendars: [],
+    submitting: false,
+    error: ''
+  });
   const progressIntervalRef = useRef(null);
   
   const messagesEndRef = useRef(null);
@@ -230,11 +243,150 @@ export default function HomePage() {
       });
       const data = await res.json();
       setMessages(prev => [...prev, { role: 'assistant', content: data.response, id: Date.now() }]);
+
+      if (data?.requires_input && data?.action === 'calendar_missing_input') {
+        const extracted = data?.extracted_info || {};
+        let calendars = data?.available_calendars || [];
+
+        if (!calendars.length) {
+          try {
+            const calendarsRes = await fetch(`${API_BASE}/api/calendar/calendars`);
+            const calendarsData = await calendarsRes.json();
+            calendars = calendarsData?.calendars || [];
+          } catch (err) {
+            console.error('Error loading calendars for form:', err);
+          }
+        }
+
+        const prefilledCalendarName = extracted.calendar_name
+          || calendars.find((c) => (c?.name || '').toLowerCase().includes((extracted.calendar_name || '').toLowerCase()))?.name
+          || calendars[0]?.name
+          || '';
+
+        setCalendarForm({
+          visible: true,
+          missingInfo: data?.missing_info || [],
+          title: extracted.title || '',
+          startTime: parseBackendDateTimeToInput(extracted.start_time),
+          endTime: parseBackendDateTimeToInput(extracted.end_time),
+          calendarName: prefilledCalendarName,
+          location: extracted.location || '',
+          description: text,
+          availableCalendars: calendars,
+          submitting: false,
+          error: ''
+        });
+      }
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}`, id: Date.now() }]);
     } finally {
       setIsThinking(false);
     }
+  };
+
+  const parseBackendDateTimeToInput = (value) => {
+    if (!value || typeof value !== 'string') return '';
+    const trimmed = value.trim();
+
+    // DD.MM.YYYY HH:MM
+    const fullDateTimeMatch = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}:\d{2})$/);
+    if (fullDateTimeMatch) {
+      const [, day, month, year, hm] = fullDateTimeMatch;
+      return `${year}-${month}-${day}T${hm}`;
+    }
+
+    // HH:MM -> heute
+    const timeOnlyMatch = trimmed.match(/^(\d{2}:\d{2})$/);
+    if (timeOnlyMatch) {
+      const today = new Date();
+      const year = String(today.getFullYear());
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}T${timeOnlyMatch[1]}`;
+    }
+
+    return '';
+  };
+
+  const formatDateTimeForBackend = (datetimeLocalValue) => {
+    if (!datetimeLocalValue) return '';
+    // Input format: YYYY-MM-DDTHH:MM -> backend format: DD.MM.YYYY HH:MM
+    const [datePart, timePart] = datetimeLocalValue.split('T');
+    if (!datePart || !timePart) return datetimeLocalValue;
+    const [year, month, day] = datePart.split('-');
+    return `${day}.${month}.${year} ${timePart}`;
+  };
+
+  const submitCalendarForm = async (e) => {
+    e.preventDefault();
+
+    if (!calendarForm.title.trim() || !calendarForm.startTime) {
+      setCalendarForm(prev => ({
+        ...prev,
+        error: 'Bitte mindestens Titel und Startzeit ausfuellen.'
+      }));
+      return;
+    }
+
+    setCalendarForm(prev => ({ ...prev, submitting: true, error: '' }));
+
+    try {
+      const payload = {
+        title: calendarForm.title.trim(),
+        start_time: formatDateTimeForBackend(calendarForm.startTime),
+        end_time: calendarForm.endTime ? formatDateTimeForBackend(calendarForm.endTime) : null,
+        calendar_name: calendarForm.calendarName || null,
+        location: calendarForm.location.trim() || null,
+        description: calendarForm.description.trim() || null
+      };
+
+      const res = await fetch(`${API_BASE}/api/calendar/create-with-details`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data?.success) {
+        setCalendarForm(prev => ({
+          ...prev,
+          submitting: false,
+          error: data?.error || 'Termin konnte nicht erstellt werden.'
+        }));
+        return;
+      }
+
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.message || 'Termin wurde erstellt.',
+        id: Date.now()
+      }]);
+
+      setCalendarForm({
+        visible: false,
+        missingInfo: [],
+        title: '',
+        startTime: '',
+        endTime: '',
+        calendarName: '',
+        location: '',
+        description: '',
+        availableCalendars: [],
+        submitting: false,
+        error: ''
+      });
+    } catch (err) {
+      setCalendarForm(prev => ({
+        ...prev,
+        submitting: false,
+        error: `Fehler beim Erstellen: ${err.message}`
+      }));
+    }
+  };
+
+  const closeCalendarForm = () => {
+    setCalendarForm(prev => ({ ...prev, visible: false, error: '' }));
   };
 
   const startNewChat = () => {
@@ -413,6 +565,85 @@ export default function HomePage() {
                       <div className="dot"></div>
                       <div className="dot"></div>
                       <div className="dot"></div>
+                    </div>
+                  </div>
+                )}
+
+                {calendarForm.visible && (
+                  <div className="message assistant">
+                    <div className="bubble calendar-form-bubble">
+                      <h4>Termin erstellen</h4>
+                      {calendarForm.missingInfo.length > 0 && (
+                        <p className="calendar-form-hint">
+                          Bitte ergaenze: {calendarForm.missingInfo.join(', ')}
+                        </p>
+                      )}
+                      <form className="calendar-form" onSubmit={submitCalendarForm}>
+                        <label>
+                          Titel
+                          <input
+                            type="text"
+                            value={calendarForm.title}
+                            onChange={(e) => setCalendarForm(prev => ({ ...prev, title: e.target.value }))}
+                            placeholder="z.B. Team Meeting"
+                            required
+                          />
+                        </label>
+
+                        <label>
+                          Startzeit
+                          <input
+                            type="datetime-local"
+                            value={calendarForm.startTime}
+                            onChange={(e) => setCalendarForm(prev => ({ ...prev, startTime: e.target.value }))}
+                            required
+                          />
+                        </label>
+
+                        <label>
+                          Endzeit (optional)
+                          <input
+                            type="datetime-local"
+                            value={calendarForm.endTime}
+                            onChange={(e) => setCalendarForm(prev => ({ ...prev, endTime: e.target.value }))}
+                          />
+                        </label>
+
+                        {calendarForm.availableCalendars.length > 0 && (
+                          <label>
+                            Kalender
+                            <select
+                              value={calendarForm.calendarName}
+                              onChange={(e) => setCalendarForm(prev => ({ ...prev, calendarName: e.target.value }))}
+                            >
+                              {calendarForm.availableCalendars.map((cal) => (
+                                <option key={cal.name} value={cal.name}>{cal.name}</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+
+                        <label>
+                          Ort (optional)
+                          <input
+                            type="text"
+                            value={calendarForm.location}
+                            onChange={(e) => setCalendarForm(prev => ({ ...prev, location: e.target.value }))}
+                            placeholder="z.B. Berlin oder Zoom"
+                          />
+                        </label>
+
+                        {calendarForm.error && <p className="calendar-form-error">{calendarForm.error}</p>}
+
+                        <div className="calendar-form-actions">
+                          <button type="button" className="btn" onClick={closeCalendarForm} disabled={calendarForm.submitting}>
+                            Abbrechen
+                          </button>
+                          <button type="submit" className="btn primary" disabled={calendarForm.submitting}>
+                            {calendarForm.submitting ? 'Speichere...' : 'Termin erstellen'}
+                          </button>
+                        </div>
+                      </form>
                     </div>
                   </div>
                 )}
