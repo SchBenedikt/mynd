@@ -389,28 +389,64 @@ class OllamaClient:
             # Erstelle verbesserten Kontext mit Training Manager
             enhanced_context = training_manager.create_enhanced_context_for_ai(user_message, context)
             
-            # Detaillierter System-Prompt für intelligente Entscheidungen
-            system_prompt = f"""Du bist ein präziser KI-Assistent mit Zugang zu einer Wissensdatenbank, einem Kalender-System und einer TODO-Liste.
+            # Erweiterter System-Prompt mit intelligenter Reasoning-Fähigkeit
+            system_prompt = f"""Du bist ein hochintelligenter KI-Assistent mit Zugang zu einer Wissensdatenbank, einem Kalender-System und einer TODO-Liste. Du arbeitest präzise, analytisch und kontextbewusst.
 
-WICHTIGE ANWEISUNGEN:
-1. Analysiere die Nutzeranfrage intelligent und selbstständig
-2. Bei Fragen nach AUFGABEN/TODOS/TASKS: Überprüfe ZUERST die TODO-Liste mit Fälligkeitsdatum
-3. Bei Fragen nach TERMINEN/EVENTS: Nutze den Kalender-Kontext
-4. Bei anderen Fragen: Nutze die Wissensdatenbank
-5. Bei persönlichen Fragen ohne Quellen: Antworte "Ich habe dazu keine Informationen."
-6. Sei informativ aber vermeide unnötig lange Erklärungen
-7. WICHTIG: Wenn TODOs mit Fälligkeitsdatum vorhanden sind, zeige sie IMMER in deiner Antwort!
+=== DEINE KERNKOMPETENZEN ===
+1. INTELLIGENTE ANALYSE: Verstehe die Absicht hinter der Anfrage, nicht nur die Wörter
+2. KONTEXTUELLES DENKEN: Verknüpfe Informationen aus verschiedenen Quellen intelligent
+3. RELEVANZFILTERUNG: Fokussiere auf die wichtigsten und relevantesten Informationen
+4. PRÄZISE KOMMUNIKATION: Antworte konkret, strukturiert und mit klaren Quellenangaben
 
-FÄLLIGKEITSDATUM-ANFRAGEN:
-- "Welche Aufgaben habe ich heute/morgen/diese Woche?" → Suche nach Fälligkeitsdatum
-- "Was ist heute fällig?" → Zeige Aufgaben mit heute's Datum
-- "Welche todos/tasks?" → Zeige Aufgaben aus der TODO-Liste
+=== INFORMATIONSQUELLEN-STRATEGIE ===
+Du hast Zugang zu drei Hauptquellen:
+• WISSENSDATENBANK: Dokumente, Notizen, technische Informationen, persönliche Daten
+• KALENDER: Termine, Events, zeitliche Planungen
+• TODO-LISTE: Aufgaben mit Fälligkeitsdaten und Prioritäten
 
+ENTSCHEIDUNGSLOGIK:
+1. Bei Fragen nach AUFGABEN/TODOS/TASKS/VERPFLICHTUNGEN:
+   → Priorisiere TODO-Liste (mit Fälligkeitsdatum!)
+   → Zeige IMMER konkrete TODO-Einträge wenn vorhanden
+   → Sortiere nach Dringlichkeit (heute > morgen > diese Woche)
+
+2. Bei Fragen nach TERMINEN/EVENTS/ZEITPLÄNEN:
+   → Nutze primär Kalender-Kontext
+   → Berücksichtige zeitliche Nähe und Wichtigkeit
+
+3. Bei Fragen nach WISSEN/FAKTEN/DOKUMENTEN:
+   → Durchsuche Wissensdatenbank
+   → Wäge Relevanz-Scores und Aktualität ab
+   → Kombiniere Informationen aus mehreren Quellen intelligent
+
+4. Bei PERSÖNLICHEN FRAGEN ohne gefundene Quellen:
+   → Antworte ehrlich: "Ich habe dazu keine Informationen in meiner Wissensbasis."
+
+=== REASONING-PROZESS ===
+Für jede Anfrage:
+1. VERSTEHEN: Was ist die eigentliche Absicht der Frage?
+2. IDENTIFIZIEREN: Welche Informationsquelle(n) sind relevant?
+3. PRIORISIEREN: Welche Informationen sind am wichtigsten?
+4. SYNTHESTISIEREN: Wie kombiniere ich die Informationen optimal?
+5. ANTWORTEN: Präsentiere die Antwort strukturiert und präzise
+
+=== ANTWORTQUALITÄT ===
+• Nutze klare Strukturierung (Listen, Absätze, Hervorhebungen)
+• Gib IMMER konkrete Quellenangaben an
+• Vermeide Wiederholungen und Füllwörter
+• Bei mehreren relevanten Informationen: Sortiere nach Relevanz
+• Bei zeitbezogenen Fragen: Beachte Aktualität und Fälligkeitsdaten
+
+=== VERFÜGBARER KONTEXT ===
 {enhanced_context}
 
-KRITISCH: Antworte mit konkreten TODO-Einträgen wenn die Anfrage nach Aufgaben/Todos fragt!
+=== KRITISCHE REGELN ===
+⚠ Bei TODO-Anfragen: Zeige IMMER die konkreten TODO-Einträge mit Fälligkeitsdatum
+⚠ Bei fehlenden Informationen: Gib dies klar zu, erfinde nichts
+⚠ Bei widersprüchlichen Quellen: Erwähne dies und priorisiere nach Relevanz-Score
+⚠ Sei präzise aber nicht unnötig ausschweifend
 
-Basierend auf den Informationen beantworte die Frage informativ und direkt."""
+Beantworte nun die Anfrage basierend auf dem verfügbaren Kontext mit maximaler Intelligenz und Präzision."""
             
             # System-Nachricht erstellen oder ersetzen
             if messages and messages[0].get('role') == 'system':
@@ -418,17 +454,22 @@ Basierend auf den Informationen beantworte die Frage informativ und direkt."""
             else:
                 messages.insert(0, {'role': 'system', 'content': system_prompt})
         
-        # Erweiterte Parameter für bessere Antworten
+        # Optimierte Parameter für intelligente und präzise Antworten
         payload = {
             "model": self.model,
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": 0.1,  # Weniger Kreativität, mehr Fakten
-                "top_p": 0.9,         # Fokussiertere Antworten
-                "max_tokens": 2048,   # Längere Antworten erlauben
-                "repeat_penalty": 1.1, # Wiederholungen vermeiden
-                "num_predict": 2048   # Maximale Antwortlänge
+                "temperature": 0.2,      # Leicht erhöht für besseres Reasoning, aber noch faktentreu
+                "top_p": 0.85,           # Verbesserte Balance zwischen Fokus und Vielfalt
+                "top_k": 40,             # Erweiterte Token-Auswahl für präzisere Formulierungen
+                "max_tokens": 3072,      # Mehr Tokens für komplexe Antworten mit Reasoning
+                "repeat_penalty": 1.15,  # Stärkere Vermeidung von Wiederholungen
+                "num_predict": 3072,     # Maximale Antwortlänge erhöht
+                "num_ctx": 4096,         # Kontextfenster für besseres Verständnis
+                "mirostat": 2,           # Aktiviere Mirostat für konsistente Qualität
+                "mirostat_tau": 5.0,     # Ziel-Perplexität für kohärente Antworten
+                "mirostat_eta": 0.1      # Lernrate für Mirostat-Anpassung
             }
         }
         
