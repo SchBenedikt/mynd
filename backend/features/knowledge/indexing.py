@@ -58,7 +58,14 @@ class IndexingManager:
         self.indexing_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
         self.progress_callbacks: list = []
-        self.config_file = "indexing_config.json"
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+        self.config_file = os.path.join(project_root, 'backend', 'config', 'indexing_config.json')
+        self.nextcloud_auth_config_file = os.path.join(project_root, 'backend', 'config', 'nextcloud_config.json')
+        self.legacy_config_files = [
+            os.path.join(project_root, 'backend', 'core', 'indexing_config.json'),
+            os.path.join(project_root, 'backend', 'indexing_config.json'),
+            os.path.join(project_root, 'indexing_config.json')
+        ]
         self.nextcloud_config: Dict = {}
         self.knowledge_cache_file = "knowledge_cache.json"
         self.max_workers = 8  # Erhöht für bessere Parallelität
@@ -88,7 +95,8 @@ class IndexingManager:
         }
         
         try:
-            with open(self.config_file, 'w') as f:
+            os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
+            with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.nextcloud_config, f)
             self.logger.info("Nextcloud configuration saved")
         except Exception as e:
@@ -97,9 +105,39 @@ class IndexingManager:
     def load_nextcloud_config(self) -> bool:
         """Lädt Nextcloud-Konfiguration"""
         try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'r') as f:
-                    self.nextcloud_config = json.load(f)
+            candidates = [self.config_file, self.nextcloud_auth_config_file] + self.legacy_config_files
+            for candidate in candidates:
+                if not os.path.exists(candidate):
+                    continue
+
+                with open(candidate, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+
+                normalized = {
+                    'url': str(loaded.get('url') or loaded.get('nextcloud_url') or '').strip(),
+                    'username': str(loaded.get('username') or '').strip(),
+                    'password': str(loaded.get('password') or '').strip(),
+                    'path': str(loaded.get('path') or '/').strip() or '/'
+                }
+
+                # Skip unusable entries and continue searching for valid credentials.
+                if not normalized['url'] or not normalized['username'] or not normalized['password']:
+                    continue
+
+                self.nextcloud_config = normalized
+
+                # Migrate from legacy path to canonical config location.
+                if candidate != self.config_file:
+                    try:
+                        self.save_nextcloud_config(
+                            normalized['url'],
+                            normalized['username'],
+                            normalized['password'],
+                            normalized['path']
+                        )
+                    except Exception:
+                        pass
+
                 self.logger.info("Nextcloud configuration loaded")
                 return True
         except Exception as e:
@@ -427,6 +465,9 @@ class IndexingManager:
     
     def get_config(self, mask_password: bool = False) -> Dict:
         """Gibt die aktuelle Konfiguration zurück"""
+        if not self.nextcloud_config:
+            self.load_nextcloud_config()
+
         if self.nextcloud_config:
             config = self.nextcloud_config.copy()
             if mask_password:
