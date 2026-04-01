@@ -27,7 +27,7 @@ class TaskManager:
         self.auto_sync_enabled: bool = False
         self.auto_sync_thread: Optional[threading.Thread] = None
         self.auto_sync_interval: float = 300
-        self.auto_sync_list_name: str = 'todo'
+        self.auto_sync_list_name: str = 'auto'
         self.last_auto_sync_time: float = 0
     
     def initialize(self, url: str, username: str, password: str) -> bool:
@@ -64,7 +64,28 @@ class TaskManager:
         
         # Standard-Namen für Task-Listen (in Reihenfolge der Wahrscheinlichkeit)
         if list_name is None:
-            list_names = ['todo', 'tasks', 'Todo', 'Tasks', 'My Tasks']
+            list_names = []
+
+            # Discover server-side task lists first.
+            discovered_lists = []
+            try:
+                discovered_lists = self.tasks_client.get_task_lists()
+            except Exception as e:
+                self.logger.debug(f"Could not auto-discover task lists: {e}")
+
+            fallback_lists = [
+                'todo',
+                'tasks',
+                'Todo',
+                'Tasks',
+                'My Tasks',
+                'Personal',
+                'Standard',
+                'Default',
+            ]
+            for name in [*discovered_lists, *fallback_lists]:
+                if name and name not in list_names:
+                    list_names.append(name)
         else:
             list_names = [list_name]
         
@@ -79,18 +100,23 @@ class TaskManager:
                 self.logger.debug(f"Error loading from DB: {e}")
         
         # 2. FALLBACK: WebDAV laden (langsamer)
-        tasks = []
+        tasks: List[Dict] = []
+        seen_keys = set()
         tried_lists = []
         try:
             for name in list_names:
                 tried_lists.append(name)
                 try:
-                    # Nur 1 Task laden, nicht alle!
-                    tasks = self.tasks_client.get_tasks(name)
-                    if tasks:  # Wenn Todos gefunden
-                        self.logger.info(f"⚠️  Using WebDAV fallback, found {len(tasks)} tasks from list: {name}")
-                        break
-                except:
+                    list_tasks = self.tasks_client.get_tasks(name)
+                    if list_tasks:
+                        self.logger.info(f"⚠️  Using WebDAV fallback, found {len(list_tasks)} tasks from list: {name}")
+                        for task in list_tasks:
+                            unique_key = task.get('uid') or task.get('nextcloud_path') or f"{name}:{task.get('title','')}:{task.get('due_date')}"
+                            if unique_key in seen_keys:
+                                continue
+                            seen_keys.add(unique_key)
+                            tasks.append(task)
+                except Exception:
                     continue
             
             self.cached_tasks = tasks
@@ -139,7 +165,7 @@ class TaskManager:
         
         return success
     
-    def sync_tasks_to_database(self, list_name: str = 'todo', batch_size: int = 100) -> bool:
+    def sync_tasks_to_database(self, list_name: str = 'auto', batch_size: int = 100) -> bool:
         """
         Startet den Background-Batch-Load aller Tasks von Nextcloud in DB
         **DIES SOLLTE NUR EINMAL MACHEN!**
@@ -171,7 +197,7 @@ class TaskManager:
         
         return self.batch_loader.get_load_status()
 
-    def start_auto_sync(self, list_name: str = 'todo', interval_seconds: int = 300) -> bool:
+    def start_auto_sync(self, list_name: str = 'auto', interval_seconds: int = 300) -> bool:
         """
         Startet periodischen Background-Sync Nextcloud -> DB.
         Nutzt inkrementelles Upsert (kein DB-Clear).
@@ -183,7 +209,7 @@ class TaskManager:
         if interval_seconds < 30:
             interval_seconds = 30
 
-        self.auto_sync_list_name = list_name or 'todo'
+        self.auto_sync_list_name = list_name or 'auto'
         self.auto_sync_interval = float(interval_seconds)
 
         # Bereits laufend: nur Konfiguration aktualisieren.

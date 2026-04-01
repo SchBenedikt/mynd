@@ -2,6 +2,16 @@
 
 import { useState, useEffect } from 'react';
 
+const safeReadJson = async (response) => {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { success: false, error: text };
+  }
+};
+
 /**
  * SuggestionsPanel component displays AI-generated query suggestions
  * that adapt based on time of day and user behavior patterns.
@@ -43,9 +53,9 @@ export default function SuggestionsPanel({
         }),
       });
 
-      const data = await response.json();
+      const data = await safeReadJson(response);
 
-      if (data.success && data.suggestions) {
+      if (response.ok && data.success && data.suggestions) {
         setSuggestions(data.suggestions);
         setTimePeriod(data.time_period || 'morning');
         setIsPersonalized(data.personalized || false);

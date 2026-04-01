@@ -86,6 +86,16 @@ const buildChatTitleFromText = (text) => {
   return cleaned.length > 38 ? `${cleaned.slice(0, 38)}...` : cleaned;
 };
 
+const safeReadJson = async (response) => {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { success: false, error: text };
+  }
+};
+
 export default function HomePage() {
   const router = useRouter();
   const { theme, setTheme, setDarkMode } = useTheme();
@@ -538,7 +548,10 @@ export default function HomePage() {
   const loadAIConfig = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/ai/config`);
-      const config = await res.json();
+      const config = await safeReadJson(res);
+      if (!res.ok || !config?.base_url) {
+        throw new Error(config?.error || `Request failed with status ${res.status}`);
+      }
       const url = new URL(config.base_url);
       setAiProtocol(url.protocol.replace(':', ''));
       setAiHost(url.hostname);
@@ -553,7 +566,7 @@ export default function HomePage() {
   const loadOllamaModels = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/ollama/models`);
-      const data = await res.json();
+      const data = await safeReadJson(res);
       setAiModels(data.models || []);
     } catch (err) {
       console.error('Error loading models:', err);
@@ -585,8 +598,8 @@ export default function HomePage() {
         fetch(`${API_BASE}/api/ollama/status`),
         fetch(`${API_BASE}/api/knowledge/status`)
       ]);
-      const ollama = await ollamaRes.json();
-      const kb = await kbRes.json();
+      const ollama = await safeReadJson(ollamaRes);
+      const kb = await safeReadJson(kbRes);
       setHealth({
         ollama: ollama.connected ? 'ok' : 'error',
         kb: kb.chunks_loaded > 0 ? 'ok' : 'error'
@@ -600,7 +613,7 @@ export default function HomePage() {
     try {
       setSecurityLoading(true);
       const res = await fetch(`${API_BASE}/api/security/status`);
-      const data = await res.json();
+      const data = await safeReadJson(res);
       if (!res.ok || data?.success === false) {
         setSecurityStatus({
           headline: 'Sicherheitslage aktuell nicht verfuegbar',
@@ -795,7 +808,7 @@ export default function HomePage() {
           context: conversationContext
         })
       });
-      const data = await res.json();
+      const data = await safeReadJson(res);
       if (!res.ok || data?.success === false) {
         const errorMessage = data?.error || `Request failed with status ${res.status}`;
         insertMessageAfter(targetChatId, userMessageId, {
@@ -820,7 +833,7 @@ export default function HomePage() {
         if (!calendars.length) {
           try {
             const calendarsRes = await fetch(`${API_BASE}/api/calendar/calendars`);
-            const calendarsData = await calendarsRes.json();
+            const calendarsData = await safeReadJson(calendarsRes);
             calendars = calendarsData?.calendars || [];
           } catch (err) {
             console.error('Error loading calendars for form:', err);

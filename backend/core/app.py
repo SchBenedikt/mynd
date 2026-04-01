@@ -674,7 +674,7 @@ def refresh_simple_calendar_manager() -> bool:
 tasks_enabled = False
 TASKS_AUTO_SYNC_ENABLED = os.getenv('TASKS_AUTO_SYNC_ENABLED', 'true').lower() == 'true'
 TASKS_AUTO_SYNC_INTERVAL_SECONDS = int(os.getenv('TASKS_AUTO_SYNC_INTERVAL_SECONDS', '300'))
-TASKS_AUTO_SYNC_LIST_NAME = os.getenv('TASKS_AUTO_SYNC_LIST_NAME', 'todo')
+TASKS_AUTO_SYNC_LIST_NAME = os.getenv('TASKS_AUTO_SYNC_LIST_NAME', 'auto')
 
 def initialize_tasks_from_config():
     """Initialisiert Task-Manager wenn Nextcloud-Config vorhanden"""
@@ -709,11 +709,16 @@ def initialize_tasks_from_config():
             if success:
                 logger.info(f"✅ Tasks manager initialized: tasks_enabled={tasks_enabled}")
                 if TASKS_AUTO_SYNC_ENABLED:
+                    auto_sync_list_name = TASKS_AUTO_SYNC_LIST_NAME or 'auto'
+
                     auto_sync_started = task_manager.start_auto_sync(
-                        list_name=TASKS_AUTO_SYNC_LIST_NAME,
+                        list_name=auto_sync_list_name,
                         interval_seconds=TASKS_AUTO_SYNC_INTERVAL_SECONDS
                     )
-                    logger.info(f"🔁 Task auto-sync {'enabled' if auto_sync_started else 'not started'}")
+                    logger.info(
+                        f"🔁 Task auto-sync {'enabled' if auto_sync_started else 'not started'} "
+                        f"(list='{auto_sync_list_name}')"
+                    )
             else:
                 logger.warning(f"❌ Failed to initialize tasks manager: tasks_enabled={tasks_enabled}")
         else:
@@ -819,6 +824,12 @@ def _filter_tasks_by_prompt(tasks: List[Dict], message: str) -> List[Dict]:
     message_lower = message.lower()
     today = date.today()
 
+    # Erinnerung = VALARM innerhalb VTODO. Falls vorhanden, nur Reminder-Tasks zeigen.
+    if any(keyword in message_lower for keyword in ['erinnerung', 'erinnerungen', 'reminder', 'reminders']):
+        alarm_tasks = [t for t in tasks if t.get('has_alarm')]
+        if alarm_tasks:
+            tasks = alarm_tasks
+
     def due_of(task: Dict) -> Optional[date]:
         return _parse_task_due_date(task.get('due_date'))
 
@@ -859,6 +870,9 @@ def _build_direct_todo_response(tasks: List[Dict], filtered_tasks: List[Dict], m
     """Erzeugt eine direkte, verlässliche Antwort für Todo/Erinnerungsfragen."""
     today = date.today()
     message_lower = message.lower()
+    is_reminder_query = any(k in message_lower for k in ['erinnerung', 'erinnerungen', 'reminder', 'reminders'])
+
+    item_word = 'Erinnerungen' if is_reminder_query else 'Aufgaben'
 
     overdue_count = 0
     due_today_count = 0
@@ -875,16 +889,16 @@ def _build_direct_todo_response(tasks: List[Dict], filtered_tasks: List[Dict], m
 
     if not filtered_tasks:
         if 'überfällig' in message_lower:
-            return "Du hast aktuell keine überfälligen Erinnerungen."
+            return f"Du hast aktuell keine überfälligen {item_word}."
         if 'heute' in message_lower:
-            return "Für heute hast du keine fälligen Erinnerungen."
-        return "Du hast aktuell keine offenen Erinnerungen."
+            return f"Für heute hast du keine fälligen {item_word}."
+        return f"Du hast aktuell keine offenen {item_word}."
 
     lines = []
-    lines.append(f"Du hast {len(tasks)} offene Erinnerungen.")
+    lines.append(f"Du hast {len(tasks)} offene {item_word}.")
     lines.append(f"Davon: {overdue_count} überfällig, {due_today_count} für heute, {no_due_count} ohne Datum.")
     lines.append("")
-    lines.append("Relevante Erinnerungen:")
+    lines.append(f"Relevante {item_word}:")
 
     # Sortierung: zuerst überfällig, dann heute, dann mit Datum, dann ohne Datum
     def sort_key(task: Dict):
@@ -2892,9 +2906,10 @@ def tasks_sync():
     
     try:
         # Starte Background-Load
+        payload = request.get_json(silent=True) or {}
         success = task_manager.sync_tasks_to_database(
-            list_name=request.json.get('list_name', 'todo'),
-            batch_size=request.json.get('batch_size', 100)
+            list_name=payload.get('list_name', 'auto'),
+            batch_size=payload.get('batch_size', 100)
         )
         
         if success:
@@ -4780,10 +4795,18 @@ def agent_query():
                     due_date = datetime.now().strftime('%Y-%m-%d')
 
                 if title and tasks_enabled and task_manager.tasks_client:
+                    target_list_name = 'tasks'
+                    try:
+                        discovered_task_lists = task_manager.tasks_client.get_task_lists()
+                        if discovered_task_lists:
+                            target_list_name = discovered_task_lists[0]
+                    except Exception as e:
+                        logger.debug(f"Task list discovery failed for action parser: {e}")
+
                     success = task_manager.create_task(
                         title=title,
                         due_date=due_date,
-                        list_name='todo'
+                        list_name=target_list_name
                     )
                     if success:
                         action_response = f"✓ Erinnerung '{title}' wurde erstellt (faellig: {due_date or 'unbegrenzt'})"
