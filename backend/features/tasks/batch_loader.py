@@ -28,7 +28,7 @@ class BatchTaskLoader:
         self.load_thread: Optional[threading.Thread] = None
         self.logger = logger
     
-    def start_background_load(self, list_name: str = 'todo') -> bool:
+    def start_background_load(self, list_name: str = 'auto') -> bool:
         """Startet Background-Thread zum Laden von Tasks"""
         if self.is_loading:
             self.logger.warning("Load already in progress")
@@ -50,35 +50,72 @@ class BatchTaskLoader:
         try:
             start_time = time.time()
             self.logger.info(f"⏳ Loading tasks from Nextcloud in batches...")
-            
-            # Lade alle Task-Pfade von Nextcloud
-            ics_paths = self._get_all_task_paths(list_name)
-            
-            if not ics_paths:
-                self.logger.warning(f"No tasks found in '{list_name}'")
-                self.is_loading = False
-                return
-            
-            self.logger.info(f"📦 Found {len(ics_paths)} tasks, loading in batches of {self.batch_size}...")
-            
-            # Lade in Batches
+
+            target_lists: List[str] = []
+            if list_name and list_name != 'auto':
+                target_lists = [list_name]
+            else:
+                try:
+                    target_lists = self.tasks_client.get_task_lists()
+                except Exception as e:
+                    self.logger.warning(f"Could not discover task lists for auto sync: {e}")
+
+            if not target_lists:
+                target_lists = ['todo', 'tasks']
+
+            # Legacy-Schutz: Falls explizit angeforderte Liste nicht existiert (404),
+            # wechsle automatisch auf Discovery aller verfügbaren Listen.
+            if len(target_lists) == 1 and list_name and list_name != 'auto':
+                probe_paths = self._get_all_task_paths(target_lists[0])
+                if not probe_paths:
+                    try:
+                        discovered_lists = self.tasks_client.get_task_lists()
+                    except Exception as e:
+                        self.logger.warning(f"Fallback discovery failed after missing list '{target_lists[0]}': {e}")
+                        discovered_lists = []
+
+                    if discovered_lists:
+                        self.logger.warning(
+                            f"List '{target_lists[0]}' not found/empty, falling back to discovered lists: {discovered_lists}"
+                        )
+                        target_lists = discovered_lists
+
+            self.logger.info(f"📚 Syncing task lists: {target_lists}")
+
             total_loaded = 0
-            for batch_num, batch_paths in enumerate(self._chunk_list(ics_paths, self.batch_size)):
-                batch_start = time.time()
-                batch_tasks = self._load_task_batch(batch_paths)
-                
-                if batch_tasks:
-                    loaded_count = self.database.add_tasks_batch(batch_tasks, list_name)
-                    total_loaded += loaded_count
-                    
-                    batch_time = time.time() - batch_start
-                    self.logger.info(
-                        f"✅ Batch {batch_num + 1}: "
-                        f"Loaded {loaded_count}/{len(batch_paths)} tasks in {batch_time:.2f}s"
-                    )
-                
-                # Kurze Pause zwischen Batches um WebDAV nicht zu überlasten
-                time.sleep(0.2)
+            seen_paths = set()
+            for source_list in target_lists:
+                ics_paths = self._get_all_task_paths(source_list)
+                if not ics_paths:
+                    self.logger.warning(f"No tasks found in '{source_list}'")
+                    continue
+
+                unique_paths = [p for p in ics_paths if p not in seen_paths]
+                seen_paths.update(unique_paths)
+
+                if not unique_paths:
+                    continue
+
+                self.logger.info(
+                    f"📦 Found {len(unique_paths)} tasks in '{source_list}', loading in batches of {self.batch_size}..."
+                )
+
+                for batch_num, batch_paths in enumerate(self._chunk_list(unique_paths, self.batch_size)):
+                    batch_start = time.time()
+                    batch_tasks = self._load_task_batch(batch_paths)
+
+                    if batch_tasks:
+                        loaded_count = self.database.add_tasks_batch(batch_tasks, source_list)
+                        total_loaded += loaded_count
+
+                        batch_time = time.time() - batch_start
+                        self.logger.info(
+                            f"✅ [{source_list}] Batch {batch_num + 1}: "
+                            f"Loaded {loaded_count}/{len(batch_paths)} tasks in {batch_time:.2f}s"
+                        )
+
+                    # Kurze Pause zwischen Batches um WebDAV nicht zu überlasten
+                    time.sleep(0.2)
             
             elapsed = time.time() - start_time
             self.logger.info(
@@ -108,7 +145,7 @@ class BatchTaskLoader:
             )
             
             if response.status_code not in [207, 200]:
-                self.logger.warning(f"PROPFIND failed: {response.status_code}")
+                self.logger.warning(f"PROPFIND failed for '{list_name}': {response.status_code}")
                 return []
             
             # Parse XML
@@ -177,13 +214,35 @@ class QuickTaskLoader:
         self.database = database
         self.logger = logger
     
-    def load_open_tasks_only(self, list_name: str = 'todo', max_tasks: int = 5) -> List[Dict]:
+    def load_open_tasks_only(self, list_name: str = 'auto', max_tasks: int = 5) -> List[Dict]:
         """Lädt NUR wenige offene Tasks (schnell, für Chat)"""
         try:
-            ics_paths = self._get_first_n_paths(list_name, max_tasks * 2)
-            
+            target_lists = [list_name] if list_name and list_name != 'auto' else []
+            if not target_lists:
+                try:
+                    target_lists = self.tasks_client.get_task_lists()
+                except Exception as e:
+                    self.logger.warning(f"Could not discover task lists for quick load: {e}")
+                    target_lists = []
+
+            if not target_lists:
+                target_lists = ['todo', 'tasks']
+
+            seen_paths = set()
+            ics_paths: List[str] = []
+            for source_list in target_lists:
+                for path in self._get_first_n_paths(source_list, max_tasks * 2):
+                    if path in seen_paths:
+                        continue
+                    seen_paths.add(path)
+                    ics_paths.append(path)
+                    if len(ics_paths) >= max_tasks * 2:
+                        break
+                if len(ics_paths) >= max_tasks * 2:
+                    break
+
             if not ics_paths:
-                self.logger.warning(f"No tasks found in '{list_name}'")
+                self.logger.warning(f"No tasks found in any list ({target_lists})")
                 return []
             
             # Schnell 2-3 Tasks laden

@@ -956,6 +956,219 @@ body {
   border-radius: 8px;
 }
 
+.api-immich-box {
+  padding: 1rem;
+  background: color-mix(in srgb, var(--chip-bg) 72%, white 28%);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-bottom: 1.25rem;
+}
+
+.api-overview-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 1fr)) minmax(220px, 1.2fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.api-overview-chip {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--chip-bg);
+  padding: 0.6rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.api-overview-chip span {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.api-overview-chip strong {
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.api-search-box {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--input-bg);
+  padding: 0 0.65rem;
+}
+
+.api-search-box i {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.api-search-box input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  min-height: 38px;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.api-workspace {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.95fr) minmax(320px, 1.6fr);
+  gap: 1rem;
+}
+
+.api-catalog {
+  display: grid;
+  gap: 0.65rem;
+  align-content: start;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.api-item-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--chip-bg);
+  padding: 0.8rem;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.api-item-card:hover {
+  border-color: var(--brand);
+  transform: translateY(-1px);
+}
+
+.api-item-card.selected {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--chip-bg) 70%, var(--accent-light) 30%);
+}
+
+.api-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.api-item-title {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.api-item-pill {
+  font-size: 0.72rem;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.api-item-pill.healthy {
+  color: #166534;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.32);
+}
+
+.api-item-pill.unhealthy {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.32);
+}
+
+.api-item-pill.neutral {
+  color: var(--muted);
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+.api-item-bottom {
+  margin-top: 0.55rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.api-key-label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+.api-response-time {
+  font-size: 0.73rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.08rem 0.45rem;
+}
+
+.api-editor {
+  min-height: 300px;
+}
+
+.api-editor-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1.1rem;
+  background: color-mix(in srgb, var(--input-bg) 86%, white 14%);
+}
+
+.api-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1.15rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.api-editor-subsection {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.api-empty-state {
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--chip-bg) 60%, transparent 40%);
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 1rem;
+}
+
+.api-empty-state.large {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.api-warning-list {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.api-warning-item {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: var(--chip-bg);
+  border: 1px solid var(--line);
+}
+
 /* Theme Buttons */
 
 .theme-btn {
@@ -1889,6 +2102,22 @@ body {
   .settings-full .settings-tabs .tab-btn {
     padding: 0.5rem 0.8rem;
     font-size: 0.85rem;
+  }
+
+  .api-overview-bar {
+    grid-template-columns: repeat(2, minmax(110px, 1fr));
+  }
+
+  .api-search-box {
+    grid-column: 1 / -1;
+  }
+
+  .api-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .api-catalog {
+    max-height: 42vh;
   }
   
   .topbar {

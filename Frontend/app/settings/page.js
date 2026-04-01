@@ -10,6 +10,7 @@ const API_BASE = '';
 const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
 const API_DISPLAY_NAMES = {
+  immich: 'Immich',
   homeassistant: 'Home Assistant',
   uptimekuma: 'Uptime Kuma',
   openweather: 'OpenWeather',
@@ -76,6 +77,7 @@ export default function SettingsPage() {
   const [selectedApi, setSelectedApi] = useState(null);
   const [apiConfig, setApiConfig] = useState({});
   const [apiConfigStatus, setApiConfigStatus] = useState('');
+  const [apiQuery, setApiQuery] = useState('');
   const [ninaRegions, setNinaRegions] = useState([]);
   const [ninaRegionStatus, setNinaRegionStatus] = useState('');
   const [ninaRegionQuery, setNinaRegionQuery] = useState('');
@@ -87,6 +89,24 @@ export default function SettingsPage() {
 
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
   const getApiDisplayName = (apiName) => API_DISPLAY_NAMES[apiName] || apiName;
+  const immichConfigured = Boolean(immichUrlDefault && immichApiKeyDefault);
+  const catalogApis = [{ api_name: 'immich', configured: immichConfigured, isImmichSpecial: true }, ...apis];
+  const normalizedApiQuery = apiQuery.trim().toLowerCase();
+  const visibleApis = catalogApis
+    .filter((api) => {
+      if (!normalizedApiQuery) return true;
+      const name = getApiDisplayName(api.api_name).toLowerCase();
+      const key = String(api.api_name || '').toLowerCase();
+      return name.includes(normalizedApiQuery) || key.includes(normalizedApiQuery);
+    })
+    .sort((a, b) => {
+      if (a.configured !== b.configured) {
+        return a.configured ? -1 : 1;
+      }
+      return getApiDisplayName(a.api_name).localeCompare(getApiDisplayName(b.api_name));
+    });
+  const configuredApiCount = catalogApis.filter((api) => api.configured).length;
+  const healthyApiCount = catalogApis.filter((api) => apiHealth[api.api_name]?.status === 'healthy').length;
 
   useEffect(() => {
     loadAIConfig();
@@ -398,11 +418,14 @@ export default function SettingsPage() {
       const data = await res.json();
       if (res.ok && data?.success) {
         setImmichStatus(tr('Erfolgreich gespeichert', 'Saved successfully'));
+        loadApiHealth();
       } else {
         setImmichStatus(`Error: ${data?.error || tr('Immich-Konfiguration konnte nicht gespeichert werden', 'Could not save Immich config')}`);
+        loadApiHealth();
       }
     } catch (err) {
       setImmichStatus('Error: ' + err.message);
+      loadApiHealth();
     }
   };
 
@@ -418,11 +441,14 @@ export default function SettingsPage() {
       const data = await res.json();
       if (res.ok && data?.success) {
         setImmichStatus(tr('Verbindung erfolgreich', 'Connection successful'));
+        loadApiHealth();
       } else {
         setImmichStatus(`Connection failed: ${data?.error || data?.message || tr('Unbekannter Fehler', 'Unknown error')}`);
+        loadApiHealth();
       }
     } catch (err) {
       setImmichStatus(tr('Verbindung fehlgeschlagen: ', 'Connection failed: ') + err.message);
+      loadApiHealth();
     }
   };
 
@@ -604,11 +630,38 @@ export default function SettingsPage() {
 
   const loadApiHealth = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/registry/health`);
-      if (res.ok) {
-        const data = await res.json();
-        setApiHealth(data.health || {});
+      const [registryRes, immichRes] = await Promise.all([
+        fetch(`${API_BASE}/api/registry/health`),
+        fetch(`${API_BASE}/api/immich/test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        })
+      ]);
+
+      const healthMap = {};
+
+      if (registryRes.ok) {
+        const registryData = await registryRes.json();
+        Object.assign(healthMap, registryData.health || {});
       }
+
+      const immichStart = performance.now();
+      let immichPayload = {};
+      try {
+        immichPayload = await immichRes.json();
+      } catch (_) {
+        immichPayload = {};
+      }
+      const immichElapsedSeconds = (performance.now() - immichStart) / 1000;
+
+      healthMap.immich = {
+        status: immichRes.ok && immichPayload?.success ? 'healthy' : 'unhealthy',
+        response_time: immichElapsedSeconds,
+        error: immichRes.ok && immichPayload?.success ? null : (immichPayload?.error || immichPayload?.message || 'Connection test failed')
+      };
+
+      setApiHealth(healthMap);
     } catch (err) {
       console.error('Error loading API health:', err);
     }
@@ -1039,329 +1092,342 @@ export default function SettingsPage() {
               <div className="settings-panel">
                 <div className="panel-section">
                   <div className="section-title">{tr('API Integrationen', 'API Integrations')}</div>
-                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1.5rem 0'}}>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1.25rem 0'}}>
                     {tr('Konfiguriere externe APIs für erweiterte Funktionen', 'Configure external APIs for extended functionality')}
                   </p>
 
-                  <div style={{padding: '1rem', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px', marginBottom: '1.5rem'}}>
-                    <div className="section-title">{tr('Immich-Integration', 'Immich Integration')}</div>
-                    <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1rem 0'}}>
-                      {tr('Globale Immich-Standards fuer die Fotosuche konfigurieren.', 'Configure global Immich defaults for photo search.')}
-                    </p>
-                    <div className="input-group">
-                      <label>Immich URL</label>
+                  <div className="api-overview-bar">
+                    <div className="api-overview-chip">
+                      <span>{tr('Gesamt', 'Total')}</span>
+                      <strong>{apis.length}</strong>
+                    </div>
+                    <div className="api-overview-chip">
+                      <span>{tr('Konfiguriert', 'Configured')}</span>
+                      <strong>{configuredApiCount}</strong>
+                    </div>
+                    <div className="api-overview-chip">
+                      <span>{tr('Erreichbar', 'Reachable')}</span>
+                      <strong>{healthyApiCount}</strong>
+                    </div>
+                    <div className="api-search-box">
+                      <i className="fas fa-search" aria-hidden="true"></i>
                       <input
                         type="text"
-                        value={immichUrlDefault}
-                        onChange={(e) => setImmichUrlDefault(e.target.value)}
-                        placeholder="https://immich.example.com"
+                        value={apiQuery}
+                        onChange={(e) => setApiQuery(e.target.value)}
+                        placeholder={tr('API suchen...', 'Search API...')}
                       />
                     </div>
-                    <div className="input-group">
-                      <label>Immich API Key</label>
-                      <input
-                        type="password"
-                        value={immichApiKeyDefault}
-                        onChange={(e) => setImmichApiKeyDefault(e.target.value)}
-                        placeholder="immich-api-key"
-                      />
-                    </div>
-                    <div className="button-group">
-                      <button className="btn primary" onClick={saveImmichConfig}>{tr('Immich speichern', 'Save Immich')}</button>
-                      <button className="btn" onClick={testImmichConnection}>{tr('Verbindung testen', 'Test Connection')}</button>
-                    </div>
-                    {immichStatus && <div className="status-text">{immichStatus}</div>}
                   </div>
 
-                  {/* API List */}
-                  <div style={{display: 'grid', gap: '1rem', marginBottom: '2rem'}}>
-                    {apis.map((api) => {
-                      const health = apiHealth[api.api_name] || {};
-                      const isHealthy = health.status === 'healthy';
-                      const isConfigured = api.configured;
+                  <div className="api-workspace">
+                    <div className="api-catalog">
+                      {visibleApis.length === 0 && (
+                        <div className="api-empty-state">{tr('Keine API gefunden', 'No APIs found')}</div>
+                      )}
 
-                      return (
-                        <div
-                          key={api.api_name}
-                          style={{
-                            padding: '1rem',
-                            background: selectedApi?.api_name === api.api_name ? 'var(--background)' : 'var(--panel-bg)',
-                            border: selectedApi?.api_name === api.api_name ? '2px solid var(--brand)' : '1px solid var(--border)',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s'
-                          }}
-                          onClick={() => {
-                            loadApiConfig(api.api_name);
-                            setApiConfigStatus('');
-                          }}
-                        >
-                          <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
-                            <div style={{display: 'flex', alignItems: 'center', gap: '1rem', flex: 1}}>
-                              <div style={{
-                                width: '12px',
-                                height: '12px',
-                                borderRadius: '50%',
-                                background: isConfigured ? (isHealthy ? 'var(--success)' : 'var(--error)') : 'var(--muted)'
-                              }}></div>
-                              <div style={{flex: 1}}>
-                                <div style={{fontWeight: '600'}}>
-                                  {getApiDisplayName(api.api_name)}
-                                </div>
-                                <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.2rem'}}>
-                                  {isConfigured ?
-                                    (isHealthy ? tr('✓ Verbunden', '✓ Connected') : tr('✗ Nicht erreichbar', '✗ Not reachable')) :
-                                    tr('Nicht konfiguriert', 'Not configured')}
-                                </div>
+                      {visibleApis.map((api) => {
+                        const health = apiHealth[api.api_name] || {};
+                        const isHealthy = health.status === 'healthy';
+                        const isConfigured = api.configured;
+                        const isSelected = selectedApi?.api_name === api.api_name;
+                        const statusVariant = !isConfigured ? 'neutral' : (isHealthy ? 'healthy' : 'unhealthy');
+                        const statusLabel = !isConfigured
+                          ? tr('Nicht konfiguriert', 'Not configured')
+                          : (isHealthy
+                            ? tr('Verbunden', 'Connected')
+                            : tr('Nicht erreichbar', 'Not reachable'));
+
+                        return (
+                          <button
+                            key={api.api_name}
+                            type="button"
+                            className={`api-item-card ${isSelected ? 'selected' : ''}`}
+                            onClick={() => {
+                              if (api.isImmichSpecial) {
+                                setSelectedApi({ api_name: 'immich', configured: immichConfigured, isImmichSpecial: true, schema: {} });
+                                setApiConfig({});
+                              } else {
+                                loadApiConfig(api.api_name);
+                              }
+                              setApiConfigStatus('');
+                            }}
+                          >
+                            <div className="api-item-top">
+                              <div className="api-item-title">{getApiDisplayName(api.api_name)}</div>
+                              <div className={`api-item-pill ${statusVariant}`}>
+                                {statusLabel}
                               </div>
                             </div>
-                            <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                            <div className="api-item-bottom">
+                              <span className="api-key-label">{api.api_name}</span>
                               {health.response_time && (
-                                <div style={{fontSize: '0.85rem', color: 'var(--muted)', minWidth: '40px', textAlign: 'right'}}>
-                                  {Math.round(health.response_time * 1000)}ms
-                                </div>
+                                <span className="api-response-time">{Math.round(health.response_time * 1000)}ms</span>
                               )}
-                              <button
-                                className="btn"
-                                style={{
-                                  padding: '0.4rem 0.8rem',
-                                  fontSize: '0.85rem',
-                                  background: isConfigured ? 'var(--chip-bg)' : 'var(--brand)',
-                                  color: isConfigured ? 'var(--ink)' : 'white'
-                                }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  loadApiConfig(api.api_name);
-                                  setApiConfigStatus('');
-                                }}
-                              >
-                                {isConfigured ? tr('Bearbeiten', 'Edit') : tr('Einrichten', 'Setup')}
-                              </button>
                             </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                          </button>
+                        );
+                      })}
+                    </div>
 
-                  {/* API Configuration Form */}
-                  {selectedApi && (
-                    <div style={{marginTop: '2rem', padding: '1.5rem', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px'}}>
-                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)'}}>
-                        <div>
-                          <div className="section-title" style={{margin: 0}}>
-                            {getApiDisplayName(selectedApi.api_name)}
-                          </div>
-                          <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.25rem'}}>
-                            {selectedApi.configured ? tr('✓ Konfiguriert', '✓ Configured') : tr('Nicht konfiguriert', 'Not configured')}
-                          </div>
+                    <div className="api-editor">
+                      {!selectedApi && (
+                        <div className="api-empty-state large">
+                          {tr('Waehle links eine API aus, um die Konfiguration zu bearbeiten.', 'Select an API from the left to edit its configuration.')}
                         </div>
-                        <button
-                          className="btn"
-                          onClick={() => {
-                            setSelectedApi(null);
-                            setApiConfig({});
-                            setApiConfigStatus('');
-                          }}
-                          style={{padding: '0.5rem 1rem'}}
-                        >
-                          {tr('Schließen', 'Close')}
-                        </button>
-                      </div>
+                      )}
 
-                      {(selectedApi.api_name === 'nina' || selectedApi.api_name === 'openweather') && (
-                        <div style={{marginBottom: '2rem', paddingBottom: '1.5rem', borderBottom: '1px solid var(--border)'}}>
-                          <div style={{fontSize: '0.9rem', fontWeight: '600', marginBottom: '1rem'}}>
-                            {tr('Standort-Einstellungen', 'Location Settings')}
-                          </div>
-                          <div style={{marginBottom: '1rem'}}>
-                            <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
-                              {tr('Standort automatisch uebernehmen', 'Auto-detect location')}
+                      {selectedApi && (
+                        <div className="api-editor-card">
+                          <div className="api-editor-header">
+                            <div>
+                              <div className="section-title" style={{margin: 0}}>
+                                {getApiDisplayName(selectedApi.api_name)}
+                              </div>
+                              <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.25rem'}}>
+                                {selectedApi.configured ? tr('✓ Konfiguriert', '✓ Configured') : tr('Nicht konfiguriert', 'Not configured')}
+                              </div>
                             </div>
-                            <div className="button-group">
-                              <button className="btn" onClick={resolveLocation}>
-                                {tr('Standort ermitteln', 'Detect location')}
-                              </button>
-                            </div>
-                            {locationStatus && (
-                              <div className="status-text" style={{marginTop: '0.5rem'}}>{locationStatus}</div>
-                            )}
-                            {locationResult && (
-                              <div style={{marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--muted)'}}>
-                                {locationResult.location?.display_name && (
-                                  <div>{tr('Standort', 'Location')}: {locationResult.location.display_name}</div>
-                                )}
-                                {locationResult.nina?.ars && (
-                                  <div>{tr('NINA ARS', 'NINA ARS')}: {locationResult.nina.ars} {locationResult.nina.name ? `(${locationResult.nina.name})` : ''}</div>
-                                )}
-                                {locationResult.openweather?.lat != null && locationResult.openweather?.lon != null && (
-                                  <div>
-                                    {tr('OpenWeather Koordinaten', 'OpenWeather coordinates')}: {locationResult.openweather.lat}, {locationResult.openweather.lon}
-                                    {locationResult.openweather.location_name ? ` (${locationResult.openweather.location_name})` : ''}
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                setSelectedApi(null);
+                                setApiConfig({});
+                                setApiConfigStatus('');
+                              }}
+                              style={{padding: '0.5rem 1rem'}}
+                            >
+                              {tr('Schließen', 'Close')}
+                            </button>
                           </div>
-                          {selectedApi.api_name === 'nina' && (
-                            <>
-                              <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
-                                {tr('Regionalschluessel (ARS) suchen', 'Search regional keys (ARS)')}
+
+                          {(selectedApi.api_name === 'nina' || selectedApi.api_name === 'openweather') && (
+                            <div className="api-editor-subsection">
+                              <div style={{fontSize: '0.9rem', fontWeight: '600', marginBottom: '1rem'}}>
+                                {tr('Standort-Einstellungen', 'Location Settings')}
                               </div>
-                              <div className="input-group">
-                                <label>{tr('Suche nach Ort oder ARS', 'Search by place or ARS')}</label>
-                                <input
-                                  type="text"
-                                  value={ninaRegionQuery}
-                                  onChange={(e) => setNinaRegionQuery(e.target.value)}
-                                  placeholder={tr('z.B. Berlin oder 110000000000', 'e.g. Berlin or 110000000000')}
-                                />
-                              </div>
-                              <div className="button-group" style={{marginTop: '0.5rem'}}>
-                                <button className="btn" onClick={loadNinaRegions}>
-                                  {tr('Regionen laden', 'Load regions')}
-                                </button>
-                              </div>
-                              {ninaRegionStatus && (
-                                <div className="status-text" style={{marginTop: '0.5rem'}}>{ninaRegionStatus}</div>
-                              )}
-                              {ninaRegions.length > 0 && (
-                                <div className="input-group" style={{marginTop: '0.75rem'}}>
-                                  <label>{tr('Treffer', 'Matches')}</label>
-                                  <select
-                                    value=""
-                                    onChange={(e) => {
-                                      const ars = e.target.value;
-                                      if (ars) {
-                                        setApiConfig(prev => ({ ...prev, ars }));
-                                      }
-                                    }}
-                                  >
-                                    <option value="">{tr('Auswaehlen...', 'Select...')}</option>
-                                    {ninaRegions.map((entry) => (
-                                      <option key={`${entry.ars}-${entry.name}`} value={entry.ars}>
-                                        {entry.ars} - {entry.name}{entry.hint ? ` (${entry.hint})` : ''}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              )}
-                              <div style={{marginTop: '1rem'}}>
+                              <div style={{marginBottom: '1rem'}}>
                                 <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
-                                  {tr('Warnungen fuer konfigurierten ARS', 'Warnings for configured ARS')}
+                                  {tr('Standort automatisch uebernehmen', 'Auto-detect location')}
                                 </div>
                                 <div className="button-group">
-                                  <button className="btn" onClick={loadNinaWarnings}>
-                                    {tr('Warnungen laden', 'Load warnings')}
+                                  <button className="btn" onClick={resolveLocation}>
+                                    {tr('Standort ermitteln', 'Detect location')}
                                   </button>
                                 </div>
-                                {ninaWarningsStatus && (
-                                  <div className="status-text" style={{marginTop: '0.5rem'}}>
-                                    {ninaWarningsStatus}
-                                  </div>
+                                {locationStatus && (
+                                  <div className="status-text" style={{marginTop: '0.5rem'}}>{locationStatus}</div>
                                 )}
-                                {ninaWarningsArs && (
-                                  <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.25rem'}}>
-                                    {tr('ARS', 'ARS')}: {ninaWarningsArs}
-                                  </div>
-                                )}
-                                {ninaWarnings.length > 0 && (
-                                  <div style={{marginTop: '0.75rem', display: 'grid', gap: '0.5rem'}}>
-                                    {ninaWarnings.slice(0, 10).map((warning, index) => (
-                                      <div
-                                        key={`${warning.identifier || warning.id || index}`}
-                                        style={{
-                                          padding: '0.75rem',
-                                          borderRadius: '6px',
-                                          background: 'var(--panel-bg)',
-                                          border: '1px solid var(--border)'
-                                        }}
-                                      >
-                                        <div style={{fontWeight: '600'}}>{getNinaWarningTitle(warning)}</div>
-                                        {getNinaWarningDescription(warning) && (
-                                          <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.35rem'}}>
-                                            {getNinaWarningDescription(warning)}
-                                          </div>
-                                        )}
+                                {locationResult && (
+                                  <div style={{marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--muted)'}}>
+                                    {locationResult.location?.display_name && (
+                                      <div>{tr('Standort', 'Location')}: {locationResult.location.display_name}</div>
+                                    )}
+                                    {locationResult.nina?.ars && (
+                                      <div>{tr('NINA ARS', 'NINA ARS')}: {locationResult.nina.ars} {locationResult.nina.name ? `(${locationResult.nina.name})` : ''}</div>
+                                    )}
+                                    {locationResult.openweather?.lat != null && locationResult.openweather?.lon != null && (
+                                      <div>
+                                        {tr('OpenWeather Koordinaten', 'OpenWeather coordinates')}: {locationResult.openweather.lat}, {locationResult.openweather.lon}
+                                        {locationResult.openweather.location_name ? ` (${locationResult.openweather.location_name})` : ''}
                                       </div>
-                                    ))}
+                                    )}
                                   </div>
                                 )}
                               </div>
+                              {selectedApi.api_name === 'nina' && (
+                                <>
+                                  <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
+                                    {tr('Regionalschluessel (ARS) suchen', 'Search regional keys (ARS)')}
+                                  </div>
+                                  <div className="input-group">
+                                    <label>{tr('Suche nach Ort oder ARS', 'Search by place or ARS')}</label>
+                                    <input
+                                      type="text"
+                                      value={ninaRegionQuery}
+                                      onChange={(e) => setNinaRegionQuery(e.target.value)}
+                                      placeholder={tr('z.B. Berlin oder 110000000000', 'e.g. Berlin or 110000000000')}
+                                    />
+                                  </div>
+                                  <div className="button-group" style={{marginTop: '0.5rem'}}>
+                                    <button className="btn" onClick={loadNinaRegions}>
+                                      {tr('Regionen laden', 'Load regions')}
+                                    </button>
+                                  </div>
+                                  {ninaRegionStatus && (
+                                    <div className="status-text" style={{marginTop: '0.5rem'}}>{ninaRegionStatus}</div>
+                                  )}
+                                  {ninaRegions.length > 0 && (
+                                    <div className="input-group" style={{marginTop: '0.75rem'}}>
+                                      <label>{tr('Treffer', 'Matches')}</label>
+                                      <select
+                                        value=""
+                                        onChange={(e) => {
+                                          const ars = e.target.value;
+                                          if (ars) {
+                                            setApiConfig(prev => ({ ...prev, ars }));
+                                          }
+                                        }}
+                                      >
+                                        <option value="">{tr('Auswaehlen...', 'Select...')}</option>
+                                        {ninaRegions.map((entry) => (
+                                          <option key={`${entry.ars}-${entry.name}`} value={entry.ars}>
+                                            {entry.ars} - {entry.name}{entry.hint ? ` (${entry.hint})` : ''}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
+                                  <div style={{marginTop: '1rem'}}>
+                                    <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
+                                      {tr('Warnungen fuer konfigurierten ARS', 'Warnings for configured ARS')}
+                                    </div>
+                                    <div className="button-group">
+                                      <button className="btn" onClick={loadNinaWarnings}>
+                                        {tr('Warnungen laden', 'Load warnings')}
+                                      </button>
+                                    </div>
+                                    {ninaWarningsStatus && (
+                                      <div className="status-text" style={{marginTop: '0.5rem'}}>
+                                        {ninaWarningsStatus}
+                                      </div>
+                                    )}
+                                    {ninaWarningsArs && (
+                                      <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.25rem'}}>
+                                        {tr('ARS', 'ARS')}: {ninaWarningsArs}
+                                      </div>
+                                    )}
+                                    {ninaWarnings.length > 0 && (
+                                      <div className="api-warning-list">
+                                        {ninaWarnings.slice(0, 10).map((warning, index) => (
+                                          <div
+                                            key={`${warning.identifier || warning.id || index}`}
+                                            className="api-warning-item"
+                                          >
+                                            <div style={{fontWeight: '600'}}>{getNinaWarningTitle(warning)}</div>
+                                            {getNinaWarningDescription(warning) && (
+                                              <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.35rem'}}>
+                                                {getNinaWarningDescription(warning)}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {selectedApi.api_name === 'immich' && (
+                            <div style={{marginBottom: '1.5rem'}}>
+                              <div style={{fontSize: '0.9rem', color: 'var(--muted)', marginBottom: '0.9rem'}}>
+                                {tr('Globale Immich-Standards fuer die Fotosuche konfigurieren.', 'Configure global Immich defaults for photo search.')}
+                              </div>
+                              <div className="input-group">
+                                <label>Immich URL</label>
+                                <input
+                                  type="text"
+                                  value={immichUrlDefault}
+                                  onChange={(e) => setImmichUrlDefault(e.target.value)}
+                                  placeholder="https://immich.example.com"
+                                />
+                              </div>
+                              <div className="input-group">
+                                <label>Immich API Key</label>
+                                <input
+                                  type="password"
+                                  value={immichApiKeyDefault}
+                                  onChange={(e) => setImmichApiKeyDefault(e.target.value)}
+                                  placeholder="immich-api-key"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {selectedApi.api_name !== 'immich' && selectedApi.schema && Object.keys(selectedApi.schema).length > 0 && (
+                            <div style={{marginBottom: '1.5rem'}}>
+                              <div style={{fontSize: '0.9rem', fontWeight: '600', marginBottom: '1rem'}}>
+                                {tr('Authentifizierung & Einstellungen', 'Authentication & Settings')}
+                              </div>
+                              {Object.entries(selectedApi.schema).map(([key, fieldSchema]) => (
+                                <div key={key} className="input-group">
+                                  <label>
+                                    {fieldSchema.description || key}
+                                    {fieldSchema.required && <span style={{color: '#ef4444'}}>*</span>}
+                                  </label>
+                                  <input
+                                    type={fieldSchema.secret ? 'password' : fieldSchema.type === 'number' ? 'number' : 'text'}
+                                    value={apiConfig[key] || ''}
+                                    onChange={(e) => setApiConfig(prev => ({...prev, [key]: e.target.value}))}
+                                    placeholder={fieldSchema.example || fieldSchema.default || ''}
+                                  />
+                                  {fieldSchema.description && (
+                                    <small style={{fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                                      {fieldSchema.type === 'string' && fieldSchema.example ? `${tr('Beispiel', 'Example')}: ${fieldSchema.example}` : ''}
+                                    </small>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {selectedApi.api_name === 'immich' ? (
+                            <>
+                              <div className="button-group" style={{marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--line)'}}>
+                                <button className="btn primary" onClick={saveImmichConfig}>{tr('Speichern', 'Save')}</button>
+                                <button className="btn" onClick={testImmichConnection}>{tr('Verbindung testen', 'Test Connection')}</button>
+                              </div>
+                              {immichStatus && <div className="status-text" style={{marginTop: '1rem'}}>{immichStatus}</div>}
+                            </>
+                          ) : (
+                            <>
+                              <div className="button-group" style={{marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--line)'}}>
+                                <button
+                                  className="btn primary"
+                                  onClick={() => saveApiConfig(selectedApi.api_name)}
+                                >
+                                  {tr('Speichern', 'Save')}
+                                </button>
+                                <button
+                                  className="btn"
+                                  onClick={() => testApiConfig(selectedApi.api_name)}
+                                >
+                                  {tr('Verbindung testen', 'Test Connection')}
+                                </button>
+                                {selectedApi.api_name === 'homeassistant' && (
+                                  <button
+                                    className="btn"
+                                    onClick={() => {
+                                      const url = apiConfig.url || 'https://my.home-assistant.io/redirect/profile/';
+                                      window.open(url, '_blank', 'noopener,noreferrer');
+                                    }}
+                                  >
+                                    {tr('Home Assistant oeffnen', 'Open Home Assistant')}
+                                  </button>
+                                )}
+                                {selectedApi.configured && (
+                                  <button
+                                    className="btn"
+                                    onClick={() => {
+                                      if (confirm(tr('Möchtest du diese API-Konfiguration wirklich löschen?', 'Do you really want to delete this API configuration?'))) {
+                                        deleteApiConfig(selectedApi.api_name);
+                                      }
+                                    }}
+                                    style={{background: '#ef4444', color: 'white'}}
+                                  >
+                                    {tr('Löschen', 'Delete')}
+                                  </button>
+                                )}
+                              </div>
+                              {apiConfigStatus && <div className="status-text" style={{marginTop: '1rem'}}>{apiConfigStatus}</div>}
                             </>
                           )}
                         </div>
                       )}
-
-                      {/* Standard configuration fields */}
-                      {selectedApi.schema && Object.keys(selectedApi.schema).length > 0 && (
-                        <div style={{marginBottom: '1.5rem'}}>
-                          <div style={{fontSize: '0.9rem', fontWeight: '600', marginBottom: '1rem'}}>
-                            {tr('Authentifizierung & Einstellungen', 'Authentication & Settings')}
-                          </div>
-                          {Object.entries(selectedApi.schema).map(([key, fieldSchema]) => (
-                            <div key={key} className="input-group">
-                              <label>
-                                {fieldSchema.description || key}
-                                {fieldSchema.required && <span style={{color: 'var(--error)'}}>*</span>}
-                              </label>
-                              <input
-                                type={fieldSchema.secret ? 'password' : fieldSchema.type === 'number' ? 'number' : 'text'}
-                                value={apiConfig[key] || ''}
-                                onChange={(e) => setApiConfig(prev => ({...prev, [key]: e.target.value}))}
-                                placeholder={fieldSchema.example || fieldSchema.default || ''}
-                              />
-                              {fieldSchema.description && (
-                                <small style={{fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
-                                  {fieldSchema.type === 'string' && fieldSchema.example ? `${tr('Beispiel', 'Example')}: ${fieldSchema.example}` : ''}
-                                </small>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="button-group" style={{marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border)'}}>
-                        <button
-                          className="btn primary"
-                          onClick={() => saveApiConfig(selectedApi.api_name)}
-                        >
-                          {tr('Speichern', 'Save')}
-                        </button>
-                        <button
-                          className="btn"
-                          onClick={() => testApiConfig(selectedApi.api_name)}
-                        >
-                          {tr('Verbindung testen', 'Test Connection')}
-                        </button>
-                        {selectedApi.api_name === 'homeassistant' && (
-                          <button
-                            className="btn"
-                            onClick={() => {
-                              const url = apiConfig.url || 'https://my.home-assistant.io/redirect/profile/';
-                              window.open(url, '_blank', 'noopener,noreferrer');
-                            }}
-                          >
-                            {tr('Home Assistant oeffnen', 'Open Home Assistant')}
-                          </button>
-                        )}
-                        {selectedApi.configured && (
-                          <button
-                            className="btn"
-                            onClick={() => {
-                              if (confirm(tr('Möchtest du diese API-Konfiguration wirklich löschen?', 'Do you really want to delete this API configuration?'))) {
-                                deleteApiConfig(selectedApi.api_name);
-                              }
-                            }}
-                            style={{background: 'var(--error)', color: 'white'}}
-                          >
-                            {tr('Löschen', 'Delete')}
-                          </button>
-                        )}
-                      </div>
-                      {apiConfigStatus && <div className="status-text" style={{marginTop: '1rem'}}>{apiConfigStatus}</div>}
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
             )}
