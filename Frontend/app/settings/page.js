@@ -837,12 +837,12 @@ export default function SettingsPage() {
           if (data.openweather_error) {
             setLocationStatus(
               tr(
-                '✓ Standort fuer NINA uebernommen (OpenWeather konnte nicht automatisch gesetzt werden)',
+                '✓ Standort für NINA übernommen (OpenWeather konnte nicht automatisch gesetzt werden)',
                 '✓ Location applied for NINA (OpenWeather could not be auto-configured)'
               )
             );
           } else {
-            setLocationStatus(tr('✓ Standort uebernommen', '✓ Location applied'));
+            setLocationStatus(tr('✓ Standort übernommen', '✓ Location applied'));
           }
         } else {
           setLocationStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unknown error'));
@@ -1047,7 +1047,7 @@ export default function SettingsPage() {
                 <div className="panel-section" style={{marginTop: '2rem'}}>
                   <div className="section-title">Personalisierung</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
-                    Dieser Name wird fuer die persoenliche Begruessung auf der Startseite genutzt.
+                    Dieser Name wird für die persönliche Begrüßung auf der Startseite genutzt.
                   </p>
                   <div className="input-group">
                     <label>Anzeigename</label>
@@ -1208,7 +1208,7 @@ export default function SettingsPage() {
                               </div>
                               <div style={{marginBottom: '1rem'}}>
                                 <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
-                                  {tr('Standort automatisch uebernehmen', 'Auto-detect location')}
+                                  {tr('Standort automatisch übernehmen', 'Auto-detect location')}
                                 </div>
                                 <div className="button-group">
                                   <button className="btn" onClick={resolveLocation}>
@@ -1226,7 +1226,7 @@ export default function SettingsPage() {
                                     {locationResult.nina?.ars && (
                                       <div>{tr('NINA ARS', 'NINA ARS')}: {locationResult.nina.ars} {locationResult.nina.name ? `(${locationResult.nina.name})` : ''}</div>
                                     )}
-                                    {locationResult.openweather?.lat != null && locationResult.openweather?.lon != null && (
+                                    {locationResult.openweather?.lat && locationResult.openweather?.lon && (
                                       <div>
                                         {tr('OpenWeather Koordinaten', 'OpenWeather coordinates')}: {locationResult.openweather.lat}, {locationResult.openweather.lon}
                                         {locationResult.openweather.location_name ? ` (${locationResult.openweather.location_name})` : ''}
@@ -1235,10 +1235,11 @@ export default function SettingsPage() {
                                   </div>
                                 )}
                               </div>
+
                               {selectedApi.api_name === 'nina' && (
                                 <>
                                   <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
-                                    {tr('Regionalschluessel (ARS) suchen', 'Search regional keys (ARS)')}
+                                    {tr('Regionalschlüssel (ARS) suchen', 'Search regional keys (ARS)')}
                                   </div>
                                   <div className="input-group">
                                     <label>{tr('Suche nach Ort oder ARS', 'Search by place or ARS')}</label>
@@ -1269,7 +1270,7 @@ export default function SettingsPage() {
                                           }
                                         }}
                                       >
-                                        <option value="">{tr('Auswaehlen...', 'Select...')}</option>
+                                        <option value="">{tr('Auswählen...', 'Select...')}</option>
                                         {ninaRegions.map((entry) => (
                                           <option key={`${entry.ars}-${entry.name}`} value={entry.ars}>
                                             {entry.ars} - {entry.name}{entry.hint ? ` (${entry.hint})` : ''}
@@ -1280,7 +1281,7 @@ export default function SettingsPage() {
                                   )}
                                   <div style={{marginTop: '1rem'}}>
                                     <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
-                                      {tr('Warnungen fuer konfigurierten ARS', 'Warnings for configured ARS')}
+                                      {tr('Warnungen für konfigurierten ARS', 'Warnings for configured ARS')}
                                     </div>
                                     <div className="button-group">
                                       <button className="btn" onClick={loadNinaWarnings}>
@@ -1323,7 +1324,7 @@ export default function SettingsPage() {
                           {selectedApi.api_name === 'immich' && (
                             <div style={{marginBottom: '1.5rem'}}>
                               <div style={{fontSize: '0.9rem', color: 'var(--muted)', marginBottom: '0.9rem'}}>
-                                {tr('Globale Immich-Standards fuer die Fotosuche konfigurieren.', 'Configure global Immich defaults for photo search.')}
+                                {tr('Globale Immich-Standards für die Fotosuche konfigurieren.', 'Configure global Immich defaults for photo search.')}
                               </div>
                               <div className="input-group">
                                 <label>Immich URL</label>
@@ -1404,7 +1405,7 @@ export default function SettingsPage() {
                                       window.open(url, '_blank', 'noopener,noreferrer');
                                     }}
                                   >
-                                    {tr('Home Assistant oeffnen', 'Open Home Assistant')}
+                                    {tr('Home Assistant öffnen', 'Open Home Assistant')}
                                   </button>
                                 )}
                                 {selectedApi.configured && (
@@ -1436,7 +1437,7 @@ export default function SettingsPage() {
                 <div className="panel-section">
                   <div className="section-title">{tr('Nextcloud-Login', 'Nextcloud Login')}</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
-                    {tr('Verbinde deine Nextcloud-Instanz fuer die Dokumenten-Indexierung', 'Connect to your Nextcloud instance for document indexing')}
+                    {tr('Verbinde deine Nextcloud-Instanz für die Dokumenten-Indexierung', 'Connect to your Nextcloud instance for document indexing')}
                   </p>
 
                   {nextcloudConfigured ? (
@@ -1476,7 +1477,7 @@ export default function SettingsPage() {
                       <div className="button-group">
                         <button className="btn primary" onClick={handleNextcloudLogin} disabled={nextcloudLoggingIn || !nextcloudUrl.trim()}>
                           <i className="fas fa-sign-in-alt" style={{marginRight: '0.5rem'}}></i>
-                          {nextcloudLoggingIn ? tr('Warte auf Bestaetigung...', 'Waiting for confirmation...') : tr('Mit Nextcloud anmelden', 'Login with Nextcloud')}
+                          {nextcloudLoggingIn ? tr('Warte auf Bestätigung...', 'Waiting for confirmation...') : tr('Mit Nextcloud anmelden', 'Login with Nextcloud')}
                         </button>
                       </div>
                       {nextcloudStatus && <div className="status-text">{nextcloudStatus}</div>}
@@ -1487,7 +1488,7 @@ export default function SettingsPage() {
                 <div className="panel-section" style={{marginTop: '2rem'}}>
                   <div className="section-title">{tr('Dokumenten-Indexierung', 'Document Indexing')}</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
-                    {tr('Indexiere deine Dokumente fuer die semantische Suche mit detaillierter Fortschrittsanzeige', 'Index your documents for semantic search with detailed progress tracking')}
+                    {tr('Indexiere deine Dokumente für die semantische Suche mit detaillierter Fortschrittsanzeige', 'Index your documents for semantic search with detailed progress tracking')}
                   </p>
                   
                   <div className="input-group">
@@ -1499,7 +1500,7 @@ export default function SettingsPage() {
                       placeholder={tr('z.B. /Documents', 'e.g. /Documents')}
                     />
                     <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
-                      {tr('Spezifischer Pfad im Nextcloud, der indexiert werden soll. Leer lassen fuer alle Dateien.', 'Specific path in Nextcloud to index. Leave empty to index all files.')}
+                      {tr('Spezifischer Pfad im Nextcloud, der indexiert werden soll. Leer lassen für alle Dateien.', 'Specific path in Nextcloud to index. Leave empty to index all files.')}
                     </small>
                   </div>
 
@@ -1512,7 +1513,7 @@ export default function SettingsPage() {
 
                   <div className="button-group" style={{marginTop: '1.5rem'}}>
                     <button className="btn primary" onClick={startIndexing} disabled={indexingStatus === 'running'}>
-                      {indexingStatus === 'running' ? tr('Indexierung laeuft...', 'Indexing...') : tr('Indexierung starten', 'Start Indexing')}
+                      {indexingStatus === 'running' ? tr('Indexierung läuft...', 'Indexing...') : tr('Indexierung starten', 'Start Indexing')}
                     </button>
                     {indexingStatus === 'running' && (
                       <button className="btn secondary" onClick={() => fetch(`${API_BASE}/api/indexing/stop`, {method: 'POST'})}>

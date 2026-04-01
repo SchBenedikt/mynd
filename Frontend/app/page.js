@@ -96,6 +96,17 @@ const safeReadJson = async (response) => {
   }
 };
 
+const getTodayDateTimeForInputs = () => {
+  const today = new Date();
+  const year = String(today.getFullYear());
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return {
+    dateOnly: `${year}-${month}-${day}`,
+    dateTime: `${year}-${month}-${day}T09:00`
+  };
+};
+
 export default function HomePage() {
   const router = useRouter();
   const { theme, setTheme, setDarkMode } = useTheme();
@@ -146,6 +157,19 @@ export default function HomePage() {
     location: '',
     description: '',
     availableCalendars: [],
+    submitting: false,
+    error: ''
+  });
+  const [taskForm, setTaskForm] = useState({
+    visible: false,
+    missingInfo: [],
+    title: '',
+    dueDate: '',
+    priority: 0,
+    listName: '',
+    location: '',
+    description: '',
+    availableTaskLists: [],
     submitting: false,
     error: ''
   });
@@ -202,13 +226,13 @@ export default function HomePage() {
       de: {
         morning: [
           'Guten Morgen',
-          'Guten Morgen! Bereit fuer den Tag',
+          'Guten Morgen! Bereit für den Tag',
           'Was liegt dir am Morgen auf dem Herzen'
         ],
         afternoon: [
           'Guten Tag',
-          'Wie laeuft dein Tag',
-          'Was kann ich fuer dich tun'
+          'Wie läuft dein Tag',
+          'Was kann ich für dich tun'
         ],
         evening: [
           'Guten Abend',
@@ -616,7 +640,7 @@ export default function HomePage() {
       const data = await safeReadJson(res);
       if (!res.ok || data?.success === false) {
         setSecurityStatus({
-          headline: 'Sicherheitslage aktuell nicht verfuegbar',
+          headline: 'Sicherheitslage aktuell nicht verfügbar',
           nina_warning_count: 0,
           nina_warnings: []
         });
@@ -625,7 +649,7 @@ export default function HomePage() {
       setSecurityStatus(data);
     } catch (err) {
       setSecurityStatus({
-        headline: 'Sicherheitslage aktuell nicht verfuegbar',
+        headline: 'Sicherheitslage aktuell nicht verfügbar',
         nina_warning_count: 0,
         nina_warnings: []
       });
@@ -845,16 +869,47 @@ export default function HomePage() {
           || calendars[0]?.name
           || '';
 
+        const { dateTime: todayDateTime } = getTodayDateTimeForInputs();
+        const startTimeValue = parseBackendDateTimeToInput(extracted.start_time) || todayDateTime;
+        const endTimeValue = parseBackendDateTimeToInput(extracted.end_time) || todayDateTime;
+
         setCalendarForm({
           visible: true,
           missingInfo: data?.missing_info || [],
           title: extracted.title || '',
-          startTime: parseBackendDateTimeToInput(extracted.start_time),
-          endTime: parseBackendDateTimeToInput(extracted.end_time),
+          startTime: startTimeValue,
+          endTime: endTimeValue,
           calendarName: prefilledCalendarName,
           location: extracted.location || '',
           description: text,
           availableCalendars: calendars,
+          submitting: false,
+          error: ''
+        });
+      }
+
+      if (data?.requires_input && data?.action === 'task_missing_input') {
+        const extracted = data?.extracted_info || {};
+        const availableTaskLists = data?.available_task_lists || [];
+
+        const selectedListName = extracted.list_name
+          || availableTaskLists.find((name) => (name || '').toLowerCase().includes((extracted.list_name || '').toLowerCase()))
+          || availableTaskLists[0]
+          || '';
+
+        const { dateOnly: todayDate } = getTodayDateTimeForInputs();
+        const dueDateValue = extracted.due_date || todayDate;
+
+        setTaskForm({
+          visible: true,
+          missingInfo: data?.missing_info || [],
+          title: extracted.title || '',
+          dueDate: dueDateValue,
+          priority: Number(extracted.priority || 0),
+          listName: selectedListName,
+          location: extracted.location || '',
+          description: extracted.description || text,
+          availableTaskLists,
           submitting: false,
           error: ''
         });
@@ -1076,6 +1131,80 @@ export default function HomePage() {
     setCalendarForm(prev => ({ ...prev, visible: false, error: '' }));
   };
 
+  const submitTaskForm = async (e) => {
+    e.preventDefault();
+
+    if (!taskForm.title.trim()) {
+      setTaskForm(prev => ({
+        ...prev,
+        error: 'Please provide at least a title.'
+      }));
+      return;
+    }
+
+    setTaskForm(prev => ({ ...prev, submitting: true, error: '' }));
+
+    try {
+      const payload = {
+        title: taskForm.title.trim(),
+        due_date: taskForm.dueDate || null,
+        priority: Number(taskForm.priority || 0),
+        list_name: taskForm.listName || null,
+        location: taskForm.location?.trim() || null,
+        description: taskForm.description?.trim() || null
+      };
+
+      const res = await fetch(`${API_BASE}/api/tasks/create-with-details`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await safeReadJson(res);
+
+      if (!res.ok || !data?.success) {
+        setTaskForm(prev => ({
+          ...prev,
+          submitting: false,
+          error: data?.error || 'Task could not be created.'
+        }));
+        return;
+      }
+
+      if (activeChatId) {
+        appendMessageToChat(activeChatId, {
+          role: 'assistant',
+          content: data.message || 'Task created.',
+          id: createMessageId()
+        });
+      }
+
+      setTaskForm({
+        visible: false,
+        missingInfo: [],
+        title: '',
+        dueDate: '',
+        priority: 0,
+        listName: '',
+        location: '',
+        description: '',
+        availableTaskLists: [],
+        submitting: false,
+        error: ''
+      });
+    } catch (err) {
+      setTaskForm(prev => ({
+        ...prev,
+        submitting: false,
+        error: `Error while creating task: ${err.message}`
+      }));
+    }
+  };
+
+  const closeTaskForm = () => {
+    setTaskForm(prev => ({ ...prev, visible: false, error: '' }));
+  };
+
   const resetCalendarForm = () => {
     setCalendarForm({
       visible: false,
@@ -1092,16 +1221,34 @@ export default function HomePage() {
     });
   };
 
+  const resetTaskForm = () => {
+    setTaskForm({
+      visible: false,
+      missingInfo: [],
+      title: '',
+      dueDate: '',
+      priority: 0,
+      listName: '',
+      location: '',
+      description: '',
+      availableTaskLists: [],
+      submitting: false,
+      error: ''
+    });
+  };
+
   const startNewChat = () => {
     const newChat = createEmptyChat();
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
     resetCalendarForm();
+    resetTaskForm();
   };
 
   const openChat = (chatId) => {
     setActiveChatId(chatId);
     resetCalendarForm();
+    resetTaskForm();
   };
 
   const renameChat = (chatId) => {
@@ -1124,6 +1271,7 @@ export default function HomePage() {
 
     if (chatId === activeChatId) {
       resetCalendarForm();
+      resetTaskForm();
     }
 
     setChats((prevChats) => {
@@ -1591,6 +1739,98 @@ export default function HomePage() {
                     </div>
                   </div>
                 )}
+
+                {taskForm.visible && (
+                  <div className="message assistant">
+                    <div className="bubble calendar-form-bubble">
+                      <h4>Create Task</h4>
+                      {taskForm.missingInfo.length > 0 && (
+                        <p className="calendar-form-hint">
+                          Please add: {taskForm.missingInfo.join(', ')}
+                        </p>
+                      )}
+                      <form className="calendar-form" onSubmit={submitTaskForm}>
+                        <label>
+                          Title
+                          <input
+                            type="text"
+                            value={taskForm.title}
+                            onChange={(e) => setTaskForm(prev => ({ ...prev, title: e.target.value }))}
+                            placeholder="e.g. Submit tax documents"
+                            required
+                          />
+                        </label>
+
+                        <label>
+                          Due Date (optional)
+                          <input
+                            type="date"
+                            value={taskForm.dueDate}
+                            onChange={(e) => setTaskForm(prev => ({ ...prev, dueDate: e.target.value }))}
+                          />
+                        </label>
+
+                        <label>
+                          Priority
+                          <select
+                            value={taskForm.priority}
+                            onChange={(e) => setTaskForm(prev => ({ ...prev, priority: Number(e.target.value) }))}
+                          >
+                            <option value={0}>No priority</option>
+                            <option value={1}>High</option>
+                            <option value={5}>Medium</option>
+                            <option value={9}>Low</option>
+                          </select>
+                        </label>
+
+                        {taskForm.availableTaskLists.length > 0 && (
+                          <label>
+                            Task List
+                            <select
+                              value={taskForm.listName}
+                              onChange={(e) => setTaskForm(prev => ({ ...prev, listName: e.target.value }))}
+                            >
+                              {taskForm.availableTaskLists.map((listName) => (
+                                <option key={listName} value={listName}>{listName}</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+
+                        <label>
+                          Location (optional)
+                          <input
+                            type="text"
+                            value={taskForm.location}
+                            onChange={(e) => setTaskForm(prev => ({ ...prev, location: e.target.value }))}
+                            placeholder="e.g. Office or Home"
+                          />
+                        </label>
+
+                        <label>
+                          Description (optional)
+                          <input
+                            type="text"
+                            value={taskForm.description}
+                            onChange={(e) => setTaskForm(prev => ({ ...prev, description: e.target.value }))}
+                            placeholder="Optional details"
+                          />
+                        </label>
+
+                        {taskForm.error && <p className="calendar-form-error">{taskForm.error}</p>}
+
+                        <div className="calendar-form-actions">
+                          <button type="button" className="btn" onClick={closeTaskForm} disabled={taskForm.submitting}>
+                            Cancel
+                          </button>
+                          <button type="submit" className="btn primary" disabled={taskForm.submitting}>
+                            {taskForm.submitting ? 'Saving...' : 'Create Task'}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
             </div>
@@ -1634,7 +1874,7 @@ export default function HomePage() {
               type="button"
               className="image-modal-close"
               onClick={closePhotoPreview}
-              aria-label="Vorschau schliessen"
+              aria-label="Vorschau schließen"
             >
               ×
             </button>
@@ -1653,7 +1893,7 @@ export default function HomePage() {
               )}
               {photoPreview.immichUrl && (
                 <a className="btn" href={photoPreview.immichUrl} target="_blank" rel="noopener noreferrer">
-                  In Immich oeffnen
+                  In Immich öffnen
                 </a>
               )}
             </div>
