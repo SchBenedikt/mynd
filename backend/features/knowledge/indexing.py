@@ -61,11 +61,6 @@ class IndexingManager:
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
         self.config_file = os.path.join(project_root, 'backend', 'config', 'indexing_config.json')
         self.nextcloud_auth_config_file = os.path.join(project_root, 'backend', 'config', 'nextcloud_config.json')
-        self.legacy_config_files = [
-            os.path.join(project_root, 'backend', 'core', 'indexing_config.json'),
-            os.path.join(project_root, 'backend', 'indexing_config.json'),
-            os.path.join(project_root, 'indexing_config.json')
-        ]
         self.nextcloud_config: Dict = {}
         self.knowledge_cache_file = "knowledge_cache.json"
         self.max_workers = 8  # Erhöht für bessere Parallelität
@@ -105,7 +100,7 @@ class IndexingManager:
     def load_nextcloud_config(self) -> bool:
         """Lädt Nextcloud-Konfiguration"""
         try:
-            candidates = [self.config_file, self.nextcloud_auth_config_file] + self.legacy_config_files
+            candidates = [self.config_file, self.nextcloud_auth_config_file]
             for candidate in candidates:
                 if not os.path.exists(candidate):
                     continue
@@ -126,7 +121,7 @@ class IndexingManager:
 
                 self.nextcloud_config = normalized
 
-                # Migrate from legacy path to canonical config location.
+                # Keep canonical indexing config in sync with loginflow config.
                 if candidate != self.config_file:
                     try:
                         self.save_nextcloud_config(
