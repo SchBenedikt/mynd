@@ -1,0 +1,7 @@
+{
+  "nextcloud_url": "https://nextcloud.example.com",
+  "username": "SET_VIA_ENV_NEXTCLOUD_USERNAME",
+  "password": "SET_VIA_ENV_NEXTCLOUD_PASSWORD",
+  "auth_type": "login_flow_v2",
+  "display_name": "SET_VIA_ENV_NEXTCLOUD_DISPLAY_NAME"
+}

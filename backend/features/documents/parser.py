@@ -490,20 +490,28 @@ class DocumentParser:
         try:
             temp_dir = tempfile.mkdtemp()
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
-                # Liste der Dateien
-                for name in zip_ref.namelist():
+                for member in zip_ref.infolist():
+                    name = member.filename
                     text += f"\n=== Datei in ZIP: {name} ===\n"
-                    # Nur Dateien, keine Verzeichnisse
-                    if not name.endswith('/'):
-                        try:
-                            zip_ref.extract(name, temp_dir)
-                            extracted_path = os.path.join(temp_dir, name)
-                            # Rekursiv parsen
-                            file_text = self.parse_file(extracted_path)
-                            if file_text:
-                                text += file_text + "\n"
-                        except Exception as e:
-                            self.logger.warning(f"Error parsing {name} in ZIP: {str(e)}")
+
+                    # Skip directories and unsafe absolute/parent paths.
+                    if member.is_dir() or os.path.isabs(name) or '..' in name.split('/'):
+                        self.logger.warning(f"Skipping unsafe ZIP member: {name}")
+                        continue
+
+                    extracted_path = os.path.realpath(os.path.join(temp_dir, name))
+                    temp_root = os.path.realpath(temp_dir)
+                    if not extracted_path.startswith(temp_root + os.sep):
+                        self.logger.warning(f"Skipping ZIP traversal attempt: {name}")
+                        continue
+
+                    try:
+                        zip_ref.extract(member, temp_dir)
+                        file_text = self.parse_file(extracted_path)
+                        if file_text:
+                            text += file_text + "\n"
+                    except Exception as e:
+                        self.logger.warning(f"Error parsing {name} in ZIP: {str(e)}")
         except Exception as e:
             self.logger.error(f"ZIP parsing error: {str(e)}")
         finally:

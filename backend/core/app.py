@@ -12,6 +12,7 @@ import time
 import secrets
 from urllib.parse import urljoin
 from urllib.parse import urlencode
+from urllib.parse import urlparse
 from typing import Optional, List, Dict
 
 # Add parent directory to path for imports
@@ -33,6 +34,12 @@ class SemanticSearchEngine:
 from backend.features.knowledge.search import SimpleSearchEngine
 from backend.features.training.manager import TrainingManager
 from backend.features.knowledge.metadata import MetadataExtractor
+from backend.core.security_utils import (
+    sanitize_username,
+    mask_secret,
+    validate_service_url,
+    clamp_int,
+)
 # from backend.features.calendar.manager import create_calendar_manager
 # Temporär deaktiviert wegen caldav Problemen
 def create_calendar_manager():
@@ -64,19 +71,52 @@ app = Flask(__name__, template_folder=TEMPLATES_DIR)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'true').lower() == 'true'
 
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ==============================
+# HEALTH CHECK ENDPOINT
+# ==============================
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for monitoring and diagnostics"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'service': 'MYND Backend',
+        'version': '1.0.0'
+    }), 200
+
 AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
 CALENDAR_CONFIG_FILE = os.path.join(CONFIG_DIR, "calendar_config.json")
+ALLOW_PRIVATE_NETWORK_TARGETS = os.getenv('ALLOW_PRIVATE_NETWORK_TARGETS', 'false').lower() == 'true'
+
+
+def _safe_json_dump(path: str, data: Dict) -> None:
+    """Write JSON atomically with restrictive file permissions for secrets."""
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.chmod(tmp_path, 0o600)
+    os.replace(tmp_path, path)
+
+
+def _safe_config_path_for_user(username: str) -> Optional[str]:
+    safe_username = sanitize_username(username)
+    if not safe_username:
+        return None
+    return os.path.join(CONFIG_DIR, f"user_{safe_username}.json")
 
 
 def load_calendar_config() -> Dict:
-    """Lädt Kalender-Konfiguration (z.B. Standard-Kalender) aus Datei."""
+    """Lädt Kalender-Konfiguration mit Priority: Environment Variables > Config File > Defaults."""
     config = {
-        'default_calendar_name': ''
+        'default_calendar_name': os.getenv('DEFAULT_CALENDAR_NAME', '')
     }
 
     if os.path.exists(CALENDAR_CONFIG_FILE):
@@ -84,10 +124,13 @@ def load_calendar_config() -> Dict:
             with open(CALENDAR_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 file_config = json.load(f)
 
-            config['default_calendar_name'] = str(file_config.get('default_calendar_name', '')).strip()
+            # Only use file config if env var not explicitly set
+            if not os.getenv('DEFAULT_CALENDAR_NAME'):
+                config['default_calendar_name'] = str(file_config.get('default_calendar_name', '')).strip()
         except Exception as e:
             logger.warning(f"Konnte Kalender-Konfiguration nicht laden: {str(e)}")
 
+    logger.debug(f"Calendar config: {config['default_calendar_name'] or '(not set)'}")
     return config
 
 
@@ -97,8 +140,7 @@ def save_calendar_config(default_calendar_name: str) -> None:
         'default_calendar_name': str(default_calendar_name or '').strip()
     }
 
-    with open(CALENDAR_CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    _safe_json_dump(CALENDAR_CONFIG_FILE, config)
 
 class KnowledgeBase:
     def __init__(self, knowledge_file=None):
@@ -524,38 +566,50 @@ Beantworte nun die Anfrage basierend auf dem verfügbaren Kontext mit maximaler 
         return sorted(set(models))
 
 def load_ai_config() -> dict:
-    """Lädt AI-Konfiguration aus Datei (oder Defaults) und wendet sie an."""
+    """Lädt AI-Konfiguration mit Priority: Environment Variables > Config File > Defaults."""
     config = {
         'provider': 'ollama',
         'base_url': os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/'),
         'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest'),
-        'immich_url_default': '',
-        'immich_api_key_default': '',
-        'vector_db_enabled': True,
-        'vector_db_provider': 'qdrant',
-        'vector_db_path': './qdrant_data',
-        'calendar_auto_reindex_hours': 6,
-        'calendar_auto_reindex_past_days': 730,
-        'calendar_auto_reindex_future_days': 365
+        'immich_url_default': os.getenv('IMMICH_URL', ''),
+        'immich_api_key_default': os.getenv('IMMICH_API_KEY', ''),
+        'vector_db_enabled': os.getenv('VECTOR_DB_ENABLED', 'true').lower() == 'true',
+        'vector_db_provider': os.getenv('VECTOR_DB_PROVIDER', 'qdrant'),
+        'vector_db_path': os.getenv('VECTOR_DB_PATH', './qdrant_data'),
+        'calendar_auto_reindex_hours': clamp_int(os.getenv('CALENDAR_AUTO_REINDEX_HOURS', '6'), default=6, minimum=1, maximum=168),
+        'calendar_auto_reindex_past_days': clamp_int(os.getenv('CALENDAR_AUTO_REINDEX_PAST_DAYS', '730'), default=730, minimum=1, maximum=3650),
+        'calendar_auto_reindex_future_days': clamp_int(os.getenv('CALENDAR_AUTO_REINDEX_FUTURE_DAYS', '365'), default=365, minimum=1, maximum=3650)
     }
 
+    # Load from config file (ONLY if env vars not explicitly set)
     if os.path.exists(AI_CONFIG_FILE):
         try:
             with open(AI_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 file_config = json.load(f)
 
-            config['base_url'] = str(file_config.get('base_url', config['base_url'])).rstrip('/')
-            config['model'] = str(file_config.get('model', config['model']))
-            config['immich_url_default'] = file_config.get('immich_url_default', '')
-            config['immich_api_key_default'] = file_config.get('immich_api_key_default', '')
-            config['vector_db_enabled'] = file_config.get('vector_db_enabled', True)
-            config['vector_db_provider'] = file_config.get('vector_db_provider', 'qdrant')
-            config['vector_db_path'] = file_config.get('vector_db_path', './qdrant_data')
-            config['calendar_auto_reindex_hours'] = file_config.get('calendar_auto_reindex_hours', 6)
-            config['calendar_auto_reindex_past_days'] = file_config.get('calendar_auto_reindex_past_days', 730)
-            config['calendar_auto_reindex_future_days'] = file_config.get('calendar_auto_reindex_future_days', 365)
+            # Only use file config if env var not set
+            if not os.getenv('OLLAMA_BASE_URL'):
+                config['base_url'] = str(file_config.get('base_url', config['base_url'])).rstrip('/')
+            if not os.getenv('OLLAMA_MODEL'):
+                config['model'] = str(file_config.get('model', config['model']))
+            if not os.getenv('IMMICH_URL'):
+                config['immich_url_default'] = file_config.get('immich_url_default', '')
+            if not os.getenv('IMMICH_API_KEY'):
+                config['immich_api_key_default'] = file_config.get('immich_api_key_default', '')
+            
+            config['vector_db_enabled'] = file_config.get('vector_db_enabled', config['vector_db_enabled'])
+            config['vector_db_provider'] = file_config.get('vector_db_provider', config['vector_db_provider'])
+            config['vector_db_path'] = file_config.get('vector_db_path', config['vector_db_path'])
+            config['calendar_auto_reindex_hours'] = file_config.get('calendar_auto_reindex_hours', config['calendar_auto_reindex_hours'])
+            config['calendar_auto_reindex_past_days'] = file_config.get('calendar_auto_reindex_past_days', config['calendar_auto_reindex_past_days'])
+            config['calendar_auto_reindex_future_days'] = file_config.get('calendar_auto_reindex_future_days', config['calendar_auto_reindex_future_days'])
         except Exception as e:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
+
+    # Log masked config for debugging
+    masked_config = config.copy()
+    masked_config['immich_api_key_default'] = mask_secret(config['immich_api_key_default'])
+    logger.info(f"AI Config loaded with provider={config['provider']}, model={config['model']}")
 
     ollama_client.update_config(config['base_url'], config['model'])
     return config
@@ -569,12 +623,14 @@ def save_ai_config(base_url: str, model: str) -> None:
         'model': model
     }
 
-    with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    _safe_json_dump(AI_CONFIG_FILE, config)
 
 def load_user_config(username: str) -> dict:
     """Lädt benutzerspezifische Konfiguration"""
-    user_config_file = os.path.join(CONFIG_DIR, f"user_{username}.json")
+    user_config_file = _safe_config_path_for_user(username)
+    if not user_config_file:
+        logger.warning("Invalid username supplied for user config load")
+        return {}
     config = {}
 
     if os.path.exists(user_config_file):
@@ -588,11 +644,12 @@ def load_user_config(username: str) -> dict:
 
 def save_user_config(username: str, config: dict) -> None:
     """Speichert benutzerspezifische Konfiguration"""
-    user_config_file = os.path.join(CONFIG_DIR, f"user_{username}.json")
+    user_config_file = _safe_config_path_for_user(username)
+    if not user_config_file:
+        raise ValueError("Invalid username")
 
     try:
-        with open(user_config_file, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        _safe_json_dump(user_config_file, config)
     except Exception as e:
         logger.error(f"Could not save user config for {username}: {str(e)}")
         raise
@@ -1536,7 +1593,7 @@ def try_migrate_existing_data():
 @app.route('/api/indexing/start', methods=['POST'])
 def start_indexing():
     """Startet die Hintergrund-Indexierung"""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     nextcloud_config = data.get('nextcloud_config')
     
     # Wenn keine Konfiguration übergeben, versuche die gespeicherte zu laden
@@ -1596,16 +1653,20 @@ def indexing_config():
     
     elif request.method == 'POST':
         try:
-            data = request.json
+            data = request.get_json(silent=True) or {}
             url = data.get('url')
             username = data.get('username')
             password = data.get('password')
             remote_path = data.get('path', '/')
+
+            normalized_url = validate_service_url(url, allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS)
+            if not normalized_url:
+                return jsonify({'error': 'Ungültige oder nicht erlaubte URL'}), 400
             
             if not all([url, username, password]):
                 return jsonify({'error': 'URL, Username und Password werden benötigt'}), 400
             
-            indexing_manager.save_nextcloud_config(url, username, password, remote_path)
+            indexing_manager.save_nextcloud_config(normalized_url, username, password, remote_path)
             
             return jsonify({
                 'status': 'saved',
@@ -1622,8 +1683,11 @@ def nextcloud_oauth_authorize():
     Erwartet Nextcloud URL, Client ID und Client Secret
     """
     try:
-        data = request.json
-        nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
+        data = request.get_json(silent=True) or {}
+        nextcloud_url = validate_service_url(
+            data.get('nextcloud_url', ''),
+            allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+        )
         client_id = data.get('client_id', '')
         client_secret = data.get('client_secret', '')
 
@@ -1727,8 +1791,7 @@ def nextcloud_oauth_callback():
 
         # Speichere in Indexing Manager
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
-        with open(config_file, 'w') as f:
-            json.dump(oauth_config, f, indent=2)
+        _safe_json_dump(config_file, oauth_config)
 
         # Speichere auch die Basis-Konfiguration für Indexing
         indexing_manager.save_nextcloud_config(
@@ -1790,8 +1853,11 @@ def nextcloud_oauth_config():
 def nextcloud_loginflow_start():
     """Startet Nextcloud Login Flow v2 ohne manuelle OAuth-Client-Registrierung."""
     try:
-        data = request.json or {}
-        nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
+        data = request.get_json(silent=True) or {}
+        nextcloud_url = validate_service_url(
+            data.get('nextcloud_url', ''),
+            allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+        )
 
         if not nextcloud_url:
             return jsonify({'error': 'nextcloud_url parameter required'}), 400
@@ -1844,6 +1910,11 @@ def nextcloud_loginflow_poll():
         if not all([nextcloud_url, poll_token, poll_endpoint]):
             return jsonify({'error': 'No active login flow', 'status': 'idle'}), 400
 
+        nextcloud_host = (urlparse(nextcloud_url).hostname or '').lower()
+        poll_host = (urlparse(poll_endpoint).hostname or '').lower()
+        if not nextcloud_host or not poll_host or nextcloud_host != poll_host:
+            return jsonify({'error': 'Invalid poll endpoint host', 'status': 'error'}), 400
+
         poll_res = requests.post(
             poll_endpoint,
             headers={'User-Agent': NEXTCLOUD_LOGINFLOW_USER_AGENT},
@@ -1873,8 +1944,7 @@ def nextcloud_loginflow_poll():
         }
 
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
-        with open(config_file, 'w') as f:
-            json.dump(nextcloud_config, f, indent=2)
+        _safe_json_dump(config_file, nextcloud_config)
 
         indexing_manager.save_nextcloud_config(server, username, app_password, '/')
 
@@ -1902,8 +1972,11 @@ def nextcloud_direct_login():
     Keine OAuth2-App-Registration nötig!
     """
     try:
-        data = request.json
-        nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
+        data = request.get_json(silent=True) or {}
+        nextcloud_url = validate_service_url(
+            data.get('nextcloud_url', ''),
+            allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+        )
         username = data.get('username', '')
         password = data.get('password', '')
 
@@ -1941,8 +2014,7 @@ def nextcloud_direct_login():
         }
 
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
-        with open(config_file, 'w') as f:
-            json.dump(nextcloud_config, f, indent=2)
+        _safe_json_dump(config_file, nextcloud_config)
 
         # Speichere auch die Basis-Konfiguration für Indexing
         indexing_manager.save_nextcloud_config(
@@ -2808,8 +2880,13 @@ def get_immich_client(username: str = None) -> Optional[ImmichClient]:
                 timeout_short = global_config.get('immich_timeout_short', 15)
                 timeout_long = global_config.get('immich_timeout_long', 45)
 
-        if immich_url and immich_api_key:
-            return ImmichClient(immich_url, immich_api_key, timeout_short, timeout_long)
+        normalized_immich_url = validate_service_url(
+            immich_url,
+            allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+        ) if immich_url else None
+
+        if normalized_immich_url and immich_api_key:
+            return ImmichClient(normalized_immich_url, immich_api_key, timeout_short, timeout_long)
         else:
             logger.warning("Immich not configured")
             return None
@@ -2863,7 +2940,7 @@ def immich_search_photos():
         data = request.get_json()
         username = data.get('username')
         query = data.get('query', '')
-        limit = data.get('limit', 20)
+        limit = clamp_int(data.get('limit', 20), default=20, minimum=1, maximum=200)
 
         client = get_immich_client(username)
         if not client:
@@ -2915,8 +2992,8 @@ def immich_get_assets():
     """Holt Assets von Immich"""
     try:
         username = request.args.get('username')
-        limit = int(request.args.get('limit', 100))
-        skip = int(request.args.get('skip', 0))
+        limit = clamp_int(request.args.get('limit', 100), default=100, minimum=1, maximum=500)
+        skip = clamp_int(request.args.get('skip', 0), default=0, minimum=0, maximum=50000)
 
         client = get_immich_client(username)
         if not client:
@@ -2943,6 +3020,9 @@ def immich_thumbnail_proxy(asset_id):
     try:
         username = request.args.get('username')
         size = request.args.get('size', 'preview')
+
+        if size not in {'preview', 'thumbnail'}:
+            return jsonify({'success': False, 'error': 'Invalid thumbnail size'}), 400
 
         client = get_immich_client(username)
         if not client:
@@ -3008,7 +3088,7 @@ def immich_search_by_context():
         data = request.get_json()
         username = data.get('username')
         query = data.get('query', '')
-        limit = data.get('limit', 20)
+        limit = clamp_int(data.get('limit', 20), default=20, minimum=1, maximum=200)
 
         client = get_immich_client(username)
         if not client:
@@ -3053,7 +3133,8 @@ def ui_system_config():
                     'base_url': config.get('base_url', ''),
                     'model': config.get('model', ''),
                     'immich_url_default': config.get('immich_url_default', ''),
-                    'immich_api_key_default': config.get('immich_api_key_default', ''),
+                    'immich_api_key_default': mask_secret(config.get('immich_api_key_default', '')),
+                    'immich_api_key_default_configured': bool(config.get('immich_api_key_default')),
                     'vector_db_enabled': config.get('vector_db_enabled', True),
                     'vector_db_provider': config.get('vector_db_provider', 'qdrant'),
                     'vector_db_path': config.get('vector_db_path', './qdrant_data')
@@ -3066,8 +3147,14 @@ def ui_system_config():
 
         # Update config values
         if 'immich_url_default' in data:
-            config['immich_url_default'] = data['immich_url_default']
-        if 'immich_api_key_default' in data:
+            normalized_default_immich = validate_service_url(
+                data['immich_url_default'],
+                allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+            )
+            if data['immich_url_default'] and not normalized_default_immich:
+                return jsonify({'success': False, 'error': 'Invalid immich_url_default'}), 400
+            config['immich_url_default'] = normalized_default_immich or ''
+        if 'immich_api_key_default' in data and data['immich_api_key_default'] not in {'', '***'}:
             config['immich_api_key_default'] = data['immich_api_key_default']
         if 'base_url' in data:
             config['base_url'] = data['base_url']
@@ -3077,8 +3164,7 @@ def ui_system_config():
             config['vector_db_enabled'] = data['vector_db_enabled']
 
         # Save to file
-        with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        _safe_json_dump(AI_CONFIG_FILE, config)
 
         # Reload config
         load_ai_config()
@@ -3124,7 +3210,9 @@ def ui_runtime_config():
 def ui_profile_config():
     """User-specific profile configuration"""
     try:
-        username = request.args.get('username') if request.method == 'GET' else request.get_json().get('username')
+        payload = request.get_json(silent=True) or {}
+        username = request.args.get('username') if request.method == 'GET' else payload.get('username')
+        username = sanitize_username(username)
 
         if not username:
             return jsonify({'success': False, 'error': 'Username required'}), 400
@@ -3136,36 +3224,39 @@ def ui_profile_config():
                 'username': username,
                 'config': {
                     'immich_url': user_config.get('immich_url', ''),
-                    'immich_api_key': user_config.get('immich_api_key', ''),
+                    'immich_api_key': mask_secret(user_config.get('immich_api_key', '')),
+                    'immich_api_key_configured': bool(user_config.get('immich_api_key')),
                     'nextcloud_url': user_config.get('nextcloud_url', ''),
                     'nextcloud_username': user_config.get('nextcloud_username', ''),
-                    'nextcloud_password': user_config.get('nextcloud_password', ''),
+                    'nextcloud_password': mask_secret(user_config.get('nextcloud_password', '')),
+                    'nextcloud_password_configured': bool(user_config.get('nextcloud_password')),
                     'caldav_url': user_config.get('caldav_url', ''),
                     'caldav_username': user_config.get('caldav_username', ''),
-                    'caldav_password': user_config.get('caldav_password', '')
+                    'caldav_password': mask_secret(user_config.get('caldav_password', '')),
+                    'caldav_password_configured': bool(user_config.get('caldav_password')),
                 }
             })
 
         # POST - update user config
-        data = request.get_json()
+        data = payload
         user_config = load_user_config(username)
 
         # Update user-specific settings
         if 'immich_url' in data:
             user_config['immich_url'] = data['immich_url']
-        if 'immich_api_key' in data:
+        if 'immich_api_key' in data and data['immich_api_key'] not in {'', '***'}:
             user_config['immich_api_key'] = data['immich_api_key']
         if 'nextcloud_url' in data:
             user_config['nextcloud_url'] = data['nextcloud_url']
         if 'nextcloud_username' in data:
             user_config['nextcloud_username'] = data['nextcloud_username']
-        if 'nextcloud_password' in data:
+        if 'nextcloud_password' in data and data['nextcloud_password'] not in {'', '***'}:
             user_config['nextcloud_password'] = data['nextcloud_password']
         if 'caldav_url' in data:
             user_config['caldav_url'] = data['caldav_url']
         if 'caldav_username' in data:
             user_config['caldav_username'] = data['caldav_username']
-        if 'caldav_password' in data:
+        if 'caldav_password' in data and data['caldav_password'] not in {'', '***'}:
             user_config['caldav_password'] = data['caldav_password']
 
         save_user_config(username, user_config)
@@ -3180,7 +3271,7 @@ def ui_profile_config():
 def ui_connectivity_status():
     """Check connectivity status of all services"""
     try:
-        username = request.args.get('username')
+        username = sanitize_username(request.args.get('username'))
 
         status = {
             'ollama': {
@@ -3228,21 +3319,10 @@ def ui_index_status():
         }
 
         if knowledge_base and knowledge_base.db:
-            cursor = knowledge_base.db.cursor()
-
-            # Count documents
-            cursor.execute("SELECT COUNT(*) FROM files")
-            stats['total_documents'] = cursor.fetchone()[0]
-
-            # Count chunks
-            cursor.execute("SELECT COUNT(*) FROM chunks")
-            stats['total_chunks'] = cursor.fetchone()[0]
-
-            # Get last indexed timestamp
-            cursor.execute("SELECT MAX(indexed_at) FROM files")
-            last_indexed = cursor.fetchone()[0]
-            if last_indexed:
-                stats['last_indexed'] = last_indexed
+            db_stats = knowledge_base.db.get_document_stats()
+            stats['total_documents'] = db_stats.get('documents', 0)
+            stats['total_chunks'] = db_stats.get('chunks', 0)
+            stats['last_indexed'] = db_stats.get('last_updated')
 
         return jsonify({'success': True, 'stats': stats})
 
@@ -3254,7 +3334,7 @@ def ui_index_status():
 def ui_suggestions():
     """Get query suggestions based on available data"""
     try:
-        username = request.args.get('username')
+        username = sanitize_username(request.args.get('username'))
 
         suggestions = []
 
@@ -3301,7 +3381,7 @@ def ui_suggestions():
 def ui_immich_status():
     """Get Immich integration status"""
     try:
-        username = request.args.get('username')
+        username = sanitize_username(request.args.get('username'))
 
         if not username:
             return jsonify({'success': False, 'error': 'Username required'}), 400
