@@ -1087,6 +1087,223 @@ def is_calendar_create_query(message: str) -> bool:
     calendar_keywords = ['termin', 'ereignis', 'kalender', 'event', 'appointment']
     return any(k in message_lower for k in create_keywords) and any(k in message_lower for k in calendar_keywords)
 
+
+def is_task_create_query(message: str) -> bool:
+    """Erkennt Wunsch nach Aufgaben-/Erinnerungs-Erstellung."""
+    message_lower = message.lower()
+    create_keywords = ['erstelle', 'anlegen', 'create', 'hinzufügen', 'add', 'new']
+    task_keywords = ['aufgabe', 'aufgaben', 'todo', 'task', 'tasks', 'erinnerung', 'reminder']
+    return any(k in message_lower for k in create_keywords) and any(k in message_lower for k in task_keywords)
+
+
+def _normalize_task_due_date(due_value: Optional[str]) -> Optional[str]:
+    """Normalisiert verschiedene Datumsangaben auf YYYY-MM-DD."""
+    if not due_value:
+        return None
+
+    value = str(due_value).strip().lower()
+    if not value:
+        return None
+
+    if value in ['heute', 'today']:
+        return datetime.now().strftime('%Y-%m-%d')
+    if value in ['morgen', 'tomorrow']:
+        return (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+    if value in ['uebermorgen', 'übermorgen']:
+        return (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
+
+    formats = ['%Y-%m-%d', '%d.%m.%Y', '%d.%m.%y']
+    for fmt in formats:
+        try:
+            return datetime.strptime(value, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+
+    return None
+
+
+def get_available_task_lists() -> List[str]:
+    """Lädt verfügbare Nextcloud-Tasklisten."""
+    if not tasks_enabled or not task_manager.tasks_client:
+        return []
+
+    try:
+        lists = task_manager.tasks_client.get_task_lists()
+        return [name for name in lists if name]
+    except Exception as e:
+        logger.debug(f"Could not load task lists: {e}")
+        return []
+
+
+def _extract_task_priority(message: str) -> int:
+    """Leitet Priorität aus Text ab (1=hoch, 5=mittel, 9=niedrig)."""
+    text = message.lower()
+    if any(k in text for k in ['dringend', 'wichtig', 'hoch', 'high', 'urgent']):
+        return 1
+    if any(k in text for k in ['mittel', 'medium', 'normal']):
+        return 5
+    if any(k in text for k in ['niedrig', 'low', 'später', 'spaeter']):
+        return 9
+    return 0
+
+
+def extract_task_info_from_message(message: str) -> Dict[str, Any]:
+    """Extrahiert Task-/Reminder-Informationen aus natürlicher Sprache."""
+    result = {
+        'title': None,
+        'due_date': None,
+        'priority': 0,
+        'list_name': None,
+        'location': None,
+        'description': None,
+        'missing_info': []
+    }
+
+    message_clean = ' '.join((message or '').strip().split())
+    message_lower = message_clean.lower()
+    now = datetime.now()
+
+    # Datum extrahieren
+    date_patterns = [
+        r'\b(?:am|bis|fuer|für)\s+(\d{1,2}\.\d{1,2}\.\d{4})\b',
+        r'\b(\d{4}-\d{2}-\d{2})\b'
+    ]
+    for pattern in date_patterns:
+        match = re.search(pattern, message_clean, re.IGNORECASE)
+        if match:
+            normalized = _normalize_task_due_date(match.group(1))
+            if normalized:
+                result['due_date'] = normalized
+                break
+
+    if not result['due_date']:
+        if any(k in message_lower for k in ['morgen', 'tomorrow']):
+            result['due_date'] = (now + timedelta(days=1)).strftime('%Y-%m-%d')
+        elif any(k in message_lower for k in ['heute', 'today']):
+            result['due_date'] = now.strftime('%Y-%m-%d')
+
+    # Priorität extrahieren
+    result['priority'] = _extract_task_priority(message_clean)
+
+    # Taskliste extrahieren (optional)
+    list_match = re.search(r'\b(?:in\s+liste|liste)\s+([a-zA-Z0-9 _\-]+)\b', message_clean, re.IGNORECASE)
+    if list_match:
+        result['list_name'] = list_match.group(1).strip()
+
+    # Ort extrahieren (optional)
+    location_patterns = [
+        r'\b(?:ort|location)[:\s]+([^,.!?]+?)(?=\s+(?:am|bis|fuer|für|heute|morgen|today|tomorrow|in\s+liste|liste)\b|[,.!?]|$)',
+        r'\b(?:bei|in)\s+([^,.!?]+?)(?=\s+(?:am|bis|fuer|für|heute|morgen|today|tomorrow|in\s+liste|liste)\b|[,.!?]|$)'
+    ]
+    for pattern in location_patterns:
+        match = re.search(pattern, message_clean, re.IGNORECASE)
+        if match:
+            candidate = match.group(1).strip()
+            if candidate and not re.search(r'\d{1,2}\.\d{1,2}\.\d{4}|\d{4}-\d{2}-\d{2}', candidate):
+                result['location'] = candidate.title()
+                break
+
+    # Titel extrahieren
+    quoted_title = re.search(r'"([^"]+)"', message_clean)
+    if quoted_title:
+        result['title'] = quoted_title.group(1).strip()
+    else:
+        title_candidate = message_clean
+        title_candidate = re.sub(
+            r'^(?:kannst\s+du\s+)?(?:bitte\s+)?(?:erstelle|erstelle\s+mir|lege\s+an|lege|mach|add|create)\s+(?:mir\s+)?(?:eine?|neue?n?)?\s*(?:erinnerung|aufgabe|todo|task|reminder|tasks|aufgaben)?\s*',
+            '',
+            title_candidate,
+            flags=re.IGNORECASE
+        )
+        title_candidate = re.sub(r'\b(?:am|bis|fuer|für|heute|morgen|today|tomorrow|in\s+liste|liste|mit\s+prioritaet|mit\s+priorität)\b.*$', '', title_candidate, flags=re.IGNORECASE)
+        title_candidate = title_candidate.strip(' .,:;!-')
+        if title_candidate:
+            result['title'] = title_candidate
+
+    if result['title'] and result['title'].islower():
+        result['title'] = result['title'].title()
+
+    # Generische Placeholder sollen den Dialog erzwingen.
+    generic_titles = {
+        'aufgabe', 'neue aufgabe', 'todo', 'neues todo', 'task', 'new task',
+        'erinnerung', 'neue erinnerung', 'reminder', 'new reminder'
+    }
+    if (result.get('title') or '').strip().lower() in generic_titles:
+        result['title'] = None
+
+    result['description'] = message_clean
+
+    if not result['title']:
+        result['missing_info'].append('Titel')
+    if not result['due_date']:
+        result['missing_info'].append('Fälligkeitsdatum')
+
+    return result
+
+
+def create_task_reminder(title: str, description: str = '', due_date: Optional[str] = None,
+                         priority: int = 0, list_name: Optional[str] = None,
+                         location: Optional[str] = None) -> Dict[str, Any]:
+    """Erstellt eine Aufgabe/Erinnerung über den Task-Manager."""
+    if not tasks_enabled or not task_manager.tasks_client:
+        return {'success': False, 'error': 'Tasks nicht verfügbar'}
+
+    try:
+        available_lists = get_available_task_lists()
+        target_list_name = (list_name or '').strip()
+
+        if target_list_name and available_lists:
+            for candidate in available_lists:
+                if target_list_name.lower() == candidate.lower():
+                    target_list_name = candidate
+                    break
+            else:
+                for candidate in available_lists:
+                    if target_list_name.lower() in candidate.lower():
+                        target_list_name = candidate
+                        break
+
+        if not target_list_name:
+            target_list_name = available_lists[0] if available_lists else 'tasks'
+
+        normalized_due = _normalize_task_due_date(due_date)
+        parsed_priority = int(priority or 0)
+
+        final_description = (description or '').strip()
+        location_value = (location or '').strip()
+        if location_value:
+            location_line = f"Ort: {location_value}"
+            if final_description:
+                if location_line.lower() not in final_description.lower():
+                    final_description = f"{final_description}\n{location_line}"
+            else:
+                final_description = location_line
+
+        success = task_manager.create_task(
+            title=title,
+            description=final_description,
+            due_date=normalized_due,
+            priority=parsed_priority,
+            list_name=target_list_name
+        )
+
+        if success:
+            due_text = normalized_due if normalized_due else 'ohne Fälligkeitsdatum'
+            return {
+                'success': True,
+                'message': f'Aufgabe "{title}" wurde erstellt (fällig: {due_text})',
+                'title': title,
+                'due_date': normalized_due,
+                'priority': parsed_priority,
+                'list_name': target_list_name,
+                'location': location_value or None
+            }
+
+        return {'success': False, 'error': 'Fehler beim Erstellen des Tasks'}
+    except Exception as e:
+        logger.error(f"Error creating task reminder: {e}")
+        return {'success': False, 'error': f'Fehler: {str(e)}'}
+
 def get_activity_context(limit: int = 10) -> Dict:
     """Lädt aktuelle Nextcloud-Aktivitäten und formatiert sie für Chat-Kontext und Direktantworten."""
     config = get_nextcloud_runtime_config()
@@ -1111,13 +1328,13 @@ def get_activity_context(limit: int = 10) -> Dict:
         activities = activity_client.get_recent_activities(limit=limit)
         if not activities:
             return {
-                'context': "=== NEXTCLOUD AKTIVITAETEN ===\nKeine neuen Aktivitäten gefunden.",
+                'context': "=== NEXTCLOUD AKTIVITÄTEN ===\nKeine neuen Aktivitäten gefunden.",
                 'summary_text': "Es gibt aktuell keine neuen Aktivitäten auf deiner Nextcloud.",
                 'count': 0,
                 'error': None
             }
 
-        lines = ["=== NEXTCLOUD AKTIVITAETEN ===", f"Anzahl: {len(activities)}", ""]
+        lines = ["=== NEXTCLOUD AKTIVITÄTEN ===", f"Anzahl: {len(activities)}", ""]
         summary_lines = ["Ja, es gibt neue Aktivitäten:"]
 
         for idx, activity in enumerate(activities[:10], 1):
@@ -2832,23 +3049,67 @@ def create_task():
         due_date = data.get('due_date')  # YYYY-MM-DD
         priority = data.get('priority', 0)
         list_name = data.get('list_name', 'tasks')
+        location = data.get('location')
         
         if not title:
             return jsonify({'error': 'Titel ist erforderlich'}), 400
-        
-        success = task_manager.create_task(title, description, due_date, priority, list_name)
-        
-        if success:
+
+        result = create_task_reminder(
+            title=title,
+            description=description,
+            due_date=due_date,
+            priority=priority,
+            list_name=list_name,
+            location=location
+        )
+
+        if result.get('success'):
             return jsonify({
                 'status': 'created',
                 'title': title,
-                'message': f'Task "{title}" wurde erstellt'
+                'message': result.get('message', f'Task "{title}" wurde erstellt')
             })
-        else:
-            return jsonify({'error': 'Fehler beim Erstellen des Tasks'}), 500
+        return jsonify({'error': result.get('error', 'Fehler beim Erstellen des Tasks')}), 500
     
     except Exception as e:
         logger.error(f"Error creating task: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tasks/create-with-details', methods=['POST'])
+def create_task_with_details():
+    """Erstellt eine Aufgabe/Erinnerung mit strukturierten Formular-Daten."""
+    try:
+        if not tasks_enabled or not task_manager.tasks_client:
+            return jsonify({'error': 'Tasks nicht verfügbar'}), 400
+
+        data = request.json or {}
+
+        title = (data.get('title') or '').strip()
+        description = data.get('description', '')
+        due_date = data.get('due_date')
+        priority = data.get('priority', 0)
+        list_name = data.get('list_name')
+        location = data.get('location')
+
+        if not title:
+            return jsonify({'error': 'Titel ist erforderlich'}), 400
+
+        result = create_task_reminder(
+            title=title,
+            description=description,
+            due_date=due_date,
+            priority=priority,
+            list_name=list_name,
+            location=location
+        )
+
+        if result.get('success'):
+            return jsonify(result)
+
+        return jsonify({'error': result.get('error', 'Fehler beim Erstellen des Tasks')}), 500
+    except Exception as e:
+        logger.error(f"Error in create_task_with_details: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tasks/complete/<task_uid>', methods=['POST'])
@@ -3142,7 +3403,7 @@ def immich_thumbnail_proxy(asset_id):
 
 @app.route('/api/immich/download/<asset_id>', methods=['GET'])
 def immich_download_proxy(asset_id):
-    """Proxy fuer originale Immich-Dateien als Download."""
+    """Proxy für originale Immich-Dateien als Download."""
     try:
         username = request.args.get('username')
 
@@ -3857,7 +4118,7 @@ def get_local_weather_status() -> Dict[str, Any]:
             except (TypeError, ValueError):
                 pop_text = ''
             if next_hour_temp:
-                result['hourly_preview'] = f"In der naechsten Stunde etwa {next_hour_temp}{pop_text}."
+                result['hourly_preview'] = f"In der nächsten Stunde etwa {next_hour_temp}{pop_text}."
 
         daily = payload.get('daily') if isinstance(payload, dict) else []
         if isinstance(daily, list) and len(daily) > 1 and isinstance(daily[1], dict):
@@ -3946,7 +4207,7 @@ def get_local_security_status() -> Dict[str, Any]:
             else:
                 result['errors'].append('NINA ARS ist nicht konfiguriert')
         else:
-            result['errors'].append('NINA Client nicht verfuegbar')
+            result['errors'].append('NINA Client nicht verfügbar')
     except Exception as exc:
         logger.error("NINA security status failed: %s", exc)
         result['errors'].append(f"NINA Fehler: {str(exc)}")
@@ -3960,7 +4221,7 @@ def get_local_security_status() -> Dict[str, Any]:
         result['errors'].append(f"OpenWeather Fehler: {str(exc)}")
 
     if result['nina_warning_count'] > 0:
-        result['headline'] = f"{result['nina_warning_count']} aktive Warnung(en) fuer deinen Standort"
+        result['headline'] = f"{result['nina_warning_count']} aktive Warnung(en) für deinen Standort"
         lines = [result['headline'] + '.']
         for idx, warning in enumerate(result['nina_warnings'][:3], 1):
             label = warning.get('headline') or f"Warnung {idx}"
@@ -3971,9 +4232,9 @@ def get_local_security_status() -> Dict[str, Any]:
                 lines.append(f"{idx}. {label}")
         result['summary'] = "\n".join(lines)
     else:
-        result['headline'] = 'Keine akuten NINA-Warnungen fuer deinen Standort'
+        result['headline'] = 'Keine akuten NINA-Warnungen für deinen Standort'
         result['summary'] = (
-            'Aktuell liegen laut NINA keine akuten Warnungen fuer deinen Standort vor.'
+            'Aktuell liegen laut NINA keine akuten Warnungen für deinen Standort vor.'
         )
 
     return result
@@ -4777,6 +5038,7 @@ def agent_query():
         message_lower = prompt.lower()
 
         # Action parser: explicit reminder/task creation
+        # For normal task create requests we use the interactive form path below.
         action_response = None
         try:
             import re
@@ -4784,7 +5046,7 @@ def agent_query():
             pattern = r'(?:erstelle|create)\s+(?:eine?\s+)?(?:erinnerung|aufgabe|task|todo|aufgaben|tasks|reminder)\s+(?:fuer|für|um)\s+([^:]+):\s*(.+?)(?:\.|$)'
             match = re.search(pattern, message_lower)
 
-            if match:
+            if match and not is_task_create_query(prompt):
                 time_ref = match.group(1).strip()
                 title = match.group(2).strip()
 
@@ -4890,7 +5152,7 @@ def agent_query():
             if not is_todo_query(prompt) and not any(k in message_lower for k in ['termin', 'kalender', 'aufgabe', 'todo', 'task']):
                 return jsonify({
                     'success': True,
-                    'response': updates_result.get('summary_text', 'Keine Aktivitaetsdaten verfuegbar.'),
+                    'response': updates_result.get('summary_text', 'Keine Aktivitätsdaten verfügbar.'),
                     'action': 'activity_lookup',
                     'context_used': bool(activity_context),
                     'context_count': 1 if activity_context else 0,
@@ -4971,6 +5233,65 @@ def agent_query():
                 'response': "Der Termin konnte nicht erstellt werden: " + create_result.get('error', 'Unbekannter Fehler'),
                 'action': 'calendar_create_failed',
                 'calendar_used': True,
+                'context_used': False,
+                'context_count': 0,
+                'training_saved': False,
+                'sources': []
+            })
+
+        # Interaktive Aufgaben-/Erinnerungs-Erstellung
+        if is_task_create_query(prompt):
+            task_info = extract_task_info_from_message(prompt)
+
+            if task_info.get('missing_info'):
+                available_task_lists = get_available_task_lists()
+
+                return jsonify({
+                    'response': "Ich kann die Aufgabe erstellen, mir fehlen aber noch: " + ", ".join(task_info['missing_info']) + ".",
+                    'action': 'task_missing_input',
+                    'requires_input': True,
+                    'missing_info': task_info['missing_info'],
+                    'extracted_info': {
+                        'title': task_info.get('title'),
+                        'due_date': task_info.get('due_date'),
+                        'priority': task_info.get('priority', 0),
+                        'list_name': task_info.get('list_name'),
+                        'location': task_info.get('location'),
+                        'description': task_info.get('description')
+                    },
+                    'available_task_lists': available_task_lists,
+                    'context_used': False,
+                    'context_count': 0,
+                    'calendar_used': False,
+                    'training_saved': False,
+                    'sources': []
+                })
+
+            create_result = create_task_reminder(
+                title=task_info.get('title'),
+                description=task_info.get('description') or prompt,
+                due_date=task_info.get('due_date'),
+                priority=task_info.get('priority', 0),
+                list_name=task_info.get('list_name'),
+                location=task_info.get('location')
+            )
+
+            if create_result.get('success'):
+                return jsonify({
+                    'response': create_result.get('message', 'Aufgabe wurde erstellt.'),
+                    'action': 'task_created',
+                    'calendar_used': False,
+                    'context_used': False,
+                    'context_count': 0,
+                    'training_saved': False,
+                    'sources': [],
+                    'created_task': create_result
+                })
+
+            return jsonify({
+                'response': "Die Aufgabe konnte nicht erstellt werden: " + create_result.get('error', 'Unbekannter Fehler'),
+                'action': 'task_create_failed',
+                'calendar_used': False,
                 'context_used': False,
                 'context_count': 0,
                 'training_saved': False,
