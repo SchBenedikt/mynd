@@ -233,6 +233,7 @@ class NextcloudCardDAVClient:
                 'given_name': '',
                 'family_name': '',
                 'organization': '',
+                'birthday': '',
                 'email': [],
                 'phone': [],
                 'address': [],
@@ -254,6 +255,9 @@ class NextcloudCardDAVClient:
                         contact['given_name'] = name_parts[1]
                 elif line.startswith('ORG:'):
                     contact['organization'] = line[4:]
+                elif line.startswith('BDAY'):
+                    birthday = line.split(':', 1)[1] if ':' in line else ''
+                    contact['birthday'] = birthday.strip()
                 elif line.startswith('EMAIL'):
                     email = line.split(':', 1)[1] if ':' in line else ''
                     if email:
@@ -306,6 +310,7 @@ class NextcloudCardDAVClient:
                     contact.get('given_name', ''),
                     contact.get('family_name', ''),
                     contact.get('organization', ''),
+                    contact.get('birthday', ''),
                     ' '.join(contact.get('email', [])),
                     ' '.join(contact.get('phone', []))
                 ]).lower()
