@@ -5118,7 +5118,7 @@ def agent_query():
         has_question = any(word in message_lower.split()[:3] for word in question_words)
         is_potentially_calendar_query = has_time_indicators and has_question
 
-        # Interaktive Termin-Erstellung: Liefere Missing-Input-Form direkt an das Frontend
+        # Interactive event creation: Let AI handle missing information naturally
         if is_calendar_create_query(prompt):
             event_info = extract_event_info_from_message(prompt)
 
@@ -5130,8 +5130,60 @@ def agent_query():
                     except Exception as e:
                         logger.warning(f"Could not load calendars for interactive form: {e}")
 
+                # Build context for AI to handle missing information
+                missing_context = {
+                    'content': f"""=== TERMIN-ERSTELLUNG ===
+Der Nutzer möchte einen Termin erstellen.
+
+Bereits extrahierte Informationen:
+- Titel: {event_info.get('title') or 'nicht angegeben'}
+- Startzeit: {event_info.get('start_time') or 'nicht angegeben'}
+- Endzeit: {event_info.get('end_time') or 'nicht angegeben'}
+- Ort: {event_info.get('location') or 'nicht angegeben'}
+- Kalender: {event_info.get('calendar_name') or 'nicht angegeben'}
+
+Fehlende Informationen: {', '.join(event_info['missing_info'])}
+
+Verfügbare Kalender: {', '.join(calendars) if calendars else 'nicht verfügbar'}
+
+AUFGABE: Frage den Nutzer natürlich nach den fehlenden Informationen.
+Erkläre, welche Angaben noch benötigt werden, um den Termin zu erstellen.""",
+                    'source': 'Termin-Erstellung',
+                    'path': 'calendar_creation',
+                    'similarity_score': 1.0,
+                    'metadata': {
+                        'action': 'calendar_missing_input',
+                        'extracted_info': event_info,
+                        'available_calendars': calendars
+                    }
+                }
+
+                # Let AI generate the response about missing information
+                system_message = f"""Du bist ein intelligenter persönlicher Assistent.
+
+{missing_context['content']}
+
+WICHTIG:
+- Antworte auf {language}
+- Frage natürlich und freundlich nach den fehlenden Informationen
+- Variiere deine Formulierung - vermeide stereotype Phrasen
+- Sei präzise und hilfreich"""
+
+                messages = [
+                    {'role': 'system', 'content': system_message},
+                    {'role': 'user', 'content': prompt}
+                ]
+
+                try:
+                    response = ollama_client.chat(messages, [])
+                    ai_response = response.get('message', {}).get('content',
+                        f"Um den Termin zu erstellen, benötige ich noch: {', '.join(event_info['missing_info'])}")
+                except Exception as e:
+                    logger.error(f"AI generation error for calendar missing input: {e}")
+                    ai_response = f"Um den Termin zu erstellen, benötige ich noch: {', '.join(event_info['missing_info'])}"
+
                 return jsonify({
-                    'response': "Ich kann den Termin erstellen, mir fehlen aber noch: " + ", ".join(event_info['missing_info']) + ".",
+                    'response': ai_response,
                     'action': 'calendar_missing_input',
                     'requires_input': True,
                     'missing_info': event_info['missing_info'],
@@ -5150,6 +5202,7 @@ def agent_query():
                     'sources': []
                 })
 
+            # Create event and let AI generate success/failure message
             create_result = create_calendar_event(
                 title=event_info.get('title'),
                 start_time=event_info.get('start_time'),
@@ -5159,37 +5212,106 @@ def agent_query():
                 description=prompt
             )
 
-            if create_result.get('success'):
-                return jsonify({
-                    'response': create_result.get('message', 'Termin wurde erstellt.'),
-                    'action': 'calendar_created',
-                    'calendar_used': True,
-                    'context_used': False,
-                    'context_count': 0,
-                    'training_saved': False,
-                    'sources': [],
-                    'created_event': create_result
-                })
+            # Let AI generate natural response about success/failure
+            result_context = f"""=== TERMIN-ERSTELLUNG ===
+Ergebnis: {'Erfolg' if create_result.get('success') else 'Fehler'}
+{create_result.get('message', '') if create_result.get('success') else create_result.get('error', 'Unbekannter Fehler')}
+
+Erstellter Termin:
+- Titel: {event_info.get('title')}
+- Startzeit: {event_info.get('start_time')}
+- Endzeit: {event_info.get('end_time')}
+- Ort: {event_info.get('location') or 'kein Ort'}
+- Kalender: {event_info.get('calendar_name') or 'Standard-Kalender'}
+
+AUFGABE: Informiere den Nutzer {'über die erfolgreiche Erstellung' if create_result.get('success') else 'über den Fehler'} des Termins.
+Formuliere die Nachricht natürlich und variiert."""
+
+            system_message = f"""Du bist ein intelligenter persönlicher Assistent.
+
+{result_context}
+
+WICHTIG:
+- Antworte auf {language}
+- Formuliere die Nachricht natürlich und freundlich
+- Variiere deine Formulierung - vermeide stereotype Phrasen"""
+
+            messages = [
+                {'role': 'system', 'content': system_message},
+                {'role': 'user', 'content': prompt}
+            ]
+
+            try:
+                response = ollama_client.chat(messages, [])
+                ai_response = response.get('message', {}).get('content',
+                    create_result.get('message', 'Termin wurde erstellt.') if create_result.get('success')
+                    else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
+            except Exception as e:
+                logger.error(f"AI generation error for calendar result: {e}")
+                ai_response = (create_result.get('message', 'Termin wurde erstellt.') if create_result.get('success')
+                              else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
 
             return jsonify({
-                'response': "Der Termin konnte nicht erstellt werden: " + create_result.get('error', 'Unbekannter Fehler'),
-                'action': 'calendar_create_failed',
+                'response': ai_response,
+                'action': 'calendar_created' if create_result.get('success') else 'calendar_create_failed',
                 'calendar_used': True,
                 'context_used': False,
                 'context_count': 0,
                 'training_saved': False,
-                'sources': []
+                'sources': [],
+                'created_event': create_result if create_result.get('success') else None
             })
 
-        # Interaktive Aufgaben-/Erinnerungs-Erstellung
+        # Interactive task/reminder creation: Let AI handle missing information naturally
         if is_task_create_query(prompt):
             task_info = extract_task_info_from_message(prompt)
 
             if task_info.get('missing_info'):
                 available_task_lists = get_available_task_lists()
 
+                # Build context for AI to handle missing information
+                missing_context = f"""=== AUFGABEN-ERSTELLUNG ===
+Der Nutzer möchte eine Aufgabe/Erinnerung erstellen.
+
+Bereits extrahierte Informationen:
+- Titel: {task_info.get('title') or 'nicht angegeben'}
+- Fälligkeitsdatum: {task_info.get('due_date') or 'nicht angegeben'}
+- Priorität: {task_info.get('priority', 0) or 'nicht angegeben'}
+- Liste: {task_info.get('list_name') or 'nicht angegeben'}
+- Ort: {task_info.get('location') or 'nicht angegeben'}
+
+Fehlende Informationen: {', '.join(task_info['missing_info'])}
+
+Verfügbare Aufgabenlisten: {', '.join(available_task_lists) if available_task_lists else 'nicht verfügbar'}
+
+AUFGABE: Frage den Nutzer natürlich nach den fehlenden Informationen.
+Erkläre, welche Angaben noch benötigt werden, um die Aufgabe zu erstellen."""
+
+                system_message = f"""Du bist ein intelligenter persönlicher Assistent.
+
+{missing_context}
+
+WICHTIG:
+- Antworte auf {language}
+- Frage natürlich und freundlich nach den fehlenden Informationen
+- Variiere deine Formulierung - vermeide stereotype Phrasen
+- Sei präzise und hilfreich"""
+
+                messages = [
+                    {'role': 'system', 'content': system_message},
+                    {'role': 'user', 'content': prompt}
+                ]
+
+                try:
+                    response = ollama_client.chat(messages, [])
+                    ai_response = response.get('message', {}).get('content',
+                        f"Um die Aufgabe zu erstellen, benötige ich noch: {', '.join(task_info['missing_info'])}")
+                except Exception as e:
+                    logger.error(f"AI generation error for task missing input: {e}")
+                    ai_response = f"Um die Aufgabe zu erstellen, benötige ich noch: {', '.join(task_info['missing_info'])}"
+
                 return jsonify({
-                    'response': "Ich kann die Aufgabe erstellen, mir fehlen aber noch: " + ", ".join(task_info['missing_info']) + ".",
+                    'response': ai_response,
                     'action': 'task_missing_input',
                     'requires_input': True,
                     'missing_info': task_info['missing_info'],
@@ -5209,6 +5331,7 @@ def agent_query():
                     'sources': []
                 })
 
+            # Create task and let AI generate success/failure message
             create_result = create_task_reminder(
                 title=task_info.get('title'),
                 description=task_info.get('description') or prompt,
@@ -5218,26 +5341,54 @@ def agent_query():
                 location=task_info.get('location')
             )
 
-            if create_result.get('success'):
-                return jsonify({
-                    'response': create_result.get('message', 'Aufgabe wurde erstellt.'),
-                    'action': 'task_created',
-                    'calendar_used': False,
-                    'context_used': False,
-                    'context_count': 0,
-                    'training_saved': False,
-                    'sources': [],
-                    'created_task': create_result
-                })
+            # Let AI generate natural response about success/failure
+            result_context = f"""=== AUFGABEN-ERSTELLUNG ===
+Ergebnis: {'Erfolg' if create_result.get('success') else 'Fehler'}
+{create_result.get('message', '') if create_result.get('success') else create_result.get('error', 'Unbekannter Fehler')}
+
+Erstellte Aufgabe:
+- Titel: {task_info.get('title')}
+- Fälligkeitsdatum: {task_info.get('due_date') or 'kein Datum'}
+- Priorität: {task_info.get('priority', 0)}
+- Liste: {task_info.get('list_name') or 'Standard-Liste'}
+- Ort: {task_info.get('location') or 'kein Ort'}
+
+AUFGABE: Informiere den Nutzer {'über die erfolgreiche Erstellung' if create_result.get('success') else 'über den Fehler'} der Aufgabe.
+Formuliere die Nachricht natürlich und variiert."""
+
+            system_message = f"""Du bist ein intelligenter persönlicher Assistent.
+
+{result_context}
+
+WICHTIG:
+- Antworte auf {language}
+- Formuliere die Nachricht natürlich und freundlich
+- Variiere deine Formulierung - vermeide stereotype Phrasen"""
+
+            messages = [
+                {'role': 'system', 'content': system_message},
+                {'role': 'user', 'content': prompt}
+            ]
+
+            try:
+                response = ollama_client.chat(messages, [])
+                ai_response = response.get('message', {}).get('content',
+                    create_result.get('message', 'Aufgabe wurde erstellt.') if create_result.get('success')
+                    else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
+            except Exception as e:
+                logger.error(f"AI generation error for task result: {e}")
+                ai_response = (create_result.get('message', 'Aufgabe wurde erstellt.') if create_result.get('success')
+                              else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
 
             return jsonify({
-                'response': "Die Aufgabe konnte nicht erstellt werden: " + create_result.get('error', 'Unbekannter Fehler'),
-                'action': 'task_create_failed',
+                'response': ai_response,
+                'action': 'task_created' if create_result.get('success') else 'task_create_failed',
                 'calendar_used': False,
                 'context_used': False,
                 'context_count': 0,
                 'training_saved': False,
-                'sources': []
+                'sources': [],
+                'created_task': create_result if create_result.get('success') else None
             })
 
         # Detect query intent
