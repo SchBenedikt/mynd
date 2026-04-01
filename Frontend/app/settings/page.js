@@ -148,6 +148,7 @@ export default function SettingsPage() {
           setNextcloudConfigured(true);
           setNextcloudDisplayName(config.display_name || config.username || '');
           setNextcloudUrl(config.nextcloud_url || '');
+          loadCalendarOptions();
           if (config.display_name || config.username) {
             try {
               const existing = localStorage.getItem(DISPLAY_NAME_STORAGE_KEY);
@@ -194,10 +195,30 @@ export default function SettingsPage() {
       const res = await fetch(`${API_BASE}/api/calendar/calendars`);
       if (res.ok) {
         const data = await res.json();
-        setCalendarOptions(data.calendars || []);
+        const calendars = data.calendars || [];
+        setCalendarOptions(calendars);
+        if (calendars.length === 0) {
+          setCalendarConfigStatus(tr('Keine Kalender gefunden', 'No calendars found'));
+        } else {
+          setCalendarConfigStatus('');
+        }
+      } else {
+        let message = tr('Kalender konnten nicht geladen werden', 'Could not load calendars');
+        try {
+          const data = await res.json();
+          if (data?.error) {
+            message = data.error;
+          }
+        } catch (_) {
+          // Keep generic fallback message if non-JSON response.
+        }
+        setCalendarOptions([]);
+        setCalendarConfigStatus(tr('Fehler: ', 'Error: ') + message);
       }
     } catch (err) {
       console.error('Error loading calendar options:', err);
+      setCalendarOptions([]);
+      setCalendarConfigStatus(tr('Fehler: ', 'Error: ') + err.message);
     }
   };
 
@@ -277,6 +298,7 @@ export default function SettingsPage() {
             setNextcloudUrl(pollData.nextcloud_url || nextcloudUrl.trim());
             setNextcloudLoggingIn(false);
             setNextcloudStatus(`✓ Connected as ${pollData.display_name || pollData.username}`);
+            loadCalendarOptions();
             return;
           }
 
@@ -989,36 +1011,6 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="panel-section" style={{marginTop: '2rem'}}>
-                  <div className="section-title">{tr('Immich-Integration', 'Immich Integration')}</div>
-                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
-                    {tr('Globale Immich-Standards fuer die Fotosuche konfigurieren.', 'Configure global Immich defaults for photo search.')}
-                  </p>
-                  <div className="input-group">
-                    <label>Immich URL</label>
-                    <input
-                      type="text"
-                      value={immichUrlDefault}
-                      onChange={(e) => setImmichUrlDefault(e.target.value)}
-                      placeholder="https://immich.example.com"
-                    />
-                  </div>
-                  <div className="input-group">
-                    <label>Immich API Key</label>
-                    <input
-                      type="password"
-                      value={immichApiKeyDefault}
-                      onChange={(e) => setImmichApiKeyDefault(e.target.value)}
-                      placeholder="immich-api-key"
-                    />
-                  </div>
-                  <div className="button-group">
-                    <button className="btn primary" onClick={saveImmichConfig}>{tr('Immich speichern', 'Save Immich')}</button>
-                    <button className="btn" onClick={testImmichConnection}>{tr('Verbindung testen', 'Test Connection')}</button>
-                  </div>
-                  {immichStatus && <div className="status-text">{immichStatus}</div>}
-                </div>
-
-                <div className="panel-section" style={{marginTop: '2rem'}}>
                   <div className="section-title">Kalender Standard</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
                     Dieser Kalender wird verwendet, wenn beim Erstellen eines Termins kein Kalender angegeben wird.
@@ -1050,6 +1042,36 @@ export default function SettingsPage() {
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1.5rem 0'}}>
                     {tr('Konfiguriere externe APIs für erweiterte Funktionen', 'Configure external APIs for extended functionality')}
                   </p>
+
+                  <div style={{padding: '1rem', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px', marginBottom: '1.5rem'}}>
+                    <div className="section-title">{tr('Immich-Integration', 'Immich Integration')}</div>
+                    <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1rem 0'}}>
+                      {tr('Globale Immich-Standards fuer die Fotosuche konfigurieren.', 'Configure global Immich defaults for photo search.')}
+                    </p>
+                    <div className="input-group">
+                      <label>Immich URL</label>
+                      <input
+                        type="text"
+                        value={immichUrlDefault}
+                        onChange={(e) => setImmichUrlDefault(e.target.value)}
+                        placeholder="https://immich.example.com"
+                      />
+                    </div>
+                    <div className="input-group">
+                      <label>Immich API Key</label>
+                      <input
+                        type="password"
+                        value={immichApiKeyDefault}
+                        onChange={(e) => setImmichApiKeyDefault(e.target.value)}
+                        placeholder="immich-api-key"
+                      />
+                    </div>
+                    <div className="button-group">
+                      <button className="btn primary" onClick={saveImmichConfig}>{tr('Immich speichern', 'Save Immich')}</button>
+                      <button className="btn" onClick={testImmichConnection}>{tr('Verbindung testen', 'Test Connection')}</button>
+                    </div>
+                    {immichStatus && <div className="status-text">{immichStatus}</div>}
+                  </div>
 
                   {/* API List */}
                   <div style={{display: 'grid', gap: '1rem', marginBottom: '2rem'}}>
