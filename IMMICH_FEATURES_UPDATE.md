@@ -31,8 +31,8 @@ Alle Fotos enthalten jetzt:
 ```json
 {
   "id": "1c19a40a-a0c0-4d37-a29c-0d6ad33c5acc",
-  "asset_url": "https://fotos.xn--schchner-2za.de/api/assets/1c19a40a.../original",
-  "thumbnail_url": "https://fotos.xn--schchner-2za.de/api/assets/1c19a40a.../thumbnail?size=preview",
+  "asset_url": "https://immich.domain.de/api/assets/1c19a40a.../original",
+  "thumbnail_url": "https://immich.domain.de/api/assets/1c19a40a.../thumbnail?size=preview",
   "original_file_name": "26-03-30 17-50-34 0375.png",
   "created_at": "2026-03-30T17:50:34.000Z"
 }
