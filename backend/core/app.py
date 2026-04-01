@@ -3,7 +3,8 @@ import json
 import sys
 import requests
 import numpy as np
-from flask import Flask, request, jsonify, redirect, url_for, session, Response
+from flask import Flask, request, jsonify, redirect, url_for, session, Response, make_response
+from flask_cors import CORS
 from dotenv import load_dotenv
 import re
 import logging
@@ -25,6 +26,7 @@ from backend.features.integration.notifications_client import NextcloudNotificat
 from backend.features.integration.auth_manager import get_auth_manager, AuthManager
 from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
+from backend.features.integration.loginflow_state import loginflow_state
 from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
 # from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
@@ -66,6 +68,15 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 # Create Flask app with correct template folder
 app = Flask(__name__, template_folder=TEMPLATES_DIR)
+
+# Configure CORS with credentials support
+cors_origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
+cors_origins = [origin.strip() for origin in cors_origins]
+CORS(app, 
+     origins=cors_origins,
+     supports_credentials=True,
+     allow_headers=['Content-Type', 'Authorization'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 
 # Konfiguriere Session für OAuth2 State Management
 app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
@@ -1849,9 +1860,9 @@ def nextcloud_oauth_config():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/nextcloud/loginflow/start', methods=['POST'])
+@app.route('/api/nextcloud/loginflow/start', methods=['POST', 'OPTIONS'])
 def nextcloud_loginflow_start():
-    """Startet Nextcloud Login Flow v2 ohne manuelle OAuth-Client-Registrierung."""
+    """Startet Nextcloud Login Flow v2 mit In-Memory State Management"""
     try:
         data = request.get_json(silent=True) or {}
         nextcloud_url = validate_service_url(
@@ -1862,7 +1873,7 @@ def nextcloud_loginflow_start():
         if not nextcloud_url:
             return jsonify({'error': 'nextcloud_url parameter required'}), 400
 
-        # Basic URL validation against Nextcloud status endpoint.
+        # Validate Nextcloud instance
         status_url = f"{nextcloud_url}/status.php"
         status_res = requests.get(status_url, timeout=8)
         status_res.raise_for_status()
@@ -1870,6 +1881,7 @@ def nextcloud_loginflow_start():
         if not status_data.get('installed', False):
             return jsonify({'error': 'Invalid Nextcloud instance'}), 400
 
+        # Request login flow from Nextcloud
         flow_url = f"{nextcloud_url}/index.php/login/v2"
         flow_res = requests.post(
             flow_url,
@@ -1887,13 +1899,22 @@ def nextcloud_loginflow_start():
         if not all([login_url, poll_token, poll_endpoint]):
             return jsonify({'error': 'Nextcloud login flow response incomplete'}), 502
 
-        session['loginflow_nextcloud_url'] = nextcloud_url
-        session['loginflow_poll_token'] = poll_token
-        session['loginflow_poll_endpoint'] = poll_endpoint
+        # Store flow state in memory (not in Flask session)
+        session_id = loginflow_state.create_flow(nextcloud_url, poll_token, poll_endpoint)
+        
+        # Also store in Flask session as fallback
+        session['loginflow_session_id'] = session_id
         session.permanent = True
 
         logger.info(f"Nextcloud Login Flow v2 started for {nextcloud_url}")
-        return jsonify({'status': 'started', 'login_url': login_url})
+        
+        response = make_response(jsonify({
+            'status': 'started',
+            'login_url': login_url,
+            'session_id': session_id
+        }))
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return response, 200
     except Exception as e:
         logger.error(f"Error starting Nextcloud Login Flow v2: {str(e)}")
         return jsonify({'error': str(e)}), 500

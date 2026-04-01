@@ -109,7 +109,7 @@ export default function SettingsPage() {
   const loadNextcloudConfig = async () => {
     try {
       // Check if Nextcloud is configured from the backend
-      const configRes = await fetch(`${API_BASE}/api/nextcloud/config`);
+      const configRes = await fetch(`${API_BASE}/api/nextcloud/config`, {credentials: 'include'});
       if (configRes.ok) {
         const config = await configRes.json();
         if (config.configured) {
@@ -145,7 +145,7 @@ export default function SettingsPage() {
 
   const loadCalendarConfig = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/calendar/config`);
+      const res = await fetch(`${API_BASE}/api/calendar/config`, {credentials: 'include'});
       if (res.ok) {
         const config = await res.json();
         setCalendarConfig({
@@ -159,7 +159,7 @@ export default function SettingsPage() {
 
   const loadCalendarOptions = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/calendar/calendars`);
+      const res = await fetch(`${API_BASE}/api/calendar/calendars`, {credentials: 'include'});
       if (res.ok) {
         const data = await res.json();
         setCalendarOptions(data.calendars || []);
@@ -210,7 +210,8 @@ export default function SettingsPage() {
       const startRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nextcloud_url: nextcloudUrl.trim() })
+        body: JSON.stringify({ nextcloud_url: nextcloudUrl.trim() }),
+        credentials: 'include'
       });
 
       const startData = await startRes.json();
@@ -226,9 +227,10 @@ export default function SettingsPage() {
       let attempts = 0;
       const maxAttempts = 120;
       const pollInterval = setInterval(async () => {
-        attempts += 1;
         try {
-          const pollRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/poll`);
+          const pollRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/poll`, {
+            credentials: 'include'
+          });
           const pollData = await pollRes.json();
 
           if (!pollRes.ok) {
@@ -247,6 +249,8 @@ export default function SettingsPage() {
             setNextcloudStatus(`✓ Connected as ${pollData.display_name || pollData.username}`);
             return;
           }
+
+          attempts += 1;
 
           if (attempts >= maxAttempts) {
             clearInterval(pollInterval);
@@ -291,7 +295,7 @@ export default function SettingsPage() {
 
   const loadAIConfig = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ai/config`);
+      const res = await fetch(`${API_BASE}/api/ai/config`, {credentials: 'include'});
       const config = await res.json();
       const url = new URL(config.base_url);
       setAiProtocol(url.protocol.replace(':', ''));
@@ -306,7 +310,7 @@ export default function SettingsPage() {
 
   const loadOllamaModels = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ollama/models`);
+      const res = await fetch(`${API_BASE}/api/ollama/models`, {credentials: 'include'});
       const data = await res.json();
       setAiModels(data.models || []);
     } catch (err) {
@@ -316,7 +320,7 @@ export default function SettingsPage() {
 
   const loadImmichConfig = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ui/system-config`);
+      const res = await fetch(`${API_BASE}/api/ui/system-config`, {credentials: 'include'});
       const data = await res.json();
       if (res.ok && data?.success && data?.config) {
         setImmichUrlDefault(data.config.immich_url_default || '');
@@ -411,7 +415,7 @@ export default function SettingsPage() {
   const startIndexing = async () => {
     try {
       // First check if there's a configuration
-      const configRes = await fetch(`${API_BASE}/api/indexing/config`);
+      const configRes = await fetch(`${API_BASE}/api/indexing/config`, {credentials: 'include'});
       if (configRes.ok) {
         const config = await configRes.json();
         if (!config.url || !config.username || !config.password) {
@@ -429,7 +433,7 @@ export default function SettingsPage() {
         setIndexingStatus('running');
         const progressInterval = setInterval(async () => {
           try {
-            const res = await fetch(`${API_BASE}/api/indexing/progress`);
+            const res = await fetch(`${API_BASE}/api/indexing/progress`, {credentials: 'include'});
             if (res.ok) {
               const data = await res.json();
               setIndexingProgress(Math.round(data.progress_percentage || 0));
