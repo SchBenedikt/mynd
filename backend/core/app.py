@@ -45,6 +45,11 @@ def create_calendar_manager():
     return None
 from backend.features.calendar.simple import create_simple_calendar_manager
 from backend.features.tasks.manager import task_manager, set_database
+from backend.core.context.gatherers import (
+    gather_photo_context, gather_file_context, gather_weather_context,
+    gather_security_context, gather_activity_context, gather_calendar_context,
+    gather_todo_context, combine_contexts, build_system_message as build_agent_system_message
+)
 import xml.etree.ElementTree as ET
 
 load_dotenv()
@@ -5038,74 +5043,20 @@ def agent_query():
         message_lower = prompt.lower()
 
         # Gather weather context if query is weather-related (but let AI respond)
-        weather_context = None
-        if is_weather_query(prompt):
-            try:
-                weather = get_local_weather_status()
-                weather_lines = []
-                weather_lines.append("=== WETTER-INFORMATION ===")
-                weather_lines.append(f"Zusammenfassung: {weather.get('summary', 'Nicht verfügbar')}")
-                if weather.get('alerts_count', 0) > 0:
-                    weather_lines.append(f"\nWetterwarnungen ({weather.get('alerts_count')} aktiv):")
-                    for idx, alert in enumerate((weather.get('alerts') or [])[:5], 1):
-                        event = alert.get('event') or f'Warnung {idx}'
-                        sender = _safe_text(alert.get('sender_name'))
-                        desc = alert.get('description', '')[:200] + '...' if len(alert.get('description', '')) > 200 else alert.get('description', '')
-                        weather_lines.append(f"{idx}. {event}" + (f" ({sender})" if sender else ""))
-                        if desc:
-                            weather_lines.append(f"   {desc}")
-                weather_context = {
-                    'content': '\n'.join(weather_lines),
-                    'source': 'Wetter',
-                    'path': 'weather',
-                    'similarity_score': 1.0,
-                    'metadata': weather
-                }
-            except Exception as e:
-                logger.error(f"Weather context error: {e}")
+        weather_context = gather_weather_context(
+            get_local_weather_status, is_weather_query, prompt, _safe_text
+        )
 
         # Gather security context if query is security-related (but let AI respond)
-        security_context = None
-        if is_security_query(prompt):
-            try:
-                security = get_local_security_status()
-                security_lines = []
-                security_lines.append("=== SICHERHEITSLAGE ===")
-                security_lines.append(f"NINA Warnungen: {security.get('nina_warning_count', 0)}")
-                if security.get('nina_warning_count', 0) > 0:
-                    for idx, warning in enumerate(security.get('nina_warnings', [])[:5], 1):
-                        security_lines.append(f"{idx}. {warning.get('headline', 'Warnung')}")
-                        security_lines.append(f"   Schweregrad: {warning.get('severity', 'Unbekannt')}")
-                        desc = warning.get('description', '')[:200] + '...' if len(warning.get('description', '')) > 200 else warning.get('description', '')
-                        if desc:
-                            security_lines.append(f"   {desc}")
-                security_context = {
-                    'content': '\n'.join(security_lines),
-                    'source': 'Sicherheitslage',
-                    'path': 'security',
-                    'similarity_score': 1.0,
-                    'metadata': security
-                }
-            except Exception as e:
-                logger.error(f"Security context error: {e}")
+        security_context = gather_security_context(
+            get_local_security_status, is_security_query, prompt
+        )
 
         # Gather activity context if query is activity-related (but let AI respond)
-        activity_context = None
+        activity_context = gather_activity_context(
+            get_updates_context, is_activity_query, prompt
+        )
         is_activity_question = is_activity_query(prompt)
-        if is_activity_question:
-            try:
-                updates_result = get_updates_context(activity_limit=10, notifications_limit=10)
-                activity_context_str = updates_result.get('context', '')
-                if activity_context_str:
-                    activity_context = {
-                        'content': activity_context_str,
-                        'source': 'Nextcloud Aktivitäten',
-                        'path': 'activity',
-                        'similarity_score': 1.0,
-                        'metadata': {}
-                    }
-            except Exception as e:
-                logger.error(f"Activity context error: {e}")
 
         # Calendar heuristic (same as legacy /api/chat)
         time_related_indicators = [
@@ -5404,224 +5355,40 @@ WICHTIG:
 
         # Gather photo context if relevant
         if intent in ['photos', 'mixed']:
-            try:
-                client = get_immich_client(username)
-                if client:
-                    # Reduced limit for quicker response in agent context
-                    result = client.search_photos_intelligent(prompt, limit=6)
-                    if result.get('success') and result.get('results') and len(result['results']) > 0:
-                        # Format photo results for context with full details
-                        photos = result['results']
-                        photo_results = photos
-                        photo_lines = []
-
-                        photo_lines.append("### 📸 Gefundene Fotos")
-                        photo_lines.append("")
-                        photo_lines.append("WICHTIG: Bette die Fotos direkt in deine Antwort ein mit Markdown-Bildern: ![Beschreibung](URL)")
-                        photo_lines.append("")
-
-                        for i, photo in enumerate(photos[:5], 1):  # Limit to 5 for context
-                            name = photo['original_file_name']
-                            date = photo.get('created_at', 'Unknown')
-                            people = photo.get('people', [])
-                            location = photo.get('location', '')
-                            objects = photo.get('objects', [])
-                            tags = photo.get('tags', [])
-                            photo_id = photo.get('id', 'N/A')
-                            asset_url = photo['asset_url']
-                            thumbnail_url = build_immich_thumbnail_proxy_url(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url', '')
-
-                            # Add numbered photo entry with metadata for AI context
-                            photo_lines.append(f"**Foto {i}: {name}**")
-                            photo_lines.append(f"- Bild-URL für Einbettung: {thumbnail_url}")
-                            photo_lines.append(f"- Vollbild-Link: {asset_url}")
-                            photo_lines.append(f"- ID: {photo_id}")
-
-                            if date and date != 'Unknown':
-                                date_str = date[:10] if len(str(date)) > 10 else date
-                                photo_lines.append(f"- Aufgenommen am: {date_str}")
-
-                            if people:
-                                # Handle both string lists and dict lists
-                                people_names = [p if isinstance(p, str) else p.get('name', str(p)) for p in people]
-                                photo_lines.append(f"- Personen auf dem Foto: {', '.join(people_names)}")
-
-                            if location:
-                                photo_lines.append(f"- Ort: {location}")
-
-                            if objects:
-                                # Handle both string lists and dict lists
-                                obj_names = [o if isinstance(o, str) else o.get('name', str(o)) for o in objects[:5]]
-                                photo_lines.append(f"- Erkannte Objekte: {', '.join(obj_names)}")
-
-                            if tags:
-                                # Handle both string lists and dict lists
-                                tag_names = [t if isinstance(t, str) else t.get('name', str(t)) for t in tags[:5]]
-                                photo_lines.append(f"- Tags: {', '.join(tag_names)}")
-
-                            photo_lines.append("")
-
-                        photo_context = {
-                            'content': '=== FOTOS VON IMMICH ===\n\n' + '\n'.join(photo_lines),
-                            'source': 'Immich Photos',
-                            'path': 'immich',
-                            'similarity_score': 1.0,
-                            'metadata': {
-                                'count': len(photos),
-                                'photo_ids': [p.get('id') for p in photos],
-                                'photos': photos  # Keep full photo data for AI
-                            }
-                        }
-                        logger.info(f"Found {len(photos)} photos for context with full metadata")
-            except Exception as e:
-                logger.error(f"Photo search error: {e}")
+            client = get_immich_client(username)
+            photo_context = gather_photo_context(client, prompt, username, build_immich_thumbnail_proxy_url)
+            if photo_context:
+                photo_results = photo_context.get('metadata', {}).get('photos', [])
+                logger.info(f"Found {len(photo_results)} photos for context with full metadata")
 
         # Gather file context if relevant
         if intent in ['files', 'mixed']:
-            try:
-                file_results = knowledge_base.search_knowledge(prompt, k=10)  # Increased to 10 for better coverage
-                if file_results:
-                    # Use training manager to create enhanced context with metadata
-                    enhanced_context_text = training_manager.create_enhanced_context_for_ai(prompt, file_results)
-
-                    # Wrap in context dict
-                    file_context = [{
-                        'content': enhanced_context_text,
-                        'source': 'Nextcloud Dateien & Wissensbasis',
-                        'path': 'knowledge_base',
-                        'similarity_score': 1.0,
-                        'metadata': {
-                            'count': len(file_results),
-                            'enhanced': True
-                        }
-                    }]
-                    logger.info(f"Found {len(file_results)} file results with enhanced context (intent-based)")
-            except Exception as e:
-                logger.error(f"File search error: {e}")
+            file_context = gather_file_context(knowledge_base, training_manager, prompt)
+            if file_context:
+                logger.info(f"Found {file_context[0].get('metadata', {}).get('count', 0)} file results with enhanced context (intent-based)")
 
         # Intelligente Erkennung was kontexte werden sollten
         use_calendar_intelligent = should_use_calendar(prompt)
         use_tasks_intelligent = should_use_tasks(prompt)
 
         # Gather calendar context if relevant (Intent ODER intelligente Erkennung)
-        if (intent in ['calendar', 'mixed'] or use_calendar_intelligent) and calendar_enabled:
-            try:
-                calendar_context_str = get_calendar_context(prompt)
-                if calendar_context_str:
-                    calendar_context = {
-                        'content': calendar_context_str,
-                        'source': 'Kalender',
-                        'path': 'calendar',
-                        'similarity_score': 1.0,
-                        'metadata': {}
-                    }
-                    logger.info(f"Calendar context added (intent={intent}, intelligent={use_calendar_intelligent})")
-            except Exception as e:
-                logger.error(f"Calendar error: {e}")
+        calendar_context = gather_calendar_context(
+            get_calendar_context, should_use_calendar, prompt, intent, calendar_enabled
+        )
 
         # Gather todo context if relevant (Intent ODER intelligente Erkennung)
-        todo_data = None
-        if intent in ['tasks', 'mixed'] or use_tasks_intelligent:
-            try:
-                if is_todo_query(prompt) or use_tasks_intelligent:
-                    todo_data = get_todo_data(prompt)
-                    todo_context_str = todo_data.get('context', '')
-                    if todo_context_str:
-                        todo_context = {
-                            'content': todo_context_str,
-                            'source': 'Todos',
-                            'path': 'todos',
-                            'similarity_score': 1.0,
-                            'metadata': {}
-                        }
-                        logger.info(f"Todo context added (intent={intent}, intelligent={use_tasks_intelligent})")
-            except Exception as e:
-                logger.error(f"Todo error: {e}")
+        todo_context = gather_todo_context(
+            get_todo_data, is_todo_query, should_use_tasks, prompt, intent
+        )
 
-        # Let AI handle todo queries with context (no predefined responses)
+        # Combine all contexts in priority order using gatherers helper
+        combined_context = combine_contexts(
+            weather_context, security_context, activity_context,
+            photo_context, file_context, calendar_context, todo_context
+        )
 
-        # Combine all contexts
-        combined_context = []
-
-        # Add weather context if available
-        if weather_context:
-            combined_context.insert(0, weather_context)
-
-        # Add security context if available
-        if security_context:
-            combined_context.insert(0, security_context)
-
-        # Add activity context if available
-        if activity_context:
-            combined_context.insert(0, activity_context)
-
-        if photo_context:
-            combined_context.insert(0, photo_context)
-
-        if file_context:
-            combined_context.extend(file_context)
-
-        if calendar_context:
-            combined_context.insert(0, calendar_context)
-
-        if todo_context:
-            combined_context.insert(0, todo_context)
-
-        # Let AI handle photo queries with context (no predefined responses)
-
-        # Build system message with context
-        if not combined_context:
-            system_message = f"""Du bist ein intelligenter persönlicher Assistent.
-
-WICHTIG:
-- Antworte auf {language}
-- Sei natürlich und variiere deine Formulierungen
-- Vermeide Floskeln und vorgefertigte Phrasen
-- Sprich direkt und persönlich mit dem Nutzer
-- Sei präzise und hilfreich
-
-Antworte natürlich auf die Anfrage."""
-        else:
-            context_parts = []
-            for ctx in combined_context:
-                source_name = ctx.get('source', 'Unknown')
-                content = ctx.get('content', '')
-                if content:
-                    context_parts.append(f"--- {source_name} ---\n{content}")
-
-            context_text = '\n\n'.join(context_parts)
-            system_message = f"""Du bist ein intelligenter persönlicher Assistent mit Zugriff auf folgende Informationen:
-
-{context_text}
-
-WICHTIGE ANWEISUNGEN ZUR NUTZUNG DER INFORMATIONEN:
-
-**Nextcloud-Dateien & Wissensbasis:**
-- Die bereitgestellten Dokumente aus der Nextcloud enthalten wichtige persönliche und fachliche Informationen
-- Nutze diese Informationen aktiv und direkt in deiner Antwort
-- Verweise auf konkrete Inhalte, Daten und Fakten aus den Dokumenten
-- Bei Datumsangaben, Personen oder Organisationen: Nenne diese explizit aus den Metadaten
-- Die Intent-Analyse zeigt dir, wie du die Informationen am besten strukturierst
-
-**Fotos von Immich:**
-- Wenn Fotos verfügbar sind, BETTE SIE DIREKT EIN mit: ![Beschreibung](Bild-URL)
-- Nutze die "Bild-URL für Einbettung" aus dem Kontext
-- Beschreibe die Fotos mit den verfügbaren Metadaten (Personen, Ort, Objekte, Datum)
-- Zeige maximal 5 Fotos pro Antwort
-- Beispiel: ![Foto von Max und Lisa am Strand](https://immich.example.com/thumbnail/...)
-
-**Allgemeine Richtlinien:**
-- Antworte auf {language}
-- Sei natürlich und variiere deine Formulierungen - vermeide stereotype Antworten
-- Nutze die Intent-Analyse und Antwort-Anweisungen aus dem Kontext
-- Bei Aufgaben oder Terminen: stelle sie übersichtlich und natürlich dar
-- Bei Wetterdaten: fasse die wichtigsten Informationen verständlich zusammen
-- Bei Sicherheitswarnungen: kommuniziere klar und sachlich
-- Sprich direkt mit dem Nutzer und vermeide unnötige Floskeln
-- Sei präzise, hilfsbereit und persönlich
-
-Falls Informationen fehlen oder unvollständig sind, sage dies ehrlich.
-Erfinde keine Informationen, die nicht in den bereitgestellten Daten enthalten sind."""
+        # Build system message with context using gatherers helper
+        system_message = build_agent_system_message(combined_context, language)
 
         # Generate AI response
         messages = [

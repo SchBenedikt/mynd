@@ -3,8 +3,7 @@ Context gathering for AI agent queries
 Handles gathering context from photos, files, calendar, tasks, weather, security, and activities
 """
 import logging
-from typing import Dict, List, Optional, Any
-from datetime import datetime, date
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -250,24 +249,28 @@ def gather_todo_context(get_todo_data_func, is_todo_query_func, should_use_tasks
 
 def combine_contexts(weather_ctx, security_ctx, activity_ctx, photo_ctx,
                     file_ctx, calendar_ctx, todo_ctx) -> List[Dict]:
-    """Combine all contexts in the correct order"""
+    """Combine all contexts in the correct order.
+
+    All ctx parameters are single context dicts (or None), except file_ctx
+    which is a list of context dicts (or None) as returned by gather_file_context().
+    """
     combined = []
 
     # Priority order: weather, security, activity, photos, files, calendar, todos
     if weather_ctx:
-        combined.insert(0, weather_ctx)
+        combined.append(weather_ctx)
     if security_ctx:
-        combined.insert(0, security_ctx)
+        combined.append(security_ctx)
     if activity_ctx:
-        combined.insert(0, activity_ctx)
+        combined.append(activity_ctx)
     if photo_ctx:
-        combined.insert(0, photo_ctx)
+        combined.append(photo_ctx)
     if file_ctx:
         combined.extend(file_ctx)
     if calendar_ctx:
-        combined.insert(0, calendar_ctx)
+        combined.append(calendar_ctx)
     if todo_ctx:
-        combined.insert(0, todo_ctx)
+        combined.append(todo_ctx)
 
     return combined
 
