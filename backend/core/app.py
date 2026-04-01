@@ -5037,133 +5037,75 @@ def agent_query():
 
         message_lower = prompt.lower()
 
-        # Action parser: explicit reminder/task creation
-        # For normal task create requests we use the interactive form path below.
-        action_response = None
-        try:
-            import re
-
-            pattern = r'(?:erstelle|create)\s+(?:eine?\s+)?(?:erinnerung|aufgabe|task|todo|aufgaben|tasks|reminder)\s+(?:fuer|für|um)\s+([^:]+):\s*(.+?)(?:\.|$)'
-            match = re.search(pattern, message_lower)
-
-            if match and not is_task_create_query(prompt):
-                time_ref = match.group(1).strip()
-                title = match.group(2).strip()
-
-                due_date = None
-                if 'morgen' in time_ref or 'tomorrow' in time_ref:
-                    due_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-                elif 'heute' in time_ref or 'today' in time_ref:
-                    due_date = datetime.now().strftime('%Y-%m-%d')
-
-                if title and tasks_enabled and task_manager.tasks_client:
-                    target_list_name = 'tasks'
-                    try:
-                        discovered_task_lists = task_manager.tasks_client.get_task_lists()
-                        if discovered_task_lists:
-                            target_list_name = discovered_task_lists[0]
-                    except Exception as e:
-                        logger.debug(f"Task list discovery failed for action parser: {e}")
-
-                    success = task_manager.create_task(
-                        title=title,
-                        due_date=due_date,
-                        list_name=target_list_name
-                    )
-                    if success:
-                        action_response = f"✓ Erinnerung '{title}' wurde erstellt (faellig: {due_date or 'unbegrenzt'})"
-        except Exception as e:
-            logger.debug(f"Action parser error (this is OK): {e}")
-
-        if action_response:
-            return jsonify({
-                'success': True,
-                'response': action_response,
-                'action': 'task_created',
-                'context_used': False,
-                'context_count': 0,
-                'intent': 'tasks',
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': False
-                }
-            })
-
-        # Weather shortcut: direct response without LLM
+        # Gather weather context if query is weather-related (but let AI respond)
+        weather_context = None
         if is_weather_query(prompt):
-            weather = get_local_weather_status()
-            response_text = weather.get('summary') or 'Wetter konnte aktuell nicht ermittelt werden.'
-            if weather.get('alerts_count', 0) > 0:
-                alert_lines = []
-                for idx, alert in enumerate((weather.get('alerts') or [])[:3], 1):
-                    event = alert.get('event') or f'Warnung {idx}'
-                    sender = _safe_text(alert.get('sender_name'))
-                    if sender:
-                        alert_lines.append(f"{idx}. {event} ({sender})")
-                    else:
-                        alert_lines.append(f"{idx}. {event}")
-                if alert_lines:
-                    response_text = response_text + "\n" + "\n".join(alert_lines)
-
-            return jsonify({
-                'success': True,
-                'response': response_text,
-                'action': 'weather_status',
-                'context_used': True,
-                'context_count': weather.get('alerts_count', 0),
-                'intent': 'weather',
-                'weather': weather,
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': False
+            try:
+                weather = get_local_weather_status()
+                weather_lines = []
+                weather_lines.append("=== WETTER-INFORMATION ===")
+                weather_lines.append(f"Zusammenfassung: {weather.get('summary', 'Nicht verfügbar')}")
+                if weather.get('alerts_count', 0) > 0:
+                    weather_lines.append(f"\nWetterwarnungen ({weather.get('alerts_count')} aktiv):")
+                    for idx, alert in enumerate((weather.get('alerts') or [])[:5], 1):
+                        event = alert.get('event') or f'Warnung {idx}'
+                        sender = _safe_text(alert.get('sender_name'))
+                        desc = alert.get('description', '')[:200] + '...' if len(alert.get('description', '')) > 200 else alert.get('description', '')
+                        weather_lines.append(f"{idx}. {event}" + (f" ({sender})" if sender else ""))
+                        if desc:
+                            weather_lines.append(f"   {desc}")
+                weather_context = {
+                    'content': '\n'.join(weather_lines),
+                    'source': 'Wetter',
+                    'path': 'weather',
+                    'similarity_score': 1.0,
+                    'metadata': weather
                 }
-            })
+            except Exception as e:
+                logger.error(f"Weather context error: {e}")
 
-        # Security shortcut: direct response without LLM
+        # Gather security context if query is security-related (but let AI respond)
+        security_context = None
         if is_security_query(prompt):
-            security = get_local_security_status()
-            return jsonify({
-                'success': True,
-                'response': security.get('summary', 'Sicherheitslage konnte nicht ermittelt werden.'),
-                'action': 'security_status',
-                'context_used': True,
-                'context_count': security.get('nina_warning_count', 0),
-                'intent': 'security',
-                'security': security,
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': False
+            try:
+                security = get_local_security_status()
+                security_lines = []
+                security_lines.append("=== SICHERHEITSLAGE ===")
+                security_lines.append(f"NINA Warnungen: {security.get('nina_warning_count', 0)}")
+                if security.get('nina_warning_count', 0) > 0:
+                    for idx, warning in enumerate(security.get('nina_warnings', [])[:5], 1):
+                        security_lines.append(f"{idx}. {warning.get('headline', 'Warnung')}")
+                        security_lines.append(f"   Schweregrad: {warning.get('severity', 'Unbekannt')}")
+                        desc = warning.get('description', '')[:200] + '...' if len(warning.get('description', '')) > 200 else warning.get('description', '')
+                        if desc:
+                            security_lines.append(f"   {desc}")
+                security_context = {
+                    'content': '\n'.join(security_lines),
+                    'source': 'Sicherheitslage',
+                    'path': 'security',
+                    'similarity_score': 1.0,
+                    'metadata': security
                 }
-            })
+            except Exception as e:
+                logger.error(f"Security context error: {e}")
 
-        # Activity shortcut: direct response without LLM
+        # Gather activity context if query is activity-related (but let AI respond)
         activity_context = None
         is_activity_question = is_activity_query(prompt)
         if is_activity_question:
-            updates_result = get_updates_context(activity_limit=10, notifications_limit=10)
-            activity_context = updates_result.get('context', '')
-
-            if not is_todo_query(prompt) and not any(k in message_lower for k in ['termin', 'kalender', 'aufgabe', 'todo', 'task']):
-                return jsonify({
-                    'success': True,
-                    'response': updates_result.get('summary_text', 'Keine Aktivitätsdaten verfügbar.'),
-                    'action': 'activity_lookup',
-                    'context_used': bool(activity_context),
-                    'context_count': 1 if activity_context else 0,
-                    'intent': 'activity',
-                    'sources_used': {
-                        'photos': False,
-                        'files': False,
-                        'calendar': False,
-                        'todos': False
+            try:
+                updates_result = get_updates_context(activity_limit=10, notifications_limit=10)
+                activity_context_str = updates_result.get('context', '')
+                if activity_context_str:
+                    activity_context = {
+                        'content': activity_context_str,
+                        'source': 'Nextcloud Aktivitäten',
+                        'path': 'activity',
+                        'similarity_score': 1.0,
+                        'metadata': {}
                     }
-                })
+            except Exception as e:
+                logger.error(f"Activity context error: {e}")
 
         # Calendar heuristic (same as legacy /api/chat)
         time_related_indicators = [
@@ -5424,45 +5366,22 @@ def agent_query():
             except Exception as e:
                 logger.error(f"Todo error: {e}")
 
-        # Für reine Todo/Erinnerungs-Anfragen direkt antworten,
-        # um generische LLM-Antworten ohne Datenbezug zu vermeiden.
-        if (intent == 'tasks' or use_tasks_intelligent) and (is_todo_query(prompt) or use_tasks_intelligent):
-            todo_data = todo_data or get_todo_data(prompt)
-            open_tasks = todo_data.get('tasks', [])
-            filtered_tasks = todo_data.get('filtered_tasks', open_tasks)
-
-            if not todo_data.get('enabled', False):
-                return jsonify({
-                    'success': True,
-                    'response': 'Deine Erinnerungen sind aktuell nicht verbunden. Bitte prüfe die Nextcloud-Task-Konfiguration.',
-                    'context_used': False,
-                    'context_count': 0,
-                    'intent': intent,
-                    'sources_used': {
-                        'photos': False,
-                        'files': False,
-                        'calendar': False,
-                        'todos': False
-                    }
-                })
-
-            direct_response = _build_direct_todo_response(open_tasks, filtered_tasks, prompt)
-            return jsonify({
-                'success': True,
-                'response': direct_response,
-                'context_used': len(open_tasks) > 0,
-                'context_count': len(open_tasks),
-                'intent': intent,
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': True
-                }
-            })
+        # Let AI handle todo queries with context (no predefined responses)
 
         # Combine all contexts
         combined_context = []
+
+        # Add weather context if available
+        if weather_context:
+            combined_context.insert(0, weather_context)
+
+        # Add security context if available
+        if security_context:
+            combined_context.insert(0, security_context)
+
+        # Add activity context if available
+        if activity_context:
+            combined_context.insert(0, activity_context)
 
         if photo_context:
             combined_context.insert(0, photo_context)
@@ -5476,60 +5395,20 @@ def agent_query():
         if todo_context:
             combined_context.insert(0, todo_context)
 
-        # Für reine Foto-Anfragen direkt antworten, um LLM-Ausreden zu vermeiden
-        if intent == 'photos':
-            if photo_results:
-                response_lines = ["Hier sind passende Fotos aus Immich:", ""]
-                for i, photo in enumerate(photo_results[:5], 1):
-                    url = photo.get('asset_url')
-                    name = photo.get('original_file_name', f'Foto {i}')
-                    photo_id = photo.get('id', 'N/A')
-                    thumbnail_url = build_immich_thumbnail_proxy_url(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url')
-                    people = photo.get('people', [])
-                    date_value = photo.get('created_at', '')
-                    date_label = date_value[:10] if date_value else ''
-
-                    response_lines.append(f"{i}. [{name}]({url})")
-                    response_lines.append(f"   ID: {photo_id}")
-                    if people:
-                        response_lines.append(f"   Personen: {', '.join(people)}")
-                    if date_label:
-                        response_lines.append(f"   Datum: {date_label}")
-                    if thumbnail_url and url:
-                        response_lines.append(f"   [![Vorschau {i}]({thumbnail_url})]({url})")
-                    response_lines.append("")
-
-                return jsonify({
-                    'success': True,
-                    'response': '\n'.join(response_lines).strip(),
-                    'context_used': True,
-                    'context_count': len(combined_context),
-                    'intent': intent,
-                    'sources_used': {
-                        'photos': True,
-                        'files': False,
-                        'calendar': False,
-                        'todos': False
-                    }
-                })
-
-            return jsonify({
-                'success': True,
-                'response': 'Ich habe in Immich keine passenden Fotos gefunden. Versuche einen anderen Namen oder ein anderes Suchwort.',
-                'context_used': False,
-                'context_count': 0,
-                'intent': intent,
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': False
-                }
-            })
+        # Let AI handle photo queries with context (no predefined responses)
 
         # Build system message with context
         if not combined_context:
-            system_message = "Du bist ein hilfreicher Assistent. Antworte natürlich und präzise."
+            system_message = f"""Du bist ein intelligenter persönlicher Assistent.
+
+WICHTIG:
+- Antworte auf {language}
+- Sei natürlich und variiere deine Formulierungen
+- Vermeide Floskeln und vorgefertigte Phrasen
+- Sprich direkt und persönlich mit dem Nutzer
+- Sei präzise und hilfreich
+
+Antworte natürlich auf die Anfrage."""
         else:
             context_parts = []
             for ctx in combined_context:
@@ -5539,13 +5418,23 @@ def agent_query():
                     context_parts.append(f"--- {source_name} ---\n{content}")
 
             context_text = '\n\n'.join(context_parts)
-            system_message = f"""Du bist ein hilfreicher Assistent mit Zugriff auf folgende Informationen:
+            system_message = f"""Du bist ein intelligenter persönlicher Assistent mit Zugriff auf folgende Informationen:
 
 {context_text}
 
-Nutze diese Informationen um die Frage präzise zu beantworten.
-Falls Fotos verfügbar sind, stelle sie als Markdown-Links dar.
-Antworte auf {language}."""
+WICHTIGE ANWEISUNGEN:
+- Antworte auf {language}
+- Nutze die bereitgestellten Informationen, um die Frage präzise zu beantworten
+- Sei natürlich und variiere deine Formulierungen - vermeide stereotype Antworten
+- Wenn Fotos verfügbar sind, präsentiere sie mit Markdown-Links: [Bildname](URL)
+- Wenn Aufgaben oder Termine vorhanden sind, stelle sie übersichtlich und natürlich dar
+- Bei Wetterdaten: Fasse die wichtigsten Informationen verständlich zusammen
+- Bei Sicherheitswarnungen: Kommuniziere klar und sachlich
+- Sprich direkt mit dem Nutzer und vermeide unnötige Floskeln
+- Sei präzise, hilfsbereit und persönlich
+
+Falls Informationen fehlen oder unvollständig sind, sage dies ehrlich.
+Erfinde keine Informationen, die nicht in den bereitgestellten Daten enthalten sind."""
 
         # Generate AI response
         messages = [
