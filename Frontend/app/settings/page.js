@@ -56,6 +56,8 @@ export default function SettingsPage() {
     lastIndexingEnd: 0,
     lastIndexingDuration: 0
   });
+  const [indexingPath, setIndexingPath] = useState('');
+  const [indexingPathStatus, setIndexingPathStatus] = useState('');
   
   const [nextcloudUrl, setNextcloudUrl] = useState('');
   const [nextcloudStatus, setNextcloudStatus] = useState('');
@@ -93,6 +95,7 @@ export default function SettingsPage() {
     loadNextcloudConfig();
     loadCalendarConfig();
     loadCalendarOptions();
+    loadIndexingConfig();
     loadAllApis();
     updateStatus();
 
@@ -420,6 +423,36 @@ export default function SettingsPage() {
     }
   };
 
+  const loadIndexingConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/indexing/path`);
+      if (res.ok) {
+        const data = await res.json();
+        setIndexingPath(data.path || '');
+      }
+    } catch (err) {
+      console.error('Error loading indexing path:', err);
+    }
+  };
+
+  const saveIndexingConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/indexing/path`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: indexingPath })
+      });
+      if (res.ok) {
+        setIndexingPathStatus(tr('✓ Pfad gespeichert', '✓ Path saved'));
+      } else {
+        const data = await res.json();
+        setIndexingPathStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      setIndexingPathStatus('Error: ' + err.message);
+    }
+  };
+
   const updateStatus = async () => {
     try {
       const [ollamaRes, kbRes] = await Promise.all([
@@ -452,7 +485,7 @@ export default function SettingsPage() {
       const res = await fetch(`${API_BASE}/api/indexing/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({ path: indexingPath || undefined })
       });
       if (res.ok) {
         setIndexingStatus('running');
@@ -1030,8 +1063,8 @@ export default function SettingsPage() {
                           key={api.api_name}
                           style={{
                             padding: '1rem',
-                            background: 'var(--panel-bg)',
-                            border: '1px solid var(--border)',
+                            background: selectedApi?.api_name === api.api_name ? 'var(--background)' : 'var(--panel-bg)',
+                            border: selectedApi?.api_name === api.api_name ? '2px solid var(--brand)' : '1px solid var(--border)',
                             borderRadius: '8px',
                             cursor: 'pointer',
                             transition: 'all 0.2s'
@@ -1042,29 +1075,47 @@ export default function SettingsPage() {
                           }}
                         >
                           <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
-                            <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '1rem', flex: 1}}>
                               <div style={{
                                 width: '12px',
                                 height: '12px',
                                 borderRadius: '50%',
                                 background: isConfigured ? (isHealthy ? 'var(--success)' : 'var(--error)') : 'var(--muted)'
                               }}></div>
-                              <div>
-                                <div style={{fontWeight: '600', textTransform: 'capitalize'}}>
+                              <div style={{flex: 1}}>
+                                <div style={{fontWeight: '600'}}>
                                   {getApiDisplayName(api.api_name)}
                                 </div>
-                                <div style={{fontSize: '0.85rem', color: 'var(--muted)'}}>
+                                <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.2rem'}}>
                                   {isConfigured ?
                                     (isHealthy ? tr('✓ Verbunden', '✓ Connected') : tr('✗ Nicht erreichbar', '✗ Not reachable')) :
                                     tr('Nicht konfiguriert', 'Not configured')}
                                 </div>
                               </div>
                             </div>
-                            {health.response_time && (
-                              <div style={{fontSize: '0.85rem', color: 'var(--muted)'}}>
-                                {Math.round(health.response_time * 1000)}ms
-                              </div>
-                            )}
+                            <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+                              {health.response_time && (
+                                <div style={{fontSize: '0.85rem', color: 'var(--muted)', minWidth: '40px', textAlign: 'right'}}>
+                                  {Math.round(health.response_time * 1000)}ms
+                                </div>
+                              )}
+                              <button
+                                className="btn"
+                                style={{
+                                  padding: '0.4rem 0.8rem',
+                                  fontSize: '0.85rem',
+                                  background: isConfigured ? 'var(--chip-bg)' : 'var(--brand)',
+                                  color: isConfigured ? 'var(--ink)' : 'white'
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  loadApiConfig(api.api_name);
+                                  setApiConfigStatus('');
+                                }}
+                              >
+                                {isConfigured ? tr('Bearbeiten', 'Edit') : tr('Einrichten', 'Setup')}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -1074,9 +1125,14 @@ export default function SettingsPage() {
                   {/* API Configuration Form */}
                   {selectedApi && (
                     <div style={{marginTop: '2rem', padding: '1.5rem', background: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px'}}>
-                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
-                        <div className="section-title" style={{textTransform: 'capitalize'}}>
-                          {getApiDisplayName(selectedApi.api_name)}
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border)'}}>
+                        <div>
+                          <div className="section-title" style={{margin: 0}}>
+                            {getApiDisplayName(selectedApi.api_name)}
+                          </div>
+                          <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.25rem'}}>
+                            {selectedApi.configured ? tr('✓ Konfiguriert', '✓ Configured') : tr('Nicht konfiguriert', 'Not configured')}
+                          </div>
                         </div>
                         <button
                           className="btn"
@@ -1092,7 +1148,10 @@ export default function SettingsPage() {
                       </div>
 
                       {(selectedApi.api_name === 'nina' || selectedApi.api_name === 'openweather') && (
-                        <div style={{marginBottom: '1.5rem'}}>
+                        <div style={{marginBottom: '2rem', paddingBottom: '1.5rem', borderBottom: '1px solid var(--border)'}}>
+                          <div style={{fontSize: '0.9rem', fontWeight: '600', marginBottom: '1rem'}}>
+                            {tr('Standort-Einstellungen', 'Location Settings')}
+                          </div>
                           <div style={{marginBottom: '1rem'}}>
                             <div style={{fontWeight: '600', marginBottom: '0.5rem'}}>
                               {tr('Standort automatisch uebernehmen', 'Auto-detect location')}
@@ -1212,28 +1271,35 @@ export default function SettingsPage() {
                         </div>
                       )}
 
-                      {/* Dynamic config fields based on schema */}
-                      {selectedApi.schema && Object.entries(selectedApi.schema).map(([key, fieldSchema]) => (
-                        <div key={key} className="input-group">
-                          <label>
-                            {fieldSchema.description || key}
-                            {fieldSchema.required && <span style={{color: 'var(--error)'}}>*</span>}
-                          </label>
-                          <input
-                            type={fieldSchema.secret ? 'password' : fieldSchema.type === 'number' ? 'number' : 'text'}
-                            value={apiConfig[key] || ''}
-                            onChange={(e) => setApiConfig(prev => ({...prev, [key]: e.target.value}))}
-                            placeholder={fieldSchema.example || fieldSchema.default || ''}
-                          />
-                          {fieldSchema.description && (
-                            <small style={{fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
-                              {fieldSchema.type === 'string' && fieldSchema.example ? `${tr('Beispiel', 'Example')}: ${fieldSchema.example}` : ''}
-                            </small>
-                          )}
+                      {/* Standard configuration fields */}
+                      {selectedApi.schema && Object.keys(selectedApi.schema).length > 0 && (
+                        <div style={{marginBottom: '1.5rem'}}>
+                          <div style={{fontSize: '0.9rem', fontWeight: '600', marginBottom: '1rem'}}>
+                            {tr('Authentifizierung & Einstellungen', 'Authentication & Settings')}
+                          </div>
+                          {Object.entries(selectedApi.schema).map(([key, fieldSchema]) => (
+                            <div key={key} className="input-group">
+                              <label>
+                                {fieldSchema.description || key}
+                                {fieldSchema.required && <span style={{color: 'var(--error)'}}>*</span>}
+                              </label>
+                              <input
+                                type={fieldSchema.secret ? 'password' : fieldSchema.type === 'number' ? 'number' : 'text'}
+                                value={apiConfig[key] || ''}
+                                onChange={(e) => setApiConfig(prev => ({...prev, [key]: e.target.value}))}
+                                placeholder={fieldSchema.example || fieldSchema.default || ''}
+                              />
+                              {fieldSchema.description && (
+                                <small style={{fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                                  {fieldSchema.type === 'string' && fieldSchema.example ? `${tr('Beispiel', 'Example')}: ${fieldSchema.example}` : ''}
+                                </small>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      )}
 
-                      <div className="button-group" style={{marginTop: '1.5rem'}}>
+                      <div className="button-group" style={{marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border)'}}>
                         <button
                           className="btn primary"
                           onClick={() => saveApiConfig(selectedApi.api_name)}
@@ -1335,7 +1401,28 @@ export default function SettingsPage() {
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
                     {tr('Indexiere deine Dokumente fuer die semantische Suche mit detaillierter Fortschrittsanzeige', 'Index your documents for semantic search with detailed progress tracking')}
                   </p>
+                  
+                  <div className="input-group">
+                    <label>{tr('Indexierungs-Pfad (optional)', 'Indexing Path (optional)')}</label>
+                    <input
+                      type="text"
+                      value={indexingPath}
+                      onChange={(e) => setIndexingPath(e.target.value)}
+                      placeholder={tr('z.B. /Documents', 'e.g. /Documents')}
+                    />
+                    <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                      {tr('Spezifischer Pfad im Nextcloud, der indexiert werden soll. Leer lassen fuer alle Dateien.', 'Specific path in Nextcloud to index. Leave empty to index all files.')}
+                    </small>
+                  </div>
+
                   <div className="button-group">
+                    <button className="btn primary" onClick={saveIndexingConfig}>
+                      {tr('Pfad speichern', 'Save Path')}
+                    </button>
+                  </div>
+                  {indexingPathStatus && <div className="status-text">{indexingPathStatus}</div>}
+
+                  <div className="button-group" style={{marginTop: '1.5rem'}}>
                     <button className="btn primary" onClick={startIndexing} disabled={indexingStatus === 'running'}>
                       {indexingStatus === 'running' ? tr('Indexierung laeuft...', 'Indexing...') : tr('Indexierung starten', 'Start Indexing')}
                     </button>
@@ -1505,14 +1592,11 @@ export default function SettingsPage() {
                   onThemeChange={setTheme}
                   currentDarkMode={darkMode}
                   onDarkModeChange={setDarkMode}
-                  contrastColor={contrastColor}
-                  onContrastColorChange={setContrastColor}
-                  showContrastColor={true}
+                  showContrastColor={false}
                   labels={{
                     theme: t('theme'),
                     darkMode: t('darkMode'),
                     reset: 'Reset',
-                    contrastColor: 'Kontrastfarbe (optional)',
                     themes: {
                       classic: 'Classic',
                       ocean: 'Ocean',
