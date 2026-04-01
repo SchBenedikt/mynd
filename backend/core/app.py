@@ -5144,7 +5144,7 @@ Bereits extrahierte Informationen:
 
 Fehlende Informationen: {', '.join(event_info['missing_info'])}
 
-Verfügbare Kalender: {', '.join(calendars) if calendars else 'nicht verfügbar'}
+Verfügbare Kalender: {', '.join([cal['name'] for cal in calendars]) if calendars else 'nicht verfügbar'}
 
 AUFGABE: Frage den Nutzer natürlich nach den fehlenden Informationen.
 Erkläre, welche Angaben noch benötigt werden, um den Termin zu erstellen.""",
@@ -5439,16 +5439,22 @@ WICHTIG:
                                 photo_lines.append(f"**Datum:** {date_str}")
                             
                             if people:
-                                photo_lines.append(f"**Personen:** {', '.join(people)}")
+                                # Handle both string lists and dict lists
+                                people_names = [p if isinstance(p, str) else p.get('name', str(p)) for p in people]
+                                photo_lines.append(f"**Personen:** {', '.join(people_names)}")
                             
                             if location:
                                 photo_lines.append(f"**Ort:** {location}")
                             
                             if objects:
-                                photo_lines.append(f"**Objekte erkannt:** {', '.join(objects[:5])}")  # Show first 5
+                                # Handle both string lists and dict lists
+                                obj_names = [o if isinstance(o, str) else o.get('name', str(o)) for o in objects[:5]]
+                                photo_lines.append(f"**Objekte erkannt:** {', '.join(obj_names)}")  # Show first 5
                             
                             if tags:
-                                photo_lines.append(f"**Tags:** {', '.join(tags[:5])}")  # Show first 5
+                                # Handle both string lists and dict lists
+                                tag_names = [t if isinstance(t, str) else t.get('name', str(t)) for t in tags[:5]]
+                                photo_lines.append(f"**Tags:** {', '.join(tag_names)}")  # Show first 5
                             
                             # Add thumbnail as image with link
                             photo_lines.append(f"[![Vorschau]({thumbnail_url})]({asset_url})")
