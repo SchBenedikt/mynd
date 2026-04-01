@@ -395,6 +395,10 @@ class OllamaClient:
             # Erstelle verbesserten Kontext mit Training Manager
             enhanced_context = training_manager.create_enhanced_context_for_ai(user_message, context)
             
+            # Intelligente Tool-Selection
+            should_use_cal = should_use_calendar(user_message)
+            should_use_task = should_use_tasks(user_message)
+            
             # Erweiterter System-Prompt mit intelligenter Reasoning-Fähigkeit
             system_prompt = f"""Du bist ein hochintelligenter KI-Assistent mit Zugang zu einer Wissensdatenbank, einem Kalender-System und einer TODO-Liste. Du arbeitest präzise, analytisch und kontextbewusst.
 
@@ -403,56 +407,76 @@ class OllamaClient:
 2. KONTEXTUELLES DENKEN: Verknüpfe Informationen aus verschiedenen Quellen intelligent
 3. RELEVANZFILTERUNG: Fokussiere auf die wichtigsten und relevantesten Informationen
 4. PRÄZISE KOMMUNIKATION: Antworte konkret, strukturiert und mit klaren Quellenangaben
+5. SMARTE TOOL-AUSWAHL: Entscheide professionell und intelligent welche Tools du nutzen solltest
 
-=== INFORMATIONSQUELLEN-STRATEGIE ===
+=== INFORMATIONSQUELLEN-STRATEGIE (INTELLIGENTE PRIORISIERUNG) ===
 Du hast Zugang zu drei Hauptquellen:
 • WISSENSDATENBANK: Dokumente, Notizen, technische Informationen, persönliche Daten
-• KALENDER: Termine, Events, zeitliche Planungen
+• KALENDER: Termine, Events, zeitliche Planungen, Verfügbarkeiten
 • TODO-LISTE: Aufgaben mit Fälligkeitsdaten und Prioritäten
 
-ENTSCHEIDUNGSLOGIK:
-1. Bei Fragen nach AUFGABEN/TODOS/TASKS/VERPFLICHTUNGEN:
-   → Priorisiere TODO-Liste (mit Fälligkeitsdatum!)
-   → Zeige IMMER konkrete TODO-Einträge wenn vorhanden
-   → Sortiere nach Dringlichkeit (heute > morgen > diese Woche)
+ENTSCHEIDUNGSLOGIK FÜR TOOL-NUTZUNG:
+1. Bei Fragen nach AUFGABEN/TODOS/TASKS/VERPFLICHTUNGEN {"[NUTZE TODO-TOOL]" if should_use_task else ""}:
+   → Nutze IMMER die TODO-Liste als primäre Quelle
+   → Zeige konkrete Einträge mit Status, Fälligkeit und Priorität
+   → Sortiere nach: heute > überfällig > diese Woche > später
+   → Erkenne auch indirekte Aufgaben-Anfragen ("was muss ich noch...", "was habe ich zu tun...")
 
-2. Bei Fragen nach TERMINEN/EVENTS/ZEITPLÄNEN:
+2. Bei Fragen nach TERMINEN/EVENTS/ZEITPLÄNEN/VERFÜGBARKEIT {"[NUTZE KALENDER-TOOL]" if should_use_cal else ""}:
    → Nutze primär Kalender-Kontext
-   → Berücksichtige zeitliche Nähe und Wichtigkeit
+   → Berücksichtige zeitliche Nähe, Bedeutsamkeit und Überschneidungen
+   → Bei Planung: Zeige verfügbare Zeitfenster
+   → Erkenne Verfügbarkeitsfragen ("bin ich verfügbar...", "habe ich zeit...")
 
-3. Bei Fragen nach WISSEN/FAKTEN/DOKUMENTEN:
-   → Durchsuche Wissensdatenbank
-   → Wäge Relevanz-Scores und Aktualität ab
+3. Bei KOMBINIERTEN FRAGEN (Aufgaben UND Zeitplanung):
+   → Nutze BEIDE Quellen intelligent
+   → Zeige zeitlich sortierte Übersicht von Aufgaben mit Kalender-Kontext
+   → Beispiel: "Heute noch zu tun: [Aufgabe1 um 14:00] [Aufgabe2 vor 17:00]"
+
+4. Bei Fragen nach WISSEN/FAKTEN/DOKUMENTEN:
+   → Durchsuche Wissensdatenbank mit Relevanz-Scoring
    → Kombiniere Informationen aus mehreren Quellen intelligent
+   → Gib Quellenangaben mit Relevanz-Score an
 
-4. Bei PERSÖNLICHEN FRAGEN ohne gefundene Quellen:
+5. Bei PERSÖNLICHEN FRAGEN ohne gefundene Quellen:
    → Antworte ehrlich: "Ich habe dazu keine Informationen in meiner Wissensbasis."
+   → Frage nach Kontext falls nötig
+
+=== PROFESSIONELLE TOOL-AUSWAHL-REGELN ===
+⚠ KEINE Kalender-Tool Nutzung für: allgemeine Wissens-Fragen, Konzept-Erklärungen, generelle Informationen
+✓ NUTZE Kalender-Tool für: "Wann bin ich...", "Termin erstellen", "Habe ich einen Termin zu...", "Was steht diese Woche an..."
+✓ NUTZE TODO-Tool für: "Was muss ich noch...", "Meine offenen Aufgaben", "Verbleibende Aufgaben", "Erledigung-Status"
+⚠ NICHT zufällig Tools nutzen - nur wenn wirklich relevant!
 
 === REASONING-PROZESS ===
-Für jede Anfrage:
-1. VERSTEHEN: Was ist die eigentliche Absicht der Frage?
-2. IDENTIFIZIEREN: Welche Informationsquelle(n) sind relevant?
-3. PRIORISIEREN: Welche Informationen sind am wichtigsten?
-4. SYNTHESTISIEREN: Wie kombiniere ich die Informationen optimal?
-5. ANTWORTEN: Präsentiere die Antwort strukturiert und präzise
+Für jede Anfrage IMMER:
+1. VERSTEHEN: Was ist die echte Absicht? (nicht nur Wörter lesen)
+2. BEWERTEN: Ist eine Tool-Nutzung nötig? (oder nur Allgemeinwissen?)
+3. IDENTIFIZIEREN: Welche Informationsquelle(n) sind optimal?
+4. PRIORISIEREN: Welche Informationen sind am wichtigsten?
+5. SYNTHESTISIEREN: Wie kombiniere ich die Informationen optimal?
+6. ANTWORTEN: Präsentiere strukturiert mit Quellenangaben
 
-=== ANTWORTQUALITÄT ===
+=== ANTWORTQUALITÄT & FORMATIERUNG ===
 • Nutze klare Strukturierung (Listen, Absätze, Hervorhebungen)
-• Gib IMMER konkrete Quellenangaben an
-• Vermeide Wiederholungen und Füllwörter
-• Bei mehreren relevanten Informationen: Sortiere nach Relevanz
-• Bei zeitbezogenen Fragen: Beachte Aktualität und Fälligkeitsdaten
+• Geb IMMER konkrete Quellenangaben an
+• Vermeide Wiederholungen und unnötige Füllwörter
+• Bei mehreren Infos: Sortiere nach Relevanz und zeitlicher Nähe
+• Bei zeitbezogenen Fragen: Beachte Aktualität, Fälligkeitsdaten und Zeitpunkte
+• Bei Listen: Formatiere kompakt und präzise
 
 === VERFÜGBARER KONTEXT ===
 {enhanced_context}
 
-=== KRITISCHE REGELN ===
-⚠ Bei TODO-Anfragen: Zeige IMMER die konkreten TODO-Einträge mit Fälligkeitsdatum
-⚠ Bei fehlenden Informationen: Gib dies klar zu, erfinde nichts
-⚠ Bei widersprüchlichen Quellen: Erwähne dies und priorisiere nach Relevanz-Score
-⚠ Sei präzise aber nicht unnötig ausschweifend
+=== KRITISCHE RULES FÜR BESTE QUALITÄT ===
+⚠ Bei TODO-Anfragen: Zeige IMMER die konkreten Einträge mit Fälligkeitsdatum
+⚠ Bei Kalender-Anfragen: Zeige IMMER spezifische Termine und Zeiten
+⚠ Bei fehlenden Infos: Gib dies klar zu, erfinde NICHTS
+⚠ Bei widersprüchlichen Infos: Erwähne dies und priorisiere nach Relevanz
+⚠ NICHT mit unnötigen Werkzeugen spielen - nur intelligente, gezielte Nutzung!
+⚠ Bleibe professionell und analytisch, nicht spekulativ
 
-Beantworte nun die Anfrage basierend auf dem verfügbaren Kontext mit maximaler Intelligenz und Präzision."""
+Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-Auswahl."""
             
             # System-Nachricht erstellen oder ersetzen
             if messages and messages[0].get('role') == 'system':
@@ -622,6 +646,29 @@ load_ai_config()
 calendar_manager = create_calendar_manager()
 simple_calendar_manager = create_simple_calendar_manager()
 calendar_enabled = os.getenv('CALENDAR_ENABLED', 'False').lower() == 'true'
+
+
+def refresh_simple_calendar_manager() -> bool:
+    """Initialisiert den einfachen Kalender-Manager mit aktueller Nextcloud-Konfiguration neu."""
+    global simple_calendar_manager
+
+    try:
+        indexing_manager.load_nextcloud_config()
+        config = indexing_manager.get_config(mask_password=False) or {}
+        url = str(config.get('url', '')).strip()
+        username = str(config.get('username', '')).strip()
+        password = str(config.get('password', '')).strip()
+
+        if url and username and password:
+            simple_calendar_manager = create_simple_calendar_manager(url, username, password)
+        else:
+            simple_calendar_manager = create_simple_calendar_manager()
+
+        return simple_calendar_manager is not None
+    except Exception as e:
+        logger.error(f"Failed to refresh simple calendar manager: {e}")
+        simple_calendar_manager = None
+        return False
 
 # Tasks/Todos Manager initialisieren
 tasks_enabled = False
@@ -969,6 +1016,56 @@ def is_activity_query(message: str) -> bool:
     ]
     return any(keyword in message_lower for keyword in activity_keywords)
 
+def should_use_calendar(message: str) -> bool:
+    """
+    Intelligente Erkennung ob Kalender verwendet werden sollte.
+    Basiert auf Schlüsselworten UND kontextuellem Verständnis.
+    """
+    message_lower = message.lower()
+    
+    # Explizite Kalender-Indikationen
+    strong_calendar_keywords = [
+        'termin', 'termine', 'erstelle', 'create', 'eintrag', 'event', 
+        'meeting', 'termin erstellen', 'im kalender', 'kalender',
+        'wann bin ich', 'habe ich einen termin', 'was steht an'
+    ]
+    
+    if any(keyword in message_lower for keyword in strong_calendar_keywords):
+        return True
+    
+    # Zeitbezogene Fragen die nach Verfügbarkeit oder Planung fragen
+    time_context_keywords = ['wann', 'zeitpunkt', 'uhrzeit', 'um', 'heute', 'morgen', 'diese woche', 'nächste woche']
+    if any(keyword in message_lower for keyword in time_context_keywords):
+        # Wenn es ohne Kontext ist, könnte es eine normale Frage sein
+        # Aber mit "habe ich", "bin ich", "steht an", etc. sollte Kalender genutzt werden
+        activity_indicators = ['habe ich', 'bin ich', 'bin die', 'steht an', 'planung', 'geplant']
+        if any(indicator in message_lower for indicator in activity_indicators):
+            return True
+    
+    return False
+
+def should_use_tasks(message: str) -> bool:
+    """
+    Intelligente Erkennung ob TODOs/Tasks verwendet werden sollten.
+    """
+    message_lower = message.lower()
+    
+    task_keywords = [
+        'aufgabe', 'aufgaben', 'todo', 'todos', 'task', 'tasks',
+        'erledigen', 'abhaken', 'fertig', 'erledigt',
+        'was muss ich', 'noch zu tun', 'to do', 'meine aufgaben'
+    ]
+    
+    if any(keyword in message_lower for keyword in task_keywords):
+        return True
+    
+    # Auch "was muss ich tun" oder "was sollte ich machen" ohne explizites task-Wort
+    action_indicators = ['was muss ich', 'was sollte ich', 'was habe ich']
+    if any(indicator in message_lower for indicator in action_indicators):
+        return True
+    
+    return False
+
 def is_calendar_create_query(message: str) -> bool:
     """Erkennt Wunsch nach Termin-Erstellung."""
     message_lower = message.lower()
@@ -1132,6 +1229,9 @@ def create_calendar_event(title: str, start_time: str, end_time: str = None,
                           calendar_name: str = None, location: str = None, 
                           description: str = None) -> dict:
     """Erstellt ein neues Kalendereignis über CalDAV"""
+    if not simple_calendar_manager:
+        refresh_simple_calendar_manager()
+
     if not simple_calendar_manager:
         return {'success': False, 'error': 'Kalender nicht verfügbar'}
     
@@ -1344,6 +1444,9 @@ def extract_event_info_from_message(message: str) -> dict:
 def get_calendar_context(message: str) -> str:
     """Holt Kalender-Kontext basierend auf intelligenten Analyse der Nachricht"""
     # Nutze den einfachen Kalender-Manager, der funktioniert
+    if not simple_calendar_manager:
+        refresh_simple_calendar_manager()
+
     if not simple_calendar_manager:
         return ""
     
@@ -1612,12 +1715,52 @@ def indexing_config():
                 return jsonify({'error': 'URL, Username und Password werden benötigt'}), 400
             
             indexing_manager.save_nextcloud_config(url, username, password, remote_path)
+            refresh_simple_calendar_manager()
             
             return jsonify({
                 'status': 'saved',
                 'message': 'Konfiguration wurde gespeichert'
             })
             
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+@app.route('/api/indexing/path', methods=['GET', 'POST'])
+def indexing_path_config():
+    """Lädt oder speichert nur den Indexierungs-Pfad"""
+    if request.method == 'GET':
+        try:
+            config = indexing_manager.get_config(mask_password=False)
+            saved_path = config.get('path', '/') if config else '/'
+
+            # For UI convenience, represent root as empty input value.
+            return jsonify({'path': '' if saved_path == '/' else saved_path})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    elif request.method == 'POST':
+        try:
+            data = request.json or {}
+            path_input = (data.get('path') or '').strip()
+            normalized_path = path_input if path_input else '/'
+
+            config = indexing_manager.get_config(mask_password=False)
+            if not config or not all([config.get('url'), config.get('username'), config.get('password')]):
+                return jsonify({'error': 'Nextcloud configuration required before saving path'}), 400
+
+            indexing_manager.save_nextcloud_config(
+                config['url'],
+                config['username'],
+                config['password'],
+                normalized_path
+            )
+            refresh_simple_calendar_manager()
+
+            return jsonify({
+                'status': 'saved',
+                'message': 'Path saved successfully',
+                'path': '' if normalized_path == '/' else normalized_path
+            })
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
@@ -1743,6 +1886,8 @@ def nextcloud_oauth_callback():
             '',  # Leeres Password, verwenden zu stattdessen OAuth2 Token
             '/'
         )
+        refresh_simple_calendar_manager()
+        initialize_tasks_from_config()
 
         # Cleanup Session
         session.pop('oauth2_state', None)
@@ -1883,6 +2028,8 @@ def nextcloud_loginflow_poll():
             json.dump(nextcloud_config, f, indent=2)
 
         indexing_manager.save_nextcloud_config(server, username, app_password, '/')
+        refresh_simple_calendar_manager()
+        initialize_tasks_from_config()
 
         session.pop('loginflow_nextcloud_url', None)
         session.pop('loginflow_poll_token', None)
@@ -1957,6 +2104,8 @@ def nextcloud_direct_login():
             password,
             '/'
         )
+        refresh_simple_calendar_manager()
+        initialize_tasks_from_config()
 
         return jsonify({
             'status': 'success',
@@ -2003,6 +2152,7 @@ def nextcloud_config_get():
 @app.route('/api/nextcloud/disconnect', methods=['POST'])
 def nextcloud_disconnect():
     """Trennt die Nextcloud-Verbindung und entfernt gespeicherte Credentials."""
+    global simple_calendar_manager, tasks_enabled
     try:
         removed_files = []
 
@@ -2018,6 +2168,9 @@ def nextcloud_disconnect():
 
         # Reset indexing credentials so indexing cannot start with stale auth data.
         indexing_manager.save_nextcloud_config('', '', '', '/')
+        simple_calendar_manager = None
+        task_manager.tasks_client = None
+        tasks_enabled = False
 
         # Cleanup potentially remaining auth session state.
         session.pop('pkce_code_verifier', None)
@@ -2243,8 +2396,11 @@ def create_event_with_details():
 def get_calendars():
     """Gibt verfügbare Kalender zurück"""
     try:
+        # Always refresh to ensure latest Login Flow credentials are used.
+        refresh_simple_calendar_manager()
+
         if not simple_calendar_manager:
-            return jsonify({'error': 'Kalender nicht verfügbar'}), 500
+            return jsonify({'error': 'Kalender nicht verfügbar. Bitte zuerst Nextcloud verbinden.'}), 400
         
         calendars = simple_calendar_manager.get_calendars()
         return jsonify({
@@ -4885,8 +5041,12 @@ def agent_query():
             except Exception as e:
                 logger.error(f"File search error: {e}")
 
-        # Gather calendar context if relevant
-        if (intent in ['calendar', 'mixed'] or is_potentially_calendar_query) and calendar_enabled:
+        # Intelligente Erkennung was kontexte werden sollten
+        use_calendar_intelligent = should_use_calendar(prompt)
+        use_tasks_intelligent = should_use_tasks(prompt)
+
+        # Gather calendar context if relevant (Intent ODER intelligente Erkennung)
+        if (intent in ['calendar', 'mixed'] or use_calendar_intelligent) and calendar_enabled:
             try:
                 calendar_context_str = get_calendar_context(prompt)
                 if calendar_context_str:
@@ -4897,15 +5057,15 @@ def agent_query():
                         'similarity_score': 1.0,
                         'metadata': {}
                     }
-                    logger.info("Calendar context added")
+                    logger.info(f"Calendar context added (intent={intent}, intelligent={use_calendar_intelligent})")
             except Exception as e:
                 logger.error(f"Calendar error: {e}")
 
-        # Gather todo context if relevant
+        # Gather todo context if relevant (Intent ODER intelligente Erkennung)
         todo_data = None
-        if intent in ['tasks', 'mixed']:
+        if intent in ['tasks', 'mixed'] or use_tasks_intelligent:
             try:
-                if is_todo_query(prompt):
+                if is_todo_query(prompt) or use_tasks_intelligent:
                     todo_data = get_todo_data(prompt)
                     todo_context_str = todo_data.get('context', '')
                     if todo_context_str:
@@ -4916,13 +5076,13 @@ def agent_query():
                             'similarity_score': 1.0,
                             'metadata': {}
                         }
-                        logger.info("Todo context added")
+                        logger.info(f"Todo context added (intent={intent}, intelligent={use_tasks_intelligent})")
             except Exception as e:
                 logger.error(f"Todo error: {e}")
 
         # Für reine Todo/Erinnerungs-Anfragen direkt antworten,
         # um generische LLM-Antworten ohne Datenbezug zu vermeiden.
-        if intent == 'tasks' and is_todo_query(prompt):
+        if (intent == 'tasks' or use_tasks_intelligent) and (is_todo_query(prompt) or use_tasks_intelligent):
             todo_data = todo_data or get_todo_data(prompt)
             open_tasks = todo_data.get('tasks', [])
             filtered_tasks = todo_data.get('filtered_tasks', open_tasks)
