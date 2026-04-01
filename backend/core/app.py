@@ -5414,10 +5414,12 @@ WICHTIG:
                         photos = result['results']
                         photo_results = photos
                         photo_lines = []
-                        
+
                         photo_lines.append("### 📸 Gefundene Fotos")
                         photo_lines.append("")
-                        
+                        photo_lines.append("WICHTIG: Bette die Fotos direkt in deine Antwort ein mit Markdown-Bildern: ![Beschreibung](URL)")
+                        photo_lines.append("")
+
                         for i, photo in enumerate(photos[:5], 1):  # Limit to 5 for context
                             name = photo['original_file_name']
                             date = photo.get('created_at', 'Unknown')
@@ -5429,35 +5431,34 @@ WICHTIG:
                             asset_url = photo['asset_url']
                             thumbnail_url = build_immich_thumbnail_proxy_url(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url', '')
 
-                            # Add numbered photo entry with thumbnail as clickable link
-                            photo_lines.append(f"#### Foto {i}: {name}")
-                            photo_lines.append(f"**ID:** `{photo_id}`")
-                            photo_lines.append(f"**Link:** [{asset_url}]({asset_url})")
-                            
+                            # Add numbered photo entry with metadata for AI context
+                            photo_lines.append(f"**Foto {i}: {name}**")
+                            photo_lines.append(f"- Bild-URL für Einbettung: {thumbnail_url}")
+                            photo_lines.append(f"- Vollbild-Link: {asset_url}")
+                            photo_lines.append(f"- ID: {photo_id}")
+
                             if date and date != 'Unknown':
                                 date_str = date[:10] if len(str(date)) > 10 else date
-                                photo_lines.append(f"**Datum:** {date_str}")
-                            
+                                photo_lines.append(f"- Aufgenommen am: {date_str}")
+
                             if people:
                                 # Handle both string lists and dict lists
                                 people_names = [p if isinstance(p, str) else p.get('name', str(p)) for p in people]
-                                photo_lines.append(f"**Personen:** {', '.join(people_names)}")
-                            
+                                photo_lines.append(f"- Personen auf dem Foto: {', '.join(people_names)}")
+
                             if location:
-                                photo_lines.append(f"**Ort:** {location}")
-                            
+                                photo_lines.append(f"- Ort: {location}")
+
                             if objects:
                                 # Handle both string lists and dict lists
                                 obj_names = [o if isinstance(o, str) else o.get('name', str(o)) for o in objects[:5]]
-                                photo_lines.append(f"**Objekte erkannt:** {', '.join(obj_names)}")  # Show first 5
-                            
+                                photo_lines.append(f"- Erkannte Objekte: {', '.join(obj_names)}")
+
                             if tags:
                                 # Handle both string lists and dict lists
                                 tag_names = [t if isinstance(t, str) else t.get('name', str(t)) for t in tags[:5]]
-                                photo_lines.append(f"**Tags:** {', '.join(tag_names)}")  # Show first 5
-                            
-                            # Add thumbnail as image with link
-                            photo_lines.append(f"[![Vorschau]({thumbnail_url})]({asset_url})")
+                                photo_lines.append(f"- Tags: {', '.join(tag_names)}")
+
                             photo_lines.append("")
 
                         photo_context = {
@@ -5467,7 +5468,8 @@ WICHTIG:
                             'similarity_score': 1.0,
                             'metadata': {
                                 'count': len(photos),
-                                'photo_ids': [p.get('id') for p in photos]
+                                'photo_ids': [p.get('id') for p in photos],
+                                'photos': photos  # Keep full photo data for AI
                             }
                         }
                         logger.info(f"Found {len(photos)} photos for context with full metadata")
@@ -5477,10 +5479,23 @@ WICHTIG:
         # Gather file context if relevant
         if intent in ['files', 'mixed']:
             try:
-                file_results = knowledge_base.search_knowledge(prompt, k=8)
+                file_results = knowledge_base.search_knowledge(prompt, k=10)  # Increased to 10 for better coverage
                 if file_results:
-                    file_context = file_results
-                    logger.info(f"Found {len(file_results)} file results for context")
+                    # Use training manager to create enhanced context with metadata
+                    enhanced_context_text = training_manager.create_enhanced_context_for_ai(prompt, file_results)
+
+                    # Wrap in context dict
+                    file_context = [{
+                        'content': enhanced_context_text,
+                        'source': 'Nextcloud Dateien & Wissensbasis',
+                        'path': 'knowledge_base',
+                        'similarity_score': 1.0,
+                        'metadata': {
+                            'count': len(file_results),
+                            'enhanced': True
+                        }
+                    }]
+                    logger.info(f"Found {len(file_results)} file results with enhanced context (intent-based)")
             except Exception as e:
                 logger.error(f"File search error: {e}")
 
@@ -5579,14 +5594,29 @@ Antworte natürlich auf die Anfrage."""
 
 {context_text}
 
-WICHTIGE ANWEISUNGEN:
+WICHTIGE ANWEISUNGEN ZUR NUTZUNG DER INFORMATIONEN:
+
+**Nextcloud-Dateien & Wissensbasis:**
+- Die bereitgestellten Dokumente aus der Nextcloud enthalten wichtige persönliche und fachliche Informationen
+- Nutze diese Informationen aktiv und direkt in deiner Antwort
+- Verweise auf konkrete Inhalte, Daten und Fakten aus den Dokumenten
+- Bei Datumsangaben, Personen oder Organisationen: Nenne diese explizit aus den Metadaten
+- Die Intent-Analyse zeigt dir, wie du die Informationen am besten strukturierst
+
+**Fotos von Immich:**
+- Wenn Fotos verfügbar sind, BETTE SIE DIREKT EIN mit: ![Beschreibung](Bild-URL)
+- Nutze die "Bild-URL für Einbettung" aus dem Kontext
+- Beschreibe die Fotos mit den verfügbaren Metadaten (Personen, Ort, Objekte, Datum)
+- Zeige maximal 5 Fotos pro Antwort
+- Beispiel: ![Foto von Max und Lisa am Strand](https://immich.example.com/thumbnail/...)
+
+**Allgemeine Richtlinien:**
 - Antworte auf {language}
-- Nutze die bereitgestellten Informationen, um die Frage präzise zu beantworten
 - Sei natürlich und variiere deine Formulierungen - vermeide stereotype Antworten
-- Wenn Fotos verfügbar sind, präsentiere sie mit Markdown-Links: [Bildname](URL)
-- Wenn Aufgaben oder Termine vorhanden sind, stelle sie übersichtlich und natürlich dar
-- Bei Wetterdaten: Fasse die wichtigsten Informationen verständlich zusammen
-- Bei Sicherheitswarnungen: Kommuniziere klar und sachlich
+- Nutze die Intent-Analyse und Antwort-Anweisungen aus dem Kontext
+- Bei Aufgaben oder Terminen: stelle sie übersichtlich und natürlich dar
+- Bei Wetterdaten: fasse die wichtigsten Informationen verständlich zusammen
+- Bei Sicherheitswarnungen: kommuniziere klar und sachlich
 - Sprich direkt mit dem Nutzer und vermeide unnötige Floskeln
 - Sei präzise, hilfsbereit und persönlich
 
