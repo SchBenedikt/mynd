@@ -1,9 +1,45 @@
-# Byte-compiled / optimized / DLL files
+# ============================================================================
+# ENVIRONMENT & SECRETS (CRITICAL - NEVER COMMIT!)
+# ============================================================================
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.test
+.cache_ggshield
+.ggshield-cache
+
+# ============================================================================
+# CONFIGURATION FILES WITH SENSITIVE DATA (NEVER COMMIT!)
+# ============================================================================
+backend/config/*.json
+!backend/config/*.example.json
+!backend/config/.gitkeep
+
+data/config/*.json
+!data/config/.gitkeep
+
+# ============================================================================
+# DATABASE & STATE FILES
+# ============================================================================
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+qdrant_storage/
+*.qdrant_storage
+knowledge_base.db*
+training_data_backup_*.json
+
+# ============================================================================
+# PYTHON
+# ============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
 
 # Distribution / packaging
@@ -48,8 +84,39 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+
+# Data and cache files
+data/cache/*.db*
+data/training/*.json
+reports/
+*.log
+
+# Environment & Configuration (SENSITIVE!)
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Configuration files with secrets (NEVER commit!)
+backend/config/*.json
+!backend/config/*.example.json
+backend/config/.gitkeep
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Caches and generated files
 .pytest_cache/
+.coverage
 cover/
+node_modules/
+.next/
+*.qdrant_storage
+venv/
+.venv/
 
 # Translations
 *.mo
@@ -335,3 +402,6 @@ temp_*
 backup_*
 *.bak
 *.backup
+
+# Added by ggshield
+.cache_ggshield
