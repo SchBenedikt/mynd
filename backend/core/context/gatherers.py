@@ -1,6 +1,6 @@
 """
 Context gathering for AI agent queries
-Handles gathering context from photos, files, calendar, tasks, weather, security, and activities
+Handles gathering context from photos, files, calendar, tasks, weather, security, activities, and Nextcloud Search
 """
 import logging
 from typing import Dict, List, Optional
@@ -247,8 +247,93 @@ def gather_todo_context(get_todo_data_func, is_todo_query_func, should_use_tasks
         return None
 
 
+def gather_nextcloud_search_context(search_client, prompt: str, extract_search_terms_func) -> Optional[Dict]:
+    """Gather context from Nextcloud unified search API
+
+    This function proactively searches across all Nextcloud providers (files, contacts, calendar, tasks)
+    to find relevant information for the user's query.
+    """
+    if not search_client:
+        return None
+
+    try:
+        # Extract meaningful search terms from the prompt
+        search_terms = extract_search_terms_func(prompt)
+        if not search_terms:
+            logger.info("No search terms extracted for Nextcloud search")
+            return None
+
+        logger.info(f"Searching Nextcloud with terms: {search_terms}")
+
+        # Perform unified search across all providers
+        search_results = search_client.search(search_terms, limit=15)
+
+        if not search_results or not search_results.get('results'):
+            logger.info("No results from Nextcloud search")
+            return None
+
+        results = search_results['results']
+        logger.info(f"Found {len(results)} results from Nextcloud unified search")
+
+        # Group results by provider
+        grouped = {}
+        for result in results:
+            provider = result.get('provider', 'unknown')
+            if provider not in grouped:
+                grouped[provider] = []
+            grouped[provider].append(result)
+
+        # Format results for AI consumption
+        search_lines = []
+        search_lines.append("### 🔍 Nextcloud Unified Search Results")
+        search_lines.append("")
+        search_lines.append(f"Search query: **{search_terms}**")
+        search_lines.append("")
+
+        for provider, items in grouped.items():
+            provider_name = {
+                'files': '📁 Dateien',
+                'contacts': '👤 Kontakte',
+                'calendar': '📅 Kalender',
+                'tasks': '✅ Aufgaben',
+                'talk': '💬 Talk',
+                'deck': '📋 Deck'
+            }.get(provider, f'📌 {provider.capitalize()}')
+
+            search_lines.append(f"**{provider_name}** ({len(items)} results):")
+            search_lines.append("")
+
+            for i, item in enumerate(items[:5], 1):  # Limit to 5 per provider
+                title = item.get('title', 'Untitled')
+                subline = item.get('subline', '')
+                url = item.get('resource_url', '')
+
+                search_lines.append(f"{i}. **{title}**")
+                if subline:
+                    search_lines.append(f"   {subline}")
+                if url:
+                    search_lines.append(f"   URL: {url}")
+                search_lines.append("")
+
+        return {
+            'content': '\n'.join(search_lines),
+            'source': 'Nextcloud Unified Search',
+            'path': 'nextcloud_search',
+            'similarity_score': 0.9,
+            'metadata': {
+                'count': len(results),
+                'providers': list(grouped.keys()),
+                'search_terms': search_terms,
+                'results': results
+            }
+        }
+    except Exception as e:
+        logger.error(f"Nextcloud search error: {e}")
+        return None
+
+
 def combine_contexts(weather_ctx, security_ctx, activity_ctx, photo_ctx,
-                    file_ctx, calendar_ctx, todo_ctx) -> List[Dict]:
+                    file_ctx, calendar_ctx, todo_ctx, nextcloud_search_ctx=None) -> List[Dict]:
     """Combine all contexts in the correct order.
 
     All ctx parameters are single context dicts (or None), except file_ctx
@@ -256,13 +341,15 @@ def combine_contexts(weather_ctx, security_ctx, activity_ctx, photo_ctx,
     """
     combined = []
 
-    # Priority order: weather, security, activity, photos, files, calendar, todos
+    # Priority order: weather, security, activity, Nextcloud search, photos, files, calendar, todos
     if weather_ctx:
         combined.append(weather_ctx)
     if security_ctx:
         combined.append(security_ctx)
     if activity_ctx:
         combined.append(activity_ctx)
+    if nextcloud_search_ctx:
+        combined.append(nextcloud_search_ctx)
     if photo_ctx:
         combined.append(photo_ctx)
     if file_ctx:
@@ -309,6 +396,17 @@ WICHTIGE ANWEISUNGEN ZUR NUTZUNG DER INFORMATIONEN:
 - Verweise auf konkrete Inhalte, Daten und Fakten aus den Dokumenten
 - Bei Datumsangaben, Personen oder Organisationen: Nenne diese explizit aus den Metadaten
 - Die Intent-Analyse zeigt dir, wie du die Informationen am besten strukturierst
+
+**Nextcloud Unified Search:**
+- Wenn Nextcloud-Suchergebnisse verfügbar sind, nutze sie für umfassende Antworten
+- Die Suche deckt Dateien, Kontakte, Kalender, Aufgaben und mehr ab
+- Verweise auf gefundene Ressourcen mit ihren Titeln und URLs
+
+**Autonomous Research Results:**
+- Das System hat automatisch mehrere Datenquellen durchsucht
+- Nutze die Ergebnisse der autonomen Recherche für eine umfassende Antwort
+- Die automatisch gesammelten Informationen aus verschiedenen Quellen ergänzen deine Wissensbasis
+- Kombiniere alle verfügbaren Informationen zu einer kohärenten Antwort
 
 **Fotos von Immich:**
 - Wenn Fotos verfügbar sind, BETTE SIE DIREKT EIN mit: ![Beschreibung](Bild-URL)
