@@ -981,10 +981,10 @@ def get_nextcloud_runtime_config() -> Dict:
     except Exception as e:
         logger.debug(f"indexing_manager.load_nextcloud_config failed: {e}")
 
-    # 3) Fallback auf bekannte Konfig-Dateien im Projekt
+    # 3) Fallback auf bekannte Konfig-Dateien im Backend
     config_candidates = [
         os.path.join(CONFIG_DIR, 'indexing_config.json'),
-        os.path.join(BASE_DIR, 'indexing_config.json')
+        os.path.join(CONFIG_DIR, 'nextcloud_config.json')
     ]
     for config_path in config_candidates:
         try:
