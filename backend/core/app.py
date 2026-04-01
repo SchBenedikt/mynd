@@ -45,6 +45,11 @@ def create_calendar_manager():
     return None
 from backend.features.calendar.simple import create_simple_calendar_manager
 from backend.features.tasks.manager import task_manager, set_database
+from backend.core.context.gatherers import (
+    gather_photo_context, gather_file_context, gather_weather_context,
+    gather_security_context, gather_activity_context, gather_calendar_context,
+    gather_todo_context, combine_contexts, build_system_message as build_agent_system_message
+)
 import xml.etree.ElementTree as ET
 
 load_dotenv()
@@ -5037,133 +5042,21 @@ def agent_query():
 
         message_lower = prompt.lower()
 
-        # Action parser: explicit reminder/task creation
-        # For normal task create requests we use the interactive form path below.
-        action_response = None
-        try:
-            import re
+        # Gather weather context if query is weather-related (but let AI respond)
+        weather_context = gather_weather_context(
+            get_local_weather_status, is_weather_query, prompt, _safe_text
+        )
 
-            pattern = r'(?:erstelle|create)\s+(?:eine?\s+)?(?:erinnerung|aufgabe|task|todo|aufgaben|tasks|reminder)\s+(?:fuer|für|um)\s+([^:]+):\s*(.+?)(?:\.|$)'
-            match = re.search(pattern, message_lower)
+        # Gather security context if query is security-related (but let AI respond)
+        security_context = gather_security_context(
+            get_local_security_status, is_security_query, prompt
+        )
 
-            if match and not is_task_create_query(prompt):
-                time_ref = match.group(1).strip()
-                title = match.group(2).strip()
-
-                due_date = None
-                if 'morgen' in time_ref or 'tomorrow' in time_ref:
-                    due_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-                elif 'heute' in time_ref or 'today' in time_ref:
-                    due_date = datetime.now().strftime('%Y-%m-%d')
-
-                if title and tasks_enabled and task_manager.tasks_client:
-                    target_list_name = 'tasks'
-                    try:
-                        discovered_task_lists = task_manager.tasks_client.get_task_lists()
-                        if discovered_task_lists:
-                            target_list_name = discovered_task_lists[0]
-                    except Exception as e:
-                        logger.debug(f"Task list discovery failed for action parser: {e}")
-
-                    success = task_manager.create_task(
-                        title=title,
-                        due_date=due_date,
-                        list_name=target_list_name
-                    )
-                    if success:
-                        action_response = f"✓ Erinnerung '{title}' wurde erstellt (faellig: {due_date or 'unbegrenzt'})"
-        except Exception as e:
-            logger.debug(f"Action parser error (this is OK): {e}")
-
-        if action_response:
-            return jsonify({
-                'success': True,
-                'response': action_response,
-                'action': 'task_created',
-                'context_used': False,
-                'context_count': 0,
-                'intent': 'tasks',
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': False
-                }
-            })
-
-        # Weather shortcut: direct response without LLM
-        if is_weather_query(prompt):
-            weather = get_local_weather_status()
-            response_text = weather.get('summary') or 'Wetter konnte aktuell nicht ermittelt werden.'
-            if weather.get('alerts_count', 0) > 0:
-                alert_lines = []
-                for idx, alert in enumerate((weather.get('alerts') or [])[:3], 1):
-                    event = alert.get('event') or f'Warnung {idx}'
-                    sender = _safe_text(alert.get('sender_name'))
-                    if sender:
-                        alert_lines.append(f"{idx}. {event} ({sender})")
-                    else:
-                        alert_lines.append(f"{idx}. {event}")
-                if alert_lines:
-                    response_text = response_text + "\n" + "\n".join(alert_lines)
-
-            return jsonify({
-                'success': True,
-                'response': response_text,
-                'action': 'weather_status',
-                'context_used': True,
-                'context_count': weather.get('alerts_count', 0),
-                'intent': 'weather',
-                'weather': weather,
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': False
-                }
-            })
-
-        # Security shortcut: direct response without LLM
-        if is_security_query(prompt):
-            security = get_local_security_status()
-            return jsonify({
-                'success': True,
-                'response': security.get('summary', 'Sicherheitslage konnte nicht ermittelt werden.'),
-                'action': 'security_status',
-                'context_used': True,
-                'context_count': security.get('nina_warning_count', 0),
-                'intent': 'security',
-                'security': security,
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': False
-                }
-            })
-
-        # Activity shortcut: direct response without LLM
-        activity_context = None
+        # Gather activity context if query is activity-related (but let AI respond)
+        activity_context = gather_activity_context(
+            get_updates_context, is_activity_query, prompt
+        )
         is_activity_question = is_activity_query(prompt)
-        if is_activity_question:
-            updates_result = get_updates_context(activity_limit=10, notifications_limit=10)
-            activity_context = updates_result.get('context', '')
-
-            if not is_todo_query(prompt) and not any(k in message_lower for k in ['termin', 'kalender', 'aufgabe', 'todo', 'task']):
-                return jsonify({
-                    'success': True,
-                    'response': updates_result.get('summary_text', 'Keine Aktivitätsdaten verfügbar.'),
-                    'action': 'activity_lookup',
-                    'context_used': bool(activity_context),
-                    'context_count': 1 if activity_context else 0,
-                    'intent': 'activity',
-                    'sources_used': {
-                        'photos': False,
-                        'files': False,
-                        'calendar': False,
-                        'todos': False
-                    }
-                })
 
         # Calendar heuristic (same as legacy /api/chat)
         time_related_indicators = [
@@ -5176,7 +5069,7 @@ def agent_query():
         has_question = any(word in message_lower.split()[:3] for word in question_words)
         is_potentially_calendar_query = has_time_indicators and has_question
 
-        # Interaktive Termin-Erstellung: Liefere Missing-Input-Form direkt an das Frontend
+        # Interactive event creation: Let AI handle missing information naturally
         if is_calendar_create_query(prompt):
             event_info = extract_event_info_from_message(prompt)
 
@@ -5188,8 +5081,60 @@ def agent_query():
                     except Exception as e:
                         logger.warning(f"Could not load calendars for interactive form: {e}")
 
+                # Build context for AI to handle missing information
+                missing_context = {
+                    'content': f"""=== TERMIN-ERSTELLUNG ===
+Der Nutzer möchte einen Termin erstellen.
+
+Bereits extrahierte Informationen:
+- Titel: {event_info.get('title') or 'nicht angegeben'}
+- Startzeit: {event_info.get('start_time') or 'nicht angegeben'}
+- Endzeit: {event_info.get('end_time') or 'nicht angegeben'}
+- Ort: {event_info.get('location') or 'nicht angegeben'}
+- Kalender: {event_info.get('calendar_name') or 'nicht angegeben'}
+
+Fehlende Informationen: {', '.join(event_info['missing_info'])}
+
+Verfügbare Kalender: {', '.join([cal['name'] for cal in calendars]) if calendars else 'nicht verfügbar'}
+
+AUFGABE: Frage den Nutzer natürlich nach den fehlenden Informationen.
+Erkläre, welche Angaben noch benötigt werden, um den Termin zu erstellen.""",
+                    'source': 'Termin-Erstellung',
+                    'path': 'calendar_creation',
+                    'similarity_score': 1.0,
+                    'metadata': {
+                        'action': 'calendar_missing_input',
+                        'extracted_info': event_info,
+                        'available_calendars': calendars
+                    }
+                }
+
+                # Let AI generate the response about missing information
+                system_message = f"""Du bist ein intelligenter persönlicher Assistent.
+
+{missing_context['content']}
+
+WICHTIG:
+- Antworte auf {language}
+- Frage natürlich und freundlich nach den fehlenden Informationen
+- Variiere deine Formulierung - vermeide stereotype Phrasen
+- Sei präzise und hilfreich"""
+
+                messages = [
+                    {'role': 'system', 'content': system_message},
+                    {'role': 'user', 'content': prompt}
+                ]
+
+                try:
+                    response = ollama_client.chat(messages, [])
+                    ai_response = response.get('message', {}).get('content',
+                        f"Um den Termin zu erstellen, benötige ich noch: {', '.join(event_info['missing_info'])}")
+                except Exception as e:
+                    logger.error(f"AI generation error for calendar missing input: {e}")
+                    ai_response = f"Um den Termin zu erstellen, benötige ich noch: {', '.join(event_info['missing_info'])}"
+
                 return jsonify({
-                    'response': "Ich kann den Termin erstellen, mir fehlen aber noch: " + ", ".join(event_info['missing_info']) + ".",
+                    'response': ai_response,
                     'action': 'calendar_missing_input',
                     'requires_input': True,
                     'missing_info': event_info['missing_info'],
@@ -5208,6 +5153,7 @@ def agent_query():
                     'sources': []
                 })
 
+            # Create event and let AI generate success/failure message
             create_result = create_calendar_event(
                 title=event_info.get('title'),
                 start_time=event_info.get('start_time'),
@@ -5217,37 +5163,106 @@ def agent_query():
                 description=prompt
             )
 
-            if create_result.get('success'):
-                return jsonify({
-                    'response': create_result.get('message', 'Termin wurde erstellt.'),
-                    'action': 'calendar_created',
-                    'calendar_used': True,
-                    'context_used': False,
-                    'context_count': 0,
-                    'training_saved': False,
-                    'sources': [],
-                    'created_event': create_result
-                })
+            # Let AI generate natural response about success/failure
+            result_context = f"""=== TERMIN-ERSTELLUNG ===
+Ergebnis: {'Erfolg' if create_result.get('success') else 'Fehler'}
+{create_result.get('message', '') if create_result.get('success') else create_result.get('error', 'Unbekannter Fehler')}
+
+Erstellter Termin:
+- Titel: {event_info.get('title')}
+- Startzeit: {event_info.get('start_time')}
+- Endzeit: {event_info.get('end_time')}
+- Ort: {event_info.get('location') or 'kein Ort'}
+- Kalender: {event_info.get('calendar_name') or 'Standard-Kalender'}
+
+AUFGABE: Informiere den Nutzer {'über die erfolgreiche Erstellung' if create_result.get('success') else 'über den Fehler'} des Termins.
+Formuliere die Nachricht natürlich und variiert."""
+
+            system_message = f"""Du bist ein intelligenter persönlicher Assistent.
+
+{result_context}
+
+WICHTIG:
+- Antworte auf {language}
+- Formuliere die Nachricht natürlich und freundlich
+- Variiere deine Formulierung - vermeide stereotype Phrasen"""
+
+            messages = [
+                {'role': 'system', 'content': system_message},
+                {'role': 'user', 'content': prompt}
+            ]
+
+            try:
+                response = ollama_client.chat(messages, [])
+                ai_response = response.get('message', {}).get('content',
+                    create_result.get('message', 'Termin wurde erstellt.') if create_result.get('success')
+                    else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
+            except Exception as e:
+                logger.error(f"AI generation error for calendar result: {e}")
+                ai_response = (create_result.get('message', 'Termin wurde erstellt.') if create_result.get('success')
+                              else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
 
             return jsonify({
-                'response': "Der Termin konnte nicht erstellt werden: " + create_result.get('error', 'Unbekannter Fehler'),
-                'action': 'calendar_create_failed',
+                'response': ai_response,
+                'action': 'calendar_created' if create_result.get('success') else 'calendar_create_failed',
                 'calendar_used': True,
                 'context_used': False,
                 'context_count': 0,
                 'training_saved': False,
-                'sources': []
+                'sources': [],
+                'created_event': create_result if create_result.get('success') else None
             })
 
-        # Interaktive Aufgaben-/Erinnerungs-Erstellung
+        # Interactive task/reminder creation: Let AI handle missing information naturally
         if is_task_create_query(prompt):
             task_info = extract_task_info_from_message(prompt)
 
             if task_info.get('missing_info'):
                 available_task_lists = get_available_task_lists()
 
+                # Build context for AI to handle missing information
+                missing_context = f"""=== AUFGABEN-ERSTELLUNG ===
+Der Nutzer möchte eine Aufgabe/Erinnerung erstellen.
+
+Bereits extrahierte Informationen:
+- Titel: {task_info.get('title') or 'nicht angegeben'}
+- Fälligkeitsdatum: {task_info.get('due_date') or 'nicht angegeben'}
+- Priorität: {task_info.get('priority', 0) or 'nicht angegeben'}
+- Liste: {task_info.get('list_name') or 'nicht angegeben'}
+- Ort: {task_info.get('location') or 'nicht angegeben'}
+
+Fehlende Informationen: {', '.join(task_info['missing_info'])}
+
+Verfügbare Aufgabenlisten: {', '.join(available_task_lists) if available_task_lists else 'nicht verfügbar'}
+
+AUFGABE: Frage den Nutzer natürlich nach den fehlenden Informationen.
+Erkläre, welche Angaben noch benötigt werden, um die Aufgabe zu erstellen."""
+
+                system_message = f"""Du bist ein intelligenter persönlicher Assistent.
+
+{missing_context}
+
+WICHTIG:
+- Antworte auf {language}
+- Frage natürlich und freundlich nach den fehlenden Informationen
+- Variiere deine Formulierung - vermeide stereotype Phrasen
+- Sei präzise und hilfreich"""
+
+                messages = [
+                    {'role': 'system', 'content': system_message},
+                    {'role': 'user', 'content': prompt}
+                ]
+
+                try:
+                    response = ollama_client.chat(messages, [])
+                    ai_response = response.get('message', {}).get('content',
+                        f"Um die Aufgabe zu erstellen, benötige ich noch: {', '.join(task_info['missing_info'])}")
+                except Exception as e:
+                    logger.error(f"AI generation error for task missing input: {e}")
+                    ai_response = f"Um die Aufgabe zu erstellen, benötige ich noch: {', '.join(task_info['missing_info'])}"
+
                 return jsonify({
-                    'response': "Ich kann die Aufgabe erstellen, mir fehlen aber noch: " + ", ".join(task_info['missing_info']) + ".",
+                    'response': ai_response,
                     'action': 'task_missing_input',
                     'requires_input': True,
                     'missing_info': task_info['missing_info'],
@@ -5267,6 +5282,7 @@ def agent_query():
                     'sources': []
                 })
 
+            # Create task and let AI generate success/failure message
             create_result = create_task_reminder(
                 title=task_info.get('title'),
                 description=task_info.get('description') or prompt,
@@ -5276,26 +5292,54 @@ def agent_query():
                 location=task_info.get('location')
             )
 
-            if create_result.get('success'):
-                return jsonify({
-                    'response': create_result.get('message', 'Aufgabe wurde erstellt.'),
-                    'action': 'task_created',
-                    'calendar_used': False,
-                    'context_used': False,
-                    'context_count': 0,
-                    'training_saved': False,
-                    'sources': [],
-                    'created_task': create_result
-                })
+            # Let AI generate natural response about success/failure
+            result_context = f"""=== AUFGABEN-ERSTELLUNG ===
+Ergebnis: {'Erfolg' if create_result.get('success') else 'Fehler'}
+{create_result.get('message', '') if create_result.get('success') else create_result.get('error', 'Unbekannter Fehler')}
+
+Erstellte Aufgabe:
+- Titel: {task_info.get('title')}
+- Fälligkeitsdatum: {task_info.get('due_date') or 'kein Datum'}
+- Priorität: {task_info.get('priority', 0)}
+- Liste: {task_info.get('list_name') or 'Standard-Liste'}
+- Ort: {task_info.get('location') or 'kein Ort'}
+
+AUFGABE: Informiere den Nutzer {'über die erfolgreiche Erstellung' if create_result.get('success') else 'über den Fehler'} der Aufgabe.
+Formuliere die Nachricht natürlich und variiert."""
+
+            system_message = f"""Du bist ein intelligenter persönlicher Assistent.
+
+{result_context}
+
+WICHTIG:
+- Antworte auf {language}
+- Formuliere die Nachricht natürlich und freundlich
+- Variiere deine Formulierung - vermeide stereotype Phrasen"""
+
+            messages = [
+                {'role': 'system', 'content': system_message},
+                {'role': 'user', 'content': prompt}
+            ]
+
+            try:
+                response = ollama_client.chat(messages, [])
+                ai_response = response.get('message', {}).get('content',
+                    create_result.get('message', 'Aufgabe wurde erstellt.') if create_result.get('success')
+                    else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
+            except Exception as e:
+                logger.error(f"AI generation error for task result: {e}")
+                ai_response = (create_result.get('message', 'Aufgabe wurde erstellt.') if create_result.get('success')
+                              else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
 
             return jsonify({
-                'response': "Die Aufgabe konnte nicht erstellt werden: " + create_result.get('error', 'Unbekannter Fehler'),
-                'action': 'task_create_failed',
+                'response': ai_response,
+                'action': 'task_created' if create_result.get('success') else 'task_create_failed',
                 'calendar_used': False,
                 'context_used': False,
                 'context_count': 0,
                 'training_saved': False,
-                'sources': []
+                'sources': [],
+                'created_task': create_result if create_result.get('success') else None
             })
 
         # Detect query intent
@@ -5311,241 +5355,40 @@ def agent_query():
 
         # Gather photo context if relevant
         if intent in ['photos', 'mixed']:
-            try:
-                client = get_immich_client(username)
-                if client:
-                    # Reduced limit for quicker response in agent context
-                    result = client.search_photos_intelligent(prompt, limit=6)
-                    if result.get('success') and result.get('results') and len(result['results']) > 0:
-                        # Format photo results for context with full details
-                        photos = result['results']
-                        photo_results = photos
-                        photo_lines = []
-                        
-                        photo_lines.append("### 📸 Gefundene Fotos")
-                        photo_lines.append("")
-                        
-                        for i, photo in enumerate(photos[:5], 1):  # Limit to 5 for context
-                            name = photo['original_file_name']
-                            date = photo.get('created_at', 'Unknown')
-                            people = photo.get('people', [])
-                            location = photo.get('location', '')
-                            objects = photo.get('objects', [])
-                            tags = photo.get('tags', [])
-                            photo_id = photo.get('id', 'N/A')
-                            asset_url = photo['asset_url']
-                            thumbnail_url = build_immich_thumbnail_proxy_url(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url', '')
-
-                            # Add numbered photo entry with thumbnail as clickable link
-                            photo_lines.append(f"#### Foto {i}: {name}")
-                            photo_lines.append(f"**ID:** `{photo_id}`")
-                            photo_lines.append(f"**Link:** [{asset_url}]({asset_url})")
-                            
-                            if date and date != 'Unknown':
-                                date_str = date[:10] if len(str(date)) > 10 else date
-                                photo_lines.append(f"**Datum:** {date_str}")
-                            
-                            if people:
-                                photo_lines.append(f"**Personen:** {', '.join(people)}")
-                            
-                            if location:
-                                photo_lines.append(f"**Ort:** {location}")
-                            
-                            if objects:
-                                photo_lines.append(f"**Objekte erkannt:** {', '.join(objects[:5])}")  # Show first 5
-                            
-                            if tags:
-                                photo_lines.append(f"**Tags:** {', '.join(tags[:5])}")  # Show first 5
-                            
-                            # Add thumbnail as image with link
-                            photo_lines.append(f"[![Vorschau]({thumbnail_url})]({asset_url})")
-                            photo_lines.append("")
-
-                        photo_context = {
-                            'content': '=== FOTOS VON IMMICH ===\n\n' + '\n'.join(photo_lines),
-                            'source': 'Immich Photos',
-                            'path': 'immich',
-                            'similarity_score': 1.0,
-                            'metadata': {
-                                'count': len(photos),
-                                'photo_ids': [p.get('id') for p in photos]
-                            }
-                        }
-                        logger.info(f"Found {len(photos)} photos for context with full metadata")
-            except Exception as e:
-                logger.error(f"Photo search error: {e}")
+            client = get_immich_client(username)
+            photo_context = gather_photo_context(client, prompt, username, build_immich_thumbnail_proxy_url)
+            if photo_context:
+                photo_results = photo_context.get('metadata', {}).get('photos', [])
+                logger.info(f"Found {len(photo_results)} photos for context with full metadata")
 
         # Gather file context if relevant
         if intent in ['files', 'mixed']:
-            try:
-                file_results = knowledge_base.search_knowledge(prompt, k=8)
-                if file_results:
-                    file_context = file_results
-                    logger.info(f"Found {len(file_results)} file results for context")
-            except Exception as e:
-                logger.error(f"File search error: {e}")
+            file_context = gather_file_context(knowledge_base, training_manager, prompt)
+            if file_context:
+                logger.info(f"Found {file_context[0].get('metadata', {}).get('count', 0)} file results with enhanced context (intent-based)")
 
         # Intelligente Erkennung was kontexte werden sollten
         use_calendar_intelligent = should_use_calendar(prompt)
         use_tasks_intelligent = should_use_tasks(prompt)
 
         # Gather calendar context if relevant (Intent ODER intelligente Erkennung)
-        if (intent in ['calendar', 'mixed'] or use_calendar_intelligent) and calendar_enabled:
-            try:
-                calendar_context_str = get_calendar_context(prompt)
-                if calendar_context_str:
-                    calendar_context = {
-                        'content': calendar_context_str,
-                        'source': 'Kalender',
-                        'path': 'calendar',
-                        'similarity_score': 1.0,
-                        'metadata': {}
-                    }
-                    logger.info(f"Calendar context added (intent={intent}, intelligent={use_calendar_intelligent})")
-            except Exception as e:
-                logger.error(f"Calendar error: {e}")
+        calendar_context = gather_calendar_context(
+            get_calendar_context, should_use_calendar, prompt, intent, calendar_enabled
+        )
 
         # Gather todo context if relevant (Intent ODER intelligente Erkennung)
-        todo_data = None
-        if intent in ['tasks', 'mixed'] or use_tasks_intelligent:
-            try:
-                if is_todo_query(prompt) or use_tasks_intelligent:
-                    todo_data = get_todo_data(prompt)
-                    todo_context_str = todo_data.get('context', '')
-                    if todo_context_str:
-                        todo_context = {
-                            'content': todo_context_str,
-                            'source': 'Todos',
-                            'path': 'todos',
-                            'similarity_score': 1.0,
-                            'metadata': {}
-                        }
-                        logger.info(f"Todo context added (intent={intent}, intelligent={use_tasks_intelligent})")
-            except Exception as e:
-                logger.error(f"Todo error: {e}")
+        todo_context = gather_todo_context(
+            get_todo_data, is_todo_query, should_use_tasks, prompt, intent
+        )
 
-        # Für reine Todo/Erinnerungs-Anfragen direkt antworten,
-        # um generische LLM-Antworten ohne Datenbezug zu vermeiden.
-        if (intent == 'tasks' or use_tasks_intelligent) and (is_todo_query(prompt) or use_tasks_intelligent):
-            todo_data = todo_data or get_todo_data(prompt)
-            open_tasks = todo_data.get('tasks', [])
-            filtered_tasks = todo_data.get('filtered_tasks', open_tasks)
+        # Combine all contexts in priority order using gatherers helper
+        combined_context = combine_contexts(
+            weather_context, security_context, activity_context,
+            photo_context, file_context, calendar_context, todo_context
+        )
 
-            if not todo_data.get('enabled', False):
-                return jsonify({
-                    'success': True,
-                    'response': 'Deine Erinnerungen sind aktuell nicht verbunden. Bitte prüfe die Nextcloud-Task-Konfiguration.',
-                    'context_used': False,
-                    'context_count': 0,
-                    'intent': intent,
-                    'sources_used': {
-                        'photos': False,
-                        'files': False,
-                        'calendar': False,
-                        'todos': False
-                    }
-                })
-
-            direct_response = _build_direct_todo_response(open_tasks, filtered_tasks, prompt)
-            return jsonify({
-                'success': True,
-                'response': direct_response,
-                'context_used': len(open_tasks) > 0,
-                'context_count': len(open_tasks),
-                'intent': intent,
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': True
-                }
-            })
-
-        # Combine all contexts
-        combined_context = []
-
-        if photo_context:
-            combined_context.insert(0, photo_context)
-
-        if file_context:
-            combined_context.extend(file_context)
-
-        if calendar_context:
-            combined_context.insert(0, calendar_context)
-
-        if todo_context:
-            combined_context.insert(0, todo_context)
-
-        # Für reine Foto-Anfragen direkt antworten, um LLM-Ausreden zu vermeiden
-        if intent == 'photos':
-            if photo_results:
-                response_lines = ["Hier sind passende Fotos aus Immich:", ""]
-                for i, photo in enumerate(photo_results[:5], 1):
-                    url = photo.get('asset_url')
-                    name = photo.get('original_file_name', f'Foto {i}')
-                    photo_id = photo.get('id', 'N/A')
-                    thumbnail_url = build_immich_thumbnail_proxy_url(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url')
-                    people = photo.get('people', [])
-                    date_value = photo.get('created_at', '')
-                    date_label = date_value[:10] if date_value else ''
-
-                    response_lines.append(f"{i}. [{name}]({url})")
-                    response_lines.append(f"   ID: {photo_id}")
-                    if people:
-                        response_lines.append(f"   Personen: {', '.join(people)}")
-                    if date_label:
-                        response_lines.append(f"   Datum: {date_label}")
-                    if thumbnail_url and url:
-                        response_lines.append(f"   [![Vorschau {i}]({thumbnail_url})]({url})")
-                    response_lines.append("")
-
-                return jsonify({
-                    'success': True,
-                    'response': '\n'.join(response_lines).strip(),
-                    'context_used': True,
-                    'context_count': len(combined_context),
-                    'intent': intent,
-                    'sources_used': {
-                        'photos': True,
-                        'files': False,
-                        'calendar': False,
-                        'todos': False
-                    }
-                })
-
-            return jsonify({
-                'success': True,
-                'response': 'Ich habe in Immich keine passenden Fotos gefunden. Versuche einen anderen Namen oder ein anderes Suchwort.',
-                'context_used': False,
-                'context_count': 0,
-                'intent': intent,
-                'sources_used': {
-                    'photos': False,
-                    'files': False,
-                    'calendar': False,
-                    'todos': False
-                }
-            })
-
-        # Build system message with context
-        if not combined_context:
-            system_message = "Du bist ein hilfreicher Assistent. Antworte natürlich und präzise."
-        else:
-            context_parts = []
-            for ctx in combined_context:
-                source_name = ctx.get('source', 'Unknown')
-                content = ctx.get('content', '')
-                if content:
-                    context_parts.append(f"--- {source_name} ---\n{content}")
-
-            context_text = '\n\n'.join(context_parts)
-            system_message = f"""Du bist ein hilfreicher Assistent mit Zugriff auf folgende Informationen:
-
-{context_text}
-
-Nutze diese Informationen um die Frage präzise zu beantworten.
-Falls Fotos verfügbar sind, stelle sie als Markdown-Links dar.
-Antworte auf {language}."""
+        # Build system message with context using gatherers helper
+        system_message = build_agent_system_message(combined_context, language)
 
         # Generate AI response
         messages = [
