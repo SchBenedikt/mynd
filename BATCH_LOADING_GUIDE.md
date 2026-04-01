@@ -212,7 +212,7 @@ User: "welche todos habe ich?"
 curl http://localhost:5001/api/tasks/status
 
 # Make sure Nextcloud is reachable
-curl https://cloud.example.com/
+curl https://cloud.domain.de/
 ```
 
 ### Sync stuck?
