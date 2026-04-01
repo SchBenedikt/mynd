@@ -10,8 +10,8 @@
 
 **Vorher:** Echte Secrets in Git!
 ```json
-"immich_api_key_default": "k511C799SEBalKUdos7zz2PpnhEVwEeOc0mhK25VDA"
-"_url_default": "https://fotos.schächner.de"
+"immich_api_key_default": ""
+"_url_default": ""
 ```
 
 **Nachher:** Anonymisiert & Environmental Variables
