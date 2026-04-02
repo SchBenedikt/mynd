@@ -1,6 +1,17 @@
 'use client';
 
-export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, onDarkModeChange, contrastColor, onContrastColorChange, showContrastColor = false, labels = {} }) {
+export function ThemeSelector({
+  currentTheme,
+  onThemeChange,
+  currentDarkMode,
+  onDarkModeChange,
+  currentMotionStyle,
+  onMotionStyleChange,
+  contrastColor,
+  onContrastColorChange,
+  showContrastColor = false,
+  labels = {}
+}) {
   const l = {
     theme: labels.theme || 'Theme',
     darkMode: labels.darkMode || 'Dark Mode',
@@ -18,6 +29,12 @@ export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, on
       light: 'Light',
       dark: 'Dark',
       auto: 'Auto'
+    },
+    motionStyle: labels.motionStyle || 'Motion Style',
+    motion: labels.motion || {
+      calm: 'Calm',
+      dynamic: 'Dynamic',
+      aurora: 'Aurora'
     }
   };
 
@@ -34,6 +51,12 @@ export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, on
     { id: 'light', name: l.modes.light, icon: '☀️' },
     { id: 'dark', name: l.modes.dark, icon: '🌙' },
     { id: 'auto', name: l.modes.auto, icon: '🔄' }
+  ];
+
+  const motionModes = [
+    { id: 'calm', name: l.motion.calm, icon: '~' },
+    { id: 'dynamic', name: l.motion.dynamic, icon: '>>' },
+    { id: 'aurora', name: l.motion.aurora, icon: '*' }
   ];
 
   return (
@@ -76,6 +99,25 @@ export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, on
           ))}
         </div>
       </div>
+
+      {onMotionStyleChange && (
+        <div className="input-group">
+          <label>{l.motionStyle}</label>
+          <div className="motion-style-selector">
+            {motionModes.map((motion) => (
+              <button
+                key={motion.id}
+                type="button"
+                className={`motion-btn ${currentMotionStyle === motion.id ? 'active' : ''}`}
+                onClick={() => onMotionStyleChange(motion.id)}
+              >
+                <span className="motion-icon">{motion.icon}</span>
+                <span>{motion.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Contrast Color Picker (optional) */}
       {showContrastColor && (
