@@ -462,6 +462,75 @@ SUMMARY:{title}"""
         ics += "\nEND:VTODO\nEND:VCALENDAR"
         
         return ics
+
+    def _set_or_append_vtodo_property(self, ics_content: str, prop: str, value: str) -> str:
+        """Set or append a VTODO property in the first VTODO block."""
+        vtodo_match = re.search(r'BEGIN:VTODO[\s\S]*?END:VTODO', ics_content)
+        if not vtodo_match:
+            return ics_content
+
+        block = vtodo_match.group(0)
+        prop_pattern = rf'^{re.escape(prop)}[^\r\n]*$'
+
+        if re.search(prop_pattern, block, flags=re.MULTILINE):
+            updated_block = re.sub(prop_pattern, f'{prop}:{value}', block, count=1, flags=re.MULTILINE)
+        else:
+            updated_block = block.replace('END:VTODO', f'{prop}:{value}\nEND:VTODO', 1)
+
+        return ics_content.replace(block, updated_block, 1)
+
+    def update_task(self, task_uid: str, list_name: str = 'tasks', title: Optional[str] = None,
+                    description: Optional[str] = None, due_date: Optional[str] = None,
+                    priority: Optional[int] = None) -> bool:
+        """Updates an existing VTODO by UID."""
+        try:
+            url = f"{self.base_url}/calendars/{self.username}/{list_name}/{task_uid}.ics"
+            response = self.session.get(url, timeout=10)
+            if response.status_code != 200:
+                self.logger.error(f"Failed to fetch task for update: {response.status_code}")
+                return False
+
+            ics_content = response.text
+            updated = ics_content
+
+            if title is not None:
+                updated = self._set_or_append_vtodo_property(updated, 'SUMMARY', title.strip())
+
+            if description is not None:
+                updated = self._set_or_append_vtodo_property(
+                    updated,
+                    'DESCRIPTION',
+                    description.replace('\n', '\\n').strip()
+                )
+
+            if due_date is not None:
+                if due_date.strip():
+                    updated = self._set_or_append_vtodo_property(updated, 'DUE', due_date.replace('-', '').strip())
+                else:
+                    updated = re.sub(r'^DUE[^\r\n]*\r?\n?', '', updated, flags=re.MULTILINE)
+
+            if priority is not None:
+                if int(priority) > 0:
+                    updated = self._set_or_append_vtodo_property(updated, 'PRIORITY', str(int(priority)))
+                else:
+                    updated = re.sub(r'^PRIORITY[^\r\n]*\r?\n?', '', updated, flags=re.MULTILINE)
+
+            put_response = self.session.put(
+                url,
+                data=updated,
+                headers={'Content-Type': 'text/calendar; charset=utf-8'},
+                timeout=10
+            )
+
+            if put_response.status_code in [200, 201, 204]:
+                self.logger.info(f"Task updated: {task_uid}")
+                return True
+
+            self.logger.error(f"Failed to update task: {put_response.status_code}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Error updating task: {str(e)}")
+            return False
     
     def complete_task(self, task_uid: str, list_name: str = 'tasks') -> bool:
         """Markiert ein Task als erledigt"""

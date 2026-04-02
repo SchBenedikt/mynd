@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SourceCard from '../components/SourceCard';
+import ContextDataCard from '../components/ContextDataCard';
 import SuggestionsPanel from '../components/SuggestionsPanel';
 import { useTheme } from '../hooks/useTheme';
 import { useLanguage } from '../hooks/useLanguage';
@@ -171,6 +172,21 @@ export default function HomePage() {
     description: '',
     availableTaskLists: [],
     submitting: false,
+    error: ''
+  });
+  const [integrationForm, setIntegrationForm] = useState({
+    visible: false,
+    provider: '',
+    feature: '',
+    title: '',
+    description: '',
+    fields: [],
+    values: {},
+    quickActions: [],
+    submitEndpoint: '',
+    originalPrompt: '',
+    submitting: false,
+    loginFlowRunning: false,
     error: ''
   });
   const [photoPreview, setPhotoPreview] = useState({
@@ -847,6 +863,7 @@ export default function HomePage() {
         role: 'assistant',
         content: data.response,
         sources: data.sources || [],
+        uiCards: data.ui_cards || [],
         id: createMessageId()
       });
 
@@ -911,6 +928,37 @@ export default function HomePage() {
           description: extracted.description || text,
           availableTaskLists,
           submitting: false,
+          error: ''
+        });
+      }
+
+      if (data?.requires_input && data?.action === 'integration_connect_required') {
+        const setup = data?.integration_setup || {};
+        const setupFields = Array.isArray(setup.fields) ? setup.fields : [];
+        const prefill = setup.prefill || {};
+
+        const initialValues = setupFields.reduce((acc, field) => {
+          const name = field?.name;
+          if (!name) return acc;
+          acc[name] = String(prefill[name] || '');
+          return acc;
+        }, {});
+
+        setCalendarForm((prev) => ({ ...prev, visible: false, error: '' }));
+        setTaskForm((prev) => ({ ...prev, visible: false, error: '' }));
+        setIntegrationForm({
+          visible: true,
+          provider: setup.provider || '',
+          feature: setup.feature || '',
+          title: setup.title || 'Connect API',
+          description: setup.description || '',
+          fields: setupFields,
+          values: initialValues,
+          quickActions: Array.isArray(setup.quick_actions) ? setup.quick_actions : [],
+          submitEndpoint: setup.submit_endpoint || '',
+          originalPrompt: setup.original_prompt || text,
+          submitting: false,
+          loginFlowRunning: false,
           error: ''
         });
       }
@@ -1205,6 +1253,203 @@ export default function HomePage() {
     setTaskForm(prev => ({ ...prev, visible: false, error: '' }));
   };
 
+  const closeIntegrationForm = () => {
+    setIntegrationForm(prev => ({
+      ...prev,
+      visible: false,
+      submitting: false,
+      loginFlowRunning: false,
+      error: ''
+    }));
+  };
+
+  const runNextcloudLoginFlow = async () => {
+    const nextcloudUrl = String(integrationForm.values?.nextcloud_url || '').trim();
+    if (!nextcloudUrl) {
+      setIntegrationForm(prev => ({ ...prev, error: 'Please enter your Nextcloud URL first.' }));
+      return;
+    }
+
+    setIntegrationForm(prev => ({
+      ...prev,
+      loginFlowRunning: true,
+      error: ''
+    }));
+
+    try {
+      const startRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nextcloud_url: nextcloudUrl })
+      });
+      const startData = await safeReadJson(startRes);
+
+      if (!startRes.ok) {
+        setIntegrationForm(prev => ({
+          ...prev,
+          loginFlowRunning: false,
+          error: startData?.error || 'Could not start Nextcloud login flow.'
+        }));
+        return;
+      }
+
+      if (startData?.login_url) {
+        window.open(startData.login_url, '_blank', 'noopener,noreferrer');
+      }
+
+      const result = await new Promise((resolve) => {
+        let attempts = 0;
+        const maxAttempts = 120;
+        const pollInterval = setInterval(async () => {
+          attempts += 1;
+          try {
+            const pollRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/poll`);
+            const pollData = await safeReadJson(pollRes);
+
+            if (!pollRes.ok) {
+              clearInterval(pollInterval);
+              resolve({ success: false, error: pollData?.error || 'Nextcloud login failed.' });
+              return;
+            }
+
+            if (pollData?.status === 'connected') {
+              clearInterval(pollInterval);
+              resolve({ success: true, data: pollData });
+              return;
+            }
+
+            if (attempts >= maxAttempts) {
+              clearInterval(pollInterval);
+              resolve({ success: false, error: 'Login timed out. Please try again.' });
+            }
+          } catch (err) {
+            clearInterval(pollInterval);
+            resolve({ success: false, error: err.message || 'Login polling failed.' });
+          }
+        }, 2000);
+      });
+
+      if (!result.success) {
+        setIntegrationForm(prev => ({
+          ...prev,
+          loginFlowRunning: false,
+          error: result.error || 'Nextcloud login failed.'
+        }));
+        return;
+      }
+
+      setIntegrationForm(prev => ({
+        ...prev,
+        visible: false,
+        submitting: false,
+        loginFlowRunning: false,
+        error: ''
+      }));
+
+      if (activeChatId) {
+        appendMessageToChat(activeChatId, {
+          role: 'assistant',
+          content: `Connected to Nextcloud as ${result.data?.display_name || result.data?.username || 'user'}.`,
+          id: createMessageId()
+        });
+      }
+
+      if (integrationForm.originalPrompt) {
+        sendMessage(integrationForm.originalPrompt);
+      }
+    } catch (err) {
+      setIntegrationForm(prev => ({
+        ...prev,
+        loginFlowRunning: false,
+        error: `Error: ${err.message}`
+      }));
+    }
+  };
+
+  const submitIntegrationForm = async (e) => {
+    e.preventDefault();
+
+    const requiredFields = integrationForm.fields.filter((field) => field?.required);
+    const missingField = requiredFields.find((field) => {
+      const val = integrationForm.values?.[field.name];
+      return !String(val || '').trim();
+    });
+
+    if (missingField) {
+      setIntegrationForm(prev => ({
+        ...prev,
+        error: `Please provide ${missingField.label || missingField.name}.`
+      }));
+      return;
+    }
+
+    setIntegrationForm(prev => ({ ...prev, submitting: true, error: '' }));
+
+    try {
+      let endpoint = integrationForm.submitEndpoint || '';
+      let payload = { ...integrationForm.values };
+
+      if (integrationForm.provider === 'nextcloud') {
+        endpoint = '/api/nextcloud/login';
+      }
+
+      if (integrationForm.provider === 'immich') {
+        endpoint = '/api/ui/system-config';
+      }
+
+      if (!endpoint) {
+        setIntegrationForm(prev => ({
+          ...prev,
+          submitting: false,
+          error: 'No setup endpoint provided for this integration.'
+        }));
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await safeReadJson(res);
+
+      if (!res.ok || data?.success === false || data?.status === 'error') {
+        setIntegrationForm(prev => ({
+          ...prev,
+          submitting: false,
+          error: data?.error || data?.message || 'Could not save integration settings.'
+        }));
+        return;
+      }
+
+      setIntegrationForm(prev => ({
+        ...prev,
+        visible: false,
+        submitting: false,
+        loginFlowRunning: false,
+        error: ''
+      }));
+
+      if (activeChatId) {
+        appendMessageToChat(activeChatId, {
+          role: 'assistant',
+          content: 'Integration connected successfully. I am retrying your request now.',
+          id: createMessageId()
+        });
+      }
+
+      if (integrationForm.originalPrompt) {
+        sendMessage(integrationForm.originalPrompt);
+      }
+    } catch (err) {
+      setIntegrationForm(prev => ({
+        ...prev,
+        submitting: false,
+        error: `Error while saving configuration: ${err.message}`
+      }));
+    }
+  };
+
   const resetCalendarForm = () => {
     setCalendarForm({
       visible: false,
@@ -1237,18 +1482,38 @@ export default function HomePage() {
     });
   };
 
+  const resetIntegrationForm = () => {
+    setIntegrationForm({
+      visible: false,
+      provider: '',
+      feature: '',
+      title: '',
+      description: '',
+      fields: [],
+      values: {},
+      quickActions: [],
+      submitEndpoint: '',
+      originalPrompt: '',
+      submitting: false,
+      loginFlowRunning: false,
+      error: ''
+    });
+  };
+
   const startNewChat = () => {
     const newChat = createEmptyChat();
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
     resetCalendarForm();
     resetTaskForm();
+    resetIntegrationForm();
   };
 
   const openChat = (chatId) => {
     setActiveChatId(chatId);
     resetCalendarForm();
     resetTaskForm();
+    resetIntegrationForm();
   };
 
   const renameChat = (chatId) => {
@@ -1272,6 +1537,7 @@ export default function HomePage() {
     if (chatId === activeChatId) {
       resetCalendarForm();
       resetTaskForm();
+      resetIntegrationForm();
     }
 
     setChats((prevChats) => {
@@ -1649,6 +1915,13 @@ export default function HomePage() {
                         </div>
                       </div>
                     )}
+                    {msg.role === 'assistant' && msg.uiCards && msg.uiCards.length > 0 && (
+                      <div className="context-cards-wrap">
+                        {msg.uiCards.map((card, idx) => (
+                          <ContextDataCard key={`${card.type || 'card'}-${idx}`} card={card} />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {isThinking && (
@@ -1825,6 +2098,63 @@ export default function HomePage() {
                           </button>
                           <button type="submit" className="btn primary" disabled={taskForm.submitting}>
                             {taskForm.submitting ? 'Saving...' : 'Create Task'}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
+
+                {integrationForm.visible && (
+                  <div className="message assistant">
+                    <div className="bubble calendar-form-bubble">
+                      <h4>{integrationForm.title || 'Connect API'}</h4>
+                      {integrationForm.description && (
+                        <p className="calendar-form-hint">{integrationForm.description}</p>
+                      )}
+                      <form className="calendar-form" onSubmit={submitIntegrationForm}>
+                        {integrationForm.fields.map((field) => (
+                          <label key={field.name || field.label}>
+                            {field.label || field.name}
+                            <input
+                              type={field.type || 'text'}
+                              value={integrationForm.values?.[field.name] || ''}
+                              onChange={(e) => {
+                                const nextValue = e.target.value;
+                                setIntegrationForm(prev => ({
+                                  ...prev,
+                                  values: {
+                                    ...prev.values,
+                                    [field.name]: nextValue
+                                  }
+                                }));
+                              }}
+                              placeholder={field.placeholder || ''}
+                              required={Boolean(field.required)}
+                            />
+                          </label>
+                        ))}
+
+                        {integrationForm.error && <p className="calendar-form-error">{integrationForm.error}</p>}
+
+                        <div className="calendar-form-actions integration-form-actions">
+                          <button type="button" className="btn" onClick={closeIntegrationForm} disabled={integrationForm.submitting || integrationForm.loginFlowRunning}>
+                            Cancel
+                          </button>
+
+                          {integrationForm.quickActions.some((action) => action?.type === 'nextcloud_login_flow') && (
+                            <button
+                              type="button"
+                              className="btn"
+                              onClick={runNextcloudLoginFlow}
+                              disabled={integrationForm.submitting || integrationForm.loginFlowRunning}
+                            >
+                              {integrationForm.loginFlowRunning ? 'Waiting for login...' : 'Login with Nextcloud'}
+                            </button>
+                          )}
+
+                          <button type="submit" className="btn primary" disabled={integrationForm.submitting || integrationForm.loginFlowRunning}>
+                            {integrationForm.submitting ? 'Saving...' : 'Save & Retry'}
                           </button>
                         </div>
                       </form>

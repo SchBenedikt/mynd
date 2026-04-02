@@ -111,6 +111,7 @@ class TaskManager:
                     if list_tasks:
                         self.logger.info(f"⚠️  Using WebDAV fallback, found {len(list_tasks)} tasks from list: {name}")
                         for task in list_tasks:
+                            task['list_name'] = name
                             unique_key = task.get('uid') or task.get('nextcloud_path') or f"{name}:{task.get('title','')}:{task.get('due_date')}"
                             if unique_key in seen_keys:
                                 continue
@@ -163,6 +164,30 @@ class TaskManager:
             # Auch in DB aktualisieren
             self.database.complete_task_in_db(task_uid)
         
+        return success
+
+    def update_task(self, task_uid: str, list_name: str = 'tasks', title: Optional[str] = None,
+                    description: Optional[str] = None, due_date: Optional[str] = None,
+                    priority: Optional[int] = None) -> bool:
+        """Aktualisiert ein bestehendes Task."""
+        if not self.tasks_client:
+            self.logger.error("Task client not initialized")
+            return False
+
+        success = self.tasks_client.update_task(
+            task_uid=task_uid,
+            list_name=list_name,
+            title=title,
+            description=description,
+            due_date=due_date,
+            priority=priority
+        )
+
+        if success:
+            # Cache invalidieren, damit UI sofort aktualisierte Daten lädt.
+            self.cached_tasks = []
+            self.last_cache_time = 0
+
         return success
     
     def sync_tasks_to_database(self, list_name: str = 'auto', batch_size: int = 100) -> bool:
