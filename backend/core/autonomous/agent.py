@@ -11,6 +11,9 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# Characters of email body included in autonomous agent result previews
+_EMAIL_AGENT_PREVIEW_LENGTH = 200
+
 
 class ActionType(Enum):
     """Types of actions the autonomous agent can perform"""
@@ -536,7 +539,7 @@ class AutonomousAgent:
                     'sender': mail.get('sender', ''),
                     'date': mail.get('date', ''),
                     'folder': mail.get('folder', ''),
-                    'body_preview': (body[:200] + '...') if len(body) > 200 else body
+                    'body_preview': (body[:_EMAIL_AGENT_PREVIEW_LENGTH] + '...') if len(body) > _EMAIL_AGENT_PREVIEW_LENGTH else body
                 })
 
             return ActionResult(
