@@ -715,6 +715,12 @@ body {
   border-color: rgba(239, 68, 68, 0.35);
 }
 
+.history-action.summary:hover {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 40%, transparent);
+  background: color-mix(in srgb, var(--brand) 14%, var(--chip-bg));
+}
+
 .message.queued .bubble {
   background: var(--chip-bg);
   color: var(--muted);
@@ -1853,6 +1859,150 @@ body {
   margin-top: 0.75rem;
 }
 
+.chat-summary-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  background: rgba(7, 10, 18, 0.62);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.2rem;
+}
+
+.chat-summary-modal {
+  position: relative;
+  width: min(860px, 96vw);
+  max-height: min(86vh, 900px);
+  overflow: hidden;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 28%, var(--line));
+  background:
+    linear-gradient(155deg, color-mix(in srgb, var(--bubble-assistant) 86%, white 14%), var(--bubble-assistant));
+  box-shadow:
+    0 28px 64px rgba(6, 10, 20, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.chat-summary-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(520px 170px at 8% -16%, color-mix(in srgb, var(--brand) 24%, transparent), transparent 68%),
+    radial-gradient(620px 220px at 102% 6%, color-mix(in srgb, var(--accent-warm) 44%, transparent), transparent 72%);
+}
+
+.chat-summary-close {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--chip-bg);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 1rem;
+  z-index: 2;
+}
+
+.chat-summary-header {
+  position: relative;
+  padding: 1rem 1rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.chat-summary-badge {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0.3rem 0.56rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--brand) 36%, var(--line));
+  background: color-mix(in srgb, var(--brand) 11%, var(--chip-bg));
+  color: var(--brand);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-bottom: 0.55rem;
+}
+
+.chat-summary-header h3 {
+  margin: 0;
+  font-size: 1.06rem;
+  line-height: 1.32;
+  color: var(--ink);
+  padding-right: 2.2rem;
+}
+
+.chat-summary-meta-row {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.chat-summary-meta-row span {
+  font-size: 0.74rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--chip-bg) 90%, transparent);
+  padding: 0.2rem 0.52rem;
+}
+
+.chat-summary-body {
+  overflow: auto;
+  padding: 0.95rem 1rem;
+}
+
+.chat-summary-loading {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  gap: 0.55rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.chat-summary-error {
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.09);
+  color: #ef4444;
+  border-radius: 10px;
+  padding: 0.75rem 0.82rem;
+  font-size: 0.88rem;
+}
+
+.chat-summary-content {
+  font-size: 0.95rem;
+  line-height: 1.58;
+}
+
+.chat-summary-content h2 {
+  font-size: 0.96rem;
+  margin: 0.92rem 0 0.44rem;
+  color: color-mix(in srgb, var(--ink) 92%, var(--brand));
+}
+
+.chat-summary-content h2:first-child {
+  margin-top: 0;
+}
+
+.chat-summary-actions {
+  border-top: 1px solid var(--line);
+  padding: 0.74rem 1rem 0.9rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
 .bubble table {
   border-collapse: collapse;
   width: 100%;
@@ -1878,6 +2028,23 @@ body {
 
   .image-modal {
     width: 95vw;
+  }
+
+  .chat-summary-modal {
+    width: 97vw;
+    max-height: 90vh;
+  }
+
+  .chat-summary-header {
+    padding-right: 2.7rem;
+  }
+
+  .chat-summary-actions {
+    flex-direction: column;
+  }
+
+  .chat-summary-actions .btn {
+    width: 100%;
   }
 }
 
