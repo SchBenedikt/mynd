@@ -8,6 +8,11 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Characters of email body included in AI context per email
+_EMAIL_CONTEXT_BODY_LENGTH = 600
+# Characters of body in email source card preview
+_SOURCE_CARD_PREVIEW_LENGTH = 260
+
 
 _QUERY_STOP_WORDS = {
     'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einer', 'eines',
@@ -480,8 +485,85 @@ def gather_nextcloud_search_context(search_client, prompt: str, extract_search_t
         return None
 
 
+def gather_email_context(email_client, prompt: str, limit: int = 10) -> Optional[Dict]:
+    """Gather email context from an IMAP email account.
+
+    Returns a context dict whose *content* field contains a formatted summary of
+    recent or query-relevant emails ready for injection into the AI system message.
+    Source cards are stored in metadata['source_cards'] so they can be displayed
+    to the user as clickable sources.
+    """
+    try:
+        if not email_client:
+            return None
+
+        # Use search when the prompt contains meaningful keywords; fall back to
+        # a general recent-email summary otherwise.
+        emails = email_client.search_emails(prompt, limit=limit)
+        if not emails:
+            return None
+
+        lines: List[str] = []
+        lines.append("=== E-MAILS ===")
+        lines.append("")
+        lines.append(f"Gefundene E-Mails ({len(emails)}):")
+        lines.append("")
+
+        source_cards = []
+        for i, mail in enumerate(emails, 1):
+            subject = mail.get('subject', '(kein Betreff)')
+            sender = mail.get('sender', '')
+            date_str = mail.get('date', '')
+            folder = mail.get('folder', 'INBOX')
+            body = mail.get('body', '')
+
+            # Truncate body for context to keep prompt manageable
+            body_for_context = body[:_EMAIL_CONTEXT_BODY_LENGTH].strip()
+            if len(body) > _EMAIL_CONTEXT_BODY_LENGTH:
+                body_for_context += '...'
+
+            lines.append(f"**E-Mail {i}:** {subject}")
+            if sender:
+                lines.append(f"- Von: {sender}")
+            if date_str:
+                lines.append(f"- Datum: {date_str}")
+            lines.append(f"- Ordner: {folder}")
+            if body_for_context:
+                lines.append(f"- Inhalt: {body_for_context}")
+            lines.append("")
+
+            # Build a source card for the UI
+            matched_sentence = _extract_matching_sentence(prompt, body or subject)
+            body_preview = (body[:_SOURCE_CARD_PREVIEW_LENGTH] + '...') if len(body) > _SOURCE_CARD_PREVIEW_LENGTH else body
+            source_cards.append({
+                'source': sender or 'E-Mail',
+                'source_type': 'email',
+                'document': subject,
+                'path': f'email://{folder}',
+                'chunk_id': mail.get('uid'),
+                'matched_sentence': matched_sentence,
+                'content_preview': body_preview or subject,
+                'similarity_score': None,
+            })
+
+        return {
+            'content': '\n'.join(lines),
+            'source': 'E-Mails',
+            'path': 'email',
+            'similarity_score': 1.0,
+            'metadata': {
+                'count': len(emails),
+                'source_cards': source_cards,
+            }
+        }
+    except Exception as e:
+        logger.error("Email context error: %s", e)
+        return None
+
+
 def combine_contexts(weather_ctx, security_ctx, activity_ctx, photo_ctx,
-                    file_ctx, calendar_ctx, todo_ctx, nextcloud_search_ctx=None) -> List[Dict]:
+                    file_ctx, calendar_ctx, todo_ctx, nextcloud_search_ctx=None,
+                    email_ctx=None) -> List[Dict]:
     """Combine all contexts in the correct order.
 
     All ctx parameters are single context dicts (or None), except file_ctx
@@ -489,7 +571,7 @@ def combine_contexts(weather_ctx, security_ctx, activity_ctx, photo_ctx,
     """
     combined = []
 
-    # Priority order: weather, security, activity, Nextcloud search, photos, files, calendar, todos
+    # Priority order: weather, security, activity, Nextcloud search, photos, files, calendar, todos, emails
     if weather_ctx:
         combined.append(weather_ctx)
     if security_ctx:
@@ -506,6 +588,8 @@ def combine_contexts(weather_ctx, security_ctx, activity_ctx, photo_ctx,
         combined.append(calendar_ctx)
     if todo_ctx:
         combined.append(todo_ctx)
+    if email_ctx:
+        combined.append(email_ctx)
 
     return combined
 
@@ -562,6 +646,11 @@ WICHTIGE ANWEISUNGEN ZUR NUTZUNG DER INFORMATIONEN:
 - Beschreibe die Fotos mit den verfügbaren Metadaten (Personen, Ort, Objekte, Datum)
 - Zeige maximal 5 Fotos pro Antwort
 - Beispiel: ![Foto von Max und Lisa am Strand](https://immich.example.com/thumbnail/...)
+
+**E-Mails:**
+- Wenn E-Mails verfügbar sind, nutze die enthaltenen Informationen für deine Antwort
+- Referenziere konkrete E-Mails mit Betreff und Absender
+- Respektiere die Privatsphäre: gib keine vollständigen E-Mail-Adressen oder sensiblen Daten unnötig weiter
 
 **Allgemeine Richtlinien:**
 - Antworte auf {language}
