@@ -234,6 +234,21 @@ export default function HomePage() {
     immichUrl: '',
     downloadUrl: ''
   });
+  const [chatSummaryPanel, setChatSummaryPanel] = useState({
+    open: false,
+    chatId: '',
+    title: '',
+    summary: '',
+    generatedAt: 0,
+    messageCount: 0,
+    stats: {
+      total: 0,
+      user: 0,
+      assistant: 0
+    },
+    loading: false,
+    error: ''
+  });
   const progressIntervalRef = useRef(null);
   const requestAbortRef = useRef(null);
   
@@ -585,6 +600,21 @@ export default function HomePage() {
       window.removeEventListener('keydown', handleEscape);
     };
   }, [photoPreview.open]);
+
+  useEffect(() => {
+    if (!chatSummaryPanel.open) return undefined;
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setChatSummaryPanel((prev) => ({ ...prev, open: false }));
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [chatSummaryPanel.open]);
 
   useEffect(() => {
     const handleCancelKey = (event) => {
@@ -1587,6 +1617,133 @@ export default function HomePage() {
     resetIntegrationForm();
   };
 
+  const summarizeChat = async (chatId, options = {}) => {
+    const chat = chats.find((item) => item.id === chatId);
+    if (!chat) return;
+
+    const messagesForSummary = Array.isArray(chat.messages)
+      ? chat.messages.filter((message) => {
+          const role = String(message?.role || '').toLowerCase();
+          return role === 'user' || role === 'assistant';
+        })
+      : [];
+
+    if (!messagesForSummary.length) {
+      window.alert('Dieser Chat hat noch keinen Inhalt zum Zusammenfassen.');
+      return;
+    }
+
+    const userMessages = messagesForSummary.filter((message) => message.role === 'user').length;
+    const assistantMessages = messagesForSummary.filter((message) => message.role === 'assistant').length;
+    const reuseCached = !options.force && chat.summary?.messageCount === messagesForSummary.length && chat.summary?.content;
+
+    if (reuseCached) {
+      setChatSummaryPanel({
+        open: true,
+        chatId,
+        title: chat.title,
+        summary: chat.summary.content,
+        generatedAt: chat.summary.generatedAt || Date.now(),
+        messageCount: chat.summary.messageCount || messagesForSummary.length,
+        stats: {
+          total: messagesForSummary.length,
+          user: userMessages,
+          assistant: assistantMessages
+        },
+        loading: false,
+        error: ''
+      });
+      return;
+    }
+
+    setChatSummaryPanel({
+      open: true,
+      chatId,
+      title: chat.title,
+      summary: '',
+      generatedAt: 0,
+      messageCount: messagesForSummary.length,
+      stats: {
+        total: messagesForSummary.length,
+        user: userMessages,
+        assistant: assistantMessages
+      },
+      loading: true,
+      error: ''
+    });
+
+    const transcript = messagesForSummary
+      .slice(-80)
+      .map((message, index) => {
+        const role = message.role === 'user' ? 'Nutzer' : 'Assistent';
+        return `${index + 1}. ${role}: ${String(message.content || '').trim()}`;
+      })
+      .join('\n');
+
+    try {
+      const prompt = [
+        'Erstelle eine moderne, klare Gespraechszusammenfassung auf Deutsch.',
+        'Nutze exakt diese Struktur mit Markdown-UEberschriften:',
+        '## Kernidee',
+        '## Wichtige Entscheidungen',
+        '## Offene Punkte',
+        '## Naechste sinnvolle Schritte',
+        'Halte die Zusammenfassung praezise, hilfreich und ohne Floskeln.',
+        '',
+        'Gespraech:',
+        transcript
+      ].join('\n');
+
+      const res = await fetch(`${API_BASE}/api/agent/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          language: 'de',
+          preferred_source: 'auto',
+          context: transcript
+        })
+      });
+
+      const data = await safeReadJson(res);
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.error || `Request failed with status ${res.status}`);
+      }
+
+      const summaryText = String(data?.response || '').trim();
+      const generatedAt = Date.now();
+
+      setChats((prevChats) => prevChats.map((item) => (
+        item.id === chatId
+          ? {
+              ...item,
+              summary: {
+                content: summaryText,
+                generatedAt,
+                messageCount: messagesForSummary.length
+              },
+              updatedAt: item.updatedAt || Date.now()
+            }
+          : item
+      )));
+
+      setChatSummaryPanel((prev) => ({
+        ...prev,
+        open: true,
+        summary: summaryText,
+        generatedAt,
+        loading: false,
+        error: ''
+      }));
+    } catch (err) {
+      setChatSummaryPanel((prev) => ({
+        ...prev,
+        loading: false,
+        error: `Zusammenfassung fehlgeschlagen: ${err.message}`
+      }));
+    }
+  };
+
   const renameChat = (chatId) => {
     const chat = chats.find((item) => item.id === chatId);
     if (!chat) return;
@@ -1738,6 +1895,17 @@ export default function HomePage() {
                     <i className="fas fa-message"></i>
                     <span className="history-title">{chat.title}</span>
                     <div className="history-actions">
+                      <button
+                        type="button"
+                        className="history-action summary"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          summarizeChat(chat.id);
+                        }}
+                        title="Zusammenfassen"
+                      >
+                        <i className="fas fa-sparkles"></i>
+                      </button>
                       <button
                         type="button"
                         className="history-action"
@@ -2378,6 +2546,88 @@ export default function HomePage() {
                   In Immich öffnen
                 </a>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {chatSummaryPanel.open && (
+        <div className="chat-summary-overlay" onClick={() => setChatSummaryPanel((prev) => ({ ...prev, open: false }))}>
+          <div className="chat-summary-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="chat-summary-glow" aria-hidden="true"></div>
+            <button
+              type="button"
+              className="chat-summary-close"
+              onClick={() => setChatSummaryPanel((prev) => ({ ...prev, open: false }))}
+              aria-label="Zusammenfassung schliessen"
+            >
+              ×
+            </button>
+
+            <div className="chat-summary-header">
+              <div className="chat-summary-badge">
+                <i className="fas fa-sparkles"></i>
+                KI Uebersicht
+              </div>
+              <h3>{chatSummaryPanel.title || 'Chat-Zusammenfassung'}</h3>
+              <div className="chat-summary-meta-row">
+                <span>{chatSummaryPanel.stats.total} Nachrichten</span>
+                <span>{chatSummaryPanel.stats.user} Nutzer</span>
+                <span>{chatSummaryPanel.stats.assistant} Assistent</span>
+                {chatSummaryPanel.generatedAt > 0 && (
+                  <span>
+                    {new Date(chatSummaryPanel.generatedAt).toLocaleString('de-DE', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="chat-summary-body">
+              {chatSummaryPanel.loading && (
+                <div className="chat-summary-loading">
+                  <div className="thinking-indicator">
+                    <div className="dot"></div>
+                    <div className="dot"></div>
+                    <div className="dot"></div>
+                  </div>
+                  <p>Erstelle eine strukturierte Uebersicht...</p>
+                </div>
+              )}
+
+              {!chatSummaryPanel.loading && chatSummaryPanel.error && (
+                <div className="chat-summary-error">{chatSummaryPanel.error}</div>
+              )}
+
+              {!chatSummaryPanel.loading && !chatSummaryPanel.error && chatSummaryPanel.summary && (
+                <div className="chat-summary-content markdown-content" onClickCapture={handleMarkdownContentClick}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    {chatSummaryPanel.summary}
+                  </ReactMarkdown>
+                </div>
+              )}
+            </div>
+
+            <div className="chat-summary-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => summarizeChat(chatSummaryPanel.chatId, { force: true })}
+                disabled={chatSummaryPanel.loading}
+              >
+                Neu generieren
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => setChatSummaryPanel((prev) => ({ ...prev, open: false }))}
+              >
+                Schliessen
+              </button>
             </div>
           </div>
         </div>
