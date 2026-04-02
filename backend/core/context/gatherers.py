@@ -116,6 +116,7 @@ def gather_photo_context(client, prompt: str, username: str, build_thumbnail_url
             return None
 
         photos = result['results']
+        ui_photos = []
         photo_lines = []
 
         photo_lines.append("### 📸 Gefundene Fotos")
@@ -123,7 +124,7 @@ def gather_photo_context(client, prompt: str, username: str, build_thumbnail_url
         photo_lines.append("WICHTIG: Bette die Fotos direkt in deine Antwort ein mit Markdown-Bildern: ![Beschreibung](URL)")
         photo_lines.append("")
 
-        for i, photo in enumerate(photos[:5], 1):
+        for i, photo in enumerate(photos[:3], 1):
             name = photo['original_file_name']
             date_val = photo.get('created_at', 'Unknown')
             people = photo.get('people', [])
@@ -133,6 +134,11 @@ def gather_photo_context(client, prompt: str, username: str, build_thumbnail_url
             photo_id = photo.get('id', 'N/A')
             asset_url = photo['asset_url']
             thumbnail_url = build_thumbnail_url_func(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url', '')
+
+            photo_for_ui = dict(photo)
+            if thumbnail_url:
+                photo_for_ui['thumbnail_url'] = thumbnail_url
+            ui_photos.append(photo_for_ui)
 
             photo_lines.append(f"**Foto {i}: {name}**")
             photo_lines.append(f"- Bild-URL für Einbettung: {thumbnail_url}")
@@ -168,7 +174,7 @@ def gather_photo_context(client, prompt: str, username: str, build_thumbnail_url
             'metadata': {
                 'count': len(photos),
                 'photo_ids': [p.get('id') for p in photos],
-                'photos': photos
+                'photos': ui_photos
             }
         }
     except Exception as e:
