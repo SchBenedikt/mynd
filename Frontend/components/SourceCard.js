@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 /**
  * SourceCard component for displaying source references
@@ -8,6 +8,8 @@ import { useState } from 'react';
  */
 export default function SourceCard({ source }) {
   const [isOpen, setIsOpen] = useState(false);
+  const closeButtonRef = useRef(null);
+  const openButtonRef = useRef(null);
 
   const {
     source: sourceName,
@@ -73,11 +75,38 @@ export default function SourceCard({ source }) {
   const displayPreview = normalizeText(content_preview);
 
   const handleOpen = () => setIsOpen(true);
-  const handleClose = () => setIsOpen(false);
+  const handleClose = useCallback(() => {
+    setIsOpen(false);
+    // Restore focus to the button that opened the modal
+    openButtonRef.current?.focus();
+  }, []);
+
+  // Move focus into the modal when it opens, and handle ESC to close
+  useEffect(() => {
+    if (isOpen) {
+      closeButtonRef.current?.focus();
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Escape') {
+          handleClose();
+        }
+      };
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [isOpen, handleClose]);
+
+  // Prevent background scroll while modal is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = ''; };
+    }
+  }, [isOpen]);
 
   return (
     <div className="source-card">
-      <button type="button" className="source-file-btn" onClick={handleOpen}>
+      <button type="button" className="source-file-btn" onClick={handleOpen} ref={openButtonRef}>
         <div className="source-file-main">
           <span className="source-icon">{icon}</span>
           <span className="source-title" title={displayName}>{displayName}</span>
@@ -91,11 +120,27 @@ export default function SourceCard({ source }) {
       </button>
 
       {isOpen && (
-        <div className="source-detail-overlay" onClick={handleClose}>
-          <div className="source-detail-modal" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="source-detail-overlay"
+          onClick={handleClose}
+          role="presentation"
+        >
+          <div
+            className="source-detail-modal"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="source-detail-title"
+          >
             <div className="source-detail-head">
-              <h4 className="source-detail-title">{displayName}</h4>
-              <button type="button" className="source-detail-close" onClick={handleClose} aria-label="Close source details">
+              <h4 className="source-detail-title" id="source-detail-title">{displayName}</h4>
+              <button
+                type="button"
+                className="source-detail-close"
+                onClick={handleClose}
+                aria-label="Close source details"
+                ref={closeButtonRef}
+              >
                 ×
               </button>
             </div>
