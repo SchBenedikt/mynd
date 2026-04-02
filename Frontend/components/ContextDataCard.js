@@ -66,9 +66,11 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
   const isCalendar = type === 'calendar';
   const isPhoto = type === 'photos';
   const isEmail = type === 'email';
+  const isContacts = type === 'contacts';
   const photoItems = card?.photos || [];
   const photoPersonOptions = card?.people_options || [];
   const photoDateOptions = card?.date_options || [];
+  const contactItems = card?.contacts || [];
   const emailDescription = card?.description || t('E-Mail direkt ausfüllen und senden.', 'Fill in and send the email directly.');
 
   useEffect(() => {
@@ -98,6 +100,10 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
 
   useEffect(() => {
     if (isPhoto) {
+      return undefined;
+    }
+
+    if (isEmail || isContacts) {
       return undefined;
     }
 
@@ -305,7 +311,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
   };
 
   const widthVariant = useMemo(() => {
-    if (isEmail) {
+    if (isEmail || isContacts) {
       return 'wide';
     }
 
@@ -324,14 +330,14 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
     if (taskScope === 'today' && taskItems.length <= 4) return 'compact';
     if (taskScope === 'all' || taskItems.length >= 10) return 'wide';
     return 'medium';
-  }, [isPhoto, photoItems.length, isCalendar, calendarView, calendarItems.length, taskScope, taskItems.length]);
+  }, [isPhoto, isEmail, isContacts, photoItems.length, isCalendar, calendarView, calendarItems.length, taskScope, taskItems.length]);
 
   return (
     <div className={`context-data-card context-data-card--${widthVariant}`}>
       <div className="context-data-head">
         <div className="context-data-title-wrap">
           <div className="context-data-title">
-            {isPhoto ? (card?.title || t('Fotos', 'Photos')) : (isCalendar ? t('Kalenderübersicht', 'Calendar Overview') : isEmail ? (card?.title || t('E-Mail verfassen', 'Compose email')) : t('Aufgabenübersicht', 'Task Overview'))}
+            {isPhoto ? (card?.title || t('Fotos', 'Photos')) : (isCalendar ? t('Kalenderübersicht', 'Calendar Overview') : isEmail ? (card?.title || t('E-Mail verfassen', 'Compose email')) : isContacts ? (card?.title || t('Kontakte', 'Contacts')) : t('Aufgabenübersicht', 'Task Overview'))}
           </div>
           <div className="context-data-subtitle">
             {isPhoto
@@ -340,11 +346,13 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
                 ? (payload?.period_label || t('Zeitraum wird geladen...', 'Loading period...'))
                 : isEmail
                   ? emailDescription
+                  : isContacts
+                    ? (card?.description || t('Kontakte auswählen und E-Mails vorbereiten.', 'Select contacts and prepare emails.'))
                   : `${payload?.count || 0} items`}
           </div>
         </div>
 
-        {!isPhoto && !isEmail && (
+        {!isPhoto && !isEmail && !isContacts && (
           <div className="context-data-controls">
             {isCalendar ? (
               <>
@@ -378,7 +386,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
         )}
       </div>
 
-      {!isPhoto && !isEmail && (
+      {!isPhoto && !isEmail && !isContacts && (
         <div className="context-data-nav">
           <button
             type="button"
@@ -454,6 +462,43 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
             </button>
           </div>
           {emailStatus && <div className="status-text">{emailStatus}</div>}
+        </div>
+      )}
+
+      {isContacts && !error && (
+        <div className="context-data-list">
+          {contactItems.length === 0 && <div className="context-data-empty">{t('Keine Kontakte gefunden.', 'No contacts found.')}</div>}
+          {contactItems.map((contact, idx) => {
+            const email = String(contact.email || '').trim();
+            const displayLine = [contact.subline, email].filter(Boolean).join(' • ');
+            return (
+              <div key={`${contact.title || 'contact'}-${idx}`} className="context-item task-item">
+                <div className="context-item-main">
+                  <div className="context-item-title">{contact.title || t('Kontakt', 'Contact')}</div>
+                  <div className="context-item-meta">{displayLine || t('Kontakt aus Nextcloud/CardDAV', 'Contact from Nextcloud/CardDAV')}</div>
+                </div>
+                <div className="context-item-actions-row" style={{flexWrap: 'wrap'}}>
+                  {email ? (
+                    <button
+                      type="button"
+                      className="context-item-action"
+                      onClick={() => onQueryAction?.(`${t('Schreibe eine E-Mail an', 'Compose an email to')} ${email}`)}
+                    >
+                      {t('E-Mail schreiben', 'Write email')}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="context-item-action"
+                      onClick={() => onQueryAction?.(`${t('Suche Kontakt', 'Search contact')} ${contact.title || ''}`.trim())}
+                    >
+                      {t('Kontakt suchen', 'Search contact')}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
