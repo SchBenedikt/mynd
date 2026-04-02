@@ -17,7 +17,8 @@ const API_DISPLAY_NAMES = {
   nina: 'NINA',
   autobahn: 'Autobahn',
   dashboard_deutschland: 'Dashboard Deutschland',
-  deutschland_atlas: 'Deutschland Atlas'
+  deutschland_atlas: 'Deutschland Atlas',
+  email: 'E-Mail (IMAP)'
 };
 
 export default function SettingsPage() {
