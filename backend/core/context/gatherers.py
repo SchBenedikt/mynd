@@ -4,7 +4,8 @@ Handles gathering context from photos, files, calendar, tasks, weather, security
 """
 import logging
 import re
-from typing import Dict, List, Optional
+from datetime import date, timedelta
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,123 @@ def _guess_document_name(source_name: str, path: str) -> str:
             return normalized_path.split('/')[-1] or normalized_path
 
     return 'Knowledge Base'
+
+
+def _normalize_email_prompt(prompt: str) -> str:
+    """Normalize a free-form email question for intent matching."""
+    return ' '.join((prompt or '').split()).strip().lower()
+
+
+def _build_email_query_profile(prompt: str) -> Dict[str, Any]:
+    """Map a natural-language email question to a structured retrieval profile."""
+    text = _normalize_email_prompt(prompt)
+    today = date.today()
+    current_week_start = today - timedelta(days=today.weekday())
+    last_week_start = current_week_start - timedelta(days=7)
+    last_week_end = current_week_start - timedelta(days=1)
+
+    def has_any(phrases: List[str]) -> bool:
+        return any(phrase in text for phrase in phrases)
+
+    last_sent = (
+        has_any([
+            'letzte e-mail', 'letzte mail', 'letzte nachricht', 'zuletzt gesendete',
+            'letzte gesendete', 'letzte von mir gesendete', 'letzte geschriebene',
+            'letzte verfasste'
+        ]) and has_any([
+            'geschrieben', 'gesendet', 'geschickt', 'verschickt', 'verfasst',
+            'mail geschrieben', 'e-mail geschrieben'
+        ])
+    )
+
+    today_received = (
+        has_any([
+            'e-mails von heute', 'emails von heute', 'mails von heute', 'heutige e-mails',
+            'heutige mails', 'was ist heute angekommen', 'was kam heute rein',
+            'was ist heute reingekommen', 'heute angekommen', 'heute erhalten'
+        ]) or (
+            'heute' in text and has_any([
+                'angekommen', 'angekommenen', 'erhalten', 'eingegangen', 'eingetroffen',
+                'bekommen', 'neu angekommen', 'eingelaufen'
+            ])
+        )
+    )
+
+    today_content = (
+        has_any([
+            'inhalt der e-mails von heute', 'inhalt der emails von heute',
+            'was war der inhalt der e-mails von heute', 'was war der inhalt der emails von heute',
+            'fasse die e-mails von heute zusammen', 'fasse die emails von heute zusammen',
+            'zusammenfassung der e-mails von heute', 'zusammenfassung der emails von heute'
+        ]) or (
+            'heute' in text and has_any(['inhalt', 'zusammenfasse', 'zusammenfassung', 'fasse zusammen'])
+        )
+    )
+
+    unread_last_week = (
+        has_any(['ungelesene e-mails von letzter woche', 'ungelesene emails von letzter woche', 'ungelesene mails von letzter woche'])
+        or ('ungelesen' in text and ('letzte woche' in text or 'letzter woche' in text or 'letzten woche' in text))
+        or ('unread' in text and 'last week' in text)
+    )
+
+    if last_sent:
+        return {
+            'mode': 'last_sent',
+            'folder_focus': 'sent',
+            'since': None,
+            'until': None,
+            'unread': None,
+            'limit': 1,
+            'summary_mode': 'single',
+            'label': 'letzte gesendete E-Mail'
+        }
+
+    if today_content:
+        return {
+            'mode': 'today_content',
+            'folder_focus': 'inbox',
+            'since': today,
+            'until': today,
+            'unread': None,
+            'limit': 20,
+            'summary_mode': 'summary',
+            'label': 'E-Mails von heute mit Inhalt'
+        }
+
+    if today_received:
+        return {
+            'mode': 'today_received',
+            'folder_focus': 'inbox',
+            'since': today,
+            'until': today,
+            'unread': None,
+            'limit': 20,
+            'summary_mode': 'list',
+            'label': 'heute erhaltene E-Mails'
+        }
+
+    if unread_last_week:
+        return {
+            'mode': 'unread_last_week',
+            'folder_focus': 'inbox',
+            'since': last_week_start,
+            'until': last_week_end,
+            'unread': True,
+            'limit': 20,
+            'summary_mode': 'summary',
+            'label': 'ungelesene E-Mails von letzter Woche'
+        }
+
+    return {
+        'mode': 'general',
+        'folder_focus': 'all',
+        'since': None,
+        'until': None,
+        'unread': None,
+        'limit': 10,
+        'summary_mode': 'list',
+        'label': 'allgemeine E-Mail-Suche'
+    }
 
 
 def gather_photo_context(client, prompt: str, username: str, build_thumbnail_url_func) -> Optional[Dict]:
@@ -497,14 +615,44 @@ def gather_email_context(email_client, prompt: str, limit: int = 10) -> Optional
         if not email_client:
             return None
 
-        # Use search when the prompt contains meaningful keywords; fall back to
-        # a general recent-email summary otherwise.
-        emails = email_client.search_emails(prompt, limit=limit)
+        profile = _build_email_query_profile(prompt)
+
+        if profile.get('mode') == 'general':
+            # Use search when the prompt contains meaningful keywords; fall back to
+            # a general recent-email summary otherwise.
+            emails = email_client.search_emails(prompt, limit=limit)
+        else:
+            emails = email_client.fetch_emails(
+                limit=profile.get('limit', limit),
+                folder_focus=profile.get('folder_focus', 'all'),
+                since=profile.get('since'),
+                until=profile.get('until'),
+                unread=profile.get('unread'),
+            )
+
         if not emails:
             return None
 
         lines: List[str] = []
         lines.append("=== E-MAILS ===")
+        lines.append("")
+        lines.append(f"Abfrage: {profile.get('label', 'E-Mails')}")
+        if profile.get('since') and profile.get('until') and profile.get('since') == profile.get('until'):
+            lines.append(f"Zeitraum: {profile['since'].strftime('%Y-%m-%d')}")
+        elif profile.get('since') and profile.get('until'):
+            lines.append(f"Zeitraum: {profile['since'].strftime('%Y-%m-%d')} bis {profile['until'].strftime('%Y-%m-%d')}")
+        if profile.get('folder_focus') and profile.get('folder_focus') != 'all':
+            lines.append(f"Ordnerfokus: {profile['folder_focus']}")
+        if profile.get('unread') is True:
+            lines.append("Filter: nur ungelesene E-Mails")
+        if profile.get('mode') == 'last_sent':
+            lines.append("Aufgabe: Nenne die letzte gesendete E-Mail möglichst konkret und knapp.")
+        elif profile.get('mode') == 'today_received':
+            lines.append("Aufgabe: Liste die heute eingegangenen E-Mails kurz auf.")
+        elif profile.get('mode') == 'today_content':
+            lines.append("Aufgabe: Fasse die Inhalte der heutigen E-Mails zusammen.")
+        elif profile.get('mode') == 'unread_last_week':
+            lines.append("Aufgabe: Fasse die ungelesenen E-Mails von letzter Woche zusammen.")
         lines.append("")
         lines.append(f"Gefundene E-Mails ({len(emails)}):")
         lines.append("")
@@ -534,7 +682,8 @@ def gather_email_context(email_client, prompt: str, limit: int = 10) -> Optional
 
             # Build a source card for the UI
             matched_sentence = _extract_matching_sentence(prompt, body or subject)
-            body_preview = (body[:_SOURCE_CARD_PREVIEW_LENGTH] + '...') if len(body) > _SOURCE_CARD_PREVIEW_LENGTH else body
+            preview_length = _SOURCE_CARD_PREVIEW_LENGTH if profile.get('mode') == 'general' else _EMAIL_CONTEXT_BODY_LENGTH
+            body_preview = (body[:preview_length] + '...') if len(body) > preview_length else body
             source_cards.append({
                 'source': sender or 'E-Mail',
                 'source_type': 'email',

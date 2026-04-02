@@ -4231,7 +4231,8 @@ def email_test_connection():
     try:
         data = request.get_json()
         username = data.get('username')
-        client = get_email_client(username)
+        account_id = data.get('account_id')
+        client = get_email_client(username=username, account_id=account_id)
         if not client:
             return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert. Bitte IMAP-Einstellungen setzen.'}), 400
         success = client.test_connection()
@@ -4250,10 +4251,11 @@ def email_search():
     try:
         data = request.get_json()
         username = data.get('username')
+        account_id = data.get('account_id')
         query = data.get('query', '')
         limit = int(data.get('limit', 10))
 
-        client = get_email_client(username)
+        client = get_email_client(username=username, account_id=account_id)
         if not client:
             return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
 
@@ -4279,9 +4281,10 @@ def email_summary():
     """Return a summary of recent emails."""
     try:
         username = request.args.get('username')
+        account_id = request.args.get('account_id')
         limit = int(request.args.get('limit', 20))
 
-        client = get_email_client(username)
+        client = get_email_client(username=username, account_id=account_id)
         if not client:
             return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
 
@@ -4298,10 +4301,15 @@ def email_folders():
     try:
         data = request.get_json(silent=True) or {}
         username = data.get('username')
+        account_id = data.get('account_id')
         config = data.get('config')
 
-        registry = get_api_registry()
-        client = registry.create_api_instance('email', config=config if config else None, username=username, use_cache=False)
+        client = get_email_client(
+            username=username,
+            account_id=account_id,
+            config=config if config else None,
+            use_cache=False
+        )
         if not client:
             return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
 
@@ -4318,11 +4326,16 @@ def email_send():
     try:
         data = request.get_json(silent=True) or {}
         username = data.get('username')
+        account_id = data.get('account_id')
         config = data.get('config')
         payload = data.get('message', data)
 
-        registry = get_api_registry()
-        client = registry.create_api_instance('email', config=config if config else None, username=username, use_cache=False)
+        client = get_email_client(
+            username=username,
+            account_id=account_id,
+            config=config if config else None,
+            use_cache=False
+        )
         if not client:
             return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
 
@@ -4345,6 +4358,27 @@ def email_send():
     except Exception as e:
         logger.error("Email send error: %s", e)
         return jsonify({'success': False, 'error': 'Interner Fehler beim E-Mail-Versand.'}), 500
+
+
+@app.route('/api/email/accounts', methods=['GET'])
+def email_accounts():
+    """Return configured email accounts and active account info."""
+    try:
+        username = request.args.get('username')
+        account_id = request.args.get('account_id')
+
+        client = get_email_client(username=username, account_id=account_id)
+        if not client:
+            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
+
+        return jsonify({
+            'success': True,
+            'accounts': client.get_accounts_overview(),
+            'active_account_id': client.active_account_id,
+        })
+    except Exception as e:
+        logger.error("Email accounts error: %s", e)
+        return jsonify({'success': False, 'error': 'Interner Fehler beim Laden der E-Mail-Konten.'}), 500
 
 
 # ==================== HomeAssistant Endpoints ====================
@@ -5824,12 +5858,31 @@ def resolve_email_contacts_for_prompt(prompt: str, username: str = None, limit: 
     }
 
 
-def get_email_client(username: str = None) -> Optional['EmailClient']:
-    """Return a configured EmailClient for *username*, or None if not configured."""
+def get_email_client(
+    username: str = None,
+    account_id: str = None,
+    config: Dict[str, Any] = None,
+    use_cache: bool = True
+) -> Optional['EmailClient']:
+    """Return a configured EmailClient for *username* and optional *account_id*."""
     try:
         registry = get_api_registry()
-        client = registry.create_api_instance('email', username=username)
-        return client
+
+        effective_config = None
+        if config is not None:
+            effective_config = dict(config)
+        elif account_id:
+            effective_config = registry.load_config('email', username)
+
+        if account_id:
+            if effective_config is None:
+                effective_config = {}
+            effective_config['selected_account_id'] = account_id
+
+        if effective_config is None:
+            return registry.create_api_instance('email', username=username, use_cache=use_cache)
+
+        return registry.create_api_instance('email', config=effective_config, username=username, use_cache=False)
     except Exception as e:
         logger.debug("Email client not available: %s", e)
         return None

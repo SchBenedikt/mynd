@@ -81,6 +81,89 @@ const EMAIL_PROVIDER_PRESETS = {
   }
 };
 
+const EMAIL_ACCOUNT_FIELDS = [
+  'provider_preset',
+  'username',
+  'password',
+  'imap_host',
+  'imap_port',
+  'use_ssl',
+  'smtp_host',
+  'smtp_port',
+  'smtp_starttls',
+  'smtp_use_ssl',
+  'folders',
+  'max_emails',
+  'from_name',
+  'from_address'
+];
+
+const _pickEmailFields = (value = {}) => {
+  const picked = {};
+  EMAIL_ACCOUNT_FIELDS.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(value, field)) {
+      picked[field] = value[field];
+    }
+  });
+  return picked;
+};
+
+const _normalizeSingleEmailAccount = (rawAccount = {}, fallbackId = 'account_1', fallbackName = '') => {
+  const accountId = String(rawAccount.account_id || rawAccount.id || fallbackId).trim() || fallbackId;
+  const username = String(rawAccount.username || '').trim();
+  const displayName = String(rawAccount.display_name || fallbackName || username || accountId).trim();
+  return {
+    account_id: accountId,
+    display_name: displayName,
+    provider_preset: 'custom',
+    folders: 'INBOX',
+    use_ssl: 'true',
+    smtp_starttls: 'true',
+    smtp_use_ssl: 'false',
+    max_emails: '50',
+    ..._pickEmailFields(rawAccount)
+  };
+};
+
+const normalizeEmailConfig = (config = {}) => {
+  const base = { ...(config || {}) };
+  let accounts = Array.isArray(base.accounts)
+    ? base.accounts
+        .filter((item) => item && typeof item === 'object')
+        .map((item, index) => _normalizeSingleEmailAccount(item, `account_${index + 1}`))
+    : [];
+
+  if (accounts.length === 0) {
+    const hasLegacyFields = ['username', 'imap_host', 'password', 'smtp_host'].some((key) => {
+      const value = base[key];
+      return value !== undefined && value !== null && String(value).trim() !== '';
+    });
+
+    if (hasLegacyFields) {
+      accounts = [_normalizeSingleEmailAccount(base, 'account_1')];
+    }
+  }
+
+  if (accounts.length === 0) {
+    accounts = [_normalizeSingleEmailAccount({}, 'account_1', 'Konto 1')];
+  }
+
+  let activeAccountId = String(base.active_account_id || base.selected_account_id || base.account_id || '').trim();
+  if (!accounts.find((account) => account.account_id === activeAccountId)) {
+    activeAccountId = accounts[0].account_id;
+  }
+
+  const activeAccount = accounts.find((account) => account.account_id === activeAccountId) || accounts[0];
+
+  return {
+    ...base,
+    accounts,
+    active_account_id: activeAccountId,
+    selected_account_id: activeAccountId,
+    ..._pickEmailFields(activeAccount)
+  };
+};
+
 export default function SettingsPage() {
   const router = useRouter();
   const { theme, darkMode, motionStyle, contrastColor, setTheme, setDarkMode, setMotionStyle, setContrastColor } = useTheme();
@@ -153,11 +236,17 @@ export default function SettingsPage() {
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
   const getApiDisplayName = (apiName) => API_DISPLAY_NAMES[apiName] || apiName;
   const immichConfigured = Boolean(immichUrlDefault && immichApiKeyDefault);
-  const emailPresetKey = apiConfig.provider_preset || 'custom';
-  const emailFoldersAreAll = String(apiConfig.folders || '').trim().toUpperCase() === 'ALL';
+  const normalizedEmailConfig = normalizeEmailConfig(apiConfig);
+  const emailAccounts = selectedApi?.api_name === 'email' ? normalizedEmailConfig.accounts : [];
+  const activeEmailAccountId = selectedApi?.api_name === 'email' ? normalizedEmailConfig.active_account_id : '';
+  const activeEmailAccount = selectedApi?.api_name === 'email'
+    ? (emailAccounts.find((account) => account.account_id === activeEmailAccountId) || emailAccounts[0] || {})
+    : {};
+  const emailPresetKey = activeEmailAccount.provider_preset || 'custom';
+  const emailFoldersAreAll = String(activeEmailAccount.folders || '').trim().toUpperCase() === 'ALL';
   const emailSelectedFolders = emailFoldersAreAll
     ? emailFolderOptions
-    : String(apiConfig.folders || '')
+    : String(activeEmailAccount.folders || '')
         .split(',')
         .map((folder) => folder.trim())
         .filter(Boolean);
@@ -743,7 +832,8 @@ export default function SettingsPage() {
       const res = await fetch(`${API_BASE}/api/registry/${apiName}/config`);
       if (res.ok) {
         const data = await res.json();
-        setApiConfig(data.config || {});
+        const loadedConfig = data.config || {};
+        setApiConfig(apiName === 'email' ? normalizeEmailConfig(loadedConfig) : loadedConfig);
         setSelectedApi({ ...data, api_name: apiName });
         setNinaRegions([]);
         setNinaRegionStatus('');
@@ -754,7 +844,7 @@ export default function SettingsPage() {
         setLocationResult(null);
 
         if (apiName === 'email') {
-          loadEmailFolders(data.config || {});
+          loadEmailFolders(normalizeEmailConfig(loadedConfig));
         }
       }
     } catch (err) {
@@ -764,21 +854,74 @@ export default function SettingsPage() {
 
   const applyEmailPreset = (presetKey) => {
     const preset = EMAIL_PROVIDER_PRESETS[presetKey] || EMAIL_PROVIDER_PRESETS.custom;
-    setApiConfig((prev) => ({
-      ...prev,
-      provider_preset: presetKey,
-      ...preset.values
-    }));
+    setApiConfig((prev) => {
+      const normalized = normalizeEmailConfig(prev);
+      const accountId = normalized.active_account_id;
+      const accounts = normalized.accounts.map((account) => (
+        account.account_id === accountId
+          ? { ...account, provider_preset: presetKey, ...preset.values }
+          : account
+      ));
+      return normalizeEmailConfig({ ...normalized, accounts });
+    });
+  };
+
+  const setActiveEmailAccount = (accountId) => {
+    setApiConfig((prev) => {
+      const normalized = normalizeEmailConfig(prev);
+      return normalizeEmailConfig({ ...normalized, active_account_id: accountId, selected_account_id: accountId });
+    });
+  };
+
+  const updateActiveEmailAccount = (patch = {}) => {
+    setApiConfig((prev) => {
+      const normalized = normalizeEmailConfig(prev);
+      const accountId = normalized.active_account_id;
+      const accounts = normalized.accounts.map((account) => (
+        account.account_id === accountId
+          ? { ...account, ...patch }
+          : account
+      ));
+      return normalizeEmailConfig({ ...normalized, accounts });
+    });
+  };
+
+  const addEmailAccount = () => {
+    setApiConfig((prev) => {
+      const normalized = normalizeEmailConfig(prev);
+      const nextIndex = normalized.accounts.length + 1;
+      const newAccount = _normalizeSingleEmailAccount({}, `account_${nextIndex}`, `Konto ${nextIndex}`);
+      const accounts = [...normalized.accounts, newAccount];
+      return normalizeEmailConfig({ ...normalized, accounts, active_account_id: newAccount.account_id });
+    });
+    setEmailFolderOptions([]);
+    setEmailFolderStatus('');
+  };
+
+  const removeEmailAccount = () => {
+    setApiConfig((prev) => {
+      const normalized = normalizeEmailConfig(prev);
+      if (normalized.accounts.length <= 1) {
+        return normalized;
+      }
+      const accountId = normalized.active_account_id;
+      const remaining = normalized.accounts.filter((account) => account.account_id !== accountId);
+      return normalizeEmailConfig({ ...normalized, accounts: remaining, active_account_id: remaining[0].account_id });
+    });
+    setEmailFolderOptions([]);
+    setEmailFolderStatus('');
   };
 
   const loadEmailFolders = async (configOverride = {}) => {
     try {
       setEmailFolderStatus(tr('Ordner werden geladen...', 'Loading folders...'));
+      const mergedConfig = normalizeEmailConfig({ ...apiConfig, ...configOverride });
       const res = await fetch(`${API_BASE}/api/email/folders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          config: { ...apiConfig, ...configOverride }
+          account_id: mergedConfig.active_account_id,
+          config: mergedConfig
         })
       });
 
@@ -802,10 +945,9 @@ export default function SettingsPage() {
   };
 
   const updateEmailFolders = (selectedFolders) => {
-    setApiConfig((prev) => ({
-      ...prev,
+    updateActiveEmailAccount({
       folders: selectedFolders.length > 0 ? selectedFolders.join(', ') : 'INBOX'
-    }));
+    });
   };
 
   const loadNinaRegions = async () => {
@@ -983,15 +1125,19 @@ export default function SettingsPage() {
   const saveApiConfig = async (apiName) => {
     try {
       setApiConfigStatus(tr('Speichern...', 'Saving...'));
+      const configToSave = apiName === 'email' ? normalizeEmailConfig(apiConfig) : apiConfig;
 
       const res = await fetch(`${API_BASE}/api/registry/${apiName}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: apiConfig })
+        body: JSON.stringify({ config: configToSave })
       });
 
       if (res.ok) {
         setApiConfigStatus(tr('✓ Gespeichert und Verbindung erfolgreich getestet', '✓ Saved and connection tested successfully'));
+        if (apiName === 'email') {
+          setApiConfig(configToSave);
+        }
         loadAllApis();
         loadApiHealth();
       } else {
@@ -1006,11 +1152,12 @@ export default function SettingsPage() {
   const testApiConfig = async (apiName) => {
     try {
       setApiConfigStatus(tr('Teste Verbindung...', 'Testing connection...'));
+      const configToTest = apiName === 'email' ? normalizeEmailConfig(apiConfig) : apiConfig;
 
       const res = await fetch(`${API_BASE}/api/registry/${apiName}/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: apiConfig })
+        body: JSON.stringify({ config: configToTest })
       });
 
       if (res.ok) {
@@ -1475,6 +1622,44 @@ export default function SettingsPage() {
                               </div>
 
                               <div className="input-group">
+                                <label>{tr('E-Mail-Konto', 'Email account')}</label>
+                                <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+                                  <select
+                                    value={activeEmailAccountId}
+                                    onChange={(e) => {
+                                      const nextId = e.target.value;
+                                      setActiveEmailAccount(nextId);
+                                      const nextConfig = normalizeEmailConfig({ ...apiConfig, active_account_id: nextId, selected_account_id: nextId });
+                                      loadEmailFolders(nextConfig);
+                                    }}
+                                    style={{flex: 1}}
+                                  >
+                                    {emailAccounts.map((account) => (
+                                      <option key={account.account_id} value={account.account_id}>
+                                        {account.display_name || account.username || account.account_id}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <button className="btn" type="button" onClick={addEmailAccount}>
+                                    {tr('Konto hinzufügen', 'Add account')}
+                                  </button>
+                                  <button className="btn" type="button" onClick={removeEmailAccount} disabled={emailAccounts.length <= 1}>
+                                    {tr('Konto entfernen', 'Remove account')}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="input-group">
+                                <label>{tr('Kontoname', 'Account name')}</label>
+                                <input
+                                  type="text"
+                                  value={activeEmailAccount.display_name || ''}
+                                  onChange={(e) => updateActiveEmailAccount({ display_name: e.target.value })}
+                                  placeholder={tr('z.B. WEB.DE privat', 'e.g. WEB.DE private')}
+                                />
+                              </div>
+
+                              <div className="input-group">
                                 <label>{tr('Provider-Vorlage', 'Provider preset')}</label>
                                 <select
                                   value={emailPresetKey}
@@ -1492,8 +1677,8 @@ export default function SettingsPage() {
                                 <label>{tr('E-Mail-Adresse / Benutzername', 'Email address / username')}</label>
                                 <input
                                   type="text"
-                                  value={apiConfig.username || ''}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, username: e.target.value}))}
+                                  value={activeEmailAccount.username || ''}
+                                  onChange={(e) => updateActiveEmailAccount({ username: e.target.value })}
                                   placeholder={tr('dein.name@anbieter.de', 'your.name@provider.com')}
                                 />
                               </div>
@@ -1502,8 +1687,8 @@ export default function SettingsPage() {
                                 <label>{tr('Passwort / App-Passwort', 'Password / app password')}</label>
                                 <input
                                   type="password"
-                                  value={apiConfig.password || ''}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, password: e.target.value}))}
+                                  value={activeEmailAccount.password || ''}
+                                  onChange={(e) => updateActiveEmailAccount({ password: e.target.value })}
                                   placeholder="••••••••"
                                 />
                               </div>
@@ -1512,8 +1697,8 @@ export default function SettingsPage() {
                                 <label>IMAP Host</label>
                                 <input
                                   type="text"
-                                  value={apiConfig.imap_host || ''}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, imap_host: e.target.value}))}
+                                  value={activeEmailAccount.imap_host || ''}
+                                  onChange={(e) => updateActiveEmailAccount({ imap_host: e.target.value })}
                                   placeholder="imap.web.de"
                                 />
                               </div>
@@ -1522,8 +1707,8 @@ export default function SettingsPage() {
                                 <label>IMAP Port</label>
                                 <input
                                   type="number"
-                                  value={apiConfig.imap_port || ''}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, imap_port: e.target.value}))}
+                                  value={activeEmailAccount.imap_port || ''}
+                                  onChange={(e) => updateActiveEmailAccount({ imap_port: e.target.value })}
                                   placeholder="993"
                                 />
                               </div>
@@ -1532,8 +1717,8 @@ export default function SettingsPage() {
                                 <label>SMTP Host</label>
                                 <input
                                   type="text"
-                                  value={apiConfig.smtp_host || ''}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, smtp_host: e.target.value}))}
+                                  value={activeEmailAccount.smtp_host || ''}
+                                  onChange={(e) => updateActiveEmailAccount({ smtp_host: e.target.value })}
                                   placeholder="smtp.web.de"
                                 />
                               </div>
@@ -1542,8 +1727,8 @@ export default function SettingsPage() {
                                 <label>SMTP Port</label>
                                 <input
                                   type="number"
-                                  value={apiConfig.smtp_port || ''}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, smtp_port: e.target.value}))}
+                                  value={activeEmailAccount.smtp_port || ''}
+                                  onChange={(e) => updateActiveEmailAccount({ smtp_port: e.target.value })}
                                   placeholder="587"
                                 />
                               </div>
@@ -1551,8 +1736,8 @@ export default function SettingsPage() {
                               <div className="input-group">
                                 <label>{tr('SMTP STARTTLS', 'SMTP STARTTLS')}</label>
                                 <select
-                                  value={apiConfig.smtp_starttls ?? 'true'}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, smtp_starttls: e.target.value}))}
+                                  value={activeEmailAccount.smtp_starttls ?? 'true'}
+                                  onChange={(e) => updateActiveEmailAccount({ smtp_starttls: e.target.value })}
                                 >
                                   <option value="true">{tr('Ja', 'Yes')}</option>
                                   <option value="false">{tr('Nein', 'No')}</option>
@@ -1562,8 +1747,8 @@ export default function SettingsPage() {
                               <div className="input-group">
                                 <label>{tr('SMTP SSL', 'SMTP SSL')}</label>
                                 <select
-                                  value={apiConfig.smtp_use_ssl ?? 'false'}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, smtp_use_ssl: e.target.value}))}
+                                  value={activeEmailAccount.smtp_use_ssl ?? 'false'}
+                                  onChange={(e) => updateActiveEmailAccount({ smtp_use_ssl: e.target.value })}
                                 >
                                   <option value="true">{tr('Ja', 'Yes')}</option>
                                   <option value="false">{tr('Nein', 'No')}</option>
@@ -1577,7 +1762,7 @@ export default function SettingsPage() {
                                     <input
                                       type="checkbox"
                                       checked={emailFoldersAreAll}
-                                      onChange={(e) => setApiConfig(prev => ({...prev, folders: e.target.checked ? 'ALL' : (emailSelectedFolders[0] || 'INBOX')}))}
+                                      onChange={(e) => updateActiveEmailAccount({ folders: e.target.checked ? 'ALL' : (emailSelectedFolders[0] || 'INBOX') })}
                                     />
                                     {tr('Alle Ordner automatisch verwenden', 'Use all folders automatically')}
                                   </label>
@@ -1615,8 +1800,8 @@ export default function SettingsPage() {
                                 <label>{tr('Maximale Mails pro Ordner', 'Max emails per folder')}</label>
                                 <input
                                   type="number"
-                                  value={apiConfig.max_emails || ''}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, max_emails: e.target.value}))}
+                                  value={activeEmailAccount.max_emails || ''}
+                                  onChange={(e) => updateActiveEmailAccount({ max_emails: e.target.value })}
                                   placeholder="50"
                                 />
                               </div>
@@ -1624,8 +1809,8 @@ export default function SettingsPage() {
                               <div className="input-group">
                                 <label>{tr('IMAP SSL', 'IMAP SSL')}</label>
                                 <select
-                                  value={apiConfig.use_ssl ?? 'true'}
-                                  onChange={(e) => setApiConfig(prev => ({...prev, use_ssl: e.target.value}))}
+                                  value={activeEmailAccount.use_ssl ?? 'true'}
+                                  onChange={(e) => updateActiveEmailAccount({ use_ssl: e.target.value })}
                                 >
                                   <option value="true">{tr('Ja', 'Yes')}</option>
                                   <option value="false">{tr('Nein', 'No')}</option>
@@ -1633,7 +1818,7 @@ export default function SettingsPage() {
                               </div>
 
                               <div className="button-group" style={{marginTop: '0.5rem'}}>
-                                <button className="btn" onClick={() => loadEmailFolders(apiConfig)}>
+                                <button className="btn" onClick={() => loadEmailFolders(normalizeEmailConfig(apiConfig))}>
                                   {tr('Ordner neu laden', 'Reload folders')}
                                 </button>
                               </div>
