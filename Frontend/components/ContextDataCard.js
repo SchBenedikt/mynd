@@ -469,8 +469,10 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
         <div className="context-data-list">
           {contactItems.length === 0 && <div className="context-data-empty">{t('Keine Kontakte gefunden.', 'No contacts found.')}</div>}
           {contactItems.map((contact, idx) => {
-            const email = String(contact.email || '').trim();
-            const displayLine = [contact.subline, email].filter(Boolean).join(' • ');
+            const emails = Array.isArray(contact.emails)
+              ? contact.emails.map((value) => String(value || '').trim()).filter(Boolean)
+              : [String(contact.primary_email || contact.email || '').trim()].filter(Boolean);
+            const displayLine = [contact.subline, contact.organization, emails.join(', ')].filter(Boolean).join(' • ');
             return (
               <div key={`${contact.title || 'contact'}-${idx}`} className="context-item task-item">
                 <div className="context-item-main">
@@ -478,14 +480,17 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
                   <div className="context-item-meta">{displayLine || t('Kontakt aus Nextcloud/CardDAV', 'Contact from Nextcloud/CardDAV')}</div>
                 </div>
                 <div className="context-item-actions-row" style={{flexWrap: 'wrap'}}>
-                  {email ? (
-                    <button
-                      type="button"
-                      className="context-item-action"
-                      onClick={() => onQueryAction?.(`${t('Schreibe eine E-Mail an', 'Compose an email to')} ${email}`)}
-                    >
-                      {t('E-Mail schreiben', 'Write email')}
-                    </button>
+                  {emails.length > 0 ? (
+                    emails.map((email) => (
+                      <button
+                        key={email}
+                        type="button"
+                        className="context-item-action"
+                        onClick={() => onQueryAction?.(`${t('Schreibe eine E-Mail an', 'Compose an email to')} ${email}`)}
+                      >
+                        {email}
+                      </button>
+                    ))
                   ) : (
                     <button
                       type="button"
