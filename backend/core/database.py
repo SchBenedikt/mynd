@@ -2,6 +2,7 @@ import sqlite3
 import json
 import time
 import logging
+import re
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import os
@@ -270,8 +271,9 @@ class KnowledgeDatabase:
         start_time = time.time()
         
         try:
-            # Escape query properly for FTS5
-            escaped_query = query.replace('"', '""')
+            match_query = self._build_fts_match_query(query)
+            if not match_query:
+                return []
             
             cursor.execute("""
                 SELECT c.*, d.name as doc_name, d.path as doc_path, d.file_type
@@ -281,7 +283,7 @@ class KnowledgeDatabase:
                 WHERE chunks_fts MATCH ?
                 ORDER BY rank
                 LIMIT ?
-            """, (escaped_query, limit))
+            """, (match_query, limit))
             
             results = [dict(row) for row in cursor.fetchall()]
             execution_time = time.time() - start_time
@@ -294,6 +296,21 @@ class KnowledgeDatabase:
         except Exception as e:
             logger.error(f"Full-text search error: {str(e)}")
             return []
+
+    def _build_fts_match_query(self, query: str) -> str:
+        """Build a safe and effective FTS5 MATCH query from natural language input."""
+        cleaned = (query or "").strip()
+        if not cleaned:
+            return ""
+
+        # Keep word-like tokens only to avoid FTS parser errors on punctuation/operators.
+        tokens = [token for token in re.findall(r"\w+", cleaned.lower(), flags=re.UNICODE) if len(token) > 1]
+
+        if not tokens:
+            return ""
+
+        # Use prefix matching and OR-combination for robust recall with natural language queries.
+        return " OR ".join(f'"{token}"*' for token in tokens)
     
     def get_chunks_without_embeddings(self, model_name: str, limit: int = 100) -> List[Dict]:
         """Get chunks that need embeddings"""
