@@ -58,7 +58,7 @@ def _get_email_body(msg) -> str:
                 body = payload.decode(charset, errors='replace')
         except Exception:
             pass
-    # Normalise whitespace
+    # Normalize whitespace
     body = re.sub(r'\r\n', '\n', body)
     body = re.sub(r'\n{3,}', '\n\n', body)
     return body.strip()
@@ -155,15 +155,17 @@ class EmailClient(APIClient):
     def test_connection(self) -> bool:
         """Test IMAP connection."""
         conn = None
+        logged_out = False
         try:
             conn = self._connect()
             conn.logout()
+            logged_out = True
             return True
         except Exception as e:
             self.logger.error("Email connection test failed: %s", e)
             return False
         finally:
-            if conn:
+            if conn and not logged_out:
                 try:
                     conn.logout()
                 except Exception:
