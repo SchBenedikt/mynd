@@ -14,7 +14,7 @@ export default function SourceCard({ source }) {
   const {
     source: sourceName,
     source_type,
-    document,
+    document: sourceDocument,
     path,
     chunk_id,
     matched_sentence,
@@ -68,7 +68,7 @@ export default function SourceCard({ source }) {
     return v;
   };
 
-  const displayName = decodeSafe(document || sourceName || 'Knowledge Base');
+  const displayName = decodeSafe(sourceDocument || sourceName || 'Knowledge Base');
   const displayPath = decodeSafe(path || '');
   const displaySource = decodeSafe(sourceName || displayName);
   const displayQuote = normalizeText(matched_sentence);
