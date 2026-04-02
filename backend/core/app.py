@@ -1954,7 +1954,52 @@ def _build_email_card(prompt: str, language: str = 'de') -> Dict[str, Any]:
     }
 
 
-def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict], photo_ctx: Optional[Dict] = None, email_ctx: Optional[Dict] = None, language: str = 'de') -> List[Dict]:
+def _build_contact_card(prompt: str, contacts: List[Dict[str, Any]], language: str = 'de') -> Dict[str, Any]:
+    """Build an interactive contacts card for the frontend."""
+    is_german = str(language or '').lower().startswith('de')
+    contact_items = []
+
+    for contact in contacts[:6]:
+        title = str(contact.get('title', '')).strip() or str(contact.get('full_name', '')).strip() or 'Kontakt'
+        subline = str(contact.get('subline', '')).strip()
+        email_candidates = []
+        for candidate in [contact.get('subline', ''), contact.get('title', '')]:
+            extracted = _extract_email_from_text(candidate)
+            if extracted:
+                email_candidates.append(extracted)
+
+        if isinstance(contact.get('attributes'), dict):
+            for value in contact['attributes'].values():
+                extracted = _extract_email_from_text(value)
+                if extracted:
+                    email_candidates.append(extracted)
+
+        email = email_candidates[0] if email_candidates else ''
+
+        contact_items.append({
+            'title': title,
+            'subline': subline,
+            'email': email,
+            'resource_url': contact.get('resource_url', ''),
+            'icon': contact.get('icon', '')
+        })
+
+    return {
+        'type': 'contacts',
+        'title': 'Kontakte' if is_german else 'Contacts',
+        'subtitle': f"{len(contact_items)} Treffer" if is_german else f"{len(contact_items)} matches",
+        'description': (
+            'Wähle einen Kontakt aus, um direkt eine E-Mail zu schreiben oder die Suche zu verfeinern.'
+            if is_german else
+            'Select a contact to draft an email or refine the search.'
+        ),
+        'query': prompt,
+        'contacts': contact_items,
+        'suggested_email_prompt': 'Schreibe eine E-Mail an {email}' if is_german else 'Compose an email to {email}'
+    }
+
+
+def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict], photo_ctx: Optional[Dict] = None, email_ctx: Optional[Dict] = None, nextcloud_search_ctx: Optional[Dict] = None, language: str = 'de') -> List[Dict]:
     """Return structured ui_cards metadata for frontend interactive cards."""
     cards: List[Dict] = []
 
@@ -2018,6 +2063,13 @@ def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo
         cards.append(_build_email_card(prompt, language))
     elif email_ctx and intent in ['email', 'mixed']:
         cards.append(_build_email_card(prompt, language))
+
+    if nextcloud_search_ctx and (is_contact_query(prompt) or is_email_send_query(prompt)):
+        search_metadata = nextcloud_search_ctx.get('metadata', {}) if isinstance(nextcloud_search_ctx, dict) else {}
+        search_results = search_metadata.get('results', []) or []
+        contact_results = [result for result in search_results if str(result.get('provider', '')).lower() == 'contacts']
+        if contact_results:
+            cards.append(_build_contact_card(prompt, contact_results, language))
 
     return cards
 
@@ -5554,6 +5606,11 @@ _EMAIL_SEND_KEYWORDS = [
     'compose email', 'verfasse', 'antworten', 'reply', 'weiterleiten', 'forward'
 ]
 
+_CONTACT_KEYWORDS = [
+    'kontakt', 'kontakte', 'adressbuch', 'carddav', 'contact', 'contacts',
+    'telefonbuch', 'person', 'personen', 'anschrift', 'email adresse', 'e-mail adresse', 'mailadresse'
+]
+
 
 def is_email_query(prompt: str) -> bool:
     """Return True if the prompt is likely asking about emails."""
@@ -5567,6 +5624,12 @@ def is_email_send_query(prompt: str) -> bool:
     return any(kw in prompt_lower for kw in _EMAIL_SEND_KEYWORDS) or (
         is_email_query(prompt) and any(kw in prompt_lower for kw in ['sende', 'schicke', 'verschicke', 'write', 'send', 'reply', 'antwort'])
     )
+
+
+def is_contact_query(prompt: str) -> bool:
+    """Return True if the prompt is likely asking about contacts or an address book."""
+    prompt_lower = prompt.lower()
+    return any(kw in prompt_lower for kw in _CONTACT_KEYWORDS)
 
 
 def extract_email_send_info_from_message(message: str) -> Dict[str, Any]:
@@ -5606,6 +5669,14 @@ def extract_email_send_info_from_message(message: str) -> Dict[str, Any]:
         'missing_info': missing_info,
         'has_recipient': bool(address_matches)
     }
+
+
+def _extract_email_from_text(text: str) -> str:
+    """Extract the first email address from arbitrary text."""
+    if not text:
+        return ''
+    match = re.search(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}', str(text), flags=re.IGNORECASE)
+    return match.group(0).strip() if match else ''
 
 
 def get_email_client(username: str = None) -> Optional['EmailClient']:
@@ -6312,7 +6383,7 @@ WICHTIG:
                 if email_cards:
                     source_cards.extend(email_cards)
 
-            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context, photo_context, email_context, language)
+            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context, photo_context, email_context, nextcloud_search_context, language)
 
             # No hard source limit: rely on relevance filtering in context gatherers.
 
