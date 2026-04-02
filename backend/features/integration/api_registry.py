@@ -117,6 +117,26 @@ class APIRegistry:
             return os.path.join(self.config_dir, f'{api_name}_{username}.json')
         return os.path.join(self.config_dir, f'{api_name}_config.json')
 
+    def get_api_schema(self, api_name: str, config: Dict[str, Any] = None, username: str = None) -> Dict[str, Any]:
+        """Return the configuration schema for an API, even if it has no saved config yet."""
+        api_class = self.get_api_class(api_name)
+        if not api_class:
+            return {}
+
+        try:
+            instance = self.create_api_instance(api_name, config if config is not None else {}, username, use_cache=False)
+            if instance:
+                return instance.get_config_schema()
+        except Exception:
+            pass
+
+        try:
+            dummy_instance = object.__new__(api_class)
+            return dummy_instance.get_config_schema()
+        except Exception as e:
+            self.logger.debug(f"Unable to resolve schema for {api_name}: {e}")
+            return {}
+
     def load_config(self, api_name: str, username: str = None) -> Dict[str, Any]:
         """Load configuration for an API"""
         config_path = self.get_config_path(api_name, username)

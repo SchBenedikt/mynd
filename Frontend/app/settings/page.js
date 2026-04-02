@@ -18,7 +18,67 @@ const API_DISPLAY_NAMES = {
   autobahn: 'Autobahn',
   dashboard_deutschland: 'Dashboard Deutschland',
   deutschland_atlas: 'Deutschland Atlas',
-  email: 'E-Mail (IMAP)'
+  email: 'E-Mail'
+};
+
+const EMAIL_PROVIDER_PRESETS = {
+  custom: {
+    labelDe: 'Eigene Angaben',
+    labelEn: 'Custom',
+    values: {}
+  },
+  'web.de': {
+    labelDe: 'WEB.DE',
+    labelEn: 'WEB.DE',
+    values: {
+      imap_host: 'imap.web.de',
+      imap_port: '993',
+      use_ssl: 'true',
+      smtp_host: 'smtp.web.de',
+      smtp_port: '587',
+      smtp_starttls: 'true',
+      smtp_use_ssl: 'false'
+    }
+  },
+  'gmx.de': {
+    labelDe: 'GMX',
+    labelEn: 'GMX',
+    values: {
+      imap_host: 'imap.gmx.net',
+      imap_port: '993',
+      use_ssl: 'true',
+      smtp_host: 'mail.gmx.net',
+      smtp_port: '587',
+      smtp_starttls: 'true',
+      smtp_use_ssl: 'false'
+    }
+  },
+  'gmail.com': {
+    labelDe: 'Gmail',
+    labelEn: 'Gmail',
+    values: {
+      imap_host: 'imap.gmail.com',
+      imap_port: '993',
+      use_ssl: 'true',
+      smtp_host: 'smtp.gmail.com',
+      smtp_port: '587',
+      smtp_starttls: 'true',
+      smtp_use_ssl: 'false'
+    }
+  },
+  'outlook.com': {
+    labelDe: 'Outlook / Microsoft',
+    labelEn: 'Outlook / Microsoft',
+    values: {
+      imap_host: 'outlook.office365.com',
+      imap_port: '993',
+      use_ssl: 'true',
+      smtp_host: 'smtp.office365.com',
+      smtp_port: '587',
+      smtp_starttls: 'true',
+      smtp_use_ssl: 'false'
+    }
+  }
 };
 
 export default function SettingsPage() {
@@ -78,6 +138,8 @@ export default function SettingsPage() {
   const [selectedApi, setSelectedApi] = useState(null);
   const [apiConfig, setApiConfig] = useState({});
   const [apiConfigStatus, setApiConfigStatus] = useState('');
+  const [emailFolderOptions, setEmailFolderOptions] = useState([]);
+  const [emailFolderStatus, setEmailFolderStatus] = useState('');
   const [apiQuery, setApiQuery] = useState('');
   const [ninaRegions, setNinaRegions] = useState([]);
   const [ninaRegionStatus, setNinaRegionStatus] = useState('');
@@ -91,6 +153,14 @@ export default function SettingsPage() {
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
   const getApiDisplayName = (apiName) => API_DISPLAY_NAMES[apiName] || apiName;
   const immichConfigured = Boolean(immichUrlDefault && immichApiKeyDefault);
+  const emailPresetKey = apiConfig.provider_preset || 'custom';
+  const emailFoldersAreAll = String(apiConfig.folders || '').trim().toUpperCase() === 'ALL';
+  const emailSelectedFolders = emailFoldersAreAll
+    ? emailFolderOptions
+    : String(apiConfig.folders || '')
+        .split(',')
+        .map((folder) => folder.trim())
+        .filter(Boolean);
   const catalogApis = [{ api_name: 'immich', configured: immichConfigured, isImmichSpecial: true }, ...apis];
   const normalizedApiQuery = apiQuery.trim().toLowerCase();
   const visibleApis = catalogApis
@@ -682,10 +752,60 @@ export default function SettingsPage() {
         setNinaWarningsArs('');
         setLocationStatus('');
         setLocationResult(null);
+
+        if (apiName === 'email') {
+          loadEmailFolders(data.config || {});
+        }
       }
     } catch (err) {
       console.error('Error loading API config:', err);
     }
+  };
+
+  const applyEmailPreset = (presetKey) => {
+    const preset = EMAIL_PROVIDER_PRESETS[presetKey] || EMAIL_PROVIDER_PRESETS.custom;
+    setApiConfig((prev) => ({
+      ...prev,
+      provider_preset: presetKey,
+      ...preset.values
+    }));
+  };
+
+  const loadEmailFolders = async (configOverride = {}) => {
+    try {
+      setEmailFolderStatus(tr('Ordner werden geladen...', 'Loading folders...'));
+      const res = await fetch(`${API_BASE}/api/email/folders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          config: { ...apiConfig, ...configOverride }
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        setEmailFolderOptions([]);
+        setEmailFolderStatus(tr('Fehler: ', 'Error: ') + (data?.error || 'Unknown error'));
+        return;
+      }
+
+      setEmailFolderOptions(data.folders || []);
+      setEmailFolderStatus(
+        (data.folders || []).length > 0
+          ? tr(`✓ ${data.folders.length} Ordner gefunden`, `✓ ${data.folders.length} folders found`)
+          : tr('Keine Ordner gefunden', 'No folders found')
+      );
+    } catch (err) {
+      setEmailFolderOptions([]);
+      setEmailFolderStatus(tr('Fehler: ', 'Error: ') + err.message);
+    }
+  };
+
+  const updateEmailFolders = (selectedFolders) => {
+    setApiConfig((prev) => ({
+      ...prev,
+      folders: selectedFolders.length > 0 ? selectedFolders.join(', ') : 'INBOX'
+    }));
   };
 
   const loadNinaRegions = async () => {
@@ -1092,9 +1212,9 @@ export default function SettingsPage() {
             {activeTab === 'apis' && (
               <div className="settings-panel">
                 <div className="panel-section">
-                  <div className="section-title">{tr('API Integrationen', 'API Integrations')}</div>
+                  <div className="section-title">{tr('Integrationen', 'Integrations')}</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1.25rem 0'}}>
-                    {tr('Konfiguriere externe APIs für erweiterte Funktionen', 'Configure external APIs for extended functionality')}
+                    {tr('Konfiguriere verbundene Dienste für erweiterte Funktionen', 'Configure connected services for extended functionality')}
                   </p>
 
                   <div className="api-overview-bar">
@@ -1116,7 +1236,7 @@ export default function SettingsPage() {
                         type="text"
                         value={apiQuery}
                         onChange={(e) => setApiQuery(e.target.value)}
-                        placeholder={tr('API suchen...', 'Search API...')}
+                        placeholder={tr('Integration suchen...', 'Search integration...')}
                       />
                     </div>
                   </div>
@@ -1124,7 +1244,7 @@ export default function SettingsPage() {
                   <div className="api-workspace">
                     <div className="api-catalog">
                       {visibleApis.length === 0 && (
-                        <div className="api-empty-state">{tr('Keine API gefunden', 'No APIs found')}</div>
+                        <div className="api-empty-state">{tr('Keine Integration gefunden', 'No integrations found')}</div>
                       )}
 
                       {visibleApis.map((api) => {
@@ -1174,7 +1294,7 @@ export default function SettingsPage() {
                     <div className="api-editor">
                       {!selectedApi && (
                         <div className="api-empty-state large">
-                          {tr('Waehle links eine API aus, um die Konfiguration zu bearbeiten.', 'Select an API from the left to edit its configuration.')}
+                          {tr('Waehle links eine Integration aus, um die Konfiguration zu bearbeiten.', 'Select an integration from the left to edit its configuration.')}
                         </div>
                       )}
 
@@ -1348,7 +1468,181 @@ export default function SettingsPage() {
                             </div>
                           )}
 
-                          {selectedApi.api_name !== 'immich' && selectedApi.schema && Object.keys(selectedApi.schema).length > 0 && (
+                          {selectedApi.api_name === 'email' && (
+                            <div style={{marginBottom: '1.5rem'}}>
+                              <div style={{fontSize: '0.9rem', color: 'var(--muted)', marginBottom: '0.9rem'}}>
+                                {tr('E-Mail einfacher einrichten: Vorlage wählen, Kontodaten ergänzen und Ordner automatisch laden.', 'Set up email more easily: choose a preset, fill in account details, and load folders automatically.')}
+                              </div>
+
+                              <div className="input-group">
+                                <label>{tr('Provider-Vorlage', 'Provider preset')}</label>
+                                <select
+                                  value={emailPresetKey}
+                                  onChange={(e) => applyEmailPreset(e.target.value)}
+                                >
+                                  {Object.entries(EMAIL_PROVIDER_PRESETS).map(([key, preset]) => (
+                                    <option key={key} value={key}>
+                                      {language === 'de' ? preset.labelDe : preset.labelEn}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="input-group">
+                                <label>{tr('E-Mail-Adresse / Benutzername', 'Email address / username')}</label>
+                                <input
+                                  type="text"
+                                  value={apiConfig.username || ''}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, username: e.target.value}))}
+                                  placeholder={tr('dein.name@anbieter.de', 'your.name@provider.com')}
+                                />
+                              </div>
+
+                              <div className="input-group">
+                                <label>{tr('Passwort / App-Passwort', 'Password / app password')}</label>
+                                <input
+                                  type="password"
+                                  value={apiConfig.password || ''}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, password: e.target.value}))}
+                                  placeholder="••••••••"
+                                />
+                              </div>
+
+                              <div className="input-group">
+                                <label>IMAP Host</label>
+                                <input
+                                  type="text"
+                                  value={apiConfig.imap_host || ''}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, imap_host: e.target.value}))}
+                                  placeholder="imap.web.de"
+                                />
+                              </div>
+
+                              <div className="input-group">
+                                <label>IMAP Port</label>
+                                <input
+                                  type="number"
+                                  value={apiConfig.imap_port || ''}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, imap_port: e.target.value}))}
+                                  placeholder="993"
+                                />
+                              </div>
+
+                              <div className="input-group">
+                                <label>SMTP Host</label>
+                                <input
+                                  type="text"
+                                  value={apiConfig.smtp_host || ''}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, smtp_host: e.target.value}))}
+                                  placeholder="smtp.web.de"
+                                />
+                              </div>
+
+                              <div className="input-group">
+                                <label>SMTP Port</label>
+                                <input
+                                  type="number"
+                                  value={apiConfig.smtp_port || ''}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, smtp_port: e.target.value}))}
+                                  placeholder="587"
+                                />
+                              </div>
+
+                              <div className="input-group">
+                                <label>{tr('SMTP STARTTLS', 'SMTP STARTTLS')}</label>
+                                <select
+                                  value={apiConfig.smtp_starttls ?? 'true'}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, smtp_starttls: e.target.value}))}
+                                >
+                                  <option value="true">{tr('Ja', 'Yes')}</option>
+                                  <option value="false">{tr('Nein', 'No')}</option>
+                                </select>
+                              </div>
+
+                              <div className="input-group">
+                                <label>{tr('SMTP SSL', 'SMTP SSL')}</label>
+                                <select
+                                  value={apiConfig.smtp_use_ssl ?? 'false'}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, smtp_use_ssl: e.target.value}))}
+                                >
+                                  <option value="true">{tr('Ja', 'Yes')}</option>
+                                  <option value="false">{tr('Nein', 'No')}</option>
+                                </select>
+                              </div>
+
+                              <div className="input-group">
+                                <label>{tr('Ordner synchronisieren', 'Folders to sync')}</label>
+                                <div style={{display: 'flex', flexDirection: 'column', gap: '0.6rem'}}>
+                                  <label style={{display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.95rem'}}>
+                                    <input
+                                      type="checkbox"
+                                      checked={emailFoldersAreAll}
+                                      onChange={(e) => setApiConfig(prev => ({...prev, folders: e.target.checked ? 'ALL' : (emailSelectedFolders[0] || 'INBOX')}))}
+                                    />
+                                    {tr('Alle Ordner automatisch verwenden', 'Use all folders automatically')}
+                                  </label>
+                                  {!emailFoldersAreAll && emailFolderOptions.length > 0 && (
+                                    <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.5rem', maxHeight: '220px', overflowY: 'auto', padding: '0.5rem', border: '1px solid var(--line)', borderRadius: '8px'}}>
+                                      {emailFolderOptions.map((folder) => {
+                                        const checked = emailSelectedFolders.includes(folder);
+                                        return (
+                                          <label key={folder} style={{display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem'}}>
+                                            <input
+                                              type="checkbox"
+                                              checked={checked}
+                                              onChange={(e) => {
+                                                const nextFolders = checked
+                                                  ? emailSelectedFolders.filter((value) => value !== folder)
+                                                  : [...emailSelectedFolders, folder];
+                                                updateEmailFolders(nextFolders);
+                                              }}
+                                            />
+                                            <span>{folder}</span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                  {!emailFoldersAreAll && emailFolderOptions.length === 0 && (
+                                    <div style={{fontSize: '0.85rem', color: 'var(--muted)'}}>
+                                      {tr('Noch keine Ordner geladen. Nutze den Button unten, um die Liste zu laden.', 'No folders loaded yet. Use the button below to fetch the list.')}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="input-group">
+                                <label>{tr('Maximale Mails pro Ordner', 'Max emails per folder')}</label>
+                                <input
+                                  type="number"
+                                  value={apiConfig.max_emails || ''}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, max_emails: e.target.value}))}
+                                  placeholder="50"
+                                />
+                              </div>
+
+                              <div className="input-group">
+                                <label>{tr('IMAP SSL', 'IMAP SSL')}</label>
+                                <select
+                                  value={apiConfig.use_ssl ?? 'true'}
+                                  onChange={(e) => setApiConfig(prev => ({...prev, use_ssl: e.target.value}))}
+                                >
+                                  <option value="true">{tr('Ja', 'Yes')}</option>
+                                  <option value="false">{tr('Nein', 'No')}</option>
+                                </select>
+                              </div>
+
+                              <div className="button-group" style={{marginTop: '0.5rem'}}>
+                                <button className="btn" onClick={() => loadEmailFolders(apiConfig)}>
+                                  {tr('Ordner neu laden', 'Reload folders')}
+                                </button>
+                              </div>
+
+                              {emailFolderStatus && <div className="status-text" style={{marginTop: '0.5rem'}}>{emailFolderStatus}</div>}
+                            </div>
+                          )}
+
+                          {selectedApi.api_name !== 'immich' && selectedApi.api_name !== 'email' && selectedApi.schema && Object.keys(selectedApi.schema).length > 0 && (
                             <div style={{marginBottom: '1.5rem'}}>
                               <div style={{fontSize: '0.9rem', fontWeight: '600', marginBottom: '1rem'}}>
                                 {tr('Authentifizierung & Einstellungen', 'Authentication & Settings')}

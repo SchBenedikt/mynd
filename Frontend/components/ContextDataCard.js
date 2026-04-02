@@ -37,8 +37,11 @@ const formatPhotoDate = (value) => {
   return dateValue.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-export default function ContextDataCard({ card, onQueryAction, onPhotoPreview }) {
+export default function ContextDataCard({ card, language: uiLanguage, onQueryAction, onPhotoPreview }) {
   const type = card?.type || 'calendar';
+  const language = uiLanguage || card?.language || 'de';
+  const isGerman = String(language || 'de').toLowerCase().startsWith('de');
+  const t = (deText, enText) => (isGerman ? deText : enText);
 
   const [anchorDate, setAnchorDate] = useState(card?.anchor_date || toIsoDate(new Date()));
   const [calendarView, setCalendarView] = useState(card?.default_view || 'day');
@@ -46,6 +49,12 @@ export default function ContextDataCard({ card, onQueryAction, onPhotoPreview })
   const [photoPerson, setPhotoPerson] = useState(card?.selected_people?.[0] || '');
   const [photoDatePhrase, setPhotoDatePhrase] = useState(card?.date_phrase || '');
   const [photoDate, setPhotoDate] = useState(card?.date_from || '');
+  const [emailTo, setEmailTo] = useState(card?.to || '');
+  const [emailSubject, setEmailSubject] = useState(card?.subject || '');
+  const [emailBody, setEmailBody] = useState(card?.body || '');
+  const [emailCc, setEmailCc] = useState(card?.cc || '');
+  const [emailBcc, setEmailBcc] = useState(card?.bcc || '');
+  const [emailStatus, setEmailStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [payload, setPayload] = useState(null);
@@ -56,9 +65,11 @@ export default function ContextDataCard({ card, onQueryAction, onPhotoPreview })
 
   const isCalendar = type === 'calendar';
   const isPhoto = type === 'photos';
+  const isEmail = type === 'email';
   const photoItems = card?.photos || [];
   const photoPersonOptions = card?.people_options || [];
   const photoDateOptions = card?.date_options || [];
+  const emailDescription = card?.description || t('E-Mail direkt ausfüllen und senden.', 'Fill in and send the email directly.');
 
   useEffect(() => {
     setAnchorDate(card?.anchor_date || toIsoDate(new Date()));
@@ -67,6 +78,12 @@ export default function ContextDataCard({ card, onQueryAction, onPhotoPreview })
     setPhotoPerson(card?.selected_people?.[0] || '');
     setPhotoDatePhrase(card?.date_phrase || '');
     setPhotoDate(card?.date_from || '');
+    setEmailTo(card?.to || '');
+    setEmailSubject(card?.subject || '');
+    setEmailBody(card?.body || '');
+    setEmailCc(card?.cc || '');
+    setEmailBcc(card?.bcc || '');
+    setEmailStatus('');
   }, [card]);
 
   const fetchUrl = useMemo(() => {
@@ -256,7 +273,42 @@ export default function ContextDataCard({ card, onQueryAction, onPhotoPreview })
   const calendarItems = payload?.events || [];
   const taskItems = payload?.tasks || [];
 
+  const sendEmail = async () => {
+    setLoading(true);
+    setEmailStatus('');
+    setError('');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/email/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            to: emailTo,
+            subject: emailSubject,
+            body: emailBody,
+            cc: emailCc,
+            bcc: emailBcc
+          }
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.error || 'Could not send email.');
+      }
+      setEmailStatus(t('E-Mail wurde gesendet.', 'Email sent successfully.'));
+    } catch (err) {
+      setEmailStatus(err.message || t('Senden fehlgeschlagen.', 'Send failed.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const widthVariant = useMemo(() => {
+    if (isEmail) {
+      return 'wide';
+    }
+
     if (isPhoto) {
       if (photoItems.length >= 4) return 'wide';
       if (photoItems.length >= 2) return 'medium';
@@ -279,42 +331,46 @@ export default function ContextDataCard({ card, onQueryAction, onPhotoPreview })
       <div className="context-data-head">
         <div className="context-data-title-wrap">
           <div className="context-data-title">
-            {isPhoto ? (card?.title || 'Fotos') : (isCalendar ? 'Calendar Overview' : 'Task Overview')}
+            {isPhoto ? (card?.title || t('Fotos', 'Photos')) : (isCalendar ? t('Kalenderübersicht', 'Calendar Overview') : isEmail ? (card?.title || t('E-Mail verfassen', 'Compose email')) : t('Aufgabenübersicht', 'Task Overview'))}
           </div>
           <div className="context-data-subtitle">
             {isPhoto
               ? (card?.subtitle || `${photoItems.length} items`)
-              : (isCalendar ? (payload?.period_label || 'Loading period...') : `${payload?.count || 0} items`)}
+              : isCalendar
+                ? (payload?.period_label || t('Zeitraum wird geladen...', 'Loading period...'))
+                : isEmail
+                  ? emailDescription
+                  : `${payload?.count || 0} items`}
           </div>
         </div>
 
-        {!isPhoto && (
+        {!isPhoto && !isEmail && (
           <div className="context-data-controls">
             {isCalendar ? (
               <>
                 <button type="button" className="chip-btn" onClick={() => setCalendarView('day')} aria-pressed={calendarView === 'day'}>
-                  Day
+                  {t('Tag', 'Day')}
                 </button>
                 <button type="button" className="chip-btn" onClick={() => setCalendarView('week')} aria-pressed={calendarView === 'week'}>
-                  Week
+                  {t('Woche', 'Week')}
                 </button>
                 <button type="button" className="chip-btn" onClick={() => setCalendarView('month')} aria-pressed={calendarView === 'month'}>
-                  Month
+                  {t('Monat', 'Month')}
                 </button>
                 <button type="button" className="chip-btn" onClick={() => setCalendarView('list')} aria-pressed={calendarView === 'list'}>
-                  List
+                  {t('Liste', 'List')}
                 </button>
               </>
             ) : (
               <>
                 <button type="button" className="chip-btn" onClick={() => setTaskScope('today')} aria-pressed={taskScope === 'today'}>
-                  Today
+                  {t('Heute', 'Today')}
                 </button>
                 <button type="button" className="chip-btn" onClick={() => setTaskScope('overdue')} aria-pressed={taskScope === 'overdue'}>
-                  Overdue
+                  {t('Überfällig', 'Overdue')}
                 </button>
                 <button type="button" className="chip-btn" onClick={() => setTaskScope('all')} aria-pressed={taskScope === 'all'}>
-                  All
+                  {t('Alle', 'All')}
                 </button>
               </>
             )}
@@ -322,13 +378,13 @@ export default function ContextDataCard({ card, onQueryAction, onPhotoPreview })
         )}
       </div>
 
-      {!isPhoto && (
+      {!isPhoto && !isEmail && (
         <div className="context-data-nav">
           <button
             type="button"
             className="context-nav-btn"
             onClick={() => setAnchorDate((prev) => shiftByView(prev, isCalendar ? calendarView : 'day', -1))}
-            aria-label="Previous"
+            aria-label={t('Zurück', 'Previous')}
           >
             <i className="fas fa-chevron-left"></i>
           </button>
@@ -337,10 +393,67 @@ export default function ContextDataCard({ card, onQueryAction, onPhotoPreview })
             type="button"
             className="context-nav-btn"
             onClick={() => setAnchorDate((prev) => shiftByView(prev, isCalendar ? calendarView : 'day', 1))}
-            aria-label="Next"
+            aria-label={t('Weiter', 'Next')}
           >
             <i className="fas fa-chevron-right"></i>
           </button>
+        </div>
+      )}
+
+      {isEmail && !error && (
+        <div className="context-edit-form" style={{gap: '0.75rem'}}>
+          <div className="input-group" style={{marginBottom: 0}}>
+            <label>{t('Empfänger', 'Recipient')}</label>
+            <input
+              type="text"
+              value={emailTo}
+              onChange={(e) => setEmailTo(e.target.value)}
+              placeholder={t('name@beispiel.de', 'name@example.com')}
+            />
+          </div>
+          <div className="input-group" style={{marginBottom: 0}}>
+            <label>{t('Betreff', 'Subject')}</label>
+            <input
+              type="text"
+              value={emailSubject}
+              onChange={(e) => setEmailSubject(e.target.value)}
+              placeholder={t('Neue Nachricht', 'New message')}
+            />
+          </div>
+          <div className="input-group" style={{marginBottom: 0}}>
+            <label>{t('CC', 'CC')}</label>
+            <input
+              type="text"
+              value={emailCc}
+              onChange={(e) => setEmailCc(e.target.value)}
+              placeholder={t('Optional', 'Optional')}
+            />
+          </div>
+          <div className="input-group" style={{marginBottom: 0}}>
+            <label>{t('BCC', 'BCC')}</label>
+            <input
+              type="text"
+              value={emailBcc}
+              onChange={(e) => setEmailBcc(e.target.value)}
+              placeholder={t('Optional', 'Optional')}
+            />
+          </div>
+          <div className="input-group" style={{marginBottom: 0}}>
+            <label>{t('Nachricht', 'Message')}</label>
+            <textarea
+              value={emailBody}
+              onChange={(e) => setEmailBody(e.target.value)}
+              rows={8}
+              placeholder={t('Schreibe deine Nachricht hier...', 'Write your message here...')}
+              style={{resize: 'vertical'}}
+            />
+          </div>
+          <div className="button-group" style={{marginTop: '0.25rem'}}>
+            <button type="button" className="btn primary" onClick={sendEmail} disabled={loading || !emailTo.trim() || !emailBody.trim()}>
+              {loading ? t('Sende...', 'Sending...') : t('E-Mail senden', 'Send email')}
+            </button>
+          </div>
+          {emailStatus && <div className="status-text">{emailStatus}</div>}
         </div>
       )}
 

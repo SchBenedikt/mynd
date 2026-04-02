@@ -1992,6 +1992,7 @@ export default function HomePage() {
                           <ContextDataCard
                             key={`${card.type || 'card'}-${idx}`}
                             card={card}
+                            language={language}
                             onQueryAction={(query) => sendMessage(query)}
                             onPhotoPreview={openPhotoPreview}
                           />
