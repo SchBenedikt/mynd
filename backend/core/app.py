@@ -1925,7 +1925,36 @@ def _infer_task_card_config(prompt: str) -> Dict:
     }
 
 
-def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict], photo_ctx: Optional[Dict] = None) -> List[Dict]:
+def _build_email_card(prompt: str, language: str = 'de') -> Dict[str, Any]:
+    """Build an interactive email compose card for the frontend."""
+    is_german = str(language or '').lower().startswith('de')
+    draft = extract_email_send_info_from_message(prompt)
+
+    return {
+        'type': 'email',
+        'title': 'E-Mail verfassen' if is_german else 'Compose email',
+        'subtitle': 'Vorlage erstellen, prüfen und direkt senden' if is_german else 'Draft, review, and send directly',
+        'description': (
+            'Fülle Empfänger, Betreff und Nachricht aus oder passe den Vorschlag an.'
+            if is_german else
+            'Fill in recipient, subject, and message or adjust the draft.'
+        ),
+        'to': draft.get('to', ''),
+        'subject': draft.get('subject', ''),
+        'body': draft.get('body', ''),
+        'cc': draft.get('cc', ''),
+        'bcc': draft.get('bcc', ''),
+        'requires_confirmation': True,
+        'quick_templates': [
+            {'label': 'WEB.DE', 'preset': 'web.de'},
+            {'label': 'GMX', 'preset': 'gmx.de'},
+            {'label': 'Gmail', 'preset': 'gmail.com'},
+            {'label': 'Outlook', 'preset': 'outlook.com'}
+        ]
+    }
+
+
+def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict], photo_ctx: Optional[Dict] = None, email_ctx: Optional[Dict] = None, language: str = 'de') -> List[Dict]:
     """Return structured ui_cards metadata for frontend interactive cards."""
     cards: List[Dict] = []
 
@@ -1984,6 +2013,11 @@ def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo
                 ],
                 'photos': photo_results[:4]
             })
+
+    if is_email_send_query(prompt):
+        cards.append(_build_email_card(prompt, language))
+    elif email_ctx and intent in ['email', 'mixed']:
+        cards.append(_build_email_card(prompt, language))
 
     return cards
 
@@ -3981,9 +4015,8 @@ def manage_api_config(api_name):
                 config = api_class.get_default_config()
                 configured = True
 
-            # Get schema
-            instance = registry.create_api_instance(api_name, config if config else {}, username, use_cache=False)
-            schema = instance.get_config_schema() if instance else {}
+            # Get schema even when the API has not been configured yet.
+            schema = registry.get_api_schema(api_name, config, username)
 
             # Remove sensitive values from response
             safe_config = {}
@@ -4008,16 +4041,11 @@ def manage_api_config(api_name):
             # Preserve existing secret values when UI sends masked placeholders (***).
             existing_config = registry.load_config(api_name, username) or {}
             api_class = registry.get_api_class(api_name)
-            schema = {}
-            if api_class:
-                schema_instance = registry.create_api_instance(
-                    api_name,
-                    existing_config if existing_config else (api_class.get_default_config() if not api_class.requires_config() else config),
-                    username,
-                    use_cache=False
-                )
-                if schema_instance:
-                    schema = schema_instance.get_config_schema()
+            schema = registry.get_api_schema(
+                api_name,
+                existing_config if existing_config else (api_class.get_default_config() if api_class and not api_class.requires_config() else config),
+                username
+            )
 
             merged_config = dict(config)
             for key, field_meta in schema.items():
@@ -4087,16 +4115,11 @@ def test_api_connection(api_name):
         # Preserve existing secret values when UI sends masked placeholders (***).
         existing_config = registry.load_config(api_name, username) or {}
         api_class = registry.get_api_class(api_name)
-        schema = {}
-        if api_class:
-            schema_instance = registry.create_api_instance(
-                api_name,
-                existing_config if existing_config else (api_class.get_default_config() if not api_class.requires_config() else config),
-                username,
-                use_cache=False
-            )
-            if schema_instance:
-                schema = schema_instance.get_config_schema()
+        schema = registry.get_api_schema(
+            api_name,
+            existing_config if existing_config else (api_class.get_default_config() if api_class and not api_class.requires_config() else config),
+            username
+        )
 
         merged_config = dict(config)
         for key, field_meta in schema.items():
@@ -4194,6 +4217,61 @@ def email_summary():
     except Exception as e:
         logger.error("Email summary error: %s", e)
         return jsonify({'success': False, 'error': 'Interner Fehler beim Laden der E-Mail-Übersicht.'}), 500
+
+
+@app.route('/api/email/folders', methods=['POST'])
+def email_folders():
+    """Return the available IMAP folders for the current configuration."""
+    try:
+        data = request.get_json(silent=True) or {}
+        username = data.get('username')
+        config = data.get('config')
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('email', config=config if config else None, username=username, use_cache=False)
+        if not client:
+            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
+
+        folders = client.list_folders()
+        return jsonify({'success': True, 'folders': folders, 'count': len(folders)})
+    except Exception as e:
+        logger.error("Email folders error: %s", e)
+        return jsonify({'success': False, 'error': 'Interner Fehler beim Laden der Ordnerliste.'}), 500
+
+
+@app.route('/api/email/send', methods=['POST'])
+def email_send():
+    """Send an email via the configured SMTP server."""
+    try:
+        data = request.get_json(silent=True) or {}
+        username = data.get('username')
+        config = data.get('config')
+        payload = data.get('message', data)
+
+        registry = get_api_registry()
+        client = registry.create_api_instance('email', config=config if config else None, username=username, use_cache=False)
+        if not client:
+            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
+
+        result = client.send_email(
+            to=payload.get('to', ''),
+            subject=payload.get('subject', ''),
+            body=payload.get('body', ''),
+            cc=payload.get('cc', ''),
+            bcc=payload.get('bcc', ''),
+            reply_to=payload.get('reply_to', ''),
+            from_name=payload.get('from_name', ''),
+            from_address=payload.get('from_address', '')
+        )
+
+        return jsonify({
+            'success': True,
+            'message': 'E-Mail gesendet',
+            'result': result
+        })
+    except Exception as e:
+        logger.error("Email send error: %s", e)
+        return jsonify({'success': False, 'error': 'Interner Fehler beim E-Mail-Versand.'}), 500
 
 
 # ==================== HomeAssistant Endpoints ====================
@@ -5470,11 +5548,64 @@ _EMAIL_KEYWORDS = [
     'newsletter', 'message', 'messages', 'inboxnachrichten'
 ]
 
+_EMAIL_SEND_KEYWORDS = [
+    'sende', 'schicke', 'verschicke', 'email schreiben', 'mail schreiben',
+    'schreibe eine mail', 'schreibe eine e-mail', 'write email', 'send email',
+    'compose email', 'verfasse', 'antworten', 'reply', 'weiterleiten', 'forward'
+]
+
 
 def is_email_query(prompt: str) -> bool:
     """Return True if the prompt is likely asking about emails."""
     prompt_lower = prompt.lower()
     return any(kw in prompt_lower for kw in _EMAIL_KEYWORDS)
+
+
+def is_email_send_query(prompt: str) -> bool:
+    """Return True if the prompt is likely asking to draft or send an email."""
+    prompt_lower = prompt.lower()
+    return any(kw in prompt_lower for kw in _EMAIL_SEND_KEYWORDS) or (
+        is_email_query(prompt) and any(kw in prompt_lower for kw in ['sende', 'schicke', 'verschicke', 'write', 'send', 'reply', 'antwort'])
+    )
+
+
+def extract_email_send_info_from_message(message: str) -> Dict[str, Any]:
+    """Extract a rough email draft from a natural language request."""
+    text = (message or '').strip()
+    normalized = ' '.join(text.split())
+    address_matches = re.findall(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}', normalized, flags=re.IGNORECASE)
+
+    subject = ''
+    subject_match = re.search(r'(?:betreff|subject)[:\-]\s*(.+?)(?:\s{2,}|$)', normalized, flags=re.IGNORECASE)
+    if subject_match:
+        subject = subject_match.group(1).strip(' "')
+
+    body = normalized
+    body_match = re.search(r'(?:nachricht|text|inhalt|body)[:\-]\s*(.+)$', normalized, flags=re.IGNORECASE)
+    if body_match:
+        body = body_match.group(1).strip()
+
+    if not subject:
+        if is_email_send_query(normalized):
+            subject = 'Neue Nachricht'
+        elif address_matches:
+            subject = 'Nachricht an ' + address_matches[0]
+
+    missing_info = []
+    if not address_matches:
+        missing_info.append('Empfänger')
+    if not body:
+        missing_info.append('Nachrichtentext')
+
+    return {
+        'to': ', '.join(address_matches),
+        'subject': subject,
+        'body': body,
+        'cc': '',
+        'bcc': '',
+        'missing_info': missing_info,
+        'has_recipient': bool(address_matches)
+    }
 
 
 def get_email_client(username: str = None) -> Optional['EmailClient']:
@@ -6181,7 +6312,7 @@ WICHTIG:
                 if email_cards:
                     source_cards.extend(email_cards)
 
-            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context, photo_context)
+            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context, photo_context, email_context, language)
 
             # No hard source limit: rely on relevance filtering in context gatherers.
 

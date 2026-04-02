@@ -7,8 +7,10 @@ import imaplib
 import email
 import logging
 import re
-import time
+import smtplib
+import ssl
 from datetime import datetime, timedelta
+from email.message import EmailMessage
 from email.header import decode_header
 from typing import Dict, Any, List, Optional
 
@@ -73,6 +75,55 @@ class EmailClient(APIClient):
     SCORING_BODY_LENGTH = 500
     # Characters of body included in the get_email_summary preview
     SUMMARY_PREVIEW_LENGTH = 300
+    # Helpful presets for common providers so users do not need to enter every server manually
+    PROVIDER_PRESETS = {
+        'custom': {},
+        'web.de': {
+            'imap_host': 'imap.web.de',
+            'imap_port': 993,
+            'use_ssl': True,
+            'smtp_host': 'smtp.web.de',
+            'smtp_port': 587,
+            'smtp_use_ssl': False,
+            'smtp_starttls': True,
+        },
+        'gmx.de': {
+            'imap_host': 'imap.gmx.net',
+            'imap_port': 993,
+            'use_ssl': True,
+            'smtp_host': 'mail.gmx.net',
+            'smtp_port': 587,
+            'smtp_use_ssl': False,
+            'smtp_starttls': True,
+        },
+        'gmail.com': {
+            'imap_host': 'imap.gmail.com',
+            'imap_port': 993,
+            'use_ssl': True,
+            'smtp_host': 'smtp.gmail.com',
+            'smtp_port': 587,
+            'smtp_use_ssl': False,
+            'smtp_starttls': True,
+        },
+        'outlook.com': {
+            'imap_host': 'outlook.office365.com',
+            'imap_port': 993,
+            'use_ssl': True,
+            'smtp_host': 'smtp.office365.com',
+            'smtp_port': 587,
+            'smtp_use_ssl': False,
+            'smtp_starttls': True,
+        },
+        'hotmail.com': {
+            'imap_host': 'outlook.office365.com',
+            'imap_port': 993,
+            'use_ssl': True,
+            'smtp_host': 'smtp.office365.com',
+            'smtp_port': 587,
+            'smtp_use_ssl': False,
+            'smtp_starttls': True,
+        },
+    }
 
     def __init__(self, config: Dict[str, Any]):
         """
@@ -89,17 +140,52 @@ class EmailClient(APIClient):
                 - max_emails: Maximum emails to fetch per folder (default: 50)
                 - use_ssl: Whether to use SSL (default: True)
         """
-        self.imap_host = config.get('imap_host', '').strip()
-        self.imap_port = int(config.get('imap_port', 993))
-        self.username = config.get('username', '').strip()
+        preset_name = str(config.get('provider_preset', 'custom') or 'custom').strip().lower()
+        preset = self.PROVIDER_PRESETS.get(preset_name, {})
+
+        self.provider_preset = preset_name
+        self.username = str(config.get('username', '')).strip()
         self.password = config.get('password', '')
-        raw_folders = config.get('folders', 'INBOX')
-        self.folders = [f.strip() for f in raw_folders.split(',') if f.strip()]
+        self.from_address = str(config.get('from_address') or self.username).strip()
+        self.from_name = str(config.get('from_name', '')).strip()
+
+        self.imap_host = str(config.get('imap_host') or preset.get('imap_host') or '').strip()
+        self.imap_port = int(config.get('imap_port') or preset.get('imap_port') or 993)
+        self.use_ssl = str(config.get('use_ssl', preset.get('use_ssl', 'true'))).lower() not in ('false', '0', 'no')
+
+        raw_smtp_host = str(config.get('smtp_host') or preset.get('smtp_host') or '').strip()
+        inferred_smtp_host = self._infer_smtp_host(self.imap_host)
+        self.smtp_host = raw_smtp_host or inferred_smtp_host
+        self.smtp_port = int(config.get('smtp_port') or preset.get('smtp_port') or 587)
+        self.smtp_use_ssl = str(config.get('smtp_use_ssl', preset.get('smtp_use_ssl', 'false'))).lower() in ('true', '1', 'yes')
+        self.smtp_starttls = str(config.get('smtp_starttls', preset.get('smtp_starttls', 'true'))).lower() not in ('false', '0', 'no')
+
+        raw_folders = str(config.get('folders', 'INBOX') or 'INBOX').strip()
+        self.sync_all_folders = raw_folders.upper() in ('ALL', '*')
+        self.folders = [f.strip() for f in raw_folders.split(',') if f.strip() and f.strip().upper() not in ('ALL', '*')]
         self.max_emails = int(config.get('max_emails', self.DEFAULT_MAX_EMAILS))
-        self.use_ssl = str(config.get('use_ssl', 'true')).lower() not in ('false', '0', 'no')
 
         if not self.imap_host or not self.username or not self.password:
             raise ValueError("imap_host, username and password are required for EmailClient")
+
+    @staticmethod
+    def _infer_smtp_host(imap_host: str) -> str:
+        """Infer a likely SMTP host from an IMAP host."""
+        host = str(imap_host or '').strip()
+        if not host:
+            return ''
+        if host.startswith('imap.'):
+            return 'smtp.' + host[len('imap.'):]
+        if host.endswith('imap.gmail.com'):
+            return 'smtp.gmail.com'
+        if host.endswith('outlook.office365.com'):
+            return 'smtp.office365.com'
+        return host
+
+    @classmethod
+    def _get_preset_defaults(cls, preset_name: str) -> Dict[str, Any]:
+        """Return default values for a provider preset."""
+        return dict(cls.PROVIDER_PRESETS.get(str(preset_name or 'custom').strip().lower(), {}))
 
     # ------------------------------------------------------------------
     # APIClient interface
@@ -110,48 +196,97 @@ class EmailClient(APIClient):
 
     def get_config_schema(self) -> Dict[str, Any]:
         return {
+            'provider_preset': {
+                'type': 'string',
+                'required': False,
+                'description': 'Provider-Vorlage / vorkonfigurierte Mail-Server',
+                'default': 'custom',
+                'options': [
+                    {'label': 'Eigene Angaben', 'value': 'custom'},
+                    {'label': 'WEB.DE', 'value': 'web.de'},
+                    {'label': 'GMX', 'value': 'gmx.de'},
+                    {'label': 'Gmail', 'value': 'gmail.com'},
+                    {'label': 'Outlook / Microsoft', 'value': 'outlook.com'}
+                ]
+            },
             'imap_host': {
                 'type': 'string',
                 'required': True,
-                'description': 'IMAP server hostname',
+                'description': 'IMAP-Servername',
                 'example': 'imap.gmail.com'
             },
             'imap_port': {
                 'type': 'number',
                 'required': False,
-                'description': 'IMAP server port (993 for SSL, 143 for STARTTLS)',
+                'description': 'IMAP-Port (993 für SSL, 143 für STARTTLS)',
                 'default': 993
             },
             'username': {
                 'type': 'string',
                 'required': True,
-                'description': 'Email address / IMAP login',
+                'description': 'E-Mail-Adresse / Login',
                 'example': 'you@example.com'
             },
             'password': {
                 'type': 'string',
                 'required': True,
-                'description': 'Account password or app-specific password',
+                'description': 'Passwort oder App-Passwort',
                 'secret': True
+            },
+            'smtp_host': {
+                'type': 'string',
+                'required': False,
+                'description': 'SMTP-Servername für den Versand',
+                'example': 'smtp.web.de'
+            },
+            'smtp_port': {
+                'type': 'number',
+                'required': False,
+                'description': 'SMTP-Port (587 mit STARTTLS, 465 mit SSL)',
+                'default': 587
+            },
+            'smtp_starttls': {
+                'type': 'string',
+                'required': False,
+                'description': 'STARTTLS für SMTP verwenden (true/false)',
+                'default': 'true'
+            },
+            'smtp_use_ssl': {
+                'type': 'string',
+                'required': False,
+                'description': 'SMTP direkt mit SSL verbinden (true/false)',
+                'default': 'false'
             },
             'folders': {
                 'type': 'string',
                 'required': False,
-                'description': 'Comma-separated IMAP folders to index (default: INBOX)',
+                'description': 'IMAP-Ordner, kommagetrennt, oder ALL für alle Ordner',
                 'default': 'INBOX',
                 'example': 'INBOX,Sent'
             },
             'max_emails': {
                 'type': 'number',
                 'required': False,
-                'description': 'Maximum number of recent emails to fetch per folder',
+                'description': 'Maximale Anzahl der Mails pro Ordner',
                 'default': 50
             },
             'use_ssl': {
                 'type': 'string',
                 'required': False,
-                'description': 'Use SSL for IMAP connection (true/false)',
+                'description': 'SSL für IMAP verwenden (true/false)',
                 'default': 'true'
+            },
+            'from_name': {
+                'type': 'string',
+                'required': False,
+                'description': 'Absendername für gesendete Mails',
+                'example': 'Max Mustermann'
+            },
+            'from_address': {
+                'type': 'string',
+                'required': False,
+                'description': 'Absenderadresse, falls sie vom Login abweicht',
+                'example': 'max@example.com'
             }
         }
 
@@ -186,6 +321,72 @@ class EmailClient(APIClient):
             conn = imaplib.IMAP4(self.imap_host, self.imap_port)
         conn.login(self.username, self.password)
         return conn
+
+    def _connect_smtp(self):
+        """Create and authenticate an SMTP connection."""
+        if not self.smtp_host:
+            raise ValueError('smtp_host is required for sending emails')
+
+        if self.smtp_use_ssl:
+            conn = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, context=ssl.create_default_context())
+        else:
+            conn = smtplib.SMTP(self.smtp_host, self.smtp_port)
+            conn.ehlo()
+            if self.smtp_starttls:
+                conn.starttls(context=ssl.create_default_context())
+                conn.ehlo()
+
+        conn.login(self.username, self.password)
+        return conn
+
+    def _format_from_header(self) -> str:
+        """Build a user-friendly From header."""
+        if self.from_name and self.from_address:
+            return f'{self.from_name} <{self.from_address}>'
+        return self.from_address or self.username
+
+    @staticmethod
+    def _decode_folder_name(folder_name: str) -> str:
+        """Decode an IMAP folder name if the server uses modified UTF-7."""
+        try:
+            return imaplib.IMAP4._decode_utf7(folder_name)
+        except Exception:
+            return folder_name
+
+    def list_folders(self) -> List[str]:
+        """Return all available IMAP folders from the server."""
+        conn = None
+        folders: List[str] = []
+        try:
+            conn = self._connect()
+            status, data = conn.list()
+            if status != 'OK' or not data:
+                return folders
+
+            for raw_line in data:
+                if not raw_line:
+                    continue
+                line = raw_line.decode('utf-8', errors='replace') if isinstance(raw_line, bytes) else str(raw_line)
+                match = re.search(r'"([^"]+)"\s*$', line)
+                if match:
+                    folder_name = match.group(1)
+                else:
+                    folder_name = line.split(' ', 2)[-1].strip().strip('"')
+
+                folder_name = self._decode_folder_name(folder_name).strip()
+                if folder_name and folder_name not in folders:
+                    folders.append(folder_name)
+
+        except Exception as e:
+            logger.warning('Failed to list IMAP folders: %s', e)
+        finally:
+            if conn:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+
+        return folders
 
     # ------------------------------------------------------------------
     # Public API
@@ -275,9 +476,14 @@ class EmailClient(APIClient):
         Returns a flat list of email dicts (same format as fetch_recent_emails).
         """
         all_emails: List[Dict[str, Any]] = []
-        per_folder_limit = max(1, self.max_emails // len(self.folders)) if len(self.folders) > 0 else self.max_emails
 
-        for folder in self.folders:
+        target_folders = self.list_folders() if self.sync_all_folders else self.folders
+        if not target_folders:
+            target_folders = ['INBOX']
+
+        per_folder_limit = max(1, self.max_emails // len(target_folders)) if len(target_folders) > 0 else self.max_emails
+
+        for folder in target_folders:
             try:
                 folder_emails = self.fetch_recent_emails(
                     folder=folder,
@@ -351,3 +557,63 @@ class EmailClient(APIClient):
             'count': len(all_emails),
             'folders': self.folders
         }
+
+    def send_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        cc: Optional[str] = None,
+        bcc: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        from_name: Optional[str] = None,
+        from_address: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Send an email via SMTP."""
+        recipients = [addr.strip() for addr in re.split(r'[;,]', to or '') if addr.strip()]
+        if not recipients:
+            raise ValueError('At least one recipient is required')
+
+        cc_recipients = [addr.strip() for addr in re.split(r'[;,]', cc or '') if addr.strip()]
+        bcc_recipients = [addr.strip() for addr in re.split(r'[;,]', bcc or '') if addr.strip()]
+        all_recipients = recipients + cc_recipients + bcc_recipients
+
+        message = EmailMessage()
+        message['To'] = ', '.join(recipients)
+        if cc_recipients:
+            message['Cc'] = ', '.join(cc_recipients)
+        if reply_to:
+            message['Reply-To'] = reply_to
+        message['Subject'] = subject or '(ohne Betreff)'
+
+        effective_from_name = str(from_name or self.from_name or '').strip()
+        effective_from_address = str(from_address or self.from_address or self.username).strip()
+        if effective_from_name:
+            message['From'] = f'{effective_from_name} <{effective_from_address}>'
+        else:
+            message['From'] = effective_from_address
+
+        message.set_content(body or '')
+
+        conn = None
+        try:
+            conn = self._connect_smtp()
+            conn.send_message(message, from_addr=effective_from_address, to_addrs=all_recipients)
+            logger.info('Email sent to %s', ', '.join(recipients))
+            return {
+                'success': True,
+                'to': recipients,
+                'cc': cc_recipients,
+                'bcc': bcc_recipients,
+                'subject': subject,
+                'from': message['From']
+            }
+        finally:
+            if conn:
+                try:
+                    conn.quit()
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass

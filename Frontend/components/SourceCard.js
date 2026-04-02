@@ -62,7 +62,7 @@ export default function SourceCard({ source }) {
 
   const prettifyType = (value) => {
     const v = String(value || 'chunk').toLowerCase();
-    if (v === 'chunk') return 'Indexed Chunk';
+    if (v === 'chunk') return 'Indizierter Ausschnitt';
     if (v === 'file') return 'Datei';
     if (v === 'photo' || v === 'image') return 'Bild';
     if (v === 'calendar') return 'Kalender';
@@ -141,7 +141,7 @@ export default function SourceCard({ source }) {
                 type="button"
                 className="source-detail-close"
                 onClick={handleClose}
-                aria-label="Close source details"
+                aria-label="Quellen-Details schließen"
                 ref={closeButtonRef}
               >
                 ×
@@ -152,13 +152,13 @@ export default function SourceCard({ source }) {
               <span className="source-detail-label">Typ</span>
               <span className="source-detail-value">{prettifyType(source_type)}</span>
 
-              <span className="source-detail-label">Chunk</span>
+              <span className="source-detail-label">Ausschnitt</span>
               <span className="source-detail-value">{chunk_id ? `#${chunk_id}` : 'n/a'}</span>
 
-              <span className="source-detail-label">Path</span>
+              <span className="source-detail-label">Pfad</span>
               <span className="source-detail-value">{displayPath || 'n/a'}</span>
 
-              <span className="source-detail-label">Source</span>
+              <span className="source-detail-label">Quelle</span>
               <span className="source-detail-value">{displaySource}</span>
 
               {showScore && Math.round(similarity_score * 100) >= 10 && (
