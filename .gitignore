@@ -335,3 +335,6 @@ temp_*
 backup_*
 *.bak
 *.backup
+
+# Added by ggshield
+.cache_ggshield

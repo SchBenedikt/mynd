@@ -38,7 +38,6 @@ export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, on
 
   return (
     <>
-      {/* Theme Selector */}
       <div className="input-group">
         <label>{l.theme}</label>
         <div className="theme-selector">
@@ -46,15 +45,21 @@ export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, on
             <button
               key={theme.id}
               type="button"
-              className={`theme-btn ${theme.id} ${currentTheme === theme.id ? 'active' : ''}`}
+              className={`theme-choice ${theme.id} ${currentTheme === theme.id ? 'active' : ''}`}
               onClick={() => onThemeChange(theme.id)}
               title={theme.name}
-            />
+              aria-label={theme.name}
+            >
+              <span className="theme-choice-preview" aria-hidden="true" />
+              <span className="theme-choice-name">{theme.name}</span>
+              {currentTheme === theme.id && (
+                <span className="theme-choice-check" aria-hidden="true">✓</span>
+              )}
+            </button>
           ))}
         </div>
       </div>
 
-      {/* Dark Mode Selector */}
       <div className="input-group">
         <label>{l.darkMode}</label>
         <div className="dark-mode-selector">
@@ -65,7 +70,7 @@ export function ThemeSelector({ currentTheme, onThemeChange, currentDarkMode, on
               className={`mode-btn ${currentDarkMode === mode.id ? 'active' : ''}`}
               onClick={() => onDarkModeChange(mode.id)}
             >
-              <span>{mode.icon}</span>
+              <span className="mode-icon">{mode.icon}</span>
               <span>{mode.name}</span>
             </button>
           ))}
