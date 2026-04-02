@@ -1903,8 +1903,9 @@ export default function HomePage() {
                           summarizeChat(chat.id);
                         }}
                         title="Zusammenfassen"
+                        aria-label="Chat zusammenfassen"
                       >
-                        <i className="fas fa-sparkles"></i>
+                        <i className="fas fa-lightbulb"></i>
                       </button>
                       <button
                         type="button"
@@ -2567,7 +2568,7 @@ export default function HomePage() {
             <div className="chat-summary-header">
               <div className="chat-summary-badge">
                 <i className="fas fa-sparkles"></i>
-                KI Uebersicht
+                KI Übersicht
               </div>
               <h3>{chatSummaryPanel.title || 'Chat-Zusammenfassung'}</h3>
               <div className="chat-summary-meta-row">
