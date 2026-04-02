@@ -12,6 +12,7 @@ import time
 import secrets
 from urllib.parse import urljoin
 from urllib.parse import urlencode
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Optional, List, Dict, Any
 
 # Add parent directory to path for imports
@@ -5676,8 +5677,19 @@ def is_email_query(prompt: str) -> bool:
 def is_email_send_query(prompt: str) -> bool:
     """Return True if the prompt is likely asking to draft or send an email."""
     prompt_lower = prompt.lower()
-    return any(kw in prompt_lower for kw in _EMAIL_SEND_KEYWORDS) or (
-        is_email_query(prompt) and any(kw in prompt_lower for kw in ['sende', 'schicke', 'verschicke', 'write', 'send', 'reply', 'antwort'])
+    if any(kw in prompt_lower for kw in _EMAIL_SEND_KEYWORDS):
+        return True
+
+    flexible_patterns = [
+        r'\bschreib\w*\b.*\b(?:e-?mail|mail|nachricht)\b',
+        r'\b(?:verfass\w*|formulier\w*|entwerf\w*|compose|write)\b.*\b(?:e-?mail|mail|nachricht)\b',
+        r'\b(?:sende|send|schick\w*|verschick\w*|reply|antwort\w*|weiterleit\w*|forward)\b.*\b(?:e-?mail|mail|nachricht)\b',
+    ]
+    if any(re.search(pattern, prompt_lower, flags=re.IGNORECASE) for pattern in flexible_patterns):
+        return True
+
+    return is_email_query(prompt) and any(
+        kw in prompt_lower for kw in ['sende', 'schicke', 'verschicke', 'schreib', 'verfasse', 'write', 'send', 'reply', 'antwort']
     )
 
 
@@ -5832,11 +5844,32 @@ def search_carddav_contacts(query: str, username: str = None, limit: int = 10) -
         return []
 
 
-def resolve_email_contacts_for_prompt(prompt: str, username: str = None, limit: int = 5) -> Dict[str, Any]:
+def resolve_email_contacts_for_prompt(
+    prompt: str,
+    username: str = None,
+    limit: int = 5,
+    timeout_seconds: float = 3.0
+) -> Dict[str, Any]:
     """Resolve likely recipient contacts for an email compose prompt."""
     recipient_query = _extract_contact_query_from_email_prompt(prompt)
     search_query = recipient_query or prompt
-    contacts = search_carddav_contacts(search_query, username=username, limit=limit)
+    contacts: List[Dict[str, Any]] = []
+
+    # CardDAV lookups can be slow on some servers. Use a hard timeout so
+    # compose requests never block the full chat endpoint.
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(search_carddav_contacts, search_query, username, limit)
+    try:
+        contacts = future.result(timeout=max(0.5, float(timeout_seconds or 3.0)))
+    except FuturesTimeoutError:
+        logger.warning('CardDAV recipient lookup timed out for query: %s', search_query)
+        future.cancel()
+        contacts = []
+    except Exception as e:
+        logger.debug('CardDAV recipient lookup failed: %s', e)
+        contacts = []
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
     email_candidates: List[str] = []
     for contact in contacts:
@@ -6087,6 +6120,64 @@ def agent_query():
                 'error': 'Keine Anfrage erhalten'
             }), 400
 
+        # Fast path for compose/send email requests before running other
+        # potentially slow context gatherers (weather/security/activity).
+        if is_email_send_query(prompt):
+            recipient_resolution = resolve_email_contacts_for_prompt(prompt, username=username)
+
+            if recipient_resolution.get('has_contact_match') and recipient_resolution.get('needs_selection'):
+                contact_cards = recipient_resolution.get('contacts', [])
+                contact_title = recipient_resolution.get('recipient_query') or 'den Kontakt'
+                contact_card = _build_contact_card(prompt, contact_cards, language)
+
+                return jsonify({
+                    'success': True,
+                    'response': f'Ich habe mehrere E-Mail-Adressen für {contact_title} gefunden. Welche soll ich verwenden?',
+                    'action': 'email_recipient_selection',
+                    'requires_input': True,
+                    'recipient_query': recipient_resolution.get('recipient_query', ''),
+                    'contacts': contact_cards,
+                    'email_candidates': recipient_resolution.get('email_candidates', []),
+                    'sources': [],
+                    'ui_cards': [contact_card],
+                    'context_used': False,
+                    'context_count': 0,
+                    'training_saved': False
+                })
+
+            email_card = _build_email_card(prompt, language)
+            cards = []
+
+            if recipient_resolution.get('best_email') and not email_card.get('to'):
+                email_card['to'] = recipient_resolution.get('best_email', '')
+
+            if recipient_resolution.get('has_contact_match') and not email_card.get('to'):
+                contact_cards = recipient_resolution.get('contacts', [])
+                if contact_cards:
+                    cards.append(_build_contact_card(prompt, contact_cards, language))
+
+            cards.append(email_card)
+
+            if email_card.get('to'):
+                response_text = 'Ich habe eine E-Mail-Vorlage vorbereitet. Du kannst sie jetzt direkt prüfen und senden.'
+            else:
+                response_text = 'Ich habe eine E-Mail-Vorlage vorbereitet. Bitte wähle einen Empfänger oder ergänze die Adresse.'
+
+            return jsonify({
+                'success': True,
+                'response': response_text,
+                'action': 'email_compose',
+                'requires_input': True,
+                'recipient_query': recipient_resolution.get('recipient_query', ''),
+                'contacts': recipient_resolution.get('contacts', []),
+                'email_candidates': recipient_resolution.get('email_candidates', []),
+                'sources': [],
+                'ui_cards': cards,
+                'context_used': False,
+                'context_count': 0,
+                'training_saved': False
+            })
+
         message_lower = prompt.lower()
 
         # Gather weather context if query is weather-related (but let AI respond)
@@ -6140,6 +6231,41 @@ def agent_query():
                     'context_count': 0,
                     'training_saved': False
                 })
+
+            # Fast path for compose/send requests: return interactive UI cards immediately
+            # instead of running the full autonomous + context pipeline.
+            email_card = _build_email_card(prompt, language)
+            cards = []
+
+            if recipient_resolution.get('best_email') and not email_card.get('to'):
+                email_card['to'] = recipient_resolution.get('best_email', '')
+
+            if recipient_resolution.get('has_contact_match') and not email_card.get('to'):
+                contact_cards = recipient_resolution.get('contacts', [])
+                if contact_cards:
+                    cards.append(_build_contact_card(prompt, contact_cards, language))
+
+            cards.append(email_card)
+
+            if email_card.get('to'):
+                response_text = 'Ich habe eine E-Mail-Vorlage vorbereitet. Du kannst sie jetzt direkt prüfen und senden.'
+            else:
+                response_text = 'Ich habe eine E-Mail-Vorlage vorbereitet. Bitte wähle einen Empfänger oder ergänze die Adresse.'
+
+            return jsonify({
+                'success': True,
+                'response': response_text,
+                'action': 'email_compose',
+                'requires_input': True,
+                'recipient_query': recipient_resolution.get('recipient_query', ''),
+                'contacts': recipient_resolution.get('contacts', []),
+                'email_candidates': recipient_resolution.get('email_candidates', []),
+                'sources': [],
+                'ui_cards': cards,
+                'context_used': False,
+                'context_count': 0,
+                'training_saved': False
+            })
 
         # Interactive event creation: Let AI handle missing information naturally
         if is_calendar_create_query(prompt):

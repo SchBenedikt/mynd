@@ -659,6 +659,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.7rem;
+  position: relative;
   width: 100%;
   border: 0;
   background: transparent;
@@ -673,22 +674,39 @@ body {
 
 .history-title {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-right: 0;
+  transition: padding-right 0.2s ease;
 }
 
 .history-actions {
-  margin-left: auto;
+  position: absolute;
+  right: 0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   gap: 0.35rem;
   opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+  padding: 0.12rem 0.12rem 0.12rem 1rem;
+  border-radius: 10px;
+  background: linear-gradient(to left, var(--chip-bg) 74%, transparent);
   transition: opacity 0.2s ease;
 }
 
 .history-item:hover .history-actions,
 .history-item.active .history-actions {
   opacity: 1;
+  pointer-events: auto;
+}
+
+.history-item:hover .history-title,
+.history-item.active .history-title {
+  padding-right: 7.2rem;
 }
 
 .history-action {
