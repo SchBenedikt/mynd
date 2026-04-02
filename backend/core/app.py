@@ -4145,7 +4145,7 @@ def email_test_connection():
         })
     except Exception as e:
         logger.error("Email test error: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Interner Fehler beim E-Mail-Verbindungstest.'}), 500
 
 
 @app.route('/api/email/search', methods=['POST'])
@@ -4174,7 +4174,7 @@ def email_search():
         return jsonify({'success': True, 'count': len(sanitized), 'results': sanitized})
     except Exception as e:
         logger.error("Email search error: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Interner Fehler bei der E-Mail-Suche.'}), 500
 
 
 @app.route('/api/email/summary', methods=['GET'])
@@ -4192,7 +4192,7 @@ def email_summary():
         return jsonify({'success': True, **summary})
     except Exception as e:
         logger.error("Email summary error: %s", e)
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Interner Fehler beim Laden der E-Mail-Übersicht.'}), 500
 
 
 # ==================== HomeAssistant Endpoints ====================
