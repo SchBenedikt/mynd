@@ -318,10 +318,11 @@ class KnowledgeBase:
                     formatted_results.append({
                         'content': result['content'],
                         'distance': 1.0 - result.get('similarity_score', 0.5),  # Convert to distance
-                        'source': result.get('doc_name', 'Unknown'),
-                        'path': result.get('doc_path', ''),
+                        'source': result.get('source') or result.get('doc_name') or 'Knowledge Base',
+                        'path': result.get('path') or result.get('doc_path', ''),
                         'similarity_score': result.get('similarity_score', 0.5),
-                        'search_type': result.get('search_type', 'search')
+                        'search_type': result.get('search_type', 'search'),
+                        'chunk_id': result.get('chunk_id') or result.get('id')
                     })
                 
                 logger.info(f"Search: {len(formatted_results)} results for query: {query[:50]}...")
@@ -447,8 +448,10 @@ ENTSCHEIDUNGSLOGIK FÜR TOOL-NUTZUNG:
    → Gib Quellenangaben mit Relevanz-Score an
 
 5. Bei PERSÖNLICHEN FRAGEN ohne gefundene Quellen:
-   → Antworte ehrlich: "Ich habe dazu keine Informationen in meiner Wissensbasis."
-   → Frage nach Kontext falls nötig
+    → Nutze bei öffentlich bekannten Fakten allgemeines Modellwissen
+    → Kennzeichne dies transparent mit "Nach meinem allgemeinen Wissen ..."
+    → Erfinde keine persönlichen oder nutzerspezifischen Details
+    → Frage nach zusätzlichem Kontext, wenn die Frage unklar ist
 
 === PROFESSIONELLE TOOL-AUSWAHL-REGELN ===
 ⚠ KEINE Kalender-Tool Nutzung für: allgemeine Wissens-Fragen, Konzept-Erklärungen, generelle Informationen
@@ -467,7 +470,8 @@ Für jede Anfrage IMMER:
 
 === ANTWORTQUALITÄT & FORMATIERUNG ===
 • Nutze klare Strukturierung (Listen, Absätze, Hervorhebungen)
-• Geb IMMER konkrete Quellenangaben an
+• Gib konkrete Quellenangaben, wenn Quellen im Kontext vorhanden sind
+• Wenn keine passenden Quellen vorhanden sind, antworte transparent mit allgemeinem Wissen
 • Vermeide Wiederholungen und unnötige Füllwörter
 • Bei mehreren Infos: Sortiere nach Relevanz und zeitlicher Nähe
 • Bei zeitbezogenen Fragen: Beachte Aktualität, Fälligkeitsdaten und Zeitpunkte
@@ -536,6 +540,27 @@ Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-
 
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.RequestException as e:
+            return {"error": f"Verbindung zu Ollama fehlgeschlagen: {str(e)}"}
+
+    def generate(self, prompt, stream=False, options=None):
+        """Generiert Text über /api/generate und liefert ein einheitliches Ergebnisformat."""
+        url = f"{self.base_url}/api/generate"
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": bool(stream),
+            "options": options or {}
+        }
+
+        try:
+            response = requests.post(url, json=payload, timeout=90)
+            response.raise_for_status()
+            data = response.json()
+            return {
+                "text": data.get("response", ""),
+                "raw": data
+            }
         except requests.exceptions.RequestException as e:
             return {"error": f"Verbindung zu Ollama fehlgeschlagen: {str(e)}"}
     
@@ -5453,8 +5478,9 @@ WICHTIG:
                 photo_results = photo_context.get('metadata', {}).get('photos', [])
                 logger.info(f"Found {len(photo_results)} photos for context with full metadata")
 
-        # Gather file context if relevant
-        if intent in ['files', 'mixed']:
+        # Gather file context for file/mixed/general queries so indexed chunks are
+        # consistently available for broad knowledge questions.
+        if intent in ['files', 'mixed', 'general']:
             file_context = gather_file_context(knowledge_base, training_manager, prompt)
             if file_context:
                 logger.info(f"Found {file_context[0].get('metadata', {}).get('count', 0)} file results with enhanced context (intent-based)")
@@ -5558,9 +5584,19 @@ WICHTIG:
 
             ai_response = response.get('message', {}).get('content', 'Entschuldigung, ich konnte keine Antwort generieren.')
 
+            source_cards = []
+            if file_context:
+                for context_item in file_context:
+                    cards = context_item.get('metadata', {}).get('source_cards', [])
+                    if cards:
+                        source_cards.extend(cards)
+
+            # No hard source limit: rely on relevance filtering in context gatherers.
+
             return jsonify({
                 'success': True,
                 'response': ai_response,
+                'sources': source_cards,
                 'context_used': len(combined_context) > 0,
                 'context_count': len(combined_context),
                 'intent': intent,
