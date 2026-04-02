@@ -234,7 +234,7 @@ class NextcloudCardDAVClient:
                 'family_name': '',
                 'organization': '',
                 'birthday': '',
-                'email': [],s
+                'email': [],
                 'phone': [],
                 'address': [],
                 'note': '',
