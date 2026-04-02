@@ -3,7 +3,9 @@ Autonomous Agent Framework
 Enables the AI to plan and execute multi-step actions independently
 """
 import logging
-from typing import Dict, List, Optional, Any, Callable
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 
@@ -18,11 +20,7 @@ class ActionType(Enum):
     SEARCH_CALENDAR = "search_calendar"
     SEARCH_TASKS = "search_tasks"
     SEARCH_PHOTOS = "search_photos"
-    GET_FILE_CONTENT = "get_file_content"
-    LIST_DIRECTORY = "list_directory"
     SEARCH_KNOWLEDGE_BASE = "search_knowledge_base"
-    ANALYZE_DOCUMENT = "analyze_document"
-    SYNTHESIZE_INFORMATION = "synthesize_information"
 
 
 @dataclass
@@ -163,7 +161,7 @@ class AutonomousAgent:
 
     def execute_actions(self, actions: List[Action], username: str) -> Dict[str, Any]:
         """
-        Execute planned actions and gather results
+        Execute planned actions in parallel and gather results.
 
         Args:
             actions: List of actions to execute
@@ -179,36 +177,51 @@ class AutonomousAgent:
             'errors': []
         }
 
-        for action in actions:
-            try:
-                logger.info(f"Executing action: {action.description}")
-                result = self._execute_single_action(action, username)
+        # Execute actions in parallel using a thread pool (all calls are I/O-bound)
+        per_action_timeout = 15  # seconds per action
+        # Total wall-clock limit: actions run in parallel, so use a modest multiplier
+        total_timeout = per_action_timeout * 2
 
-                if result.success:
-                    results['actions_executed'].append({
-                        'type': action.action_type.value,
-                        'description': action.description,
-                        'success': True
-                    })
+        def _run(action: Action):
+            return action, self._execute_single_action(action, username)
 
-                    if result.data:
-                        results['gathered_information'].append({
-                            'source': action.action_type.value,
-                            'data': result.data
+        with ThreadPoolExecutor(max_workers=min(len(actions), 8)) as executor:
+            future_to_action = {executor.submit(_run, action): action for action in actions}
+            for future in as_completed(future_to_action, timeout=total_timeout):
+                try:
+                    action, result = future.result(timeout=per_action_timeout)
+                    if result.success:
+                        results['actions_executed'].append({
+                            'type': action.action_type.value,
+                            'description': action.description,
+                            'success': True,
+                            'execution_time': result.execution_time
                         })
-                else:
-                    logger.warning(f"Action failed: {action.description} - {result.error}")
+                        if result.data:
+                            results['gathered_information'].append({
+                                'source': action.action_type.value,
+                                'data': result.data
+                            })
+                    else:
+                        logger.warning(f"Action failed: {action.description} - {result.error}")
+                        results['errors'].append({
+                            'action': action.description,
+                            'error': result.error
+                        })
+                except FuturesTimeoutError:
+                    action = future_to_action[future]
+                    logger.warning(f"Action timed out: {action.description}")
                     results['errors'].append({
                         'action': action.description,
-                        'error': result.error
+                        'error': 'Action timed out'
                     })
-
-            except Exception as e:
-                logger.error(f"Error executing action {action.description}: {e}", exc_info=True)
-                results['errors'].append({
-                    'action': action.description,
-                    'error': str(e)
-                })
+                except Exception as e:
+                    action = future_to_action[future]
+                    logger.error(f"Error executing action {action.description}: {e}", exc_info=True)
+                    results['errors'].append({
+                        'action': action.description,
+                        'error': str(e)
+                    })
 
         results['success'] = len(results['actions_executed']) > 0
         logger.info(f"Executed {len(results['actions_executed'])} actions successfully, "
@@ -218,38 +231,41 @@ class AutonomousAgent:
 
     def _execute_single_action(self, action: Action, username: str) -> ActionResult:
         """Execute a single action and return result"""
-        import time
         start_time = time.time()
 
         try:
             if action.action_type == ActionType.SEARCH_KNOWLEDGE_BASE:
-                return self._search_knowledge_base(action.parameters)
+                result = self._search_knowledge_base(action.parameters)
 
             elif action.action_type == ActionType.SEARCH_FILES:
-                return self._search_files(action.parameters)
+                result = self._search_files(action.parameters)
 
             elif action.action_type == ActionType.SEARCH_CONTACTS:
-                return self._search_contacts(action.parameters)
+                result = self._search_contacts(action.parameters)
 
             elif action.action_type == ActionType.SEARCH_CALENDAR:
-                return self._search_calendar(action.parameters)
+                result = self._search_calendar(action.parameters)
 
             elif action.action_type == ActionType.SEARCH_TASKS:
-                return self._search_tasks(action.parameters)
+                result = self._search_tasks(action.parameters)
 
             elif action.action_type == ActionType.SEARCH_PHOTOS:
-                return self._search_photos(action.parameters, username)
+                result = self._search_photos(action.parameters, username)
 
             elif action.action_type == ActionType.READ_FILE:
-                return self._read_file(action.parameters)
+                result = self._read_file(action.parameters)
 
             else:
                 return ActionResult(
                     action_type=action.action_type,
                     success=False,
                     data=None,
-                    error=f"Unknown action type: {action.action_type}"
+                    error=f"Unknown action type: {action.action_type}",
+                    execution_time=time.time() - start_time
                 )
+
+            result.execution_time = time.time() - start_time
+            return result
 
         except Exception as e:
             logger.error(f"Action execution error: {e}", exc_info=True)
@@ -482,7 +498,7 @@ class AutonomousAgent:
                     error="Nextcloud client not available"
                 )
 
-            content = self.nextcloud.download_file(file_path)
+            content = self.nextcloud.parse_remote_file(file_path)
 
             if content:
                 return ActionResult(

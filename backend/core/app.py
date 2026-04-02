@@ -3302,18 +3302,20 @@ def build_immich_thumbnail_proxy_url(asset_id: str, username: str = None, size: 
 def get_nextcloud_search_client(username: str = None) -> Optional[NextcloudSearchClient]:
     """Get Nextcloud Search API client with credentials"""
     try:
-        auth_manager = get_auth_manager()
-
         if username:
-            credentials = auth_manager.get_credentials(username)
-            if credentials and credentials.get('nextcloud_url'):
+            user_config = load_user_config(username)
+            nextcloud_url = user_config.get('nextcloud_url')
+            nextcloud_username = user_config.get('nextcloud_username')
+            nextcloud_password = user_config.get('nextcloud_password')
+
+            if nextcloud_url and nextcloud_username and nextcloud_password:
                 return NextcloudSearchClient(
-                    url=credentials['nextcloud_url'],
-                    username=credentials['nextcloud_username'],
-                    password=credentials['nextcloud_password']
+                    url=nextcloud_url,
+                    username=nextcloud_username,
+                    password=nextcloud_password
                 )
 
-        # Fallback to default
+        # Fallback to environment variables
         nextcloud_url = os.getenv('NEXTCLOUD_URL')
         nextcloud_username = os.getenv('NEXTCLOUD_USERNAME')
         nextcloud_password = os.getenv('NEXTCLOUD_PASSWORD')
@@ -3332,18 +3334,20 @@ def get_nextcloud_search_client(username: str = None) -> Optional[NextcloudSearc
 def get_nextcloud_client(username: str = None) -> Optional[NextcloudClient]:
     """Get Nextcloud WebDAV client with credentials"""
     try:
-        auth_manager = get_auth_manager()
-
         if username:
-            credentials = auth_manager.get_credentials(username)
-            if credentials and credentials.get('nextcloud_url'):
+            user_config = load_user_config(username)
+            nextcloud_url = user_config.get('nextcloud_url')
+            nextcloud_username = user_config.get('nextcloud_username')
+            nextcloud_password = user_config.get('nextcloud_password')
+
+            if nextcloud_url and nextcloud_username and nextcloud_password:
                 return NextcloudClient(
-                    url=credentials['nextcloud_url'],
-                    username=credentials['nextcloud_username'],
-                    password=credentials['nextcloud_password']
+                    url=nextcloud_url,
+                    username=nextcloud_username,
+                    password=nextcloud_password
                 )
 
-        # Fallback to default
+        # Fallback to environment variables
         nextcloud_url = os.getenv('NEXTCLOUD_URL')
         nextcloud_username = os.getenv('NEXTCLOUD_USERNAME')
         nextcloud_password = os.getenv('NEXTCLOUD_PASSWORD')
@@ -3383,8 +3387,8 @@ def extract_search_terms(prompt: str) -> str:
         if word and word not in stop_words and len(word) > 2:
             meaningful_words.append(word)
 
-    # Return first 3-5 most meaningful words as search query
-    return ' '.join(meaningful_words[:5]) if meaningful_words else prompt
+    # Return first 3-5 most meaningful words as search query; empty string if none found
+    return ' '.join(meaningful_words[:5]) if meaningful_words else ''
 
 
 @app.route('/api/immich/test', methods=['POST'])
@@ -5516,7 +5520,8 @@ WICHTIG:
         # NEW: Autonomous agent for comprehensive research
         # The agent proactively searches multiple sources and gathers detailed information
         autonomous_context = None
-        autonomous_enabled = True  # Can be made configurable
+        _ai_cfg = load_ai_config()
+        autonomous_enabled = _ai_cfg.get('autonomous_agent_enabled', True)
         try:
             if autonomous_enabled:
                 # Get clients for autonomous agent
@@ -5541,13 +5546,31 @@ WICHTIG:
                 })
 
                 if planned_actions:
-                    logger.info(f"Autonomous agent planned {len(planned_actions)} actions")
-                    results = agent.execute_actions(planned_actions, username)
+                    # Skip SEARCH_KNOWLEDGE_BASE action when file_context already provides KB results
+                    if file_context:
+                        original_count = len(planned_actions)
+                        planned_actions = [
+                            a for a in planned_actions
+                            if a.action_type.value != 'search_knowledge_base'
+                        ]
+                        skipped = original_count - len(planned_actions)
+                        if skipped > 0:
+                            logger.info(
+                                "Skipping %d autonomous SEARCH_KNOWLEDGE_BASE action(s) "
+                                "because file_context is already available",
+                                skipped,
+                            )
 
-                    if results.get('success') and results.get('gathered_information'):
-                        autonomous_context = agent.format_autonomous_results_for_context(results)
-                        if autonomous_context:
-                            logger.info("Autonomous research completed successfully")
+                    if not planned_actions:
+                        logger.info("No autonomous actions to execute after filtering")
+                    else:
+                        logger.info(f"Autonomous agent planned {len(planned_actions)} actions")
+                        results = agent.execute_actions(planned_actions, username)
+
+                        if results.get('success') and results.get('gathered_information'):
+                            autonomous_context = agent.format_autonomous_results_for_context(results)
+                            if autonomous_context:
+                                logger.info("Autonomous research completed successfully")
         except Exception as e:
             logger.warning(f"Autonomous agent error: {e}", exc_info=True)
 
