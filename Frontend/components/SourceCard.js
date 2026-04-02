@@ -32,6 +32,8 @@ export default function SourceCard({ source }) {
       case 'photo':
       case 'image':
         return '🖼️';
+      case 'email':
+        return '📧';
       case 'chunk':
         return '🧩';
       case 'file':
@@ -65,6 +67,7 @@ export default function SourceCard({ source }) {
     if (v === 'photo' || v === 'image') return 'Bild';
     if (v === 'calendar') return 'Kalender';
     if (v === 'todo') return 'Aufgabe';
+    if (v === 'email') return 'E-Mail';
     return v;
   };
 

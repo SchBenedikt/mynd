@@ -11,6 +11,9 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# Characters of email body included in autonomous agent result previews
+_EMAIL_AGENT_PREVIEW_LENGTH = 200
+
 
 class ActionType(Enum):
     """Types of actions the autonomous agent can perform"""
@@ -21,6 +24,7 @@ class ActionType(Enum):
     SEARCH_TASKS = "search_tasks"
     SEARCH_PHOTOS = "search_photos"
     SEARCH_KNOWLEDGE_BASE = "search_knowledge_base"
+    SEARCH_EMAILS = "search_emails"
 
 
 @dataclass
@@ -53,7 +57,7 @@ class AutonomousAgent:
     """
 
     def __init__(self, nextcloud_client, search_client, knowledge_base,
-                 immich_client, training_manager):
+                 immich_client, training_manager, email_client=None):
         """
         Initialize autonomous agent with access to various services
 
@@ -63,12 +67,14 @@ class AutonomousAgent:
             knowledge_base: KnowledgeBase instance for indexed content
             immich_client: ImmichClient instance for photos
             training_manager: TrainingManager instance
+            email_client: EmailClient instance (optional)
         """
         self.nextcloud = nextcloud_client
         self.search = search_client
         self.knowledge = knowledge_base
         self.immich = immich_client
         self.training = training_manager
+        self.email = email_client
         self.action_results = []
 
     def analyze_query_and_plan_actions(self, query: str, context: Dict) -> List[Action]:
@@ -162,6 +168,17 @@ class AutonomousAgent:
                 description="Search photos",
                 parameters={'query': query, 'limit': 6},
                 priority=8
+            ))
+
+        # 7. Search emails if query mentions email
+        email_indicators = ['email', 'e-mail', 'mail', 'mails', 'emails', 'nachricht',
+                            'posteingang', 'inbox', 'absender', 'betreff', 'message', 'messages']
+        if any(ind in query_lower for ind in email_indicators) and self.email:
+            actions.append(Action(
+                action_type=ActionType.SEARCH_EMAILS,
+                description="Search emails",
+                parameters={'query': query, 'limit': 8},
+                priority=7
             ))
 
         # Sort by priority (higher first)
@@ -262,6 +279,9 @@ class AutonomousAgent:
 
             elif action.action_type == ActionType.SEARCH_PHOTOS:
                 result = self._search_photos(action.parameters, username)
+
+            elif action.action_type == ActionType.SEARCH_EMAILS:
+                result = self._search_emails(action.parameters)
 
             elif action.action_type == ActionType.READ_FILE:
                 result = self._read_file(action.parameters)
@@ -496,6 +516,46 @@ class AutonomousAgent:
                 error=str(e)
             )
 
+    def _search_emails(self, params: Dict) -> ActionResult:
+        """Search emails using the configured email client."""
+        try:
+            query = params.get('query', '')
+            limit = params.get('limit', 8)
+
+            if not self.email:
+                return ActionResult(
+                    action_type=ActionType.SEARCH_EMAILS,
+                    success=False,
+                    data=None,
+                    error="Email client not available"
+                )
+
+            results = self.email.search_emails(query, limit=limit)
+            summaries = []
+            for mail in results:
+                body = mail.get('body', '')
+                summaries.append({
+                    'subject': mail.get('subject', ''),
+                    'sender': mail.get('sender', ''),
+                    'date': mail.get('date', ''),
+                    'folder': mail.get('folder', ''),
+                    'body_preview': (body[:_EMAIL_AGENT_PREVIEW_LENGTH] + '...') if len(body) > _EMAIL_AGENT_PREVIEW_LENGTH else body
+                })
+
+            return ActionResult(
+                action_type=ActionType.SEARCH_EMAILS,
+                success=True,
+                data={'count': len(summaries), 'emails': summaries}
+            )
+
+        except Exception as e:
+            return ActionResult(
+                action_type=ActionType.SEARCH_EMAILS,
+                success=False,
+                data=None,
+                error=str(e)
+            )
+
     def _read_file(self, params: Dict) -> ActionResult:
         """Read a specific file from Nextcloud"""
         try:
@@ -587,7 +647,8 @@ class AutonomousAgent:
                 'search_contacts': '👤 Contact Search',
                 'search_calendar': '📅 Calendar Search',
                 'search_tasks': '✅ Task Search',
-                'search_photos': '📸 Photo Search'
+                'search_photos': '📸 Photo Search',
+                'search_emails': '📧 Email Search'
             }
 
             lines.append(f"**{source_names.get(source, source)}**:")
@@ -623,6 +684,18 @@ class AutonomousAgent:
                 elif source == 'search_photos':
                     count = data.get('count', 0)
                     lines.append(f"Found {count} photos")
+
+                elif source == 'search_emails':
+                    count = data.get('count', 0)
+                    lines.append(f"Found {count} emails:")
+                    for mail in data.get('emails', [])[:5]:
+                        subject = mail.get('subject', '(no subject)')
+                        sender = mail.get('sender', '')
+                        date = mail.get('date', '')
+                        lines.append(f"- {subject}" + (f" (von {sender})" if sender else '') + (f" [{date}]" if date else ''))
+                        preview = mail.get('body_preview', '')
+                        if preview:
+                            lines.append(f"  {preview[:150]}")
 
             lines.append("")
 
