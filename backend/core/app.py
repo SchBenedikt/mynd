@@ -1864,6 +1864,89 @@ def get_calendar_context(message: str) -> str:
     
     return context_text
 
+
+def _parse_iso_anchor_date(value: Optional[str]) -> date:
+    """Parse YYYY-MM-DD and fallback to today."""
+    if not value:
+        return date.today()
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except Exception:
+        return date.today()
+
+
+def _infer_calendar_card_config(prompt: str) -> Dict:
+    """Infer default calendar card state from prompt."""
+    message = (prompt or '').lower()
+    view = 'day'
+    if 'woche' in message or 'week' in message:
+        view = 'week'
+    elif 'monat' in message or 'month' in message:
+        view = 'month'
+    elif 'liste' in message or 'list' in message:
+        view = 'list'
+
+    anchor = date.today()
+    if 'morgen' in message or 'tomorrow' in message:
+        anchor = anchor + timedelta(days=1)
+    elif 'gestern' in message or 'yesterday' in message:
+        anchor = anchor - timedelta(days=1)
+    else:
+        rel_start, _, _ = parse_relative_date(prompt)
+        if rel_start:
+            anchor = rel_start.date()
+
+    return {
+        'view': view,
+        'date': anchor.strftime('%Y-%m-%d')
+    }
+
+
+def _infer_task_card_config(prompt: str) -> Dict:
+    """Infer default task card state from prompt."""
+    message = (prompt or '').lower()
+    scope = 'all'
+    if 'überfällig' in message or 'overdue' in message:
+        scope = 'overdue'
+    elif 'heute' in message or 'today' in message:
+        scope = 'today'
+
+    anchor = date.today()
+    if 'morgen' in message or 'tomorrow' in message:
+        anchor = anchor + timedelta(days=1)
+    elif 'gestern' in message or 'yesterday' in message:
+        anchor = anchor - timedelta(days=1)
+
+    return {
+        'scope': scope,
+        'date': anchor.strftime('%Y-%m-%d')
+    }
+
+
+def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict]) -> List[Dict]:
+    """Return structured ui_cards metadata for frontend interactive cards."""
+    cards: List[Dict] = []
+
+    if calendar_ctx and (intent in ['calendar', 'mixed'] or should_use_calendar(prompt)):
+        cfg = _infer_calendar_card_config(prompt)
+        cards.append({
+            'type': 'calendar',
+            'title': 'Calendar',
+            'default_view': cfg['view'],
+            'anchor_date': cfg['date']
+        })
+
+    if todo_ctx and (intent in ['tasks', 'mixed'] or should_use_tasks(prompt) or is_todo_query(prompt)):
+        cfg = _infer_task_card_config(prompt)
+        cards.append({
+            'type': 'tasks',
+            'title': 'Tasks',
+            'default_scope': cfg['scope'],
+            'anchor_date': cfg['date']
+        })
+
+    return cards
+
 # Try to migrate existing data on startup
 def try_migrate_existing_data():
     """Try to migrate existing JSON cache to database"""
@@ -3035,6 +3118,193 @@ def calendar_day(day_name):
         })
     except Exception as e:
         logger.error(f"Calendar day error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/calendar/ui', methods=['GET'])
+def calendar_ui():
+    """Structured calendar data for interactive frontend cards."""
+    try:
+        if not calendar_enabled:
+            return jsonify({'error': 'Kalender nicht verfügbar'}), 400
+
+        if not simple_calendar_manager:
+            refresh_simple_calendar_manager()
+
+        if not simple_calendar_manager:
+            return jsonify({'error': 'Kalender nicht initialisiert'}), 400
+
+        view = (request.args.get('view') or 'day').strip().lower()
+        anchor_date = _parse_iso_anchor_date(request.args.get('date'))
+
+        if view == 'week':
+            start_date = anchor_date - timedelta(days=anchor_date.weekday())
+            end_date = start_date + timedelta(days=6)
+            period_label = f"Week of {start_date.strftime('%d.%m.%Y')}"
+        elif view == 'month':
+            start_date = date(anchor_date.year, anchor_date.month, 1)
+            if anchor_date.month == 12:
+                next_month = date(anchor_date.year + 1, 1, 1)
+            else:
+                next_month = date(anchor_date.year, anchor_date.month + 1, 1)
+            end_date = next_month - timedelta(days=1)
+            period_label = start_date.strftime('%B %Y')
+        elif view == 'list':
+            start_date = anchor_date
+            end_date = anchor_date + timedelta(days=13)
+            period_label = f"Next 14 days from {anchor_date.strftime('%d.%m.%Y')}"
+        else:
+            view = 'day'
+            start_date = anchor_date
+            end_date = anchor_date
+            period_label = anchor_date.strftime('%A, %d.%m.%Y')
+
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        end_dt = datetime.combine(end_date, datetime.max.time())
+
+        events: List[Dict] = []
+        calendars = simple_calendar_manager.get_calendars()
+        for cal in calendars:
+            cal_events = simple_calendar_manager.get_events(cal.get('url', ''), start_dt, end_dt)
+            for event in cal_events:
+                event['calendar'] = cal.get('name', 'Unknown')
+                events.append(event)
+
+        events.sort(key=lambda item: item.get('start', ''))
+
+        return jsonify({
+            'success': True,
+            'view': view,
+            'anchor_date': anchor_date.strftime('%Y-%m-%d'),
+            'start_date': start_date.strftime('%Y-%m-%d'),
+            'end_date': end_date.strftime('%Y-%m-%d'),
+            'period_label': period_label,
+            'events': events,
+            'count': len(events)
+        })
+    except Exception as e:
+        logger.error(f"Calendar UI error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/calendar/update', methods=['POST'])
+def update_calendar_event():
+    """Update an existing calendar event by Nextcloud path."""
+    try:
+        if not calendar_enabled:
+            return jsonify({'error': 'Kalender nicht verfügbar'}), 400
+
+        if not simple_calendar_manager:
+            refresh_simple_calendar_manager()
+
+        if not simple_calendar_manager:
+            return jsonify({'error': 'Kalender nicht initialisiert'}), 400
+
+        data = request.json or {}
+        nextcloud_path = (data.get('nextcloud_path') or '').strip()
+        title = (data.get('title') or '').strip()
+        start_time = (data.get('start_time') or '').strip()
+        end_time = (data.get('end_time') or '').strip()
+        location = data.get('location')
+        description = data.get('description')
+
+        if not nextcloud_path or not title or not start_time:
+            return jsonify({'error': 'nextcloud_path, title and start_time are required'}), 400
+
+        success = simple_calendar_manager.update_event(
+            nextcloud_path=nextcloud_path,
+            title=title,
+            start_time=start_time,
+            end_time=end_time or None,
+            location=location,
+            description=description
+        )
+
+        if not success:
+            return jsonify({'error': 'Event could not be updated'}), 500
+
+        return jsonify({'success': True, 'message': 'Event updated successfully'})
+    except Exception as e:
+        logger.error(f"Calendar update error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+def _filter_tasks_for_scope(tasks: List[Dict], scope: str, anchor: date) -> List[Dict]:
+    """Filter tasks by due-date scope for card rendering."""
+    scope_lower = (scope or 'all').lower()
+    filtered = []
+
+    for task in tasks:
+        due = _parse_task_due_date(task.get('due_date'))
+        if scope_lower == 'today':
+            if due == anchor:
+                filtered.append(task)
+        elif scope_lower == 'overdue':
+            if due and due < anchor:
+                filtered.append(task)
+        else:
+            filtered.append(task)
+
+    def task_sort_key(task: Dict):
+        due = _parse_task_due_date(task.get('due_date'))
+        if due is None:
+            return (1, date.max, task.get('title', ''))
+        return (0, due, task.get('title', ''))
+
+    return sorted(filtered, key=task_sort_key)
+
+
+@app.route('/api/tasks/ui', methods=['GET'])
+def tasks_ui():
+    """Structured task data for interactive frontend cards."""
+    try:
+        if not tasks_enabled or not task_manager.tasks_client:
+            return jsonify({'error': 'Tasks nicht verfügbar'}), 400
+
+        scope = (request.args.get('scope') or 'all').strip().lower()
+        anchor_date = _parse_iso_anchor_date(request.args.get('date'))
+
+        tasks = task_manager.get_tasks(use_cache=True, list_name=None)
+        open_tasks = [task for task in tasks if not task.get('completed', False)]
+        filtered_tasks = _filter_tasks_for_scope(open_tasks, scope, anchor_date)
+
+        return jsonify({
+            'success': True,
+            'scope': scope,
+            'anchor_date': anchor_date.strftime('%Y-%m-%d'),
+            'tasks': filtered_tasks,
+            'count': len(filtered_tasks)
+        })
+    except Exception as e:
+        logger.error(f"Tasks UI error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tasks/update/<task_uid>', methods=['POST'])
+def update_task(task_uid):
+    """Update an existing task by UID."""
+    try:
+        if not tasks_enabled or not task_manager.tasks_client:
+            return jsonify({'error': 'Tasks nicht verfügbar'}), 400
+
+        data = request.json or {}
+        list_name = data.get('list_name') or 'tasks'
+
+        success = task_manager.update_task(
+            task_uid=task_uid,
+            list_name=list_name,
+            title=data.get('title'),
+            description=data.get('description'),
+            due_date=data.get('due_date'),
+            priority=data.get('priority')
+        )
+
+        if not success:
+            return jsonify({'error': 'Task could not be updated'}), 500
+
+        return jsonify({'success': True, 'message': 'Task updated successfully'})
+    except Exception as e:
+        logger.error(f"Task update error: {e}")
         return jsonify({'error': str(e)}), 500
 
 # Task/Todo API Endpunkte
@@ -5141,6 +5411,121 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
     else:
         return 'general'
 
+
+def _build_integration_connect_response(provider: str, prompt: str, language: str = 'de', feature: str = '') -> Dict[str, Any]:
+    """Builds a unified interactive setup response for missing integrations."""
+    is_german = str(language or '').lower().startswith('de')
+    requested_feature = feature or provider
+
+    if provider == 'nextcloud':
+        response_text = (
+            "Ich kann diese Anfrage erst ausführen, wenn Nextcloud verbunden ist. "
+            "Du kannst dich jetzt direkt hier verbinden."
+            if is_german else
+            "I can run this request once Nextcloud is connected. You can connect it directly here now."
+        )
+        title = 'Nextcloud verbinden' if is_german else 'Connect Nextcloud'
+        description = (
+            'Verbinde zuerst Nextcloud per Login-Flow oder hinterlege URL + Benutzername + App-Passwort.'
+            if is_german else
+            'Connect Nextcloud via login flow or provide URL, username, and app password.'
+        )
+        fields = [
+            {
+                'name': 'nextcloud_url',
+                'label': 'Nextcloud URL',
+                'type': 'url',
+                'required': True,
+                'placeholder': 'https://cloud.example.com'
+            },
+            {
+                'name': 'username',
+                'label': 'Username',
+                'type': 'text',
+                'required': True,
+                'placeholder': 'your.username'
+            },
+            {
+                'name': 'password',
+                'label': 'App Password',
+                'type': 'password',
+                'required': True,
+                'placeholder': '••••••••'
+            }
+        ]
+        quick_actions = [
+            {
+                'type': 'nextcloud_login_flow',
+                'label': 'Login with Nextcloud' if not is_german else 'Mit Nextcloud einloggen'
+            }
+        ]
+        submit_endpoint = '/api/nextcloud/login'
+    elif provider == 'immich':
+        response_text = (
+            'Ich brauche eine konfigurierte Immich-Verbindung, um danach suchen zu können.'
+            if is_german else
+            'I need an active Immich connection before I can search photos.'
+        )
+        title = 'Immich konfigurieren' if is_german else 'Configure Immich'
+        description = (
+            'Trage Immich URL und API Key ein. Die Werte werden als Standard-Konfiguration gespeichert.'
+            if is_german else
+            'Enter Immich URL and API key. Values will be saved as default configuration.'
+        )
+        fields = [
+            {
+                'name': 'immich_url_default',
+                'label': 'Immich URL',
+                'type': 'url',
+                'required': True,
+                'placeholder': 'https://immich.example.com'
+            },
+            {
+                'name': 'immich_api_key_default',
+                'label': 'API Key',
+                'type': 'password',
+                'required': True,
+                'placeholder': '••••••••'
+            }
+        ]
+        quick_actions = []
+        submit_endpoint = '/api/ui/system-config'
+    else:
+        response_text = (
+            'Für diese Funktion fehlt noch eine API-Verbindung.'
+            if is_german else
+            'This feature needs an API connection before it can be used.'
+        )
+        title = 'API konfigurieren' if is_german else 'Configure API'
+        description = (
+            'Bitte hinterlege die notwendigen Zugangsdaten.'
+            if is_german else
+            'Please enter the required credentials.'
+        )
+        fields = []
+        quick_actions = []
+        submit_endpoint = ''
+
+    return {
+        'success': True,
+        'response': response_text,
+        'action': 'integration_connect_required',
+        'requires_input': True,
+        'integration_setup': {
+            'provider': provider,
+            'feature': requested_feature,
+            'title': title,
+            'description': description,
+            'fields': fields,
+            'quick_actions': quick_actions,
+            'submit_endpoint': submit_endpoint,
+            'prefill': {},
+            'original_prompt': prompt
+        },
+        'sources': [],
+        'ui_cards': []
+    }
+
 @app.route('/api/agent/query', methods=['POST'])
 def agent_query():
     """
@@ -5189,9 +5574,13 @@ def agent_query():
         has_time_indicators = any(indicator in message_lower for indicator in time_related_indicators)
         has_question = any(word in message_lower.split()[:3] for word in question_words)
         is_potentially_calendar_query = has_time_indicators and has_question
+        intent = detect_query_intent(prompt, preferred_source)
 
         # Interactive event creation: Let AI handle missing information naturally
         if is_calendar_create_query(prompt):
+            if not get_nextcloud_runtime_config():
+                return jsonify(_build_integration_connect_response('nextcloud', prompt, language, feature='calendar_create'))
+
             event_info = extract_event_info_from_message(prompt)
 
             if event_info.get('missing_info'):
@@ -5336,6 +5725,9 @@ WICHTIG:
 
         # Interactive task/reminder creation: Let AI handle missing information naturally
         if is_task_create_query(prompt):
+            if not get_nextcloud_runtime_config():
+                return jsonify(_build_integration_connect_response('nextcloud', prompt, language, feature='task_create'))
+
             task_info = extract_task_info_from_message(prompt)
 
             if task_info.get('missing_info'):
@@ -5463,8 +5855,21 @@ WICHTIG:
                 'created_task': create_result if create_result.get('success') else None
             })
 
-        # Detect query intent
-        intent = detect_query_intent(prompt, preferred_source)
+        # Detect missing integrations early and return interactive setup payloads.
+        requires_nextcloud = any([
+            intent in ['calendar', 'tasks'],
+            should_use_calendar(prompt),
+            should_use_tasks(prompt),
+            is_activity_question,
+            is_potentially_calendar_query,
+            'nextcloud' in message_lower
+        ])
+        if requires_nextcloud and not get_nextcloud_runtime_config():
+            return jsonify(_build_integration_connect_response('nextcloud', prompt, language, feature='nextcloud_context'))
+
+        if intent == 'photos' and not get_immich_client(username):
+            return jsonify(_build_integration_connect_response('immich', prompt, language, feature='photo_search'))
+
         logger.info(f"Query intent: {intent}, preferred_source: {preferred_source}")
 
         # Collect context from different sources based on intent
@@ -5614,12 +6019,15 @@ WICHTIG:
                     if cards:
                         source_cards.extend(cards)
 
+            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context)
+
             # No hard source limit: rely on relevance filtering in context gatherers.
 
             return jsonify({
                 'success': True,
                 'response': ai_response,
                 'sources': source_cards,
+                'ui_cards': ui_cards,
                 'context_used': len(combined_context) > 0,
                 'context_count': len(combined_context),
                 'intent': intent,

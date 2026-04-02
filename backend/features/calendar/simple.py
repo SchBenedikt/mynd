@@ -12,7 +12,10 @@ import logging
 import os
 import sys
 import json
+import re
 from urllib.parse import quote
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from dotenv import load_dotenv
 
 # Add parent directory to path for imports
@@ -37,23 +40,52 @@ class SimpleNextcloudCalendar:
         """
         self.nextcloud_url = nextcloud_url.rstrip('/')
         self.username = username
-        self.session = requests.Session()
 
         # Set up authentication
         if auth_provider:
             self.auth_provider = auth_provider
-            self.session.auth = auth_provider.get_auth()
         elif username and password:
             # Backward compatibility: create basic auth provider
             auth_manager = get_auth_manager()
             self.auth_provider = auth_manager.create_basic_auth(username, password)
-            self.session.auth = self.auth_provider.get_auth()
         else:
             raise ValueError("Either auth_provider or username/password must be provided")
+
+        self.session = self._build_session()
 
         # Get username from auth provider if not provided
         if not self.username:
             self.username = self.auth_provider.config.get('username', 'unknown')
+
+    def _build_session(self) -> requests.Session:
+        """Create a resilient session for DAV calls with retries and explicit UA."""
+        session = requests.Session()
+        session.auth = self.auth_provider.get_auth()
+        session.headers.update({
+            'User-Agent': 'MYND-Calendar-Client/1.0'
+        })
+
+        retry = Retry(
+            total=2,
+            connect=2,
+            read=2,
+            backoff_factor=0.4,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=None,
+            raise_on_status=False
+        )
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+        session.mount('https://', adapter)
+        session.mount('http://', adapter)
+        return session
+
+    def _reset_session(self) -> None:
+        """Reset session to recover from stale keep-alive sockets."""
+        try:
+            self.session.close()
+        except Exception:
+            pass
+        self.session = self._build_session()
 
     def _to_utc(self, dt: datetime) -> datetime:
         """Konvertiert datetime robust nach UTC für CalDAV time-range Queries."""
@@ -189,12 +221,16 @@ class SimpleNextcloudCalendar:
                 'cal': 'urn:ietf:params:xml:ns:caldav'
             }
             
-            # Finde alle calendar-data Elemente
-            for cal_data_elem in root.findall('.//cal:calendar-data', namespaces):
-                if cal_data_elem.text:
+            # Finde pro Response die zugehörigen iCal-Daten inkl. href-Pfad.
+            for response_elem in root.findall('.//d:response', namespaces):
+                href_elem = response_elem.find('.//d:href', namespaces)
+                nextcloud_path = href_elem.text if href_elem is not None else None
+
+                for cal_data_elem in response_elem.findall('.//cal:calendar-data', namespaces):
+                    if not cal_data_elem.text:
+                        continue
                     ical_text = cal_data_elem.text.strip()
-                    # Parse das iCal-Daten
-                    parsed_events = self._parse_ical_text(ical_text)
+                    parsed_events = self._parse_ical_text(ical_text, nextcloud_path=nextcloud_path)
                     events.extend(parsed_events)
             
             logger.info(f"Parsed {len(events)} events from CalDAV response")
@@ -204,7 +240,7 @@ class SimpleNextcloudCalendar:
             logger.error(f"Error parsing CalDAV events: {e}")
             return []
     
-    def _parse_ical_text(self, ical_text: str) -> List[Dict]:
+    def _parse_ical_text(self, ical_text: str, nextcloud_path: Optional[str] = None) -> List[Dict]:
         """Parst reines iCal-Format in Ereignisse"""
         events = []
         # RFC5545 line unfolding: Zeilen mit führendem Leerzeichen gehören zur vorherigen Zeile.
@@ -227,12 +263,14 @@ class SimpleNextcloudCalendar:
                 if current_event:
                     # Formatiere das Ereignis
                     formatted_event = {
+                        'uid': current_event.get('UID', ''),
                         'summary': current_event.get('SUMMARY', 'Kein Titel'),
                         'start': self._format_ical_datetime(current_event.get('DTSTART')),
                         'end': self._format_ical_datetime(current_event.get('DTEND')),
                         'location': current_event.get('LOCATION', '').replace('\\', '').replace('\n', ', '),
                         'description': current_event.get('DESCRIPTION', '').replace('\\', '').replace('\n', ' '),
                         'all_day': self._is_all_day_ical(current_event.get('DTSTART'), current_event.get('DTEND')),
+                        'nextcloud_path': nextcloud_path,
                         # Rohdaten für Debugging
                         'raw_start': current_event.get('DTSTART'),
                         'raw_end': current_event.get('DTEND')
@@ -307,6 +345,128 @@ class SimpleNextcloudCalendar:
             
             return False
         except:
+            return False
+
+    def _to_ical_datetime_from_display(self, value: str) -> str:
+        """Konvertiert Anzeige-/Input-Formate in iCal UTC Datetime (YYYYMMDDTHHMMSSZ)."""
+        if not value:
+            raise ValueError("Empty datetime value")
+
+        normalized = str(value).strip()
+        for fmt in ('%d.%m.%Y %H:%M', '%Y-%m-%dT%H:%M', '%Y-%m-%d %H:%M'):
+            try:
+                parsed = datetime.strptime(normalized, fmt)
+                return parsed.strftime('%Y%m%dT%H%M%SZ')
+            except ValueError:
+                continue
+
+        raise ValueError(f"Unsupported datetime format: {value}")
+
+    def _set_or_append_ical_property(self, ics_content: str, prop: str, value: str) -> str:
+        """Setzt oder ergänzt ein Property innerhalb des ersten VEVENT-Blocks."""
+        if not value:
+            return ics_content
+
+        event_match = re.search(r'BEGIN:VEVENT[\s\S]*?END:VEVENT', ics_content)
+        if not event_match:
+            return ics_content
+
+        block = event_match.group(0)
+        prop_pattern = rf'^{re.escape(prop)}[^\r\n]*$'
+
+        if re.search(prop_pattern, block, flags=re.MULTILINE):
+            updated_block = re.sub(prop_pattern, f'{prop}:{value}', block, count=1, flags=re.MULTILINE)
+        else:
+            updated_block = block.replace('END:VEVENT', f'{prop}:{value}\nEND:VEVENT', 1)
+
+        return ics_content.replace(block, updated_block, 1)
+
+    def update_event(self, nextcloud_path: str, title: str, start_time: str,
+                     end_time: Optional[str] = None, location: Optional[str] = None,
+                     description: Optional[str] = None) -> bool:
+        """Aktualisiert ein bestehendes VEVENT per GET+PUT am angegebenen Nextcloud-Pfad."""
+        try:
+            if not nextcloud_path:
+                return False
+
+            event_url = nextcloud_path if nextcloud_path.startswith('http') else f"{self.nextcloud_url}{nextcloud_path}"
+            get_response = self.session.get(event_url, timeout=10)
+            if get_response.status_code != 200:
+                logger.error(f"Could not fetch event for update: {get_response.status_code}")
+                return False
+
+            ics_content = get_response.text
+            start_ical = self._to_ical_datetime_from_display(start_time)
+            end_ical = self._to_ical_datetime_from_display(end_time) if end_time else start_ical
+
+            updated = ics_content
+            updated = self._set_or_append_ical_property(updated, 'SUMMARY', title.strip())
+            updated = self._set_or_append_ical_property(updated, 'DTSTART', start_ical)
+            updated = self._set_or_append_ical_property(updated, 'DTEND', end_ical)
+
+            if location is not None:
+                updated = self._set_or_append_ical_property(updated, 'LOCATION', location.strip())
+            if description is not None:
+                sanitized_description = description.replace('\n', '\\n').strip()
+                updated = self._set_or_append_ical_property(updated, 'DESCRIPTION', sanitized_description)
+
+            etag = get_response.headers.get('ETag')
+
+            headers = {
+                'Content-Type': 'text/calendar; charset=utf-8'
+            }
+            if etag:
+                headers['If-Match'] = etag
+
+            payload = updated.encode('utf-8')
+
+            # Send UTF-8 bytes like the working create flow.
+            def _send_update(req_headers: Dict[str, str]) -> requests.Response:
+                return self.session.put(
+                    event_url,
+                    data=payload,
+                    headers=req_headers,
+                    timeout=15
+                )
+
+            try:
+                put_response = _send_update(headers)
+            except requests.RequestException as req_err:
+                logger.warning(f"Calendar update PUT failed once, retrying with new session: {req_err}")
+                self._reset_session()
+                retry_after_reset_headers = dict(headers)
+                retry_after_reset_headers['Connection'] = 'close'
+                put_response = _send_update(retry_after_reset_headers)
+
+            if put_response.status_code in [200, 201, 204]:
+                return True
+
+            # Some servers reject charset in Content-Type for updates.
+            if put_response.status_code == 415:
+                retry_headers = {
+                    'Content-Type': 'text/calendar'
+                }
+                if etag:
+                    retry_headers['If-Match'] = etag
+
+                try:
+                    put_response = _send_update(retry_headers)
+                except requests.RequestException as req_err:
+                    logger.warning(f"Calendar update 415-retry failed once, retrying with new session: {req_err}")
+                    self._reset_session()
+                    retry_headers['Connection'] = 'close'
+                    put_response = _send_update(retry_headers)
+
+                if put_response.status_code in [200, 201, 204]:
+                    return True
+
+            logger.error(
+                f"Event update failed: {put_response.status_code} - {put_response.text[:300]} | "
+                f"URL: {event_url}"
+            )
+            return False
+        except Exception as e:
+            logger.error(f"Error updating calendar event: {e}")
             return False
     
     def get_today_info(self) -> Dict:
