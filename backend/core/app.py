@@ -31,6 +31,7 @@ from backend.features.integration.auth_nextcloud_direct import DirectNextcloudPr
 from backend.features.integration.api_registry import get_api_registry
 from backend.features.integration.homeassistant_client import HomeAssistantClient
 from backend.features.integration.uptimekuma_client import UptimeKumaClient
+from backend.features.integration.email_client import EmailClient
 from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
 # from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
@@ -49,7 +50,8 @@ from backend.features.tasks.manager import task_manager, set_database
 from backend.core.context.gatherers import (
     gather_photo_context, gather_file_context, gather_weather_context,
     gather_security_context, gather_activity_context, gather_calendar_context,
-    gather_todo_context, gather_nextcloud_search_context, combine_contexts,
+    gather_todo_context, gather_nextcloud_search_context, gather_email_context,
+    combine_contexts,
     build_system_message as build_agent_system_message
 )
 from backend.core.autonomous.agent import AutonomousAgent
@@ -4125,6 +4127,74 @@ def test_api_connection(api_name):
             'error': str(e)
         }), 500
 
+# ==================== Email Endpoints ====================
+
+@app.route('/api/email/test', methods=['POST'])
+def email_test_connection():
+    """Test the IMAP email connection."""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        client = get_email_client(username)
+        if not client:
+            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert. Bitte IMAP-Einstellungen setzen.'}), 400
+        success = client.test_connection()
+        return jsonify({
+            'success': success,
+            'message': 'Verbindung erfolgreich' if success else 'Verbindung fehlgeschlagen',
+        })
+    except Exception as e:
+        logger.error("Email test error: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/email/search', methods=['POST'])
+def email_search():
+    """Search emails by keyword query."""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        query = data.get('query', '')
+        limit = int(data.get('limit', 10))
+
+        client = get_email_client(username)
+        if not client:
+            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
+
+        results = client.search_emails(query, limit=limit)
+        sanitized = []
+        for mail in results:
+            sanitized.append({
+                'subject': mail.get('subject', ''),
+                'sender': mail.get('sender', ''),
+                'date': mail.get('date', ''),
+                'folder': mail.get('folder', ''),
+                'body_preview': (mail.get('body', '')[:300] + '...') if len(mail.get('body', '')) > 300 else mail.get('body', '')
+            })
+        return jsonify({'success': True, 'count': len(sanitized), 'results': sanitized})
+    except Exception as e:
+        logger.error("Email search error: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/email/summary', methods=['GET'])
+def email_summary():
+    """Return a summary of recent emails."""
+    try:
+        username = request.args.get('username')
+        limit = int(request.args.get('limit', 20))
+
+        client = get_email_client(username)
+        if not client:
+            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
+
+        summary = client.get_email_summary(max_emails=limit)
+        return jsonify({'success': True, **summary})
+    except Exception as e:
+        logger.error("Email summary error: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ==================== HomeAssistant Endpoints ====================
 
 @app.route('/api/homeassistant/states', methods=['GET'])
@@ -5393,11 +5463,35 @@ def tools_test_execution(tool_name: str):
 
 # ==================== Agent Query Endpoint (Unified Chat Interface) ====================
 
+_EMAIL_KEYWORDS = [
+    'email', 'e-mail', 'e mail', 'mail', 'mails', 'emails', 'nachricht',
+    'posteingang', 'inbox', 'absender', 'betreff', 'gesendet', 'sent',
+    'newsletter', 'message', 'messages', 'inboxnachrichten'
+]
+
+
+def is_email_query(prompt: str) -> bool:
+    """Return True if the prompt is likely asking about emails."""
+    prompt_lower = prompt.lower()
+    return any(kw in prompt_lower for kw in _EMAIL_KEYWORDS)
+
+
+def get_email_client(username: str = None) -> Optional['EmailClient']:
+    """Return a configured EmailClient for *username*, or None if not configured."""
+    try:
+        registry = get_api_registry()
+        client = registry.create_api_instance('email', username=username)
+        return client
+    except Exception as e:
+        logger.debug("Email client not available: %s", e)
+        return None
+
+
 def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
     """
     Erkennt die Intention der Anfrage
 
-    Returns: 'photos', 'files', 'calendar', 'tasks', 'mixed', 'general'
+    Returns: 'photos', 'files', 'calendar', 'tasks', 'email', 'mixed', 'general'
     """
     prompt_lower = prompt.lower()
 
@@ -5406,6 +5500,8 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
         return 'photos'
     elif preferred_source == 'files':
         return 'files'
+    elif preferred_source == 'email':
+        return 'email'
 
     # Erkenne Foto-Anfragen
     photo_keywords = ['foto', 'fotos', 'bild', 'bilder', 'image', 'images', 'photo', 'photos',
@@ -5431,9 +5527,15 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
                     'erledigen', 'machen', 'erinnerung', 'erinnerungen', 'reminder', 'reminders']
     has_task = any(keyword in prompt_lower for keyword in task_keywords)
 
-    # Bestimme primäre Intention
-    active_intents = sum([has_photo, has_file, has_time, has_task])
+    # Erkenne E-Mail-Anfragen
+    has_email = is_email_query(prompt)
 
+    # Bestimme primäre Intention
+    active_intents = sum([has_photo, has_file, has_time, has_task, has_email])
+
+    # E-Mail-Anfragen haben Vorrang wenn eindeutig
+    if has_email and not has_photo and not has_file and not has_task:
+        return 'email'
     # Fotoanfragen mit Zeitbezug (z. B. "Foto von heute") sollen als
     # Foto-Intent laufen und nicht in den gemischten Pfad fallen.
     if has_photo and not has_file and not has_task:
@@ -5946,6 +6048,18 @@ WICHTIG:
             get_todo_data, is_todo_query, should_use_tasks, prompt, intent
         )
 
+        # Gather email context if query is email-related
+        email_context = None
+        try:
+            if intent in ['email', 'mixed'] or is_email_query(prompt):
+                email_client_instance = get_email_client(username)
+                if email_client_instance:
+                    email_context = gather_email_context(email_client_instance, prompt, limit=10)
+                    if email_context:
+                        logger.info("Email context added (%d emails)", email_context.get('metadata', {}).get('count', 0))
+        except Exception as e:
+            logger.warning("Email context error: %s", e)
+
         # NEW: Proactively gather Nextcloud search context
         # This searches across all Nextcloud providers (files, contacts, calendar, tasks)
         nextcloud_search_context = None
@@ -5971,6 +6085,7 @@ WICHTIG:
                 nextcloud_client = get_nextcloud_client(username)
                 search_client = get_nextcloud_search_client(username)
                 immich_client = get_immich_client(username)
+                autonomous_email_client = get_email_client(username)
 
                 # Create autonomous agent
                 agent = AutonomousAgent(
@@ -5978,7 +6093,8 @@ WICHTIG:
                     search_client=search_client,
                     knowledge_base=knowledge_base,
                     immich_client=immich_client,
-                    training_manager=training_manager
+                    training_manager=training_manager,
+                    email_client=autonomous_email_client
                 )
 
                 # Plan and execute autonomous actions
@@ -6020,7 +6136,8 @@ WICHTIG:
         # Combine all contexts in priority order using gatherers helper
         combined_context = combine_contexts(
             weather_context, security_context, activity_context,
-            photo_context, file_context, calendar_context, todo_context, nextcloud_search_context
+            photo_context, file_context, calendar_context, todo_context, nextcloud_search_context,
+            email_ctx=email_context
         )
 
         # Add autonomous research results if available
@@ -6057,6 +6174,12 @@ WICHTIG:
                     if cards:
                         source_cards.extend(cards)
 
+            # Add email source cards
+            if email_context:
+                email_cards = email_context.get('metadata', {}).get('source_cards', [])
+                if email_cards:
+                    source_cards.extend(email_cards)
+
             ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context, photo_context)
 
             # No hard source limit: rely on relevance filtering in context gatherers.
@@ -6073,7 +6196,8 @@ WICHTIG:
                     'photos': photo_context is not None,
                     'files': file_context is not None and len(file_context) > 0,
                     'calendar': calendar_context is not None,
-                    'todos': todo_context is not None
+                    'todos': todo_context is not None,
+                    'emails': email_context is not None
                 }
             })
 
