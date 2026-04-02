@@ -69,6 +69,10 @@ class EmailClient(APIClient):
 
     # Maximum number of emails fetched per folder during a sync
     DEFAULT_MAX_EMAILS = 50
+    # Characters of email body included in keyword scoring
+    SCORING_BODY_LENGTH = 500
+    # Characters of body included in the get_email_summary preview
+    SUMMARY_PREVIEW_LENGTH = 300
 
     def __init__(self, config: Dict[str, Any]):
         """
@@ -85,7 +89,6 @@ class EmailClient(APIClient):
                 - max_emails: Maximum emails to fetch per folder (default: 50)
                 - use_ssl: Whether to use SSL (default: True)
         """
-        self.logger = logging.getLogger(__name__)
         self.imap_host = config.get('imap_host', '').strip()
         self.imap_port = int(config.get('imap_port', 993))
         self.username = config.get('username', '').strip()
@@ -162,7 +165,7 @@ class EmailClient(APIClient):
             logged_out = True
             return True
         except Exception as e:
-            self.logger.error("Email connection test failed: %s", e)
+            logger.error("Email connection test failed: %s", e)
             return False
         finally:
             if conn and not logged_out:
@@ -208,7 +211,7 @@ class EmailClient(APIClient):
             folder_name = f'"{folder}"' if ' ' in folder else folder
             status, _ = conn.select(folder_name, readonly=True)
             if status != 'OK':
-                self.logger.warning("Cannot select folder '%s'", folder)
+                logger.warning("Cannot select folder '%s'", folder)
                 return emails
 
             since_date = (datetime.now() - timedelta(days=days_back)).strftime('%d-%b-%Y')
@@ -249,13 +252,13 @@ class EmailClient(APIClient):
                         'message_id': msg.get('Message-ID', '')
                     })
                 except Exception as e:
-                    self.logger.warning("Error parsing email %s: %s", msg_id, e)
+                    logger.warning("Error parsing email %s: %s", msg_id, e)
                     continue
 
         except imaplib.IMAP4.error as e:
-            self.logger.error("IMAP error fetching emails from '%s': %s", folder, e)
+            logger.error("IMAP error fetching emails from '%s': %s", folder, e)
         except Exception as e:
-            self.logger.error("Unexpected error fetching emails: %s", e)
+            logger.error("Unexpected error fetching emails: %s", e)
         finally:
             if conn:
                 try:
@@ -272,7 +275,7 @@ class EmailClient(APIClient):
         Returns a flat list of email dicts (same format as fetch_recent_emails).
         """
         all_emails: List[Dict[str, Any]] = []
-        per_folder_limit = max(1, self.max_emails // len(self.folders)) if self.folders else self.max_emails
+        per_folder_limit = max(1, self.max_emails // len(self.folders)) if len(self.folders) > 0 else self.max_emails
 
         for folder in self.folders:
             try:
@@ -281,9 +284,9 @@ class EmailClient(APIClient):
                     limit=per_folder_limit
                 )
                 all_emails.extend(folder_emails)
-                self.logger.info("Fetched %d emails from folder '%s'", len(folder_emails), folder)
+                logger.info("Fetched %d emails from folder '%s'", len(folder_emails), folder)
             except Exception as e:
-                self.logger.warning("Failed to fetch emails from folder '%s': %s", folder, e)
+                logger.warning("Failed to fetch emails from folder '%s': %s", folder, e)
 
         return all_emails
 
@@ -304,7 +307,7 @@ class EmailClient(APIClient):
             haystack = ' '.join([
                 mail.get('subject', ''),
                 mail.get('sender', ''),
-                mail.get('body', '')[:500]
+                mail.get('body', '')[:self.SCORING_BODY_LENGTH]
             ]).lower()
             return sum(1 for kw in keywords if kw in haystack)
 
@@ -333,9 +336,8 @@ class EmailClient(APIClient):
         summaries = []
         for mail in recent:
             body_preview = mail.get('body', '')
-            # Truncate body preview to 300 chars
-            if len(body_preview) > 300:
-                body_preview = body_preview[:300] + '...'
+            if len(body_preview) > self.SUMMARY_PREVIEW_LENGTH:
+                body_preview = body_preview[:self.SUMMARY_PREVIEW_LENGTH] + '...'
             summaries.append({
                 'subject': mail.get('subject', '(no subject)'),
                 'sender': mail.get('sender', ''),
