@@ -266,12 +266,15 @@ class TrainingManager:
         # Intent-basierte Kontextkonfiguration
         context_config = self._get_context_config_for_intent(intent, confidence)
 
-        # Bei persönlichen Fragen mit keinen Informationen
+        # Bei persönlichen Fragen mit keinen Informationen:
+        # Erlaube allgemeines Modellwissen, aber ohne unbelegte persönliche Details.
         if intent == QueryIntent.PERSONAL and (not enhanced_context or len(enhanced_context) == 0):
             return """=== PERSÖNLICHE FRAGE ===
 
-Die Frage bezieht sich auf persönliche Informationen, die nicht in der Wissensbasis gefunden wurden.
-Antworte kurz und direkt, dass diese Information nicht verfügbar ist."""
+Die Frage bezieht sich auf persönliche Informationen, aber es wurden keine passenden Einträge in der Wissensbasis gefunden.
+Wenn es sich um öffentlich bekannte Personen oder allgemeine Fakten handelt, darfst du mit allgemeinem Modellwissen antworten.
+Kennzeichne das transparent, z.B. mit "Nach meinem allgemeinen Wissen ...".
+Erfinde keine persönlichen oder nutzerspezifischen Details."""
 
         # Sortiere Ergebnisse nach Relevanz
         sorted_results = sorted(
@@ -347,8 +350,9 @@ Gefundene Quellen: {len(sorted_results)}
                 'strategy': 'Direkte und präzise Antwort aus begrenzten Quellen',
                 'instructions': """1. Antworte kurz und direkt auf die persönliche Frage
 2. Nutze nur die relevantesten Informationen
-3. Bei fehlenden Informationen: "Ich habe dazu keine Informationen."
-4. Vermeide unnötige Details oder Ausschweifungen"""
+3. Wenn keine passenden Quellen vorhanden sind: Nutze allgemeines Modellwissen mit transparenter Kennzeichnung ("Nach meinem allgemeinen Wissen ...")
+4. Erfinde keine persönlichen oder nutzerspezifischen Details
+5. Vermeide unnötige Details oder Ausschweifungen"""
             },
             QueryIntent.TEMPORAL: {
                 'max_sources': 5,
