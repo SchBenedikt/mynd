@@ -47,6 +47,21 @@ const MODE_COMMANDS = {
   auto: ['auto mode', 'auto-mode', 'automatisch', 'systemmodus']
 };
 
+const MOTION_COMMANDS = {
+  calm: ['ruhig', 'sanft', 'soft', 'calm', 'smooth', 'langsam'],
+  dynamic: ['dynamisch', 'dynamic', 'lebendig', 'energetisch', 'schneller'],
+  aurora: ['aurora', 'nordlicht', 'atmosphaere', 'atmosphäre', 'flow']
+};
+
+const NAMED_COLOR_COMMANDS = {
+  '#e11d48': ['rot', 'red'],
+  '#2f63ff': ['blau', 'blue'],
+  '#16a34a': ['gruen', 'grun', 'green'],
+  '#7c3aed': ['lila', 'violett', 'purple'],
+  '#b45309': ['gold', 'orange', 'gelb', 'yellow'],
+  '#424242': ['grau', 'gray', 'grey', 'graphite']
+};
+
 const THEME_LABEL_KEY = {
   classic: 'Classic',
   ocean: 'Ocean',
@@ -55,6 +70,20 @@ const THEME_LABEL_KEY = {
   rose: 'Rose',
   gold: 'Gold'
 };
+
+const MOTION_LABEL_KEY = {
+  calm: 'motionCalm',
+  dynamic: 'motionDynamic',
+  aurora: 'motionAurora'
+};
+
+const DESIGN_COLOR_PRESETS = [
+  { id: 'brand-red', label: 'Red', value: '#e11d48' },
+  { id: 'brand-blue', label: 'Blue', value: '#2f63ff' },
+  { id: 'brand-green', label: 'Green', value: '#16a34a' },
+  { id: 'brand-violet', label: 'Violet', value: '#7c3aed' },
+  { id: 'brand-gold', label: 'Gold', value: '#b45309' }
+];
 
 const createChatId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -110,7 +139,16 @@ const getTodayDateTimeForInputs = () => {
 
 export default function HomePage() {
   const router = useRouter();
-  const { theme, setTheme, setDarkMode } = useTheme();
+  const {
+    theme,
+    darkMode,
+    motionStyle,
+    contrastColor,
+    setTheme,
+    setDarkMode,
+    setMotionStyle,
+    setContrastColor
+  } = useTheme();
   const { language, setLanguage, t, languages } = useLanguage();
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
@@ -322,14 +360,33 @@ export default function HomePage() {
     return bestMatch;
   };
 
+  const detectColorTarget = (normalizedText, originalText) => {
+    const hexMatch = String(originalText || '').match(/#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b/);
+    if (hexMatch?.[0]) {
+      return hexMatch[0];
+    }
+
+    for (const [hex, keywords] of Object.entries(NAMED_COLOR_COMMANDS)) {
+      if (keywords.some((keyword) => normalizedText.includes(keyword))) {
+        return hex;
+      }
+    }
+
+    return null;
+  };
+
   const handleUiControlCommand = (text, targetChatId) => {
     const normalized = normalizeText(text);
     const languageTarget = detectLanguageTarget(normalized);
     const themeTarget = detectMappedValue(normalized, THEME_COMMANDS);
     const modeTarget = detectMappedValue(normalized, MODE_COMMANDS);
+    const motionTarget = detectMappedValue(normalized, MOTION_COMMANDS);
+    const colorTarget = detectColorTarget(normalized, text);
 
-    const hasControlIntent = /sprache|language|theme|farbe|color|modus|mode|design|blau|blue|deutsch|englisch/.test(normalized);
-    if (!hasControlIntent && !languageTarget && !themeTarget && !modeTarget) {
+    const wantsDesignPanel = /theme|design|farbe|color|look|stil|style|bewegung|animation|motion|aurora|ruhig|dynamisch/.test(normalized);
+
+    const hasControlIntent = /sprache|language|theme|farbe|color|modus|mode|design|blau|blue|deutsch|englisch|animation|motion/.test(normalized);
+    if (!hasControlIntent && !languageTarget && !themeTarget && !modeTarget && !motionTarget && !colorTarget) {
       return false;
     }
 
@@ -351,13 +408,27 @@ export default function HomePage() {
       confirmations.push(t('cmdModeChanged', { value: t(modeKey) }));
     }
 
-    if (!confirmations.length) {
+    if (motionTarget) {
+      setMotionStyle(motionTarget);
+      confirmations.push(t('cmdMotionChanged', { value: t(MOTION_LABEL_KEY[motionTarget] || 'motionDynamic') }));
+    }
+
+    if (colorTarget) {
+      setContrastColor(colorTarget);
+      const colorConfirm = language === 'de'
+        ? `Akzentfarbe wurde auf ${colorTarget} gesetzt.`
+        : `Accent color was set to ${colorTarget}.`;
+      confirmations.push(colorConfirm);
+    }
+
+    if (!confirmations.length && !wantsDesignPanel) {
       return false;
     }
 
     appendMessageToChat(targetChatId, {
       role: 'assistant',
-      content: confirmations.join('\n'),
+      content: confirmations.length ? `${confirmations.join('\n')}\n\n${t('designControlHint')}` : t('designControlHint'),
+      designControls: wantsDesignPanel || confirmations.length > 0,
       id: createMessageId()
     });
 
@@ -1925,6 +1996,81 @@ export default function HomePage() {
                             onPhotoPreview={openPhotoPreview}
                           />
                         ))}
+                      </div>
+                    )}
+                    {msg.role === 'assistant' && msg.designControls && (
+                      <div className="chat-design-controls">
+                        <div className="chat-design-group">
+                          <span>{t('theme')}</span>
+                          <div className="chat-design-btn-row">
+                            {['classic', 'ocean', 'graphite', 'lavender', 'rose', 'gold'].map((themeOption) => (
+                              <button
+                                key={`chat-theme-${themeOption}`}
+                                className={`chat-design-btn ${theme === themeOption ? 'active' : ''}`}
+                                type="button"
+                                onClick={() => setTheme(themeOption)}
+                              >
+                                {THEME_LABEL_KEY[themeOption] || themeOption}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="chat-design-group">
+                          <span>{t('darkMode')}</span>
+                          <div className="chat-design-btn-row">
+                            {['light', 'dark', 'auto'].map((modeOption) => (
+                              <button
+                                key={`chat-mode-${modeOption}`}
+                                className={`chat-design-btn ${darkMode === modeOption ? 'active' : ''}`}
+                                type="button"
+                                onClick={() => setDarkMode(modeOption)}
+                              >
+                                {t(modeOption === 'dark' ? 'modeDark' : modeOption === 'light' ? 'modeLight' : 'modeAuto')}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="chat-design-group">
+                          <span>{t('motionStyle')}</span>
+                          <div className="chat-design-btn-row">
+                            {['calm', 'dynamic', 'aurora'].map((motionOption) => (
+                              <button
+                                key={`chat-motion-${motionOption}`}
+                                className={`chat-design-btn ${motionStyle === motionOption ? 'active' : ''}`}
+                                type="button"
+                                onClick={() => setMotionStyle(motionOption)}
+                              >
+                                {t(MOTION_LABEL_KEY[motionOption])}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="chat-design-group">
+                          <span>Accent</span>
+                          <div className="chat-color-row">
+                            {DESIGN_COLOR_PRESETS.map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                className={`chat-color-btn ${(contrastColor || '').toLowerCase() === preset.value.toLowerCase() ? 'active' : ''}`}
+                                style={{ '--chat-color': preset.value }}
+                                onClick={() => setContrastColor(preset.value)}
+                                title={preset.label}
+                                aria-label={preset.label}
+                              />
+                            ))}
+                            <button
+                              type="button"
+                              className="chat-design-btn"
+                              onClick={() => setContrastColor('')}
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>

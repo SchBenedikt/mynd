@@ -5,20 +5,24 @@ import { useState, useEffect } from 'react';
 export function useTheme() {
   const [theme, setThemeState] = useState('gold');
   const [darkMode, setDarkModeState] = useState('auto');
+  const [motionStyle, setMotionStyleState] = useState('dynamic');
   const [contrastColor, setContrastColorState] = useState('');
 
   // Apply theme immediately on mount
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') || 'gold';
     const savedDarkMode = localStorage.getItem('darkMode') || 'auto';
+    const savedMotionStyle = localStorage.getItem('motionStyle') || 'dynamic';
     const savedContrast = localStorage.getItem('contrastColor');
     
     // Apply theme immediately to prevent flash
     document.documentElement.setAttribute('data-theme', savedTheme);
     document.documentElement.setAttribute('data-mode', savedDarkMode);
+    document.documentElement.setAttribute('data-motion-style', savedMotionStyle);
     
     setThemeState(savedTheme);
     setDarkModeState(savedDarkMode);
+    setMotionStyleState(savedMotionStyle);
     setContrastColorState(savedContrast || '');
     
     applyDarkMode(savedDarkMode);
@@ -49,8 +53,10 @@ export function useTheme() {
     if (!localStorage.getItem('theme')) {
       localStorage.setItem('theme', 'gold');
       localStorage.setItem('darkMode', 'auto');
+      localStorage.setItem('motionStyle', 'dynamic');
       localStorage.removeItem('contrastColor');
       document.documentElement.setAttribute('data-theme', 'gold');
+      document.documentElement.setAttribute('data-motion-style', 'dynamic');
       document.documentElement.style.removeProperty('--brand');
     }
   }, []);
@@ -84,6 +90,14 @@ export function useTheme() {
     applyDarkMode(mode);
   };
 
+  const setMotionStyle = (style) => {
+    const allowed = ['calm', 'dynamic', 'aurora'];
+    const safeStyle = allowed.includes(style) ? style : 'dynamic';
+    setMotionStyleState(safeStyle);
+    localStorage.setItem('motionStyle', safeStyle);
+    document.documentElement.setAttribute('data-motion-style', safeStyle);
+  };
+
   const setContrastColor = (color) => {
     setContrastColorState(color);
     if (color) {
@@ -98,9 +112,11 @@ export function useTheme() {
   return {
     theme,
     darkMode,
+    motionStyle,
     contrastColor,
     setTheme,
     setDarkMode,
+    setMotionStyle,
     setContrastColor
   };
 }

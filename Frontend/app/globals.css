@@ -61,6 +61,33 @@ body {
   }
 }
 
+@keyframes ambient-calm {
+  0% {
+    background-position: 2% 0%, 98% 6%, 50% 98%, 4% 96%, 0% 0%;
+  }
+  50% {
+    background-position: 8% 5%, 92% 10%, 48% 90%, 10% 90%, 0% 0%;
+  }
+  100% {
+    background-position: 12% 8%, 88% 14%, 54% 84%, 14% 84%, 0% 0%;
+  }
+}
+
+@keyframes ambient-aurora {
+  0% {
+    background-position: 0% 8%, 100% 0%, 48% 100%, 0% 88%, 0% 0%;
+    background-size: 134% 134%, 130% 130%, 142% 142%, 136% 136%, 100% 100%;
+  }
+  50% {
+    background-position: 14% 0%, 84% 16%, 56% 84%, 18% 74%, 0% 0%;
+    background-size: 144% 144%, 138% 138%, 148% 148%, 142% 142%, 100% 100%;
+  }
+  100% {
+    background-position: 20% 12%, 76% 24%, 60% 76%, 24% 68%, 0% 0%;
+    background-size: 138% 138%, 144% 144%, 146% 146%, 140% 140%, 100% 100%;
+  }
+}
+
 /* Default to gold theme brand color */
 [data-theme="gold"] {
   --brand: #b45309 !important;
@@ -274,6 +301,24 @@ body {
   background-size: 130% 130%, 132% 132%, 138% 138%, 140% 140%, 100% 100%;
   background-position: 0% 0%, 100% 0%, 50% 100%, 0% 100%, 0% 0%;
   animation: ambient-shift 18s ease-in-out infinite alternate;
+}
+
+[data-motion-style="calm"] body {
+  animation: ambient-calm 30s ease-in-out infinite alternate;
+}
+
+[data-motion-style="dynamic"] body {
+  animation: ambient-shift 18s ease-in-out infinite alternate;
+}
+
+[data-motion-style="aurora"] body {
+  animation: ambient-aurora 16s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body {
+    animation: none !important;
+  }
 }
 
 /* Main Container */
@@ -1327,6 +1372,46 @@ body {
   box-shadow: 0 6px 18px color-mix(in srgb, var(--brand) 28%, transparent);
 }
 
+.motion-style-selector {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.motion-btn {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--chip-bg) 88%, white 12%);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 0.55rem 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.motion-icon {
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.motion-btn:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--line));
+}
+
+.motion-btn.active {
+  background: color-mix(in srgb, var(--brand) 16%, var(--chip-bg));
+  border-color: var(--brand);
+  color: var(--ink);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 20%, transparent);
+}
+
 /* Chat Area */
 .chat-area,
 .center-area {
@@ -1821,6 +1906,69 @@ body {
   margin-bottom: 0.75rem;
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.chat-design-controls {
+  margin-top: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: color-mix(in srgb, var(--chip-bg) 68%, transparent);
+  display: grid;
+  gap: 0.6rem;
+}
+
+.chat-design-group {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.chat-design-group > span {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.chat-design-btn-row,
+.chat-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.chat-design-btn {
+  border: 1px solid var(--line);
+  background: var(--input-bg);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0.34rem 0.65rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.chat-design-btn:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--brand) 36%, var(--line));
+}
+
+.chat-design-btn.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 20%, var(--input-bg));
+}
+
+.chat-color-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  background: var(--chat-color);
+  box-shadow: 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+
+.chat-color-btn.active {
+  box-shadow: 0 0 0 2px var(--brand);
 }
 
 .calendar-form {

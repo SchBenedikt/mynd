@@ -22,7 +22,7 @@ const API_DISPLAY_NAMES = {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { theme, darkMode, contrastColor, setTheme, setDarkMode, setContrastColor } = useTheme();
+  const { theme, darkMode, motionStyle, contrastColor, setTheme, setDarkMode, setMotionStyle, setContrastColor } = useTheme();
   const { language, setLanguage, t, languages } = useLanguage();
   const [activeTab, setActiveTab] = useState('config');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
@@ -1681,10 +1681,13 @@ export default function SettingsPage() {
                   onThemeChange={setTheme}
                   currentDarkMode={darkMode}
                   onDarkModeChange={setDarkMode}
+                  currentMotionStyle={motionStyle}
+                  onMotionStyleChange={setMotionStyle}
                   showContrastColor={false}
                   labels={{
                     theme: t('theme'),
                     darkMode: t('darkMode'),
+                    motionStyle: t('motionStyle'),
                     reset: 'Reset',
                     themes: {
                       classic: 'Classic',
@@ -1698,6 +1701,11 @@ export default function SettingsPage() {
                       light: t('modeLight'),
                       dark: t('modeDark'),
                       auto: t('modeAuto')
+                    },
+                    motion: {
+                      calm: t('motionCalm'),
+                      dynamic: t('motionDynamic'),
+                      aurora: t('motionAurora')
                     }
                   }}
                 />
