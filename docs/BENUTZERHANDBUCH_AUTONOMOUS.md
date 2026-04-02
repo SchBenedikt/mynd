@@ -85,13 +85,13 @@ Die KI erkennt, welche Art von Information du suchst:
 | Anfrage-Typ | Beispiele | Ausgeführte Aktionen |
 |-------------|-----------|----------------------|
 | **Personen** | "Wer ist...", "Kontakt von...", "Email von..." | Kontakte durchsuchen |
-| **Zeit/Termine** | "Wann...", "Termin", "Meeting", "Kalendar" | Kalender durchsuchen |
+| **Zeit/Termine** | "Wann...", "Termin", "Meeting", "Kalender" | Kalender durchsuchen |
 | **Aufgaben** | "Was muss ich...", "Aufgabe", "Todo" | Aufgaben durchsuchen |
 | **Fotos** | "Zeig Foto", "Bild von..." | Immich durchsuchen |
 | **Dokumente** | "Datei", "Dokument", "PDF" | Nextcloud + Index durchsuchen |
 
-### 3. Parallele Suche
-Alle Suchvorgänge laufen **gleichzeitig** ab → schnellere Ergebnisse!
+### 3. Koordinierte Suche
+Die KI führt alle notwendigen Suchvorgänge koordiniert und parallel aus und bündelt die Ergebnisse.
 
 ### 4. Intelligente Kombinierung
 Die KI kombiniert Informationen aus verschiedenen Quellen zu einer kohärenten Antwort.

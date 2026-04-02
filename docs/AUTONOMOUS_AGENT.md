@@ -241,13 +241,13 @@ The agent now returns additional fields:
 
 ## Performance Considerations
 
-### Parallel Execution
-All autonomous actions execute in parallel using Python's built-in capabilities, significantly reducing total research time.
+### Execution Model
+Autonomous actions are executed sequentially within `AutonomousAgent.execute_actions()` using a `ThreadPoolExecutor` for parallel I/O-bound network calls. This significantly reduces total research time compared to fully sequential execution.
 
-### Caching
-- Knowledge base results are cached
-- Nextcloud credentials are reused across actions
-- Training manager maintains session state
+### Caching & State
+- Knowledge base queries are executed fresh for each request; results are not cached by the agent layer.
+- Nextcloud credentials are resolved per-request from user configuration and may be reused across actions within the same request where supported by the underlying clients.
+- The training manager may maintain limited in-memory session state, but this is not a general-purpose cache for knowledge base results.
 
 ### Timeouts
 - Each action has individual timeout protection
@@ -368,4 +368,4 @@ The autonomous agent transforms MYND from a reactive assistant into a proactive 
 ✅ **Synthesizes** comprehensive answers from diverse information
 ✅ **Operates** independently without step-by-step instructions
 
-This implementation fulfills the requirement: *"Das System sollte meine Dateien kennen, alles über mich wissen. Die KI darf gerne in kleinere Schritte selbsständig agieren, Recherche betreiben, Aktionen durchführen."*
+This implementation fulfills the requirement: *"Das System sollte meine Dateien kennen, alles über mich wissen. Die KI darf gerne in kleinere Schritte selbstständig agieren, Recherche betreiben, Aktionen durchführen."*
