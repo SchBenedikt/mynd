@@ -1,11 +1,108 @@
 """
 Context gathering for AI agent queries
-Handles gathering context from photos, files, calendar, tasks, weather, security, and activities
+Handles gathering context from photos, files, calendar, tasks, weather, security, activities, and Nextcloud Search
 """
 import logging
+import re
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+_QUERY_STOP_WORDS = {
+    'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einer', 'eines',
+    'und', 'oder', 'aber', 'nicht', 'auch', 'mit', 'für', 'von', 'auf', 'an',
+    'ist', 'sind', 'war', 'waren', 'hat', 'haben', 'wird', 'werden',
+    'ich', 'du', 'er', 'sie', 'es', 'wir', 'ihr', 'man', 'mich', 'dir', 'mir',
+    'wer', 'wie', 'was', 'wann', 'wo', 'warum', 'wieso',
+    'the', 'a', 'an', 'and', 'or', 'but', 'not', 'also', 'with', 'for', 'from',
+    'is', 'are', 'was', 'were', 'has', 'have', 'will', 'would', 'who', 'what', 'when', 'where', 'why'
+}
+
+
+def _extract_matching_sentence(prompt: str, content: str) -> str:
+    """Return the most likely matching sentence from a chunk for source attribution cards."""
+    normalized = " ".join((content or "").split())
+    if not normalized:
+        return ""
+
+    keywords = [w.lower() for w in re.findall(r"\w+", (prompt or "").lower()) if len(w) > 3]
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", normalized) if s.strip()]
+
+    if keywords and sentences:
+        for sentence in sentences:
+            sentence_lower = sentence.lower()
+            if any(keyword in sentence_lower for keyword in keywords):
+                return sentence
+
+    if sentences:
+        return sentences[0]
+
+    return normalized[:220] + ("..." if len(normalized) > 220 else "")
+
+
+def _extract_query_keywords(prompt: str) -> List[str]:
+    """Extract meaningful query keywords for source relevance checks."""
+    words = [w.lower() for w in re.findall(r"\w+", (prompt or ""), flags=re.UNICODE)]
+    keywords = [w for w in words if len(w) > 2 and w not in _QUERY_STOP_WORDS]
+    # Keep order, remove duplicates
+    seen = set()
+    deduped = []
+    for kw in keywords:
+        if kw not in seen:
+            seen.add(kw)
+            deduped.append(kw)
+    return deduped
+
+
+def _is_person_definition_query(prompt: str) -> bool:
+    """Detect simple "who is X" style questions to apply stricter source filtering."""
+    text = (prompt or "").strip().lower()
+    return bool(re.search(r"\b(wer\s+ist|who\s+is|wer\s+war|who\s+was)\b", text))
+
+
+def _is_meaningful_source(query_keywords: List[str], content: str, matched_sentence: str, score) -> bool:
+    """Return True if a source is likely relevant to the user's query."""
+    if not query_keywords:
+        if isinstance(score, (int, float)) and abs(float(score) - 0.5) > 1e-9:
+            return float(score) >= 0.25
+        return bool((matched_sentence or content).strip())
+
+    sentence_haystack = (matched_sentence or "").lower()
+    content_haystack = (content or "").lower()
+    sentence_overlap = sum(1 for kw in query_keywords if kw in sentence_haystack)
+    content_overlap = sum(1 for kw in query_keywords if kw in content_haystack)
+
+    has_real_score = isinstance(score, (int, float)) and abs(float(score) - 0.5) > 1e-9
+    score_ok = float(score) >= 0.18 if has_real_score else True
+
+    if len(query_keywords) == 1:
+        # Single-keyword matches are often noisy in large personal knowledge bases.
+        return score_ok and sentence_overlap >= 1
+
+    if len(query_keywords) == 2:
+        # Require both terms in the same matched sentence to avoid unrelated source cards.
+        return score_ok and sentence_overlap >= 2
+
+    # For longer queries, require stronger lexical overlap before showing a source card.
+    if len(query_keywords) >= 3:
+        return score_ok and sentence_overlap >= 2 and content_overlap >= 2
+
+    return score_ok and sentence_overlap >= 1
+
+
+def _guess_document_name(source_name: str, path: str) -> str:
+    """Return a stable, readable document name for source cards."""
+    name = (source_name or "").strip()
+    if name and name.lower() != 'unknown':
+        return name
+
+    if path:
+        normalized_path = path.rstrip('/')
+        if normalized_path:
+            return normalized_path.split('/')[-1] or normalized_path
+
+    return 'Knowledge Base'
 
 
 def gather_photo_context(client, prompt: str, username: str, build_thumbnail_url_func) -> Optional[Dict]:
@@ -82,12 +179,56 @@ def gather_photo_context(client, prompt: str, username: str, build_thumbnail_url
 def gather_file_context(knowledge_base, training_manager, prompt: str) -> Optional[List[Dict]]:
     """Gather file context from knowledge base with enhanced training manager context"""
     try:
-        file_results = knowledge_base.search_knowledge(prompt, k=10)
+        file_results = knowledge_base.search_knowledge(prompt, k=80)
         if not file_results:
             return None
 
+        query_keywords = _extract_query_keywords(prompt)
+        meaningful_results = []
+
+        source_cards = []
+        is_person_query = _is_person_definition_query(prompt)
+        max_source_cards = 3 if is_person_query else 8
+        for result in file_results:
+            content = result.get('content', '')
+            doc_name = _guess_document_name(result.get('source', ''), result.get('path', ''))
+            matched_sentence = _extract_matching_sentence(prompt, content)
+            score = result.get('similarity_score')
+            # 0.5 is currently a neutral placeholder in this backend; hide it in UI cards.
+            if isinstance(score, (int, float)) and abs(float(score) - 0.5) < 1e-9:
+                score = None
+
+            if not _is_meaningful_source(query_keywords, content, matched_sentence, score):
+                continue
+
+            if is_person_query and len(query_keywords) >= 2:
+                sentence_lower = (matched_sentence or "").lower()
+                full_name = " ".join(query_keywords[:2])
+                if full_name not in sentence_lower:
+                    continue
+
+            meaningful_results.append(result)
+
+            source_cards.append({
+                'source': doc_name,
+                'source_type': 'chunk',
+                'document': doc_name,
+                'path': result.get('path', ''),
+                'chunk_id': result.get('chunk_id'),
+                'matched_sentence': matched_sentence,
+                'content_preview': (content[:260] + '...') if len(content) > 260 else content,
+                'similarity_score': score,
+                'search_type': result.get('search_type', 'fulltext')
+            })
+
+            if len(source_cards) >= max_source_cards:
+                break
+
+        if not meaningful_results:
+            return None
+
         # Use training manager to create enhanced context with metadata
-        enhanced_context_text = training_manager.create_enhanced_context_for_ai(prompt, file_results)
+        enhanced_context_text = training_manager.create_enhanced_context_for_ai(prompt, meaningful_results)
 
         return [{
             'content': enhanced_context_text,
@@ -95,8 +236,9 @@ def gather_file_context(knowledge_base, training_manager, prompt: str) -> Option
             'path': 'knowledge_base',
             'similarity_score': 1.0,
             'metadata': {
-                'count': len(file_results),
-                'enhanced': True
+                'count': len(meaningful_results),
+                'enhanced': True,
+                'source_cards': source_cards
             }
         }]
     except Exception as e:
@@ -247,8 +389,93 @@ def gather_todo_context(get_todo_data_func, is_todo_query_func, should_use_tasks
         return None
 
 
+def gather_nextcloud_search_context(search_client, prompt: str, extract_search_terms_func) -> Optional[Dict]:
+    """Gather context from Nextcloud unified search API
+
+    This function proactively searches across all Nextcloud providers (files, contacts, calendar, tasks)
+    to find relevant information for the user's query.
+    """
+    if not search_client:
+        return None
+
+    try:
+        # Extract meaningful search terms from the prompt
+        search_terms = extract_search_terms_func(prompt)
+        if not search_terms:
+            logger.info("No search terms extracted for Nextcloud search")
+            return None
+
+        logger.info(f"Searching Nextcloud with terms: {search_terms}")
+
+        # Perform unified search across all providers
+        search_results = search_client.search(search_terms, limit=15)
+
+        if not search_results or not search_results.get('results'):
+            logger.info("No results from Nextcloud search")
+            return None
+
+        results = search_results['results']
+        logger.info(f"Found {len(results)} results from Nextcloud unified search")
+
+        # Group results by provider
+        grouped = {}
+        for result in results:
+            provider = result.get('provider', 'unknown')
+            if provider not in grouped:
+                grouped[provider] = []
+            grouped[provider].append(result)
+
+        # Format results for AI consumption
+        search_lines = []
+        search_lines.append("### 🔍 Nextcloud Unified Search Results")
+        search_lines.append("")
+        search_lines.append(f"Search query: **{search_terms}**")
+        search_lines.append("")
+
+        for provider, items in grouped.items():
+            provider_name = {
+                'files': '📁 Dateien',
+                'contacts': '👤 Kontakte',
+                'calendar': '📅 Kalender',
+                'tasks': '✅ Aufgaben',
+                'talk': '💬 Talk',
+                'deck': '📋 Deck'
+            }.get(provider, f'📌 {provider.capitalize()}')
+
+            search_lines.append(f"**{provider_name}** ({len(items)} results):")
+            search_lines.append("")
+
+            for i, item in enumerate(items[:5], 1):  # Limit to 5 per provider
+                title = item.get('title', 'Untitled')
+                subline = item.get('subline', '')
+                url = item.get('resource_url', '')
+
+                search_lines.append(f"{i}. **{title}**")
+                if subline:
+                    search_lines.append(f"   {subline}")
+                if url:
+                    search_lines.append(f"   URL: {url}")
+                search_lines.append("")
+
+        return {
+            'content': '\n'.join(search_lines),
+            'source': 'Nextcloud Unified Search',
+            'path': 'nextcloud_search',
+            'similarity_score': 0.9,
+            'metadata': {
+                'count': len(results),
+                'providers': list(grouped.keys()),
+                'search_terms': search_terms,
+                'results': results
+            }
+        }
+    except Exception as e:
+        logger.error(f"Nextcloud search error: {e}")
+        return None
+
+
 def combine_contexts(weather_ctx, security_ctx, activity_ctx, photo_ctx,
-                    file_ctx, calendar_ctx, todo_ctx) -> List[Dict]:
+                    file_ctx, calendar_ctx, todo_ctx, nextcloud_search_ctx=None) -> List[Dict]:
     """Combine all contexts in the correct order.
 
     All ctx parameters are single context dicts (or None), except file_ctx
@@ -256,13 +483,15 @@ def combine_contexts(weather_ctx, security_ctx, activity_ctx, photo_ctx,
     """
     combined = []
 
-    # Priority order: weather, security, activity, photos, files, calendar, todos
+    # Priority order: weather, security, activity, Nextcloud search, photos, files, calendar, todos
     if weather_ctx:
         combined.append(weather_ctx)
     if security_ctx:
         combined.append(security_ctx)
     if activity_ctx:
         combined.append(activity_ctx)
+    if nextcloud_search_ctx:
+        combined.append(nextcloud_search_ctx)
     if photo_ctx:
         combined.append(photo_ctx)
     if file_ctx:
@@ -310,6 +539,17 @@ WICHTIGE ANWEISUNGEN ZUR NUTZUNG DER INFORMATIONEN:
 - Bei Datumsangaben, Personen oder Organisationen: Nenne diese explizit aus den Metadaten
 - Die Intent-Analyse zeigt dir, wie du die Informationen am besten strukturierst
 
+**Nextcloud Unified Search:**
+- Wenn Nextcloud-Suchergebnisse verfügbar sind, nutze sie für umfassende Antworten
+- Die Suche deckt Dateien, Kontakte, Kalender, Aufgaben und mehr ab
+- Verweise auf gefundene Ressourcen mit ihren Titeln und URLs
+
+**Autonomous Research Results:**
+- Das System hat automatisch mehrere Datenquellen durchsucht
+- Nutze die Ergebnisse der autonomen Recherche für eine umfassende Antwort
+- Die automatisch gesammelten Informationen aus verschiedenen Quellen ergänzen deine Wissensbasis
+- Kombiniere alle verfügbaren Informationen zu einer kohärenten Antwort
+
 **Fotos von Immich:**
 - Wenn Fotos verfügbar sind, BETTE SIE DIREKT EIN mit: ![Beschreibung](Bild-URL)
 - Nutze die "Bild-URL für Einbettung" aus dem Kontext
@@ -327,5 +567,10 @@ WICHTIGE ANWEISUNGEN ZUR NUTZUNG DER INFORMATIONEN:
 - Sprich direkt mit dem Nutzer und vermeide unnötige Floskeln
 - Sei präzise, hilfsbereit und persönlich
 
+**WICHTIG FÜR FEHLENDE TREFFER:**
+- Wenn die bereitgestellten Daten die Frage NICHT beantworten, darfst du mit deinem allgemeinen Modellwissen antworten.
+- Kennzeichne das dann kurz transparent, z.B. "Nach meinem allgemeinen Wissen ...".
+- Erfinde keine persönlichen Fakten über den Nutzer oder nicht belegte konkrete Details.
+
 Falls Informationen fehlen oder unvollständig sind, sage dies ehrlich.
-Erfinde keine Informationen, die nicht in den bereitgestellten Daten enthalten sind."""
+Erfinde keine persönlichen oder kontextspezifischen Informationen, die nicht belegt sind."""

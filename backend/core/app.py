@@ -24,6 +24,7 @@ from backend.features.documents.parser import DocumentParser
 from backend.features.integration.nextcloud_client import NextcloudClient
 from backend.features.integration.activity_client import NextcloudActivityClient
 from backend.features.integration.notifications_client import NextcloudNotificationsClient
+from backend.features.integration.search_client import NextcloudSearchClient
 from backend.features.integration.auth_manager import get_auth_manager, AuthManager
 from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
@@ -48,8 +49,10 @@ from backend.features.tasks.manager import task_manager, set_database
 from backend.core.context.gatherers import (
     gather_photo_context, gather_file_context, gather_weather_context,
     gather_security_context, gather_activity_context, gather_calendar_context,
-    gather_todo_context, combine_contexts, build_system_message as build_agent_system_message
+    gather_todo_context, gather_nextcloud_search_context, combine_contexts,
+    build_system_message as build_agent_system_message
 )
+from backend.core.autonomous.agent import AutonomousAgent
 import xml.etree.ElementTree as ET
 
 load_dotenv()
@@ -315,10 +318,11 @@ class KnowledgeBase:
                     formatted_results.append({
                         'content': result['content'],
                         'distance': 1.0 - result.get('similarity_score', 0.5),  # Convert to distance
-                        'source': result.get('doc_name', 'Unknown'),
-                        'path': result.get('doc_path', ''),
+                        'source': result.get('source') or result.get('doc_name') or 'Knowledge Base',
+                        'path': result.get('path') or result.get('doc_path', ''),
                         'similarity_score': result.get('similarity_score', 0.5),
-                        'search_type': result.get('search_type', 'search')
+                        'search_type': result.get('search_type', 'search'),
+                        'chunk_id': result.get('chunk_id') or result.get('id')
                     })
                 
                 logger.info(f"Search: {len(formatted_results)} results for query: {query[:50]}...")
@@ -444,8 +448,10 @@ ENTSCHEIDUNGSLOGIK FÜR TOOL-NUTZUNG:
    → Gib Quellenangaben mit Relevanz-Score an
 
 5. Bei PERSÖNLICHEN FRAGEN ohne gefundene Quellen:
-   → Antworte ehrlich: "Ich habe dazu keine Informationen in meiner Wissensbasis."
-   → Frage nach Kontext falls nötig
+    → Nutze bei öffentlich bekannten Fakten allgemeines Modellwissen
+    → Kennzeichne dies transparent mit "Nach meinem allgemeinen Wissen ..."
+    → Erfinde keine persönlichen oder nutzerspezifischen Details
+    → Frage nach zusätzlichem Kontext, wenn die Frage unklar ist
 
 === PROFESSIONELLE TOOL-AUSWAHL-REGELN ===
 ⚠ KEINE Kalender-Tool Nutzung für: allgemeine Wissens-Fragen, Konzept-Erklärungen, generelle Informationen
@@ -464,7 +470,8 @@ Für jede Anfrage IMMER:
 
 === ANTWORTQUALITÄT & FORMATIERUNG ===
 • Nutze klare Strukturierung (Listen, Absätze, Hervorhebungen)
-• Geb IMMER konkrete Quellenangaben an
+• Gib konkrete Quellenangaben, wenn Quellen im Kontext vorhanden sind
+• Wenn keine passenden Quellen vorhanden sind, antworte transparent mit allgemeinem Wissen
 • Vermeide Wiederholungen und unnötige Füllwörter
 • Bei mehreren Infos: Sortiere nach Relevanz und zeitlicher Nähe
 • Bei zeitbezogenen Fragen: Beachte Aktualität, Fälligkeitsdaten und Zeitpunkte
@@ -533,6 +540,27 @@ Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-
 
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.RequestException as e:
+            return {"error": f"Verbindung zu Ollama fehlgeschlagen: {str(e)}"}
+
+    def generate(self, prompt, stream=False, options=None):
+        """Generiert Text über /api/generate und liefert ein einheitliches Ergebnisformat."""
+        url = f"{self.base_url}/api/generate"
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": bool(stream),
+            "options": options or {}
+        }
+
+        try:
+            response = requests.post(url, json=payload, timeout=90)
+            response.raise_for_status()
+            data = response.json()
+            return {
+                "text": data.get("response", ""),
+                "raw": data
+            }
         except requests.exceptions.RequestException as e:
             return {"error": f"Verbindung zu Ollama fehlgeschlagen: {str(e)}"}
     
@@ -3270,6 +3298,99 @@ def build_immich_thumbnail_proxy_url(asset_id: str, username: str = None, size: 
         params['username'] = username
     return f"{request.host_url.rstrip('/')}/api/immich/thumbnail/{asset_id}?{urlencode(params)}"
 
+
+def get_nextcloud_search_client(username: str = None) -> Optional[NextcloudSearchClient]:
+    """Get Nextcloud Search API client with credentials"""
+    try:
+        if username:
+            user_config = load_user_config(username)
+            nextcloud_url = user_config.get('nextcloud_url')
+            nextcloud_username = user_config.get('nextcloud_username')
+            nextcloud_password = user_config.get('nextcloud_password')
+
+            if nextcloud_url and nextcloud_username and nextcloud_password:
+                return NextcloudSearchClient(
+                    url=nextcloud_url,
+                    username=nextcloud_username,
+                    password=nextcloud_password
+                )
+
+        # Fallback to environment variables
+        nextcloud_url = os.getenv('NEXTCLOUD_URL')
+        nextcloud_username = os.getenv('NEXTCLOUD_USERNAME')
+        nextcloud_password = os.getenv('NEXTCLOUD_PASSWORD')
+
+        if nextcloud_url and nextcloud_username and nextcloud_password:
+            return NextcloudSearchClient(nextcloud_url, nextcloud_username, nextcloud_password)
+
+        logger.warning("Nextcloud search client not configured")
+        return None
+
+    except Exception as e:
+        logger.error(f"Error creating Nextcloud search client: {e}")
+        return None
+
+
+def get_nextcloud_client(username: str = None) -> Optional[NextcloudClient]:
+    """Get Nextcloud WebDAV client with credentials"""
+    try:
+        if username:
+            user_config = load_user_config(username)
+            nextcloud_url = user_config.get('nextcloud_url')
+            nextcloud_username = user_config.get('nextcloud_username')
+            nextcloud_password = user_config.get('nextcloud_password')
+
+            if nextcloud_url and nextcloud_username and nextcloud_password:
+                return NextcloudClient(
+                    url=nextcloud_url,
+                    username=nextcloud_username,
+                    password=nextcloud_password
+                )
+
+        # Fallback to environment variables
+        nextcloud_url = os.getenv('NEXTCLOUD_URL')
+        nextcloud_username = os.getenv('NEXTCLOUD_USERNAME')
+        nextcloud_password = os.getenv('NEXTCLOUD_PASSWORD')
+
+        if nextcloud_url and nextcloud_username and nextcloud_password:
+            return NextcloudClient(nextcloud_url, nextcloud_username, nextcloud_password)
+
+        logger.warning("Nextcloud client not configured")
+        return None
+
+    except Exception as e:
+        logger.error(f"Error creating Nextcloud client: {e}")
+        return None
+
+
+def extract_search_terms(prompt: str) -> str:
+    """Extract meaningful search terms from user prompt"""
+    # Remove common question words and filler words
+    stop_words = {
+        'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einer', 'eines',
+        'und', 'oder', 'aber', 'nicht', 'auch', 'mit', 'für', 'von', 'auf', 'an',
+        'ist', 'sind', 'war', 'waren', 'hat', 'haben', 'wird', 'werden', 'mir', 'mein', 'meine',
+        'the', 'a', 'an', 'and', 'or', 'but', 'not', 'also', 'with', 'for', 'from',
+        'is', 'are', 'was', 'were', 'has', 'have', 'will', 'would', 'my', 'me',
+        'was', 'wie', 'wo', 'wann', 'warum', 'what', 'how', 'where', 'when', 'why',
+        'gibt', 'es', 'über', 'alle', 'zum', 'zur', 'about', 'all', 'to', 'zeig', 'zeige',
+        'finde', 'suche', 'such', 'find', 'search', 'show', 'tell'
+    }
+
+    words = prompt.lower().split()
+    meaningful_words = []
+
+    for word in words:
+        # Clean punctuation
+        word = word.strip('.,!?;:()[]{}"\'-')
+        # Keep if not stop word and length > 2
+        if word and word not in stop_words and len(word) > 2:
+            meaningful_words.append(word)
+
+    # Return first 3-5 most meaningful words as search query; empty string if none found
+    return ' '.join(meaningful_words[:5]) if meaningful_words else ''
+
+
 @app.route('/api/immich/test', methods=['POST'])
 def immich_test_connection():
     """Testet die Verbindung zu Immich"""
@@ -5361,8 +5482,9 @@ WICHTIG:
                 photo_results = photo_context.get('metadata', {}).get('photos', [])
                 logger.info(f"Found {len(photo_results)} photos for context with full metadata")
 
-        # Gather file context if relevant
-        if intent in ['files', 'mixed']:
+        # Gather file context for file/mixed/general queries so indexed chunks are
+        # consistently available for broad knowledge questions.
+        if intent in ['files', 'mixed', 'general']:
             file_context = gather_file_context(knowledge_base, training_manager, prompt)
             if file_context:
                 logger.info(f"Found {file_context[0].get('metadata', {}).get('count', 0)} file results with enhanced context (intent-based)")
@@ -5381,11 +5503,86 @@ WICHTIG:
             get_todo_data, is_todo_query, should_use_tasks, prompt, intent
         )
 
+        # NEW: Proactively gather Nextcloud search context
+        # This searches across all Nextcloud providers (files, contacts, calendar, tasks)
+        nextcloud_search_context = None
+        try:
+            search_client = get_nextcloud_search_client(username)
+            if search_client:
+                nextcloud_search_context = gather_nextcloud_search_context(
+                    search_client, prompt, extract_search_terms
+                )
+                if nextcloud_search_context:
+                    logger.info(f"Nextcloud search found {nextcloud_search_context.get('metadata', {}).get('count', 0)} results")
+        except Exception as e:
+            logger.warning(f"Nextcloud search error: {e}")
+
+        # NEW: Autonomous agent for comprehensive research
+        # The agent proactively searches multiple sources and gathers detailed information
+        autonomous_context = None
+        _ai_cfg = load_ai_config()
+        autonomous_enabled = _ai_cfg.get('autonomous_agent_enabled', True)
+        try:
+            if autonomous_enabled:
+                # Get clients for autonomous agent
+                nextcloud_client = get_nextcloud_client(username)
+                search_client = get_nextcloud_search_client(username)
+                immich_client = get_immich_client(username)
+
+                # Create autonomous agent
+                agent = AutonomousAgent(
+                    nextcloud_client=nextcloud_client,
+                    search_client=search_client,
+                    knowledge_base=knowledge_base,
+                    immich_client=immich_client,
+                    training_manager=training_manager
+                )
+
+                # Plan and execute autonomous actions
+                logger.info("Starting autonomous research...")
+                planned_actions = agent.analyze_query_and_plan_actions(prompt, {
+                    'intent': intent,
+                    'language': language
+                })
+
+                if planned_actions:
+                    # Skip SEARCH_KNOWLEDGE_BASE action when file_context already provides KB results
+                    if file_context:
+                        original_count = len(planned_actions)
+                        planned_actions = [
+                            a for a in planned_actions
+                            if a.action_type.value != 'search_knowledge_base'
+                        ]
+                        skipped = original_count - len(planned_actions)
+                        if skipped > 0:
+                            logger.info(
+                                "Skipping %d autonomous SEARCH_KNOWLEDGE_BASE action(s) "
+                                "because file_context is already available",
+                                skipped,
+                            )
+
+                    if not planned_actions:
+                        logger.info("No autonomous actions to execute after filtering")
+                    else:
+                        logger.info(f"Autonomous agent planned {len(planned_actions)} actions")
+                        results = agent.execute_actions(planned_actions, username)
+
+                        if results.get('success') and results.get('gathered_information'):
+                            autonomous_context = agent.format_autonomous_results_for_context(results)
+                            if autonomous_context:
+                                logger.info("Autonomous research completed successfully")
+        except Exception as e:
+            logger.warning(f"Autonomous agent error: {e}", exc_info=True)
+
         # Combine all contexts in priority order using gatherers helper
         combined_context = combine_contexts(
             weather_context, security_context, activity_context,
-            photo_context, file_context, calendar_context, todo_context
+            photo_context, file_context, calendar_context, todo_context, nextcloud_search_context
         )
+
+        # Add autonomous research results if available
+        if autonomous_context:
+            combined_context.append(autonomous_context)
 
         # Build system message with context using gatherers helper
         system_message = build_agent_system_message(combined_context, language)
@@ -5410,9 +5607,19 @@ WICHTIG:
 
             ai_response = response.get('message', {}).get('content', 'Entschuldigung, ich konnte keine Antwort generieren.')
 
+            source_cards = []
+            if file_context:
+                for context_item in file_context:
+                    cards = context_item.get('metadata', {}).get('source_cards', [])
+                    if cards:
+                        source_cards.extend(cards)
+
+            # No hard source limit: rely on relevance filtering in context gatherers.
+
             return jsonify({
                 'success': True,
                 'response': ai_response,
+                'sources': source_cards,
                 'context_used': len(combined_context) > 0,
                 'context_count': len(combined_context),
                 'intent': intent,
