@@ -8,6 +8,11 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# Characters of email body included in AI context per email
+_EMAIL_CONTEXT_BODY_LENGTH = 600
+# Characters of body in email source card preview
+_SOURCE_CARD_PREVIEW_LENGTH = 260
+
 
 _QUERY_STOP_WORDS = {
     'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einer', 'eines',
@@ -513,8 +518,8 @@ def gather_email_context(email_client, prompt: str, limit: int = 10) -> Optional
             body = mail.get('body', '')
 
             # Truncate body for context to keep prompt manageable
-            body_for_context = body[:600].strip()
-            if len(body) > 600:
+            body_for_context = body[:_EMAIL_CONTEXT_BODY_LENGTH].strip()
+            if len(body) > _EMAIL_CONTEXT_BODY_LENGTH:
                 body_for_context += '...'
 
             lines.append(f"**E-Mail {i}:** {subject}")
@@ -529,7 +534,7 @@ def gather_email_context(email_client, prompt: str, limit: int = 10) -> Optional
 
             # Build a source card for the UI
             matched_sentence = _extract_matching_sentence(prompt, body or subject)
-            body_preview = (body[:260] + '...') if len(body) > 260 else body
+            body_preview = (body[:_SOURCE_CARD_PREVIEW_LENGTH] + '...') if len(body) > _SOURCE_CARD_PREVIEW_LENGTH else body
             source_cards.append({
                 'source': sender or 'E-Mail',
                 'source_type': 'email',

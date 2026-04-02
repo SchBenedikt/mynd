@@ -4164,12 +4164,13 @@ def email_search():
         results = client.search_emails(query, limit=limit)
         sanitized = []
         for mail in results:
+            body = mail.get('body', '')
             sanitized.append({
                 'subject': mail.get('subject', ''),
                 'sender': mail.get('sender', ''),
                 'date': mail.get('date', ''),
                 'folder': mail.get('folder', ''),
-                'body_preview': (mail.get('body', '')[:300] + '...') if len(mail.get('body', '')) > 300 else mail.get('body', '')
+                'body_preview': (body[:300] + '...') if len(body) > 300 else body
             })
         return jsonify({'success': True, 'count': len(sanitized), 'results': sanitized})
     except Exception as e:
