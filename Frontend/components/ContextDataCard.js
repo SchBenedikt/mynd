@@ -30,12 +30,22 @@ const formatDueLabel = (dueDate) => {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-export default function ContextDataCard({ card }) {
+const formatPhotoDate = (value) => {
+  if (!value) return '';
+  const dateValue = new Date(value);
+  if (Number.isNaN(dateValue.getTime())) return String(value);
+  return dateValue.toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+export default function ContextDataCard({ card, onQueryAction, onPhotoPreview }) {
   const type = card?.type || 'calendar';
 
   const [anchorDate, setAnchorDate] = useState(card?.anchor_date || toIsoDate(new Date()));
   const [calendarView, setCalendarView] = useState(card?.default_view || 'day');
   const [taskScope, setTaskScope] = useState(card?.default_scope || 'all');
+  const [photoPerson, setPhotoPerson] = useState(card?.selected_people?.[0] || '');
+  const [photoDatePhrase, setPhotoDatePhrase] = useState(card?.date_phrase || '');
+  const [photoDate, setPhotoDate] = useState(card?.date_from || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [payload, setPayload] = useState(null);
@@ -45,6 +55,19 @@ export default function ContextDataCard({ card }) {
   const [saving, setSaving] = useState(false);
 
   const isCalendar = type === 'calendar';
+  const isPhoto = type === 'photos';
+  const photoItems = card?.photos || [];
+  const photoPersonOptions = card?.people_options || [];
+  const photoDateOptions = card?.date_options || [];
+
+  useEffect(() => {
+    setAnchorDate(card?.anchor_date || toIsoDate(new Date()));
+    setCalendarView(card?.default_view || 'day');
+    setTaskScope(card?.default_scope || 'all');
+    setPhotoPerson(card?.selected_people?.[0] || '');
+    setPhotoDatePhrase(card?.date_phrase || '');
+    setPhotoDate(card?.date_from || '');
+  }, [card]);
 
   const fetchUrl = useMemo(() => {
     if (isCalendar) {
@@ -57,6 +80,10 @@ export default function ContextDataCard({ card }) {
   }, [isCalendar, calendarView, taskScope, anchorDate]);
 
   useEffect(() => {
+    if (isPhoto) {
+      return undefined;
+    }
+
     let cancelled = false;
 
     const loadData = async () => {
@@ -86,7 +113,36 @@ export default function ContextDataCard({ card }) {
     return () => {
       cancelled = true;
     };
-  }, [fetchUrl]);
+  }, [fetchUrl, isPhoto]);
+
+  const buildPhotoQuery = ({ person = photoPerson, datePhrase = photoDatePhrase, isoDate = photoDate } = {}) => {
+    const parts = ['Zeig mir Fotos'];
+    if (datePhrase) {
+      parts.push(`von ${datePhrase}`);
+    } else if (isoDate) {
+      parts.push(`am ${isoDate}`);
+    }
+    if (person) {
+      parts.push(`mit ${person}`);
+    }
+    return parts.join(' ');
+  };
+
+  const triggerPhotoSearch = (overrides = {}) => {
+    if (!onQueryAction) return;
+    onQueryAction(buildPhotoQuery(overrides));
+  };
+
+  const handlePhotoPersonSelect = (personName) => {
+    setPhotoPerson(personName);
+    triggerPhotoSearch({ person: personName });
+  };
+
+  const handlePhotoDatePreset = (dateLabel) => {
+    setPhotoDatePhrase(dateLabel);
+    setPhotoDate('');
+    triggerPhotoSearch({ datePhrase: dateLabel, isoDate: '' });
+  };
 
   const onCalendarEdit = (eventItem) => {
     const key = eventItem.uid || eventItem.nextcloud_path || eventItem.summary;
@@ -201,6 +257,12 @@ export default function ContextDataCard({ card }) {
   const taskItems = payload?.tasks || [];
 
   const widthVariant = useMemo(() => {
+    if (isPhoto) {
+      if (photoItems.length >= 4) return 'wide';
+      if (photoItems.length >= 2) return 'medium';
+      return 'compact';
+    }
+
     if (isCalendar) {
       if (calendarView === 'day' && calendarItems.length <= 3) return 'compact';
       if (calendarView === 'week' || calendarView === 'month' || calendarItems.length >= 8) return 'wide';
@@ -210,74 +272,173 @@ export default function ContextDataCard({ card }) {
     if (taskScope === 'today' && taskItems.length <= 4) return 'compact';
     if (taskScope === 'all' || taskItems.length >= 10) return 'wide';
     return 'medium';
-  }, [isCalendar, calendarView, calendarItems.length, taskScope, taskItems.length]);
+  }, [isPhoto, photoItems.length, isCalendar, calendarView, calendarItems.length, taskScope, taskItems.length]);
 
   return (
     <div className={`context-data-card context-data-card--${widthVariant}`}>
       <div className="context-data-head">
         <div className="context-data-title-wrap">
-          <div className="context-data-title">{isCalendar ? 'Calendar Overview' : 'Task Overview'}</div>
+          <div className="context-data-title">
+            {isPhoto ? (card?.title || 'Fotos') : (isCalendar ? 'Calendar Overview' : 'Task Overview')}
+          </div>
           <div className="context-data-subtitle">
-            {isCalendar ? (payload?.period_label || 'Loading period...') : `${payload?.count || 0} items`}
+            {isPhoto
+              ? (card?.subtitle || `${photoItems.length} items`)
+              : (isCalendar ? (payload?.period_label || 'Loading period...') : `${payload?.count || 0} items`)}
           </div>
         </div>
 
-        <div className="context-data-controls">
-          {isCalendar ? (
-            <>
-              <button type="button" className="chip-btn" onClick={() => setCalendarView('day')} aria-pressed={calendarView === 'day'}>
-                Day
-              </button>
-              <button type="button" className="chip-btn" onClick={() => setCalendarView('week')} aria-pressed={calendarView === 'week'}>
-                Week
-              </button>
-              <button type="button" className="chip-btn" onClick={() => setCalendarView('month')} aria-pressed={calendarView === 'month'}>
-                Month
-              </button>
-              <button type="button" className="chip-btn" onClick={() => setCalendarView('list')} aria-pressed={calendarView === 'list'}>
-                List
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="chip-btn" onClick={() => setTaskScope('today')} aria-pressed={taskScope === 'today'}>
-                Today
-              </button>
-              <button type="button" className="chip-btn" onClick={() => setTaskScope('overdue')} aria-pressed={taskScope === 'overdue'}>
-                Overdue
-              </button>
-              <button type="button" className="chip-btn" onClick={() => setTaskScope('all')} aria-pressed={taskScope === 'all'}>
-                All
-              </button>
-            </>
-          )}
-        </div>
+        {!isPhoto && (
+          <div className="context-data-controls">
+            {isCalendar ? (
+              <>
+                <button type="button" className="chip-btn" onClick={() => setCalendarView('day')} aria-pressed={calendarView === 'day'}>
+                  Day
+                </button>
+                <button type="button" className="chip-btn" onClick={() => setCalendarView('week')} aria-pressed={calendarView === 'week'}>
+                  Week
+                </button>
+                <button type="button" className="chip-btn" onClick={() => setCalendarView('month')} aria-pressed={calendarView === 'month'}>
+                  Month
+                </button>
+                <button type="button" className="chip-btn" onClick={() => setCalendarView('list')} aria-pressed={calendarView === 'list'}>
+                  List
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="chip-btn" onClick={() => setTaskScope('today')} aria-pressed={taskScope === 'today'}>
+                  Today
+                </button>
+                <button type="button" className="chip-btn" onClick={() => setTaskScope('overdue')} aria-pressed={taskScope === 'overdue'}>
+                  Overdue
+                </button>
+                <button type="button" className="chip-btn" onClick={() => setTaskScope('all')} aria-pressed={taskScope === 'all'}>
+                  All
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="context-data-nav">
-        <button
-          type="button"
-          className="context-nav-btn"
-          onClick={() => setAnchorDate((prev) => shiftByView(prev, isCalendar ? calendarView : 'day', -1))}
-          aria-label="Previous"
-        >
-          <i className="fas fa-chevron-left"></i>
-        </button>
-        <div className="context-data-anchor">{anchorDate}</div>
-        <button
-          type="button"
-          className="context-nav-btn"
-          onClick={() => setAnchorDate((prev) => shiftByView(prev, isCalendar ? calendarView : 'day', 1))}
-          aria-label="Next"
-        >
-          <i className="fas fa-chevron-right"></i>
-        </button>
-      </div>
+      {!isPhoto && (
+        <div className="context-data-nav">
+          <button
+            type="button"
+            className="context-nav-btn"
+            onClick={() => setAnchorDate((prev) => shiftByView(prev, isCalendar ? calendarView : 'day', -1))}
+            aria-label="Previous"
+          >
+            <i className="fas fa-chevron-left"></i>
+          </button>
+          <div className="context-data-anchor">{anchorDate}</div>
+          <button
+            type="button"
+            className="context-nav-btn"
+            onClick={() => setAnchorDate((prev) => shiftByView(prev, isCalendar ? calendarView : 'day', 1))}
+            aria-label="Next"
+          >
+            <i className="fas fa-chevron-right"></i>
+          </button>
+        </div>
+      )}
 
       {loading && <div className="context-data-status">Loading…</div>}
       {error && <div className="context-data-error">{error}</div>}
 
-      {!loading && !error && isCalendar && (
+      {isPhoto && !error && (
+        <div className="photo-context-body">
+          <div className="photo-context-gallery">
+            {photoItems.length === 0 && <div className="context-data-empty">Keine Fotos gefunden.</div>}
+            {photoItems.map((photo, idx) => {
+              const title = photo.original_file_name || `Foto ${idx + 1}`;
+              const subtitle = [formatPhotoDate(photo.created_at), photo.people?.[0], photo.location].filter(Boolean).join(' • ');
+              return (
+                <button
+                  type="button"
+                  key={photo.id || `${title}-${idx}`}
+                  className="photo-thumb-card"
+                  onClick={() => {
+                    if (onPhotoPreview) {
+                      onPhotoPreview({
+                        title,
+                        thumbnailUrl: photo.thumbnail_url,
+                        immichUrl: photo.asset_url,
+                        downloadUrl: photo.asset_url
+                      });
+                    }
+                  }}
+                >
+                  <img src={photo.thumbnail_url} alt={title} />
+                  <span className="photo-thumb-title">{title}</span>
+                  {subtitle && <span className="photo-thumb-subtitle">{subtitle}</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="photo-context-controls">
+            <div className="photo-context-section">
+              <div className="photo-context-section-label">Andere Personen</div>
+              <div className="photo-chip-row">
+                {photoPersonOptions.length === 0 && <div className="context-data-empty small">Keine alternativen Personen verfügbar.</div>}
+                {photoPersonOptions.map((name) => (
+                  <button
+                    type="button"
+                    key={name}
+                    className="chip-btn photo-chip"
+                    aria-pressed={photoPerson === name}
+                    onClick={() => handlePhotoPersonSelect(name)}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <div className="photo-input-row">
+                <input
+                  type="text"
+                  value={photoPerson}
+                  onChange={(e) => setPhotoPerson(e.target.value)}
+                  placeholder="Andere Person eingeben"
+                />
+              </div>
+            </div>
+
+            <div className="photo-context-section">
+              <div className="photo-context-section-label">Anderes Datum</div>
+              <div className="photo-chip-row">
+                {photoDateOptions.map((option) => (
+                  <button
+                    type="button"
+                    key={option.value}
+                    className="chip-btn photo-chip"
+                    aria-pressed={photoDatePhrase === option.value}
+                    onClick={() => handlePhotoDatePreset(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <div className="photo-input-row">
+                <input
+                  type="date"
+                  value={photoDate}
+                  onChange={(e) => {
+                    setPhotoDate(e.target.value);
+                    setPhotoDatePhrase('');
+                  }}
+                />
+                <button type="button" className="btn primary" onClick={() => triggerPhotoSearch()}>
+                  Neue Suche
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!isPhoto && !loading && !error && isCalendar && (
         <div className="context-data-list">
           {calendarItems.length === 0 && <div className="context-data-empty">No events in this range.</div>}
           {calendarItems.map((eventItem, idx) => {
@@ -344,7 +505,7 @@ export default function ContextDataCard({ card }) {
         </div>
       )}
 
-      {!loading && !error && !isCalendar && (
+      {!isPhoto && !loading && !error && !isCalendar && (
         <div className="context-data-list">
           {taskItems.length === 0 && <div className="context-data-empty">No tasks for this scope.</div>}
           {taskItems.map((taskItem, idx) => {

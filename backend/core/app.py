@@ -1923,7 +1923,7 @@ def _infer_task_card_config(prompt: str) -> Dict:
     }
 
 
-def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict]) -> List[Dict]:
+def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict], photo_ctx: Optional[Dict] = None) -> List[Dict]:
     """Return structured ui_cards metadata for frontend interactive cards."""
     cards: List[Dict] = []
 
@@ -1944,6 +1944,44 @@ def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo
             'default_scope': cfg['scope'],
             'anchor_date': cfg['date']
         })
+
+    if photo_ctx:
+        photo_metadata = photo_ctx.get('metadata', {}) if isinstance(photo_ctx, dict) else {}
+        photo_results = photo_metadata.get('photos', []) or []
+        if photo_results:
+            people_options: List[str] = []
+            for photo in photo_results:
+                for person in photo.get('people', []) or []:
+                    name = person if isinstance(person, str) else person.get('name', '')
+                    name = str(name).strip()
+                    if name and name not in people_options:
+                        people_options.append(name)
+
+            detected_people = [str(name).strip() for name in photo_metadata.get('detected_people', []) if str(name).strip()]
+            similar_people = [str(name).strip() for name in photo_metadata.get('similar_people', []) if str(name).strip()]
+            card_people = []
+            for name in detected_people + similar_people + people_options:
+                if name and name not in card_people:
+                    card_people.append(name)
+
+            cards.append({
+                'type': 'photos',
+                'title': 'Fotos',
+                'subtitle': f"{len(photo_results)} Treffer",
+                'query': prompt,
+                'date_phrase': photo_metadata.get('date_phrase', ''),
+                'date_from': photo_metadata.get('date_from', ''),
+                'date_to': photo_metadata.get('date_to', ''),
+                'selected_people': detected_people[:2],
+                'people_options': card_people[:6],
+                'date_options': [
+                    {'label': 'Heute', 'value': 'heute'},
+                    {'label': 'Gestern', 'value': 'gestern'},
+                    {'label': 'Letzte Woche', 'value': 'letzte Woche'},
+                    {'label': 'Diesen Monat', 'value': 'diesen Monat'}
+                ],
+                'photos': photo_results[:4]
+            })
 
     return cards
 
@@ -6019,7 +6057,7 @@ WICHTIG:
                     if cards:
                         source_cards.extend(cards)
 
-            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context)
+            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context, photo_context)
 
             # No hard source limit: rely on relevance filtering in context gatherers.
 

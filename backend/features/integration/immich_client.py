@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import re
+from difflib import get_close_matches
 from typing import List, Dict, Optional, Any, Tuple
 import requests
 from datetime import datetime, date, timedelta
@@ -14,14 +15,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 class ImmichClient:
     """Client für Immich-Integration über REST API"""
 
-    def __init__(self, url: str, api_key: str, timeout_short: int = 15, timeout_long: int = 45):
+    def __init__(self, url: str, api_key: str, timeout_short: int = 15, timeout_long: int = 90):
         self.url = self._normalize_url(url)
         self.api_key = api_key
         self.logger = logging.getLogger(__name__)
         self.last_error: Optional[str] = None
         # Configurable timeouts
         self.timeout_short = timeout_short  # For quick operations like ping, asset info
-        self.timeout_long = timeout_long    # For heavy operations like search, get people
+        self.timeout_long = timeout_long    # For heavy operations like search, get people (increased to 90s for remote Immich)
         # Keep a short-lived people cache to avoid expensive /people calls on every query.
         self._people_cache: List[Dict[str, Any]] = []
         self._people_cache_time: float = 0
@@ -653,10 +654,49 @@ class ImmichClient:
         if date_from or date_to:
             self.logger.info(f"Extracted date range: {date_from} to {date_to}")
 
+        date_phrase = None
+        query_lower = query.lower()
+        date_phrase_patterns = [
+            ('heute', 'heute'),
+            ('today', 'today'),
+            ('gestern', 'gestern'),
+            ('yesterday', 'yesterday'),
+            ('letzte woche', 'letzte Woche'),
+            ('last week', 'last week'),
+            ('diese woche', 'diese Woche'),
+            ('this week', 'this week'),
+            ('diesen monat', 'diesen Monat'),
+            ('this month', 'this month'),
+            ('letzter monat', 'letzter Monat'),
+            ('last month', 'last month'),
+        ]
+        for needle, label in date_phrase_patterns:
+            if needle in query_lower:
+                date_phrase = label
+                break
+
+        if not date_phrase:
+            iso_date_match = re.search(r'\b(20\d{2}-\d{2}-\d{2})\b', query)
+            euro_date_match = re.search(r'\b(\d{1,2}\.\d{1,2}\.20\d{2})\b', query)
+            if iso_date_match:
+                date_phrase = iso_date_match.group(1)
+            elif euro_date_match:
+                date_phrase = euro_date_match.group(1)
+
         # Erkenne genannte Personen robust anhand der Immich-Personenliste
         people = self.get_people()
         mentioned_people = self._detect_people_in_query(query, people)
         mentioned_person_names = [p.get('name', '').strip() for p in mentioned_people if p.get('name')]
+        all_people_names = [p.get('name', '').strip() for p in people if p.get('name')]
+
+        similar_people_names: List[str] = []
+        for person_name in mentioned_person_names[:2]:
+            close_matches = get_close_matches(person_name, all_people_names, n=5, cutoff=0.6)
+            for candidate in close_matches:
+                if candidate.lower() == person_name.lower():
+                    continue
+                if candidate not in similar_people_names and candidate not in mentioned_person_names:
+                    similar_people_names.append(candidate)
 
         # Extrahiere relevante Terme für gezielte Suchanfragen und UI-Search-Kontext.
         relevant_terms = self._extract_relevant_terms(query)
@@ -831,7 +871,16 @@ class ImmichClient:
             'success': True,
             'query': query,
             'count': len(formatted_results),
-            'results': formatted_results
+            'results': formatted_results,
+            'metadata': {
+                'date_from': date_from,
+                'date_to': date_to,
+                'date_phrase': date_phrase,
+                'detected_people': mentioned_person_names,
+                'similar_people': similar_people_names,
+                'context_queries': context_queries[:5] if context_queries else [],
+                'ui_search_query': ui_search_query
+            }
         }
 
     def search_by_context(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
