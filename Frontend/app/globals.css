@@ -2145,6 +2145,97 @@ body {
   background: color-mix(in srgb, var(--chip-bg) 70%, white 30%);
 }
 
+.photo-context-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.photo-context-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 0.55rem;
+}
+
+.photo-thumb-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.45rem;
+  background: var(--bubble-assistant);
+  color: var(--ink);
+  display: grid;
+  gap: 0.35rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.photo-thumb-card img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 9px;
+  display: block;
+  background: var(--chip-bg);
+}
+
+.photo-thumb-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.photo-thumb-subtitle {
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+.photo-context-controls {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.photo-context-section {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.photo-context-section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.photo-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.photo-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.photo-input-row input {
+  flex: 1 1 180px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--input-bg);
+  color: var(--ink);
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+}
+
+.photo-input-row .btn.primary {
+  flex: 0 0 auto;
+}
+
+.photo-chip {
+  padding-inline: 0.75rem;
+}
+
 .context-data-head {
   display: flex;
   align-items: flex-start;
@@ -2541,6 +2632,14 @@ body {
 
   .context-data-nav {
     grid-template-columns: 30px 1fr 30px;
+  }
+
+  .photo-context-gallery {
+    grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
+  }
+
+  .photo-input-row input {
+    flex-basis: 100%;
   }
 
   .context-nav-btn {

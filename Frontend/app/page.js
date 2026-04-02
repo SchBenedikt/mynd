@@ -1918,7 +1918,12 @@ export default function HomePage() {
                     {msg.role === 'assistant' && msg.uiCards && msg.uiCards.length > 0 && (
                       <div className="context-cards-wrap">
                         {msg.uiCards.map((card, idx) => (
-                          <ContextDataCard key={`${card.type || 'card'}-${idx}`} card={card} />
+                          <ContextDataCard
+                            key={`${card.type || 'card'}-${idx}`}
+                            card={card}
+                            onQueryAction={(query) => sendMessage(query)}
+                            onPhotoPreview={openPhotoPreview}
+                          />
                         ))}
                       </div>
                     )}

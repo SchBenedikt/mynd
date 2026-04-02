@@ -144,8 +144,19 @@ class AutonomousAgent:
             ))
 
         # 6. Search photos if visual content mentioned
+        # BUT: Skip if person+date query (already handled efficiently by main search)
         photo_indicators = ['foto', 'bild', 'photo', 'picture', 'image', 'zeig']
-        if any(ind in query_lower for ind in photo_indicators):
+        has_photo_keyword = any(ind in query_lower for ind in photo_indicators)
+        
+        # Detect if this is a simple person+date photo query (handled by main flow)
+        person_keywords = ['vinzenz', 'schächner', 'benedikt', 'person', 'wer']
+        date_keywords = ['letzter', 'woche', 'gestern', 'heute', 'morgen', 'wann', 'datum',
+                        'last', 'week', 'yesterday', 'today', 'tomorrow', 'when']
+        has_person = any(p in query_lower for p in person_keywords)
+        has_date = any(d in query_lower for d in date_keywords)
+        
+        # Only search photos if it's NOT a simple person+date query (main flow handles that)
+        if has_photo_keyword and not (has_person and has_date):
             actions.append(Action(
                 action_type=ActionType.SEARCH_PHOTOS,
                 description="Search photos",
