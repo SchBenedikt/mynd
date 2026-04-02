@@ -29,6 +29,7 @@ from backend.features.integration.auth_manager import get_auth_manager, AuthMana
 from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
 from backend.features.integration.api_registry import get_api_registry
+from backend.features.integration.carddav_client import NextcloudCardDAVClient
 from backend.features.integration.homeassistant_client import HomeAssistantClient
 from backend.features.integration.uptimekuma_client import UptimeKumaClient
 from backend.features.integration.email_client import EmailClient
@@ -1962,26 +1963,32 @@ def _build_contact_card(prompt: str, contacts: List[Dict[str, Any]], language: s
     for contact in contacts[:6]:
         title = str(contact.get('title', '')).strip() or str(contact.get('full_name', '')).strip() or 'Kontakt'
         subline = str(contact.get('subline', '')).strip()
-        email_candidates = []
-        for candidate in [contact.get('subline', ''), contact.get('title', '')]:
-            extracted = _extract_email_from_text(candidate)
-            if extracted:
-                email_candidates.append(extracted)
+        emails = []
+        for email_value in contact.get('email', []) or []:
+            email_value = str(email_value).strip()
+            if email_value and email_value not in emails:
+                emails.append(email_value)
+
+        if not emails:
+            for candidate in [contact.get('subline', ''), contact.get('title', '')]:
+                extracted = _extract_email_from_text(candidate)
+                if extracted and extracted not in emails:
+                    emails.append(extracted)
 
         if isinstance(contact.get('attributes'), dict):
             for value in contact['attributes'].values():
                 extracted = _extract_email_from_text(value)
-                if extracted:
-                    email_candidates.append(extracted)
-
-        email = email_candidates[0] if email_candidates else ''
+                if extracted and extracted not in emails:
+                    emails.append(extracted)
 
         contact_items.append({
             'title': title,
             'subline': subline,
-            'email': email,
+            'emails': emails,
+            'primary_email': emails[0] if emails else '',
             'resource_url': contact.get('resource_url', ''),
-            'icon': contact.get('icon', '')
+            'icon': contact.get('icon', ''),
+            'organization': contact.get('organization', '')
         })
 
     return {
@@ -1999,7 +2006,7 @@ def _build_contact_card(prompt: str, contacts: List[Dict[str, Any]], language: s
     }
 
 
-def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict], photo_ctx: Optional[Dict] = None, email_ctx: Optional[Dict] = None, nextcloud_search_ctx: Optional[Dict] = None, language: str = 'de') -> List[Dict]:
+def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict], photo_ctx: Optional[Dict] = None, email_ctx: Optional[Dict] = None, nextcloud_search_ctx: Optional[Dict] = None, username: str = None, language: str = 'de') -> List[Dict]:
     """Return structured ui_cards metadata for frontend interactive cards."""
     cards: List[Dict] = []
 
@@ -2060,7 +2067,21 @@ def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo
             })
 
     if is_email_send_query(prompt):
-        cards.append(_build_email_card(prompt, language))
+        recipient_resolution = resolve_email_contacts_for_prompt(prompt, username=username)
+        if recipient_resolution.get('has_contact_match') and recipient_resolution.get('needs_selection'):
+            contact_cards = recipient_resolution.get('contacts', [])
+            if contact_cards:
+                cards.append(_build_contact_card(prompt, contact_cards, language))
+            return cards
+
+        email_card = _build_email_card(prompt, language)
+        if recipient_resolution.get('best_email') and not email_card.get('to'):
+            email_card['to'] = recipient_resolution['best_email']
+        elif recipient_resolution.get('has_contact_match') and not email_card.get('to'):
+            contact_cards = recipient_resolution.get('contacts', [])
+            if contact_cards:
+                cards.append(_build_contact_card(prompt, contact_cards, language))
+        cards.append(email_card)
     elif email_ctx and intent in ['email', 'mixed']:
         cards.append(_build_email_card(prompt, language))
 
@@ -2068,7 +2089,7 @@ def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo
         search_metadata = nextcloud_search_ctx.get('metadata', {}) if isinstance(nextcloud_search_ctx, dict) else {}
         search_results = search_metadata.get('results', []) or []
         contact_results = [result for result in search_results if str(result.get('provider', '')).lower() == 'contacts']
-        if contact_results:
+        if contact_results and not any(card.get('type') == 'contacts' for card in cards):
             cards.append(_build_contact_card(prompt, contact_results, language))
 
     return cards
@@ -5679,6 +5700,130 @@ def _extract_email_from_text(text: str) -> str:
     return match.group(0).strip() if match else ''
 
 
+def _extract_contact_query_from_email_prompt(prompt: str) -> str:
+    """Extract the intended recipient name from a compose-email prompt."""
+    text = ' '.join((prompt or '').split())
+    if not text:
+        return ''
+
+    patterns = [
+        r'(?:an|für|to)\s+(?:den|die|das|dem|der|the)?\s*([^,.;:]+?)(?:\s+(?:und|mit|wegen|bezüglich)\b.*)?$',
+        r'(?:schreibe|sende|schick(?:e)?|verschicke|compose|write)\s+(?:eine\s+)?(?:e-?mail|mail|nachricht)\s+(?:an|für|to)\s+([^,.;:]+?)(?:\s+(?:und|mit|wegen|bezüglich)\b.*)?$',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            candidate = match.group(1).strip(' "')
+            if candidate and not _extract_email_from_text(candidate):
+                return candidate
+
+    return ''
+
+
+def get_carddav_client(username: str = None) -> Optional['NextcloudCardDAVClient']:
+    """Return a configured CardDAV client for *username*, or None if unavailable."""
+    try:
+        config = get_nextcloud_runtime_config()
+        if not config:
+            return None
+
+        nextcloud_url = str(config.get('url') or config.get('nextcloud_url') or '').strip()
+        nextcloud_username = str(username or config.get('username') or '').strip()
+        password = str(config.get('password') or '').strip()
+        if not all([nextcloud_url, nextcloud_username, password]):
+            return None
+
+        return NextcloudCardDAVClient(nextcloud_url, nextcloud_username, password)
+    except Exception as e:
+        logger.debug('CardDAV client not available: %s', e)
+        return None
+
+
+def search_carddav_contacts(query: str, username: str = None, limit: int = 10) -> List[Dict[str, Any]]:
+    """Search contacts in CardDAV address books by query."""
+    client = get_carddav_client(username)
+    if not client or not query.strip():
+        return []
+
+    matches: List[Dict[str, Any]] = []
+    query_lower = query.lower().strip()
+
+    try:
+        addressbooks = client.get_addressbooks()
+        addressbook_names = [book.get('name') for book in addressbooks if book.get('name')] or ['contacts']
+
+        for addressbook_name in addressbook_names:
+            try:
+                contacts = client.search_contacts(query, addressbook_name)
+                for contact in contacts:
+                    display_name = contact.get('full_name') or ' '.join([
+                        contact.get('given_name', ''),
+                        contact.get('family_name', '')
+                    ]).strip()
+                    searchable = ' '.join([
+                        display_name,
+                        contact.get('given_name', ''),
+                        contact.get('family_name', ''),
+                        contact.get('organization', ''),
+                        ' '.join(contact.get('email', [])),
+                    ]).lower()
+
+                    if query_lower in searchable:
+                        enriched = dict(contact)
+                        enriched['addressbook_name'] = addressbook_name
+                        matches.append(enriched)
+            except Exception as e:
+                logger.debug('CardDAV search failed for addressbook %s: %s', addressbook_name, e)
+
+        # Deduplicate by contact URL/id and prefer contacts with the most email addresses.
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for contact in matches:
+            key = str(contact.get('url') or contact.get('id') or contact.get('full_name') or contact.get('organization') or id(contact))
+            existing = deduped.get(key)
+            if not existing or len(contact.get('email', [])) > len(existing.get('email', [])):
+                deduped[key] = contact
+
+        sorted_matches = sorted(
+            deduped.values(),
+            key=lambda item: (
+                0 if query_lower in str(item.get('full_name', '')).lower() else 1,
+                -(len(item.get('email', [])) or 0),
+                str(item.get('full_name', '')).lower()
+            )
+        )
+        return sorted_matches[:limit]
+    except Exception as e:
+        logger.debug('CardDAV contact search error: %s', e)
+        return []
+
+
+def resolve_email_contacts_for_prompt(prompt: str, username: str = None, limit: int = 5) -> Dict[str, Any]:
+    """Resolve likely recipient contacts for an email compose prompt."""
+    recipient_query = _extract_contact_query_from_email_prompt(prompt)
+    search_query = recipient_query or prompt
+    contacts = search_carddav_contacts(search_query, username=username, limit=limit)
+
+    email_candidates: List[str] = []
+    for contact in contacts:
+        for email_address in contact.get('email', []) or []:
+            email_address = str(email_address).strip()
+            if email_address and email_address not in email_candidates:
+                email_candidates.append(email_address)
+
+    best_email = email_candidates[0] if len(email_candidates) == 1 else ''
+    needs_selection = len(email_candidates) > 1
+
+    return {
+        'recipient_query': recipient_query,
+        'contacts': contacts,
+        'email_candidates': email_candidates,
+        'best_email': best_email,
+        'needs_selection': needs_selection,
+        'has_contact_match': bool(contacts)
+    }
+
+
 def get_email_client(username: str = None) -> Optional['EmailClient']:
     """Return a configured EmailClient for *username*, or None if not configured."""
     try:
@@ -5918,6 +6063,30 @@ def agent_query():
         has_question = any(word in message_lower.split()[:3] for word in question_words)
         is_potentially_calendar_query = has_time_indicators and has_question
         intent = detect_query_intent(prompt, preferred_source)
+
+        # If the user wants to draft an email and we found multiple contact emails,
+        # ask which one should be used before composing the draft.
+        if is_email_send_query(prompt):
+            recipient_resolution = resolve_email_contacts_for_prompt(prompt, username=username)
+            if recipient_resolution.get('has_contact_match') and recipient_resolution.get('needs_selection'):
+                contact_cards = recipient_resolution.get('contacts', [])
+                contact_title = recipient_resolution.get('recipient_query') or 'den Kontakt'
+                contact_card = _build_contact_card(prompt, contact_cards, language)
+
+                return jsonify({
+                    'success': True,
+                    'response': f'Ich habe mehrere E-Mail-Adressen für {contact_title} gefunden. Welche soll ich verwenden?',
+                    'action': 'email_recipient_selection',
+                    'requires_input': True,
+                    'recipient_query': recipient_resolution.get('recipient_query', ''),
+                    'contacts': contact_cards,
+                    'email_candidates': recipient_resolution.get('email_candidates', []),
+                    'sources': [],
+                    'ui_cards': [contact_card],
+                    'context_used': False,
+                    'context_count': 0,
+                    'training_saved': False
+                })
 
         # Interactive event creation: Let AI handle missing information naturally
         if is_calendar_create_query(prompt):
@@ -6383,7 +6552,7 @@ WICHTIG:
                 if email_cards:
                     source_cards.extend(email_cards)
 
-            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context, photo_context, email_context, nextcloud_search_context, language)
+            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context, photo_context, email_context, nextcloud_search_context, username, language)
 
             # No hard source limit: rely on relevance filtering in context gatherers.
 
