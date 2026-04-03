@@ -938,6 +938,17 @@ export default function HomePage() {
         .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
         .join('\n');
 
+      let emailConfig = null;
+      try {
+        const emailConfigRes = await fetch(`${API_BASE}/api/registry/email/config`);
+        const emailConfigData = await safeReadJson(emailConfigRes);
+        if (emailConfigRes.ok && emailConfigData?.success !== false) {
+          emailConfig = emailConfigData?.config || null;
+        }
+      } catch (err) {
+        console.error('Error loading email config for chat:', err);
+      }
+
       const res = await fetch(`${API_BASE}/api/agent/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -946,7 +957,9 @@ export default function HomePage() {
           prompt: text,
           language,
           preferred_source: source,
-          context: conversationContext
+          context: conversationContext,
+          email_config: emailConfig,
+          account_id: emailConfig?.active_account_id || emailConfig?.selected_account_id || emailConfig?.account_id || ''
         })
       });
       const data = await safeReadJson(res);

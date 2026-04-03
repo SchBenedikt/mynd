@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import html
 import requests
 import numpy as np
 from flask import Flask, request, jsonify, redirect, url_for, session, Response
@@ -53,6 +54,7 @@ from backend.core.context.gatherers import (
     gather_photo_context, gather_file_context, gather_weather_context,
     gather_security_context, gather_activity_context, gather_calendar_context,
     gather_todo_context, gather_nextcloud_search_context, gather_email_context,
+    _build_email_query_profile,
     combine_contexts,
     build_system_message as build_agent_system_message
 )
@@ -1931,6 +1933,21 @@ def _build_email_card(prompt: str, language: str = 'de') -> Dict[str, Any]:
     """Build an interactive email compose card for the frontend."""
     is_german = str(language or '').lower().startswith('de')
     draft = extract_email_send_info_from_message(prompt)
+    prompt_text = _normalize_lookup_text(prompt)
+    reply_like = any(keyword in prompt_text for keyword in ['antwort', 'antworte', 'antworten', 'reply', 'antwort schreiben'])
+
+    if reply_like:
+        if not str(draft.get('subject', '')).strip():
+            draft['subject'] = 'Re: Ihre Nachricht'
+        if not str(draft.get('body', '')).strip() or str(draft.get('body', '')).strip() == str(prompt or '').strip():
+            draft['body'] = (
+                'Sehr geehrte Damen und Herren,\n\n'
+                'vielen Dank für Ihre Information. Ich werde mir die Dokumente zeitnah ansehen.\n\n'
+                'Mit freundlichen Grüßen\n'
+                'Vinzenz Schächner'
+            )
+    elif not str(draft.get('body', '')).strip() or str(draft.get('body', '')).strip() == str(prompt or '').strip():
+        draft['body'] = ''
 
     return {
         'type': 'email',
@@ -1947,6 +1964,8 @@ def _build_email_card(prompt: str, language: str = 'de') -> Dict[str, Any]:
         'cc': draft.get('cc', ''),
         'bcc': draft.get('bcc', ''),
         'requires_confirmation': True,
+        'confirmation_text': 'Bitte bestätige den Versand manuell, bevor die Nachricht gesendet wird.' if is_german else 'Please confirm the send manually before the message is sent.',
+        'draft_kind': 'reply' if reply_like else 'compose',
         'quick_templates': [
             {'label': 'WEB.DE', 'preset': 'web.de'},
             {'label': 'GMX', 'preset': 'gmx.de'},
@@ -2004,6 +2023,53 @@ def _build_contact_card(prompt: str, contacts: List[Dict[str, Any]], language: s
         'query': prompt,
         'contacts': contact_items,
         'suggested_email_prompt': 'Schreibe eine E-Mail an {email}' if is_german else 'Compose an email to {email}'
+    }
+
+
+def _build_email_source_card(
+    subject: str,
+    sender: str,
+    date_str: str,
+    folder: str,
+    body_preview: str,
+    label: str = 'E-Mail'
+) -> Dict[str, Any]:
+    """Build a source-style card for a concrete email result."""
+    return {
+        'source_type': 'email',
+        'source': sender or label,
+        'document': subject or label,
+        'path': folder or 'INBOX',
+        'chunk_id': None,
+        'matched_sentence': body_preview[:240] if body_preview else subject,
+        'content_preview': body_preview[:600] if body_preview else subject,
+        'similarity_score': 0.95,
+        'subject': subject,
+        'sender': sender,
+        'date': date_str,
+        'folder': folder or 'INBOX'
+    }
+
+
+def _build_contact_source_card(contact: Dict[str, Any], label: str = 'Kontakt') -> Dict[str, Any]:
+    """Build a source-style card for a matched contact used in email compose/reply."""
+    title = str(contact.get('title', '')).strip() or str(contact.get('full_name', '')).strip() or label
+    emails: List[str] = []
+    for value in contact.get('email', []) or []:
+        email_value = str(value or '').strip()
+        if email_value and email_value not in emails:
+            emails.append(email_value)
+
+    return {
+        'source_type': 'email',
+        'source': title,
+        'document': emails[0] if emails else title,
+        'path': str(contact.get('addressbook_name') or contact.get('organization') or label),
+        'chunk_id': None,
+        'matched_sentence': str(contact.get('subline', '')).strip() or ', '.join(emails),
+        'content_preview': ', '.join(emails) if emails else str(contact.get('subline', '')).strip(),
+        'similarity_score': 0.8,
+        'contact': contact
     }
 
 
@@ -5657,7 +5723,7 @@ _EMAIL_KEYWORDS = [
 ]
 
 _EMAIL_SEND_KEYWORDS = [
-    'sende', 'schicke', 'verschicke', 'email schreiben', 'mail schreiben',
+    'sende', 'schicke', 'schick', 'verschicke', 'email schreiben', 'mail schreiben',
     'schreibe eine mail', 'schreibe eine e-mail', 'write email', 'send email',
     'compose email', 'verfasse', 'antworten', 'reply', 'weiterleiten', 'forward'
 ]
@@ -5678,6 +5744,7 @@ def is_email_send_query(prompt: str) -> bool:
     """Return True if the prompt is likely asking to draft or send an email."""
     prompt_lower = prompt.lower()
     if any(kw in prompt_lower for kw in _EMAIL_SEND_KEYWORDS):
+        r'\b(?:schick\w*|sende|send|reply|antworte|antwort\w*)\b.*\b(?:antwort\w*|reply|e-?mail|mail|nachricht)\b',
         return True
 
     flexible_patterns = [
@@ -5697,6 +5764,126 @@ def is_contact_query(prompt: str) -> bool:
     """Return True if the prompt is likely asking about contacts or an address book."""
     prompt_lower = prompt.lower()
     return any(kw in prompt_lower for kw in _CONTACT_KEYWORDS)
+
+
+def is_email_read_query(prompt: str) -> bool:
+    """Return True for inbox/list/search style email questions (not compose/send)."""
+    prompt_lower = (prompt or '').lower()
+    if not is_email_query(prompt) or is_email_send_query(prompt):
+        return False
+
+    return any(token in prompt_lower for token in [
+        'welche', 'zeige', 'liste', 'list', 'posteingang', 'inbox', 'ungelesen',
+        'heute', 'gestern', 'woche', 'month', 'monat', 'erhalten', 'eingegangen', 'angekommen'
+    ])
+
+
+def is_email_content_query(prompt: str) -> bool:
+    """Return True for prompts asking for email content/summary."""
+    prompt_lower = (prompt or '').lower()
+    if not is_email_query(prompt) or is_email_send_query(prompt):
+        return False
+
+    return any(token in prompt_lower for token in [
+        'was steht', 'inhalt', 'worum geht', 'zusammenfassen', 'zusammenfassung',
+        'was schreibt', 'was steht drin', 'was steht in', 'content'
+    ])
+
+
+def _extract_email_query_tokens(prompt: str) -> List[str]:
+    """Extract meaningful tokens for ranking a target email from a result list."""
+    text = _normalize_lookup_text(prompt)
+    stop_words = {
+        'was', 'steht', 'in', 'dem', 'der', 'die', 'das', 'den', 'heute', 'gestern', 'mail',
+        'email', 'e', 'von', 'ich', 'habe', 'bekommen', 'bitte', 'mir', 'zu', 'und', 'oder',
+        'worum', 'geht', 'inhalt', 'zusammenfassung', 'zusammenfassen', 'welche', 'zeige',
+        'posteingang', 'inbox', 'nachricht', 'nachrichten', 'ein', 'eine', 'einer'
+    }
+    tokens = [token for token in re.findall(r'[a-z0-9]+', text) if len(token) >= 3 and token not in stop_words]
+    # Preserve order while removing duplicates.
+    seen = set()
+    result: List[str] = []
+    for token in tokens:
+        if token not in seen:
+            seen.add(token)
+            result.append(token)
+    return result
+
+
+def _score_email_for_prompt(mail: Dict[str, Any], prompt: str) -> int:
+    """Score an email entry by how well it matches the user prompt."""
+    tokens = _extract_email_query_tokens(prompt)
+    sender = _normalize_lookup_text(mail.get('sender', ''))
+    subject = _normalize_lookup_text(mail.get('subject', ''))
+    body = _normalize_lookup_text((mail.get('body', '') or '')[:600])
+
+    score = 0
+    for token in tokens:
+        if token in sender:
+            score += 30
+        if token in subject:
+            score += 18
+        if token in body:
+            score += 5
+
+    prompt_lower = (prompt or '').lower()
+    date_str = str(mail.get('date') or '').lower()
+    if 'heute' in prompt_lower and datetime.now().strftime('%d %b').lower() in date_str:
+        score += 5
+    if 'gestern' in prompt_lower:
+        score += 2
+
+    return score
+
+
+def _email_body_to_text(body: str) -> str:
+    """Convert raw email body (plain text or HTML) into readable text."""
+    if not body:
+        return ''
+
+    text = str(body)
+    looks_like_html = '<html' in text.lower() or '<body' in text.lower() or '</' in text.lower()
+    if looks_like_html:
+        text = re.sub(r'(?is)<(script|style).*?>.*?</\1>', ' ', text)
+        text = re.sub(r'(?i)</?(br|p|div|li|tr|h1|h2|h3|h4|h5|h6)[^>]*>', '\n', text)
+        text = re.sub(r'(?is)<[^>]+>', ' ', text)
+
+    text = html.unescape(text)
+    text = text.replace('\r', '\n')
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'[ \t]{2,}', ' ', text)
+    return text.strip()
+
+
+def _build_email_content_summary(mail: Dict[str, Any], prompt: str) -> str:
+    """Build a concise content summary for a single email."""
+    subject = str(mail.get('subject') or '(kein Betreff)').strip()
+    sender = str(mail.get('sender') or '').strip()
+    date_str = str(mail.get('date') or '').strip()
+    body_text = _email_body_to_text(str(mail.get('body') or ''))
+
+    if not body_text:
+        return f"Ich habe die Mail gefunden ({subject}), aber keinen lesbaren Inhalt extrahieren können."
+
+    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', body_text) if len(s.strip()) >= 30]
+    preferred = [
+        s for s in sentences
+        if any(kw in s.lower() for kw in ['bewertung', 'bestellung', 'lass uns wissen', 'würden gerne wissen', 'feedback'])
+    ]
+
+    summary_sentences = preferred[:3] if preferred else sentences[:3]
+    summary_text = ' '.join(summary_sentences).strip()
+    if not summary_text:
+        summary_text = body_text[:600] + ('...' if len(body_text) > 600 else '')
+
+    header = f"In der Mail \"{subject}\""
+    if sender:
+        header += f" von {sender}"
+    if date_str:
+        header += f" ({date_str})"
+    header += " geht es um Folgendes:"
+
+    return f"{header}\n\n{summary_text}"
 
 
 def extract_email_send_info_from_message(message: str) -> Dict[str, Any]:
@@ -5765,6 +5952,55 @@ def _extract_contact_query_from_email_prompt(prompt: str) -> str:
                 return candidate
 
     return ''
+
+
+def _normalize_lookup_text(text: str) -> str:
+    """Normalize text for robust contact matching without umlaut sensitivity."""
+    value = str(text or '').lower().strip()
+    replacements = {
+        'ä': 'ae',
+        'ö': 'oe',
+        'ü': 'ue',
+        'ß': 'ss',
+    }
+    for source, target in replacements.items():
+        value = value.replace(source, target)
+    value = re.sub(r'[^a-z0-9\s@._-]+', ' ', value)
+    return ' '.join(value.split())
+
+
+def _score_contact_match(contact: Dict[str, Any], recipient_query: str) -> int:
+    """Score how well a contact fits the requested recipient name."""
+    query_norm = _normalize_lookup_text(recipient_query)
+    if not query_norm:
+        return 0
+
+    full_name = _normalize_lookup_text(contact.get('full_name', ''))
+    given_name = _normalize_lookup_text(contact.get('given_name', ''))
+    family_name = _normalize_lookup_text(contact.get('family_name', ''))
+    organization = _normalize_lookup_text(contact.get('organization', ''))
+    haystack = ' '.join([full_name, given_name, family_name, organization]).strip()
+
+    score = 0
+    if full_name == query_norm:
+        score += 100
+    if given_name and family_name and query_norm in [
+        f'{given_name} {family_name}'.strip(),
+        f'{family_name} {given_name}'.strip()
+    ]:
+        score += 95
+    if query_norm and query_norm in haystack:
+        score += 35
+
+    query_tokens = [token for token in query_norm.split() if len(token) >= 2]
+    for token in query_tokens:
+        if token in full_name:
+            score += 10
+        elif token in haystack:
+            score += 4
+
+    score += min(5, len(contact.get('email', []) or []))
+    return score
 
 
 def get_carddav_client(username: str = None) -> Optional['NextcloudCardDAVClient']:
@@ -5848,7 +6084,7 @@ def resolve_email_contacts_for_prompt(
     prompt: str,
     username: str = None,
     limit: int = 5,
-    timeout_seconds: float = 3.0
+    timeout_seconds: float = 8.0
 ) -> Dict[str, Any]:
     """Resolve likely recipient contacts for an email compose prompt."""
     recipient_query = _extract_contact_query_from_email_prompt(prompt)
@@ -5871,19 +6107,34 @@ def resolve_email_contacts_for_prompt(
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
+    scored_contacts: List[Dict[str, Any]] = sorted(
+        contacts,
+        key=lambda item: _score_contact_match(item, recipient_query),
+        reverse=True
+    )
+
     email_candidates: List[str] = []
-    for contact in contacts:
+    for contact in scored_contacts:
         for email_address in contact.get('email', []) or []:
             email_address = str(email_address).strip()
             if email_address and email_address not in email_candidates:
                 email_candidates.append(email_address)
 
-    best_email = email_candidates[0] if len(email_candidates) == 1 else ''
-    needs_selection = len(email_candidates) > 1
+    top_contact = scored_contacts[0] if scored_contacts else None
+    top_score = _score_contact_match(top_contact, recipient_query) if top_contact else 0
+
+    best_email = ''
+    if len(email_candidates) == 1:
+        best_email = email_candidates[0]
+    elif top_contact and (top_contact.get('email') or []):
+        # For clearly identified recipients, auto-pick the primary address.
+        best_email = str((top_contact.get('email') or [''])[0]).strip()
+
+    needs_selection = len(email_candidates) > 1 and not (best_email and top_score >= 45)
 
     return {
         'recipient_query': recipient_query,
-        'contacts': contacts,
+        'contacts': scored_contacts,
         'email_candidates': email_candidates,
         'best_email': best_email,
         'needs_selection': needs_selection,
@@ -6110,9 +6361,11 @@ def agent_query():
         data = request.get_json()
         prompt = data.get('prompt', '').strip()
         username = data.get('username')
+        account_id = data.get('account_id')
         language = data.get('language', 'de')
         context = data.get('context', '')  # Previous conversation context
         preferred_source = data.get('preferred_source', 'auto')
+        email_config = data.get('email_config') or data.get('emailConfig')
 
         if not prompt:
             return jsonify({
@@ -6124,6 +6377,19 @@ def agent_query():
         # potentially slow context gatherers (weather/security/activity).
         if is_email_send_query(prompt):
             recipient_resolution = resolve_email_contacts_for_prompt(prompt, username=username)
+            draft_card = _build_email_card(prompt, language)
+            draft_source = _build_email_source_card(
+                subject=str(draft_card.get('subject') or 'Neue Nachricht').strip(),
+                sender=str(draft_card.get('to') or recipient_resolution.get('recipient_query') or 'Entwurf').strip() or 'Entwurf',
+                date_str='',
+                folder='Entwurf',
+                body_preview=str(draft_card.get('body') or '').strip() or str(prompt or '').strip(),
+                label='E-Mail-Entwurf'
+            )
+            contact_sources = [
+                _build_contact_source_card(contact, 'Empfänger')
+                for contact in (recipient_resolution.get('contacts', []) or [])[:3]
+            ]
 
             if recipient_resolution.get('has_contact_match') and recipient_resolution.get('needs_selection'):
                 contact_cards = recipient_resolution.get('contacts', [])
@@ -6138,14 +6404,14 @@ def agent_query():
                     'recipient_query': recipient_resolution.get('recipient_query', ''),
                     'contacts': contact_cards,
                     'email_candidates': recipient_resolution.get('email_candidates', []),
-                    'sources': [],
+                    'sources': [draft_source, *contact_sources],
                     'ui_cards': [contact_card],
                     'context_used': False,
                     'context_count': 0,
                     'training_saved': False
                 })
 
-            email_card = _build_email_card(prompt, language)
+            email_card = draft_card
             cards = []
 
             if recipient_resolution.get('best_email') and not email_card.get('to'):
@@ -6171,8 +6437,138 @@ def agent_query():
                 'recipient_query': recipient_resolution.get('recipient_query', ''),
                 'contacts': recipient_resolution.get('contacts', []),
                 'email_candidates': recipient_resolution.get('email_candidates', []),
-                'sources': [],
+                'sources': [draft_source, *contact_sources],
                 'ui_cards': cards,
+                'context_used': False,
+                'context_count': 0,
+                'training_saved': False
+            })
+
+        # Fast path for email read/list queries to avoid slow mixed pipelines and
+        # ensure deterministic inbox answers.
+        if is_email_read_query(prompt):
+            email_client_instance = get_email_client(
+                username=username,
+                account_id=account_id,
+                config=email_config if isinstance(email_config, dict) else None
+            )
+            if not email_client_instance:
+                return jsonify({
+                    'success': False,
+                    'error': 'E-Mail ist nicht konfiguriert. Bitte hinterlege die IMAP-Zugangsdaten in den Einstellungen.'
+                }), 400
+
+            profile = _build_email_query_profile(prompt)
+            is_content_request = is_email_content_query(prompt)
+
+            if profile.get('mode') == 'general':
+                emails = email_client_instance.search_emails(prompt, limit=10)
+                prompt_norm = ' '.join((prompt or '').split()).strip().lower()
+                if not emails and ('heute' in prompt_norm or 'today' in prompt_norm) and any(
+                    token in prompt_norm for token in ['mail', 'e-mail', 'email', 'posteingang', 'inbox']
+                ):
+                    today = date.today()
+                    emails = email_client_instance.fetch_emails(
+                        limit=20,
+                        folder_focus='inbox',
+                        since=today,
+                        until=today,
+                        unread=None,
+                    )
+            else:
+                emails = email_client_instance.fetch_emails(
+                    limit=profile.get('limit', 10),
+                    folder_focus=profile.get('folder_focus', 'all'),
+                    since=profile.get('since'),
+                    until=profile.get('until'),
+                    unread=profile.get('unread'),
+                )
+
+                # If today's inbox is empty, retry across all folders to avoid
+                # false negatives caused by provider-specific inbox mapping.
+                if not emails and profile.get('mode') in ['today_received', 'today_content']:
+                    emails = email_client_instance.fetch_emails(
+                        limit=profile.get('limit', 10),
+                        folder_focus='all',
+                        since=profile.get('since'),
+                        until=profile.get('until'),
+                        unread=profile.get('unread'),
+                    )
+
+            if not emails:
+                return jsonify({
+                    'success': True,
+                    'response': 'Ich habe keine passenden E-Mails gefunden. Möchtest du, dass ich ohne Zeitfilter im gesamten Posteingang suche?',
+                    'action': 'email_list',
+                    'requires_input': False,
+                    'sources': [],
+                    'ui_cards': [],
+                    'context_used': False,
+                    'context_count': 0,
+                    'training_saved': False
+                })
+
+            if is_content_request:
+                target_mail = max(emails, key=lambda m: _score_email_for_prompt(m, prompt))
+                content_response = _build_email_content_summary(target_mail, prompt)
+                body_text = _email_body_to_text(str(target_mail.get('body') or ''))
+                preview = body_text[:300] + ('...' if len(body_text) > 300 else '')
+                email_source = _build_email_source_card(
+                    subject=str(target_mail.get('subject') or '(kein Betreff)').strip(),
+                    sender=str(target_mail.get('sender') or '').strip(),
+                    date_str=str(target_mail.get('date') or '').strip(),
+                    folder=str(target_mail.get('folder') or 'INBOX').strip(),
+                    body_preview=preview,
+                    label='E-Mail-Inhalt'
+                )
+
+                return jsonify({
+                    'success': True,
+                    'response': content_response,
+                    'action': 'email_content',
+                    'requires_input': False,
+                    'email_results': [{
+                        'subject': str(target_mail.get('subject') or '(kein Betreff)').strip(),
+                        'sender': str(target_mail.get('sender') or '').strip(),
+                        'date': str(target_mail.get('date') or '').strip(),
+                        'folder': str(target_mail.get('folder') or 'INBOX').strip(),
+                        'body_preview': preview,
+                        'uid': target_mail.get('uid')
+                    }],
+                    'sources': [email_source],
+                    'ui_cards': [],
+                    'context_used': False,
+                    'context_count': 0,
+                    'training_saved': False
+                })
+
+            preview_items = []
+            response_lines = [f"Ich habe {len(emails)} passende E-Mails gefunden:"]
+            for idx, mail in enumerate(emails[:10], 1):
+                subject = str(mail.get('subject') or '(kein Betreff)').strip()
+                sender = str(mail.get('sender') or '').strip()
+                date_str = str(mail.get('date') or '').strip()
+                folder = str(mail.get('folder') or 'INBOX').strip()
+                response_lines.append(f"{idx}. {subject}" + (f" - von {sender}" if sender else "") + (f" ({date_str})" if date_str else ""))
+
+                body = str(mail.get('body') or '').strip()
+                preview_items.append({
+                    'subject': subject,
+                    'sender': sender,
+                    'date': date_str,
+                    'folder': folder,
+                    'body_preview': (body[:300] + '...') if len(body) > 300 else body,
+                    'uid': mail.get('uid')
+                })
+
+            return jsonify({
+                'success': True,
+                'response': '\n'.join(response_lines),
+                'action': 'email_list',
+                'requires_input': False,
+                'email_results': preview_items,
+                'sources': [],
+                'ui_cards': [],
                 'context_used': False,
                 'context_count': 0,
                 'training_saved': False
