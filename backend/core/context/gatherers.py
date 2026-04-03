@@ -120,12 +120,17 @@ def _build_email_query_profile(prompt: str) -> Dict[str, Any]:
     """Map a natural-language email question to a structured retrieval profile."""
     text = _normalize_email_prompt(prompt)
     today = date.today()
+    yesterday = today - timedelta(days=1)
     current_week_start = today - timedelta(days=today.weekday())
     last_week_start = current_week_start - timedelta(days=7)
     last_week_end = current_week_start - timedelta(days=1)
 
     def has_any(phrases: List[str]) -> bool:
         return any(phrase in text for phrase in phrases)
+
+    email_terms_present = has_any([
+        'e-mail', 'email', 'mails', 'mail', 'posteingang', 'inbox', 'nachrichten'
+    ])
 
     last_sent = (
         has_any([
@@ -148,6 +153,13 @@ def _build_email_query_profile(prompt: str) -> Dict[str, Any]:
                 'angekommen', 'angekommenen', 'erhalten', 'eingegangen', 'eingetroffen',
                 'bekommen', 'neu angekommen', 'eingelaufen'
             ])
+        ) or (
+            # Catch natural formulations like: "welche e-mails habe ich von heute?"
+            email_terms_present and 'heute' in text and has_any([
+                'welche', 'welcher', 'welches', 'habe ich', 'gibt es', 'zeige', 'list', 'liste'
+            ])
+        ) or (
+            email_terms_present and 'von heute' in text
         )
     )
 
@@ -159,6 +171,18 @@ def _build_email_query_profile(prompt: str) -> Dict[str, Any]:
             'zusammenfassung der e-mails von heute', 'zusammenfassung der emails von heute'
         ]) or (
             'heute' in text and has_any(['inhalt', 'zusammenfasse', 'zusammenfassung', 'fasse zusammen'])
+        )
+    )
+
+    yesterday_or_recent = (
+        email_terms_present and (
+            'gestern' in text or 'yesterday' in text
+        )
+    )
+
+    yesterday_and_today = (
+        yesterday_or_recent and (
+            'heute' in text or 'today' in text or 'und heute' in text or 'and today' in text
         )
     )
 
@@ -202,6 +226,30 @@ def _build_email_query_profile(prompt: str) -> Dict[str, Any]:
             'limit': 20,
             'summary_mode': 'list',
             'label': 'heute erhaltene E-Mails'
+        }
+
+    if yesterday_and_today:
+        return {
+            'mode': 'yesterday_and_today',
+            'folder_focus': 'inbox',
+            'since': yesterday,
+            'until': today,
+            'unread': None,
+            'limit': 30,
+            'summary_mode': 'list',
+            'label': 'E-Mails von gestern und heute'
+        }
+
+    if yesterday_or_recent:
+        return {
+            'mode': 'yesterday_received',
+            'folder_focus': 'inbox',
+            'since': yesterday,
+            'until': yesterday,
+            'unread': None,
+            'limit': 20,
+            'summary_mode': 'list',
+            'label': 'E-Mails von gestern'
         }
 
     if unread_last_week:
@@ -621,6 +669,21 @@ def gather_email_context(email_client, prompt: str, limit: int = 10) -> Optional
             # Use search when the prompt contains meaningful keywords; fall back to
             # a general recent-email summary otherwise.
             emails = email_client.search_emails(prompt, limit=limit)
+
+            # Fallback: if a "today + email" query slipped into general mode,
+            # force an inbox date filter so today's messages are still returned.
+            prompt_norm = _normalize_email_prompt(prompt)
+            if not emails and ('heute' in prompt_norm or 'today' in prompt_norm) and any(
+                token in prompt_norm for token in ['mail', 'e-mail', 'email', 'posteingang', 'inbox']
+            ):
+                today = date.today()
+                emails = email_client.fetch_emails(
+                    limit=max(limit, 20),
+                    folder_focus='inbox',
+                    since=today,
+                    until=today,
+                    unread=None,
+                )
         else:
             emails = email_client.fetch_emails(
                 limit=profile.get('limit', limit),
@@ -651,6 +714,10 @@ def gather_email_context(email_client, prompt: str, limit: int = 10) -> Optional
             lines.append("Aufgabe: Liste die heute eingegangenen E-Mails kurz auf.")
         elif profile.get('mode') == 'today_content':
             lines.append("Aufgabe: Fasse die Inhalte der heutigen E-Mails zusammen.")
+        elif profile.get('mode') == 'yesterday_received':
+            lines.append("Aufgabe: Liste die gestern eingegangenen E-Mails kurz auf.")
+        elif profile.get('mode') == 'yesterday_and_today':
+            lines.append("Aufgabe: Liste die E-Mails von gestern und heute kurz auf.")
         elif profile.get('mode') == 'unread_last_week':
             lines.append("Aufgabe: Fasse die ungelesenen E-Mails von letzter Woche zusammen.")
         lines.append("")
