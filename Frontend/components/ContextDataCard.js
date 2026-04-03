@@ -54,6 +54,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
   const [emailBody, setEmailBody] = useState(card?.body || '');
   const [emailCc, setEmailCc] = useState(card?.cc || '');
   const [emailBcc, setEmailBcc] = useState(card?.bcc || '');
+  const [emailConfirmed, setEmailConfirmed] = useState(false);
   const [emailStatus, setEmailStatus] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -85,6 +86,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
     setEmailBody(card?.body || '');
     setEmailCc(card?.cc || '');
     setEmailBcc(card?.bcc || '');
+    setEmailConfirmed(false);
     setEmailStatus('');
   }, [card]);
 
@@ -350,6 +352,11 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
                     ? (card?.description || t('Kontakte auswählen und E-Mails vorbereiten.', 'Select contacts and prepare emails.'))
                   : `${payload?.count || 0} items`}
           </div>
+          {isEmail && card?.requires_confirmation && (
+            <div className="context-data-note" style={{marginTop: '0.5rem'}}>
+              {card?.confirmation_text || t('Bitte bestätige den Versand manuell, bevor die Nachricht gesendet wird.', 'Please confirm the send manually before the message is sent.')}
+            </div>
+          )}
         </div>
 
         {!isPhoto && !isEmail && !isContacts && (
@@ -456,8 +463,16 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
               style={{resize: 'vertical'}}
             />
           </div>
+          <label className="context-confirmation-row" style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
+            <input
+              type="checkbox"
+              checked={emailConfirmed}
+              onChange={(e) => setEmailConfirmed(e.target.checked)}
+            />
+            <span>{t('Ich bestätige den Versand dieser E-Mail.', 'I confirm sending this email.')}</span>
+          </label>
           <div className="button-group" style={{marginTop: '0.25rem'}}>
-            <button type="button" className="btn primary" onClick={sendEmail} disabled={loading || !emailTo.trim() || !emailBody.trim()}>
+            <button type="button" className="btn primary" onClick={sendEmail} disabled={loading || !emailConfirmed || !emailTo.trim() || !emailBody.trim()}>
               {loading ? t('Sende...', 'Sending...') : t('E-Mail senden', 'Send email')}
             </button>
           </div>

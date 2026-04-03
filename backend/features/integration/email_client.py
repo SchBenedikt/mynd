@@ -9,6 +9,11 @@ import logging
 import re
 import smtplib
 import ssl
+import sqlite3
+import json
+import os
+import time
+import hashlib
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from email.header import decode_header
@@ -18,6 +23,85 @@ from typing import Dict, Any, List, Optional
 from .api_registry import APIClient
 
 logger = logging.getLogger(__name__)
+
+
+class _EmailQueryCache:
+    """Small persistent SQLite cache for expensive email queries."""
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self.connection: Optional[sqlite3.Connection] = None
+        self._initialize()
+
+    def _initialize(self) -> None:
+        directory = os.path.dirname(self.db_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+
+        self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.connection.row_factory = sqlite3.Row
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_query_cache (
+                cache_key TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                expires_at REAL NOT NULL
+            )
+            """
+        )
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_query_cache_expires ON email_query_cache(expires_at)")
+        self.connection.commit()
+
+    @staticmethod
+    def _make_key(operation: str, payload: Dict[str, Any]) -> str:
+        encoded = json.dumps({'operation': operation, 'payload': payload}, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+    def get(self, operation: str, payload: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+        if not self.connection:
+            return None
+        self.cleanup_expired()
+        key = self._make_key(operation, payload)
+        cursor = self.connection.cursor()
+        cursor.execute(
+            "SELECT payload_json FROM email_query_cache WHERE cache_key = ? AND expires_at > ?",
+            (key, time.time())
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        try:
+            parsed = json.loads(row['payload_json'])
+        except Exception:
+            return None
+        if isinstance(parsed, list):
+            return [p for p in parsed if isinstance(p, dict)]
+        return None
+
+    def set(self, operation: str, payload: Dict[str, Any], result: List[Dict[str, Any]], ttl_seconds: int) -> None:
+        if not self.connection or ttl_seconds <= 0:
+            return
+        key = self._make_key(operation, payload)
+        now = time.time()
+        expires_at = now + ttl_seconds
+        cursor = self.connection.cursor()
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO email_query_cache (cache_key, payload_json, created_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (key, json.dumps(result, ensure_ascii=False), now, expires_at)
+        )
+        self.connection.commit()
+
+    def cleanup_expired(self) -> None:
+        if not self.connection:
+            return
+        cursor = self.connection.cursor()
+        cursor.execute("DELETE FROM email_query_cache WHERE expires_at <= ?", (time.time(),))
+        self.connection.commit()
 
 
 def _decode_header_value(value: str) -> str:
@@ -76,6 +160,8 @@ class EmailClient(APIClient):
     SCORING_BODY_LENGTH = 500
     # Characters of body included in the get_email_summary preview
     SUMMARY_PREVIEW_LENGTH = 300
+    # Keep cache short-lived so unread/date changes are reflected quickly
+    DEFAULT_QUERY_CACHE_TTL_SECONDS = 180
     # Helpful presets for common providers so users do not need to enter every server manually
     PROVIDER_PRESETS = {
         'custom': {},
@@ -181,8 +267,23 @@ class EmailClient(APIClient):
         self.folders = [f.strip() for f in raw_folders.split(',') if f.strip() and f.strip().upper() not in ('ALL', '*')]
         self.max_emails = int(runtime_config.get('max_emails', self.DEFAULT_MAX_EMAILS))
 
+        cache_db_path = str(runtime_config.get('cache_db_path') or os.path.join('data', 'cache', 'email_query_cache.db')).strip()
+        self.query_cache_ttl_seconds = int(runtime_config.get('query_cache_ttl_seconds') or self.DEFAULT_QUERY_CACHE_TTL_SECONDS)
+        self.query_cache_enabled = str(runtime_config.get('query_cache_enabled', 'true')).lower() not in ('false', '0', 'no')
+        self._query_cache = _EmailQueryCache(cache_db_path) if self.query_cache_enabled else None
+
         if not self.imap_host or not self.username or not self.password:
             raise ValueError("imap_host, username and password are required for EmailClient")
+
+    @staticmethod
+    def _serialize_email_for_cache(mail: Dict[str, Any]) -> Dict[str, Any]:
+        serialized = dict(mail)
+        parsed = serialized.get('_parsed_date')
+        if isinstance(parsed, datetime):
+            serialized['_parsed_date'] = parsed.isoformat()
+        elif parsed is None:
+            serialized.pop('_parsed_date', None)
+        return serialized
 
     def _resolve_runtime_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve single-account runtime settings from a potentially multi-account config."""
@@ -364,10 +465,28 @@ class EmailClient(APIClient):
         """Fetch emails with optional folder, date and unread filters."""
         conn = None
         emails: List[Dict[str, Any]] = []
+        final_limit = max(1, int(limit or 1))
+
+        normalized_folders = self._dedupe_preserve_order(folders or [])
+        cache_payload = {
+            'account': self.active_account_id or self.username,
+            'limit': final_limit,
+            'folder_focus': str(folder_focus or 'all'),
+            'folders': normalized_folders,
+            'days_back': int(days_back) if days_back is not None else None,
+            'since': since.isoformat() if isinstance(since, datetime) else str(since) if since is not None else None,
+            'until': until.isoformat() if isinstance(until, datetime) else str(until) if until is not None else None,
+            'unread': unread,
+        }
+
+        if self._query_cache and self.query_cache_ttl_seconds > 0:
+            cached = self._query_cache.get('fetch_emails', cache_payload)
+            if cached is not None:
+                return cached[:final_limit]
+
         try:
             conn = self._connect()
-            target_folders = self._select_target_folders(folder_focus=folder_focus, folders=folders)
-            final_limit = max(1, int(limit or 1))
+            target_folders = self._select_target_folders(folder_focus=folder_focus, folders=normalized_folders)
             per_folder_limit = max(final_limit, 20)
 
             if days_back is not None and since is None and until is None:
@@ -441,7 +560,15 @@ class EmailClient(APIClient):
                     logger.warning("Failed to fetch emails from folder '%s': %s", folder, e)
 
             emails.sort(key=self._mail_sort_key, reverse=True)
-            return emails[:final_limit]
+            result = emails[:final_limit]
+            if self._query_cache and self.query_cache_ttl_seconds > 0:
+                self._query_cache.set(
+                    'fetch_emails',
+                    cache_payload,
+                    [self._serialize_email_for_cache(mail) for mail in result],
+                    self.query_cache_ttl_seconds
+                )
+            return result
 
         except imaplib.IMAP4.error as e:
             logger.error("IMAP error fetching emails: %s", e)
@@ -455,7 +582,15 @@ class EmailClient(APIClient):
                     pass
 
         emails.sort(key=self._mail_sort_key, reverse=True)
-        return emails[:max(1, int(limit or 1))]
+        result = emails[:final_limit]
+        if self._query_cache and self.query_cache_ttl_seconds > 0 and result:
+            self._query_cache.set(
+                'fetch_emails',
+                cache_payload,
+                [self._serialize_email_for_cache(mail) for mail in result],
+                self.query_cache_ttl_seconds
+            )
+        return result
 
     # ------------------------------------------------------------------
     # APIClient interface
@@ -690,9 +825,25 @@ class EmailClient(APIClient):
 
         Fetches recent emails and filters by *query* keywords.
         """
-        all_emails = self.fetch_emails(limit=max(limit * 4, self.max_emails), folder_focus='all')
+        safe_limit = max(1, int(limit or 1))
+        fetch_limit = max(safe_limit * 4, self.max_emails)
+        query_text = str(query or '').strip()
+
+        cache_payload = {
+            'account': self.active_account_id or self.username,
+            'query': query_text.lower(),
+            'limit': safe_limit,
+            'fetch_limit': fetch_limit,
+        }
+
+        if self._query_cache and self.query_cache_ttl_seconds > 0:
+            cached = self._query_cache.get('search_emails', cache_payload)
+            if cached is not None:
+                return cached[:safe_limit]
+
+        all_emails = self.fetch_emails(limit=fetch_limit, folder_focus='all')
         if not all_emails or not query.strip():
-            return all_emails[:limit]
+            return all_emails[:safe_limit]
 
         query_lower = query.lower()
         keywords = [w.lower() for w in re.findall(r'\w+', query_lower) if len(w) > 2]
@@ -713,7 +864,15 @@ class EmailClient(APIClient):
         if not matched:
             matched = [m for m, _ in scored]
 
-        return matched[:limit]
+        result = matched[:safe_limit]
+        if self._query_cache and self.query_cache_ttl_seconds > 0:
+            self._query_cache.set(
+                'search_emails',
+                cache_payload,
+                [self._serialize_email_for_cache(mail) for mail in result],
+                self.query_cache_ttl_seconds
+            )
+        return result
 
     def get_email_summary(self, max_emails: int = 20) -> Dict[str, Any]:
         """
