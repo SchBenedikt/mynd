@@ -16,6 +16,7 @@ const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
 const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
 const LOCATION_AUTO_RESOLVE_KEY = 'mynd_location_auto_resolve_v1';
+const BRIEFING_SEEN_KEY = 'mynd_seen_briefings_v1';
 
 const LANGUAGE_COMMANDS = {
   de: ['deutsch', 'german'],
@@ -160,6 +161,7 @@ export default function HomePage() {
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
   const [securityStatus, setSecurityStatus] = useState(null);
   const [securityLoading, setSecurityLoading] = useState(false);
+  const [proactiveBriefings, setProactiveBriefings] = useState([]);
   const [displayName, setDisplayName] = useState('');
   const [, setGreetingTick] = useState(0);
   
@@ -465,15 +467,50 @@ export default function HomePage() {
     loadOllamaModels();
     updateStatus();
     loadSecurityStatus();
+    loadProactiveBriefings();
     autoResolveLocationOnOpen();
     
     const statusInterval = setInterval(updateStatus, 8000);
     const securityInterval = setInterval(loadSecurityStatus, 60000);
+    const briefingInterval = setInterval(loadProactiveBriefings, 10 * 60 * 1000);
     return () => {
       clearInterval(statusInterval);
       clearInterval(securityInterval);
+      clearInterval(briefingInterval);
     };
   }, []);
+
+  useEffect(() => {
+    if (!activeChatId || !proactiveBriefings.length) return;
+
+    let seen = [];
+    try {
+      seen = JSON.parse(localStorage.getItem(BRIEFING_SEEN_KEY) || '[]');
+      if (!Array.isArray(seen)) seen = [];
+    } catch {
+      seen = [];
+    }
+
+    const unseen = proactiveBriefings.filter((item) => item?.key && !seen.includes(item.key));
+    if (!unseen.length) return;
+
+    unseen.forEach((item) => {
+      appendMessageToChat(activeChatId, {
+        role: 'assistant',
+        content: `## ${item.title || 'Briefing'}\n\n${item.content || ''}`,
+        id: createMessageId(),
+        sources: [],
+        uiCards: []
+      });
+    });
+
+    try {
+      const nextSeen = [...new Set([...seen, ...unseen.map((item) => item.key)])];
+      localStorage.setItem(BRIEFING_SEEN_KEY, JSON.stringify(nextSeen));
+    } catch (err) {
+      console.error('Could not persist seen briefings:', err);
+    }
+  }, [activeChatId, proactiveBriefings]);
 
   const autoResolveLocationOnOpen = async () => {
     if (typeof window === 'undefined' || !navigator.geolocation) {
@@ -772,6 +809,20 @@ export default function HomePage() {
       });
     } finally {
       setSecurityLoading(false);
+    }
+  };
+
+  const loadProactiveBriefings = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/assistant/briefing/current`);
+      const data = await safeReadJson(res);
+      if (!res.ok || data?.success === false) {
+        return;
+      }
+      const items = Array.isArray(data?.items) ? data.items : [];
+      setProactiveBriefings(items.filter((item) => item?.content));
+    } catch (err) {
+      console.error('Could not load proactive briefings:', err);
     }
   };
 
@@ -2006,6 +2057,29 @@ export default function HomePage() {
                 ))}
               </ul>
             )}
+          </div>
+        )}
+
+        {proactiveBriefings.length > 0 && (
+          <div className="security-banner" style={{marginTop: '0.5rem'}}>
+            <div className="security-banner-header">
+              <div className="security-banner-title">
+                <i className="fas fa-sun"></i>
+                <span>{proactiveBriefings[0]?.title || 'Tagesbriefing'}</span>
+              </div>
+              <button
+                type="button"
+                className="security-refresh"
+                onClick={() => loadProactiveBriefings()}
+                title="Briefing aktualisieren"
+              >
+                Aktualisieren
+              </button>
+            </div>
+            <div style={{whiteSpace: 'pre-line', color: 'var(--text-secondary)', fontSize: '0.92rem'}}>
+              {(proactiveBriefings[0]?.content || '').slice(0, 360)}
+              {(proactiveBriefings[0]?.content || '').length > 360 ? '...' : ''}
+            </div>
           </div>
         )}
 
