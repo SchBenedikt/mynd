@@ -17,7 +17,6 @@ const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
 const LOCATION_AUTO_RESOLVE_KEY = 'mynd_location_auto_resolve_v1';
 const BRIEFING_SEEN_KEY = 'mynd_seen_briefings_v1';
-const VOICE_SELECTION_STORAGE_KEY = 'mynd_voice_selection_v1';
 
 const SPEECH_LANG_MAP = {
   de: 'de-DE',
@@ -196,6 +195,7 @@ export default function HomePage() {
   const [voiceError, setVoiceError] = useState('');
   const [speechCapabilities, setSpeechCapabilities] = useState({ input: false, output: false });
   const [selectedVoiceUri, setSelectedVoiceUri] = useState('');
+  const [ttsProvider, setTtsProvider] = useState('browser');
   
   const [aiProtocol, setAiProtocol] = useState('http');
   const [aiHost, setAiHost] = useState('127.0.0.1');
@@ -286,6 +286,7 @@ export default function HomePage() {
   const progressIntervalRef = useRef(null);
   const requestAbortRef = useRef(null);
   const speechRecognitionRef = useRef(null);
+  const activeAudioRef = useRef(null);
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -615,11 +616,6 @@ export default function HomePage() {
         setDisplayName(rawDisplayName);
       }
 
-      const storedVoiceSelection = localStorage.getItem(VOICE_SELECTION_STORAGE_KEY);
-      if (storedVoiceSelection) {
-        setSelectedVoiceUri(storedVoiceSelection);
-      }
-
       const rawChats = localStorage.getItem(CHAT_STORAGE_KEY);
       const rawActiveChatId = localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
       const rawSidebarCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
@@ -670,14 +666,6 @@ export default function HomePage() {
       console.error('Error saving sidebar state:', err);
     }
   }, [isSidebarCollapsed]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(VOICE_SELECTION_STORAGE_KEY, selectedVoiceUri || '');
-    } catch (err) {
-      console.error('Error saving voice selection:', err);
-    }
-  }, [selectedVoiceUri]);
 
   useEffect(() => {
     if (!photoPreview.open) return undefined;
@@ -791,6 +779,8 @@ export default function HomePage() {
       setAiHost(url.hostname);
       setAiPort(url.port || '11434');
       setAiModel(config.model);
+      setTtsProvider(String(config.tts_provider || 'browser').toLowerCase() === 'gemini' ? 'gemini' : 'browser');
+      setSelectedVoiceUri(String(config.browser_tts_voice_uri || ''));
       setAiStatus('Loaded');
     } catch (err) {
       setAiStatus('Error loading config');
@@ -1215,48 +1205,123 @@ export default function HomePage() {
   };
 
   const speakAssistantText = (text) => {
-    if (!speechSynthesisSupported) return;
     const prepared = cleanTextForSpeech(text).slice(0, 1100);
     if (!prepared) return;
 
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new window.SpeechSynthesisUtterance(prepared);
-      const locale = resolveSpeechLocale(language);
-      utterance.lang = locale;
-      utterance.rate = 1;
-      utterance.pitch = 1;
-
-      const browserVoices = window.speechSynthesis.getVoices();
-      const selectedVoice = selectedVoiceUri
-        ? browserVoices.find((voice) => voice.voiceURI === selectedVoiceUri)
-        : null;
-      const matchingVoice = selectedVoice
-        || browserVoices.find((voice) => voice.lang?.toLowerCase().startsWith(language.toLowerCase()))
-        || browserVoices.find((voice) => voice.lang?.toLowerCase().startsWith(locale.slice(0, 2).toLowerCase()));
-
-      if (matchingVoice) {
-        utterance.voice = matchingVoice;
+    const stopAudioPlayback = () => {
+      const activeAudio = activeAudioRef.current;
+      if (activeAudio) {
+        try {
+          activeAudio.pause();
+        } catch (_) {
+          // ignore pause errors from stale audio instances
+        }
+        activeAudioRef.current = null;
       }
+    };
 
-      utterance.onstart = () => {
-        setIsSpeaking(true);
-      };
+    const speakWithBrowser = () => {
+      if (!speechSynthesisSupported) return;
 
-      utterance.onend = () => {
+      try {
+        stopAudioPlayback();
+        window.speechSynthesis.cancel();
+        const utterance = new window.SpeechSynthesisUtterance(prepared);
+        const locale = resolveSpeechLocale(language);
+        utterance.lang = locale;
+        utterance.rate = 1;
+        utterance.pitch = 1;
+
+        const browserVoices = window.speechSynthesis.getVoices();
+        const selectedVoice = selectedVoiceUri
+          ? browserVoices.find((voice) => voice.voiceURI === selectedVoiceUri)
+          : null;
+        const matchingVoice = selectedVoice
+          || browserVoices.find((voice) => voice.lang?.toLowerCase().startsWith(language.toLowerCase()))
+          || browserVoices.find((voice) => voice.lang?.toLowerCase().startsWith(locale.slice(0, 2).toLowerCase()));
+
+        if (matchingVoice) {
+          utterance.voice = matchingVoice;
+        }
+
+        utterance.onstart = () => {
+          setIsSpeaking(true);
+        };
+
+        utterance.onend = () => {
+          setIsSpeaking(false);
+        };
+
+        utterance.onerror = () => {
+          setIsSpeaking(false);
+          setVoiceError(language === 'de' ? 'Sprachausgabe fehlgeschlagen.' : 'Text-to-speech failed.');
+        };
+
+        window.speechSynthesis.speak(utterance);
+      } catch (err) {
         setIsSpeaking(false);
-      };
+        setVoiceError(language === 'de' ? 'Sprachausgabe nicht verfuegbar.' : 'Text-to-speech is unavailable.');
+      }
+    };
 
-      utterance.onerror = () => {
-        setIsSpeaking(false);
-        setVoiceError(language === 'de' ? 'Sprachausgabe fehlgeschlagen.' : 'Text-to-speech failed.');
-      };
+    const speakWithGemini = async () => {
+      try {
+        stopAudioPlayback();
+        if (speechSynthesisSupported) {
+          window.speechSynthesis.cancel();
+        }
 
-      window.speechSynthesis.speak(utterance);
-    } catch (err) {
-      setIsSpeaking(false);
-      setVoiceError(language === 'de' ? 'Sprachausgabe nicht verfuegbar.' : 'Text-to-speech is unavailable.');
+        const response = await fetch(`${API_BASE}/api/tts/synthesize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: prepared,
+            language_code: resolveSpeechLocale(language)
+          })
+        });
+        const data = await safeReadJson(response);
+
+        if (!response.ok || data?.success === false || !data?.audio_base64) {
+          throw new Error(data?.error || `Gemini TTS request failed (${response.status})`);
+        }
+
+        const mimeType = data?.mime_type || 'audio/mpeg';
+        const audio = new Audio(`data:${mimeType};base64,${data.audio_base64}`);
+        activeAudioRef.current = audio;
+
+        audio.onplay = () => {
+          setIsSpeaking(true);
+          setVoiceError('');
+        };
+        audio.onended = () => {
+          setIsSpeaking(false);
+          if (activeAudioRef.current === audio) {
+            activeAudioRef.current = null;
+          }
+        };
+        audio.onerror = () => {
+          setIsSpeaking(false);
+          if (activeAudioRef.current === audio) {
+            activeAudioRef.current = null;
+          }
+          setVoiceError(language === 'de' ? 'Gemini-Audio konnte nicht abgespielt werden.' : 'Gemini audio playback failed.');
+        };
+
+        await audio.play();
+      } catch (err) {
+        setVoiceError(language === 'de'
+          ? `Gemini-TTS Fehler: ${err.message}. Fallback auf Browser-Stimme.`
+          : `Gemini TTS error: ${err.message}. Falling back to browser voice.`);
+        speakWithBrowser();
+      }
+    };
+
+    if (ttsProvider === 'gemini') {
+      speakWithGemini();
+      return;
     }
+
+    speakWithBrowser();
   };
 
   const startVoiceInput = () => {
@@ -1333,11 +1398,19 @@ export default function HomePage() {
         speechRecognitionRef.current.stop();
         speechRecognitionRef.current = null;
       }
+      if (activeAudioRef.current) {
+        try {
+          activeAudioRef.current.pause();
+        } catch (_) {
+          // ignore pause errors from stale audio instances
+        }
+        activeAudioRef.current = null;
+      }
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
     };
-  }, []);
+  }, [speechSynthesisSupported]);
 
   const parseBackendDateTimeToInput = (value) => {
     if (!value || typeof value !== 'string') return '';
