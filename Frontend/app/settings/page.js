@@ -183,6 +183,10 @@ export default function SettingsPage() {
   const [immichUrlDefault, setImmichUrlDefault] = useState('');
   const [immichApiKeyDefault, setImmichApiKeyDefault] = useState('');
   const [immichStatus, setImmichStatus] = useState('');
+  const [briefingDailyEnabled, setBriefingDailyEnabled] = useState(true);
+  const [briefingWeeklyEnabled, setBriefingWeeklyEnabled] = useState(true);
+  const [briefingMorningHour, setBriefingMorningHour] = useState(7);
+  const [briefingStatus, setBriefingStatus] = useState('');
   
   const [indexingProgress, setIndexingProgress] = useState(0);
   const [indexingStatus, setIndexingStatus] = useState('idle');
@@ -555,6 +559,9 @@ export default function SettingsPage() {
       if (res.ok && data?.success && data?.config) {
         setImmichUrlDefault(data.config.immich_url_default || '');
         setImmichApiKeyDefault(data.config.immich_api_key_default || '');
+        setBriefingDailyEnabled(Boolean(data.config.briefing_daily_enabled ?? true));
+        setBriefingWeeklyEnabled(Boolean(data.config.briefing_weekly_enabled ?? true));
+        setBriefingMorningHour(Number.isFinite(Number(data.config.briefing_morning_hour)) ? Number(data.config.briefing_morning_hour) : 7);
         setImmichStatus(tr('Geladen', 'Loaded'));
       } else {
         setImmichStatus(tr('Fehler beim Laden der Immich-Konfiguration', 'Error loading Immich config'));
@@ -586,6 +593,31 @@ export default function SettingsPage() {
     } catch (err) {
       setImmichStatus('Error: ' + err.message);
       loadApiHealth();
+    }
+  };
+
+  const saveBriefingConfig = async () => {
+    try {
+      const safeHour = Math.max(0, Math.min(23, Number(briefingMorningHour) || 7));
+      const res = await fetch(`${API_BASE}/api/ui/system-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          briefing_daily_enabled: briefingDailyEnabled,
+          briefing_weekly_enabled: briefingWeeklyEnabled,
+          briefing_morning_hour: safeHour
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setBriefingMorningHour(safeHour);
+        setBriefingStatus(tr('Briefing-Einstellungen gespeichert', 'Briefing settings saved'));
+      } else {
+        setBriefingStatus(`Error: ${data?.error || tr('Briefing-Einstellungen konnten nicht gespeichert werden', 'Could not save briefing settings')}`);
+      }
+    } catch (err) {
+      setBriefingStatus('Error: ' + err.message);
     }
   };
 
@@ -1353,6 +1385,51 @@ export default function SettingsPage() {
                     <button className="btn" onClick={loadCalendarOptions}>{tr('Kalender neu laden', 'Reload calendars')}</button>
                   </div>
                   {calendarConfigStatus && <div className="status-text">{calendarConfigStatus}</div>}
+                </div>
+
+                <div className="panel-section" style={{marginTop: '2rem'}}>
+                  <div className="section-title">Proaktives Briefing</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                    {tr('Automatisches Briefing jeden Morgen sowie optional montags zum Wochenstart.', 'Automatic briefing every morning with optional Monday weekly kickoff.')}
+                  </p>
+
+                  <div className="input-group">
+                    <label>{tr('Tagesbriefing aktiv', 'Daily briefing enabled')}</label>
+                    <select
+                      value={briefingDailyEnabled ? 'true' : 'false'}
+                      onChange={(e) => setBriefingDailyEnabled(e.target.value === 'true')}
+                    >
+                      <option value="true">{tr('Ja', 'Yes')}</option>
+                      <option value="false">{tr('Nein', 'No')}</option>
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Wochenstart-Briefing (Montag) aktiv', 'Weekly kickoff briefing (Monday) enabled')}</label>
+                    <select
+                      value={briefingWeeklyEnabled ? 'true' : 'false'}
+                      onChange={(e) => setBriefingWeeklyEnabled(e.target.value === 'true')}
+                    >
+                      <option value="true">{tr('Ja', 'Yes')}</option>
+                      <option value="false">{tr('Nein', 'No')}</option>
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Uhrzeit für Morgenbriefing (0-23)', 'Morning briefing hour (0-23)')}</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="23"
+                      value={briefingMorningHour}
+                      onChange={(e) => setBriefingMorningHour(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="button-group">
+                    <button className="btn primary" onClick={saveBriefingConfig}>{tr('Briefing speichern', 'Save briefing')}</button>
+                  </div>
+                  {briefingStatus && <div className="status-text">{briefingStatus}</div>}
                 </div>
               </div>
             )}
