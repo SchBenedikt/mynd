@@ -211,6 +211,8 @@ pids
 *.pid
 *.seed
 *.pid.lock
+data/assistant_briefings.json
+data/cache/
 
 # Coverage directory used by tools like istanbul
 coverage/
