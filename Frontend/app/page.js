@@ -165,13 +165,6 @@ const cleanTextForSpeech = (value) => String(value || '')
   .replace(/\s+/g, ' ')
   .trim();
 
-const formatVoiceLabel = (voice) => {
-  const name = String(voice?.name || '').trim();
-  const lang = String(voice?.lang || '').trim();
-  if (name && lang) return `${name} (${lang})`;
-  return name || lang || 'Systemstimme';
-};
-
 export default function HomePage() {
   const router = useRouter();
   const {
@@ -202,7 +195,6 @@ export default function HomePage() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceError, setVoiceError] = useState('');
   const [speechCapabilities, setSpeechCapabilities] = useState({ input: false, output: false });
-  const [availableVoices, setAvailableVoices] = useState([]);
   const [selectedVoiceUri, setSelectedVoiceUri] = useState('');
   
   const [aiProtocol, setAiProtocol] = useState('http');
@@ -511,25 +503,6 @@ export default function HomePage() {
       input: 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window,
       output: 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance !== 'undefined'
     });
-
-    if (!('speechSynthesis' in window)) return;
-
-    const updateVoices = () => {
-      const voices = window.speechSynthesis.getVoices();
-      const normalized = voices.map((voice) => ({
-        voiceURI: voice.voiceURI,
-        name: voice.name,
-        lang: voice.lang,
-        default: voice.default
-      }));
-      setAvailableVoices(normalized);
-    };
-
-    updateVoices();
-    window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
-    return () => {
-      window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
-    };
   }, []);
 
   useEffect(() => {
@@ -2100,7 +2073,6 @@ export default function HomePage() {
 
   const canSend = inputValue.trim().length > 0;
   const queueReady = isThinking && canSend;
-  const showVoiceSelector = speechSynthesisSupported && availableVoices.length > 0;
   const voiceStatusText = (() => {
     if (voiceError) return voiceError;
     if (isListening) return language === 'de' ? 'Voice: Ich hoere zu...' : 'Voice: Listening...';
@@ -2320,21 +2292,6 @@ export default function HomePage() {
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && sendMessage(e.target.value)}
               />
-              {showVoiceSelector && (
-                <select
-                  className="voice-select"
-                  value={selectedVoiceUri}
-                  onChange={(event) => setSelectedVoiceUri(event.target.value)}
-                  title={language === 'de' ? 'Stimme auswaehlen' : 'Select voice'}
-                >
-                  <option value="">{language === 'de' ? 'Auto-Stimme' : 'Auto voice'}</option>
-                  {availableVoices.map((voice) => (
-                    <option key={voice.voiceURI} value={voice.voiceURI}>
-                      {formatVoiceLabel(voice)}
-                    </option>
-                  ))}
-                </select>
-              )}
               <button
                 type="button"
                 className={`voice-btn ${isListening ? 'listening' : ''}`}
@@ -2839,21 +2796,6 @@ export default function HomePage() {
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && !e.ctrlKey && sendMessage(e.target.value)}
                 />
-                {showVoiceSelector && (
-                  <select
-                    className="voice-select"
-                    value={selectedVoiceUri}
-                    onChange={(event) => setSelectedVoiceUri(event.target.value)}
-                    title={language === 'de' ? 'Stimme auswaehlen' : 'Select voice'}
-                  >
-                    <option value="">{language === 'de' ? 'Auto-Stimme' : 'Auto voice'}</option>
-                    {availableVoices.map((voice) => (
-                      <option key={voice.voiceURI} value={voice.voiceURI}>
-                        {formatVoiceLabel(voice)}
-                      </option>
-                    ))}
-                  </select>
-                )}
                 <button
                   type="button"
                   className={`voice-btn ${isListening ? 'listening' : ''}`}
