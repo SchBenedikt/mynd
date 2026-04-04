@@ -213,6 +213,7 @@ pids
 *.pid.lock
 data/assistant_briefings.json
 data/cache/
+data/knowledge_graph.json
 
 # Coverage directory used by tools like istanbul
 coverage/
