@@ -191,6 +191,49 @@ def _calendar_events_for_week(limit: int = 12) -> List[Dict[str, Any]]:
         return []
 
 
+def _is_manual_briefing_query(prompt: str) -> bool:
+    """Detect if user asks explicitly for a manual day/week briefing."""
+    text = str(prompt or '').strip().lower()
+    if not text:
+        return False
+
+    briefing_keywords = [
+        'briefing', 'tagesbriefing', 'morgenbriefing', 'wochenbriefing', 'wochenstart',
+        'tageszusammenfassung', 'wochenzusammenfassung', 'status update',
+        'was steht heute an', 'was ist heute wichtig', 'gib mir ein update',
+        'daily summary', 'weekly summary', 'morning update'
+    ]
+    return any(keyword in text for keyword in briefing_keywords)
+
+
+def _requested_briefing_kind(prompt: str) -> str:
+    """Infer requested briefing kind from prompt."""
+    text = str(prompt or '').strip().lower()
+    weekly_markers = ['woche', 'wochen', 'wochenstart', 'weekly', 'kw']
+    if any(marker in text for marker in weekly_markers):
+        return 'weekly'
+    return 'daily'
+
+
+def _briefing_top_tasks(tasks: List[Dict[str, Any]], today: date, limit: int = 3) -> List[Dict[str, Any]]:
+    """Rank tasks for briefing output: overdue first, then due today, then due soon."""
+    ranked = []
+    for task in tasks:
+        due = _parse_task_due_date(task.get('due_date'))
+        if due is None:
+            priority_key = 3
+        elif due < today:
+            priority_key = 0
+        elif due == today:
+            priority_key = 1
+        else:
+            priority_key = 2
+        ranked.append((priority_key, due or date.max, task))
+
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in ranked[:limit]]
+
+
 def _build_daily_briefing() -> Dict[str, Any]:
     """Build the daily morning briefing payload."""
     today = date.today()
@@ -226,31 +269,69 @@ def _build_daily_briefing() -> Dict[str, Any]:
     except Exception as exc:
         logger.debug('Could not load emails for daily briefing: %s', exc)
 
+    warning_count = int(security.get('nina_warning_count') or 0)
+    top_tasks = _briefing_top_tasks(tasks, today=today, limit=3)
+
     lines = [
-        f"Guten Morgen. Hier ist dein Briefing für {today.strftime('%d.%m.%Y')}:",
+        f"Guten Morgen. Heute ist der {today.strftime('%d.%m.%Y')}.",
         "",
+        "Kurzüberblick:",
+        f"• Du hast aktuell {len(tasks)} offene Aufgaben. Davon sind {overdue} überfällig und {due_today} heute fällig.",
+        f"• Für heute stehen {len(calendar_events)} Termine im Kalender.",
+        f"• Es gibt {len(email_results)} relevante E-Mails aus dem Posteingang.",
         f"• Wetter: {weather.get('summary') or 'Nicht verfügbar.'}",
-        f"• Sicherheitslage: {security.get('headline') or 'Keine Daten.'}",
-        f"• Aufgaben: {len(tasks)} offen ({overdue} überfällig, {due_today} heute fällig).",
-        f"• Termine heute: {len(calendar_events)}",
-        f"• Neue E-Mails heute: {len(email_results)}",
+        f"• Sicherheitslage: {security.get('headline') or 'Keine Daten.'}" + (f" ({warning_count} Warnungen)" if warning_count > 0 else ""),
         "",
     ]
 
+    if top_tasks:
+        lines.append("Wichtige Aufgaben:")
+        for idx, task in enumerate(top_tasks, 1):
+            title = str(task.get('title') or 'Aufgabe').strip()
+            due = _parse_task_due_date(task.get('due_date'))
+            if due is None:
+                due_text = 'ohne Fälligkeitsdatum'
+            elif due < today:
+                due_text = f"überfällig seit {due.strftime('%d.%m.%Y')}"
+            elif due == today:
+                due_text = "heute fällig"
+            else:
+                due_text = f"fällig am {due.strftime('%d.%m.%Y')}"
+            lines.append(f"{idx}. {title} ({due_text})")
+        lines.append("")
+
     if calendar_events:
-        lines.append("Top-Termine heute:")
-        for idx, event in enumerate(calendar_events[:3], 1):
+        lines.append("Termine heute:")
+        for idx, event in enumerate(calendar_events[:4], 1):
             title = str(event.get('summary') or event.get('title') or 'Termin').strip()
             start = str(event.get('start') or '').strip()
-            lines.append(f"{idx}. {title}" + (f" ({start})" if start else ""))
+            location = str(event.get('location') or '').strip()
+            line = f"{idx}. {title}"
+            if start:
+                line += f" um {start}"
+            if location:
+                line += f" ({location})"
+            lines.append(line)
         lines.append("")
 
     if email_results:
-        lines.append("Wichtige neue Mails:")
-        for idx, mail in enumerate(email_results[:3], 1):
+        lines.append("Relevante E-Mails:")
+        for idx, mail in enumerate(email_results[:4], 1):
             subject = str(mail.get('subject') or '(kein Betreff)').strip()
             sender = str(mail.get('sender') or '').strip()
-            lines.append(f"{idx}. {subject}" + (f" — {sender}" if sender else ""))
+            date_str = str(mail.get('date') or '').strip()
+            line = f"{idx}. {subject}"
+            if sender:
+                line += f" von {sender}"
+            if date_str:
+                line += f" ({date_str})"
+            lines.append(line)
+
+    lines.extend([
+        "",
+        "Empfehlung für den Start:",
+        "Beginne mit den überfälligen Aufgaben, plane dann die heute fälligen Tasks vor dem ersten Termin ein und prüfe anschließend die wichtigsten E-Mails."
+    ])
 
     return {
         'kind': 'daily',
@@ -290,20 +371,43 @@ def _build_weekly_briefing() -> Dict[str, Any]:
             due_this_week += 1
 
     lines = [
-        f"Wochenstart-Briefing (KW {week_no}) für {week_start.strftime('%d.%m.')} bis {week_end.strftime('%d.%m.%Y')}.",
+        f"Wochenstart-Briefing für KW {week_no} ({week_start.strftime('%d.%m.')} bis {week_end.strftime('%d.%m.%Y')}).",
         "",
-        f"• Termine diese Woche: {len(week_events)}",
-        f"• Aufgaben mit Fälligkeit diese Woche: {due_this_week}",
-        f"• Überfällige Aufgaben: {overdue}",
+        "Wochenüberblick:",
+        f"• In dieser Woche sind {len(week_events)} Termine geplant.",
+        f"• {due_this_week} Aufgaben sind diese Woche fällig.",
+        f"• {overdue} Aufgaben sind bereits überfällig.",
         "",
     ]
 
+    if tasks:
+        top_tasks = _briefing_top_tasks(tasks, today=today, limit=5)
+        lines.append("Fokus-Aufgaben für diese Woche:")
+        for idx, task in enumerate(top_tasks, 1):
+            title = str(task.get('title') or 'Aufgabe').strip()
+            due = _parse_task_due_date(task.get('due_date'))
+            due_text = f"fällig {due.strftime('%d.%m.%Y')}" if due else "ohne Fälligkeitsdatum"
+            lines.append(f"{idx}. {title} ({due_text})")
+        lines.append("")
+
     if week_events:
-        lines.append("Wichtige Termine:")
-        for idx, event in enumerate(week_events[:5], 1):
+        lines.append("Wichtige Termine der Woche:")
+        for idx, event in enumerate(week_events[:6], 1):
             title = str(event.get('summary') or event.get('title') or 'Termin').strip()
             start = str(event.get('start') or '').strip()
-            lines.append(f"{idx}. {title}" + (f" ({start})" if start else ""))
+            location = str(event.get('location') or '').strip()
+            line = f"{idx}. {title}"
+            if start:
+                line += f" ({start})"
+            if location:
+                line += f" - {location}"
+            lines.append(line)
+
+    lines.extend([
+        "",
+        "Vorschlag für die Wochenplanung:",
+        "Blocke zuerst Zeitfenster für überfällige und diese Woche fällige Aufgaben und richte deine Arbeit um die fixen Termine herum aus."
+    ])
 
     return {
         'kind': 'weekly',
@@ -384,16 +488,9 @@ def start_briefing_scheduler() -> None:
 def _collect_calendar_data() -> List[Dict[str, Any]]:
     """Collect calendar events for knowledge graph."""
     try:
-        calendar_manager = create_simple_calendar_manager()
-        if not calendar_manager:
-            return []
-        
-        today = date.today()
-        start = today - timedelta(days=30)
-        end = today + timedelta(days=30)
-        
-        events = calendar_manager.get_events_for_period(start, end)
-        return events if events else []
+        # Reuse the existing robust helper path used by briefings.
+        events = _calendar_events_for_week(limit=80)
+        return [event for event in events if isinstance(event, dict)]
     except Exception as e:
         logger.debug(f"Error collecting calendar data: {e}")
         return []
@@ -402,27 +499,29 @@ def _collect_calendar_data() -> List[Dict[str, Any]]:
 def _collect_email_data() -> List[Dict[str, Any]]:
     """Collect emails for knowledge graph."""
     try:
-        email_client = EmailClient()
-        if not email_client.is_connected:
-            email_client.connect()
-        
-        # Fetch recent emails (last 7 days)
+        email_client = get_email_client()
+        if not email_client:
+            return []
+
         emails = email_client.fetch_emails(
             folders=['INBOX'],
             limit=50,
             days_back=7
-        )
-        
-        return [
-            {
-                'from': email.get('from', ''),
-                'to': email.get('to', []),
-                'subject': email.get('subject', ''),
-                'attachments': email.get('attachments', []),
-                'date': email.get('date', '')
-            }
-            for email in (emails if emails else [])
-        ]
+        ) or []
+
+        normalized = []
+        for email in emails:
+            recipients_raw = str(email.get('recipients') or '').strip()
+            recipients = [r.strip() for r in re.split(r'[;,]', recipients_raw) if r.strip()]
+            normalized.append({
+                'from': str(email.get('sender') or '').strip(),
+                'to': recipients,
+                'subject': str(email.get('subject') or '').strip(),
+                'attachments': [],
+                'date': str(email.get('date') or '').strip()
+            })
+
+        return normalized
     except Exception as e:
         logger.debug(f"Error collecting email data: {e}")
         return []
@@ -431,10 +530,12 @@ def _collect_email_data() -> List[Dict[str, Any]]:
 def _collect_task_data() -> List[Dict[str, Any]]:
     """Collect tasks/todos for knowledge graph."""
     try:
-        from backend.features.tasks.manager import task_manager
-        
-        all_tasks = task_manager.get_all_tasks()
-        
+        all_tasks = task_manager.get_tasks(use_cache=True) or []
+        if not all_tasks:
+            # Fallback to existing task context helper.
+            todo_data = get_todo_data('diese woche')
+            all_tasks = todo_data.get('tasks', []) or []
+
         return [
             {
                 'title': task.get('title', ''),
@@ -454,26 +555,47 @@ def _collect_task_data() -> List[Dict[str, Any]]:
 def _collect_document_data() -> List[Dict[str, Any]]:
     """Collect documents from Nextcloud for knowledge graph."""
     try:
-        nextcloud_client = NextcloudClient()
-        if not nextcloud_client.is_connected:
-            return []
-        
-        # Get files from home directory
-        files = nextcloud_client.list_files('/')
-        if not files:
-            return []
-        
-        documents = []
-        for file_entry in files:
-            if isinstance(file_entry, dict):
-                documents.append({
-                    'name': file_entry.get('name', ''),
-                    'path': file_entry.get('path', ''),
-                    'size': file_entry.get('size', 0),
-                    'mime_type': file_entry.get('mime_type', ''),
-                    'modified': file_entry.get('modified', '')
-                })
-        
+        documents: List[Dict[str, Any]] = []
+
+        # 1) Local knowledge base files are always available in this app.
+        for source in getattr(knowledge_base, 'document_sources', []) or []:
+            if not isinstance(source, dict):
+                continue
+            file_name = str(source.get('file') or source.get('path') or '').strip()
+            if not file_name:
+                continue
+            documents.append({
+                'name': os.path.basename(file_name),
+                'path': file_name,
+                'size': int(source.get('size', 0) or 0),
+                'mime_type': str(source.get('type') or ''),
+                'modified': ''
+            })
+
+        # 2) Nextcloud files if runtime config is available.
+        nc_cfg = get_nextcloud_runtime_config()
+        if all(nc_cfg.get(k) for k in ('url', 'username', 'password')):
+            try:
+                nextcloud_client = NextcloudClient(
+                    nc_cfg['url'],
+                    nc_cfg['username'],
+                    nc_cfg['password']
+                )
+                if nextcloud_client.test_connection():
+                    files = nextcloud_client.list_files('/') or []
+                    for file_entry in files:
+                        if not isinstance(file_entry, dict):
+                            continue
+                        documents.append({
+                            'name': file_entry.get('name', ''),
+                            'path': file_entry.get('path', ''),
+                            'size': file_entry.get('size', 0),
+                            'mime_type': file_entry.get('mime_type', ''),
+                            'modified': file_entry.get('modified', '')
+                        })
+            except Exception as nc_exc:
+                logger.debug(f"Error collecting nextcloud documents: {nc_exc}")
+
         return documents
     except Exception as e:
         logger.debug(f"Error collecting document data: {e}")
@@ -531,10 +653,12 @@ def get_knowledge_graph_data():
     try:
         # Optionally force update
         force_refresh = request.args.get('refresh', 'false').lower() == 'true'
-        if force_refresh:
-            _update_knowledge_graph()
-        
         graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
+
+        if force_refresh or not graph.nodes:
+            _update_knowledge_graph()
+            graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
+
         graph_data = graph.get_graph_data()
         
         return jsonify({
@@ -2620,7 +2744,7 @@ def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo
     """Return structured ui_cards metadata for frontend interactive cards."""
     cards: List[Dict] = []
 
-    if calendar_ctx and (intent in ['calendar', 'mixed'] or should_use_calendar(prompt)):
+    if calendar_ctx and not is_weather_query(prompt) and (intent in ['calendar', 'mixed'] or should_use_calendar(prompt)):
         cfg = _infer_calendar_card_config(prompt)
         cards.append({
             'type': 'calendar',
@@ -2629,7 +2753,7 @@ def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo
             'anchor_date': cfg['date']
         })
 
-    if todo_ctx and (intent in ['tasks', 'mixed'] or should_use_tasks(prompt) or is_todo_query(prompt)):
+    if todo_ctx and not is_weather_query(prompt) and (intent in ['tasks', 'mixed'] or should_use_tasks(prompt) or is_todo_query(prompt)):
         cfg = _infer_task_card_config(prompt)
         cards.append({
             'type': 'tasks',
@@ -2701,6 +2825,23 @@ def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo
         contact_results = [result for result in search_results if str(result.get('provider', '')).lower() == 'contacts']
         if contact_results and not any(card.get('type') == 'contacts' for card in cards):
             cards.append(_build_contact_card(prompt, contact_results, language))
+
+    if is_weather_query(prompt):
+        weather = get_local_weather_status()
+        cards.append({
+            'type': 'weather',
+            'title': 'Wetter' if str(language).lower().startswith('de') else 'Weather',
+            'subtitle': weather.get('location_name') or ('Dein Standort' if str(language).lower().startswith('de') else 'Your location'),
+            'description': weather.get('description') or '',
+            'summary': weather.get('summary') or '',
+            'temperature_display': weather.get('temperature_display') or '',
+            'icon': weather.get('icon') or 'sun',
+            'hourly_preview': weather.get('hourly_preview') or '',
+            'daily_preview': weather.get('daily_preview') or '',
+            'forecast_days': weather.get('forecast_days') or [],
+            'status': weather.get('status') or 'ok',
+            'success': bool(weather.get('success'))
+        })
 
     return cards
 
@@ -5362,6 +5503,154 @@ def _format_temperature(value: Any, units: str) -> str:
     return f"{round(temp)}°C"
 
 
+def _load_weather_from_wttr(location_name: str = '', lat: Any = None, lon: Any = None) -> Optional[Dict[str, Any]]:
+    """Load weather from wttr.in as API-key-free fallback."""
+    query = _safe_text(location_name)
+    if not query and lat is not None and lon is not None:
+        query = f"{lat},{lon}"
+    if not query:
+        query = 'auto:ip'
+
+    try:
+        resp = requests.get(f"https://wttr.in/{query}", params={'format': 'j1'}, timeout=8)
+        if resp.status_code != 200:
+            return None
+
+        payload = resp.json() if resp.content else {}
+        current_list = payload.get('current_condition') if isinstance(payload, dict) else []
+        current = current_list[0] if isinstance(current_list, list) and current_list else {}
+        if not isinstance(current, dict) or not current:
+            return None
+
+        desc_entries = current.get('weatherDesc') if isinstance(current.get('weatherDesc'), list) else []
+        description = _safe_text((desc_entries[0] or {}).get('value') if desc_entries else '')
+        weather_code = current.get('weatherCode')
+
+        icon = 'sun'
+        try:
+            code_num = int(weather_code)
+            if code_num in {176, 179, 182, 185, 200, 227, 230, 248, 260, 263, 266, 281, 284, 293, 296, 299, 302, 305, 308, 311, 314, 317, 320, 323, 326, 329, 332, 335, 338, 350, 353, 356, 359, 362, 365, 368, 371, 374, 377, 386, 389, 392, 395}:
+                icon = 'rain'
+            elif code_num in {116, 119, 122, 143}:
+                icon = 'cloud'
+        except (TypeError, ValueError):
+            if any(token in description.lower() for token in ['rain', 'drizzle', 'storm', 'snow']):
+                icon = 'rain'
+            elif any(token in description.lower() for token in ['cloud', 'fog', 'mist', 'haze']):
+                icon = 'cloud'
+
+        nearest = payload.get('nearest_area') if isinstance(payload, dict) else []
+        area_name = ''
+        if isinstance(nearest, list) and nearest and isinstance(nearest[0], dict):
+            names = nearest[0].get('areaName') if isinstance(nearest[0].get('areaName'), list) else []
+            if names and isinstance(names[0], dict):
+                area_name = _safe_text(names[0].get('value'))
+
+        temp_c = current.get('temp_C')
+        feels_c = current.get('FeelsLikeC')
+        wind_kmph = current.get('windspeedKmph')
+        humidity = current.get('humidity')
+
+        hourly_preview = ''
+        weather_days = payload.get('weather') if isinstance(payload, dict) else []
+        if isinstance(weather_days, list) and weather_days and isinstance(weather_days[0], dict):
+            hourly = weather_days[0].get('hourly') if isinstance(weather_days[0].get('hourly'), list) else []
+            if hourly and isinstance(hourly[0], dict):
+                chance_rain = hourly[0].get('chanceofrain')
+                if chance_rain is not None:
+                    hourly_preview = f"Regenwahrscheinlichkeit aktuell etwa {chance_rain}%."
+
+        daily_preview = ''
+        forecast_days = []
+        if isinstance(weather_days, list) and len(weather_days) > 1 and isinstance(weather_days[1], dict):
+            t_min = weather_days[1].get('mintempC')
+            t_max = weather_days[1].get('maxtempC')
+            if t_min is not None and t_max is not None:
+                daily_preview = f"Morgen voraussichtlich zwischen {t_min}°C und {t_max}°C."
+
+        if isinstance(weather_days, list):
+            for day in weather_days[:6]:
+                if not isinstance(day, dict):
+                    continue
+
+                day_date = None
+                try:
+                    if day.get('date'):
+                        day_date = datetime.strptime(str(day.get('date')), '%Y-%m-%d').date()
+                except Exception:
+                    day_date = None
+
+                hourly_items = day.get('hourly') if isinstance(day.get('hourly'), list) else []
+                representative = hourly_items[4] if len(hourly_items) > 4 and isinstance(hourly_items[4], dict) else (hourly_items[0] if hourly_items and isinstance(hourly_items[0], dict) else {})
+                desc_items = representative.get('weatherDesc') if isinstance(representative.get('weatherDesc'), list) else []
+                day_desc = _safe_text((desc_items[0] or {}).get('value') if desc_items else '')
+
+                icon_for_day = 'sun'
+                if any(token in day_desc.lower() for token in ['rain', 'drizzle', 'storm', 'snow']):
+                    icon_for_day = 'rain'
+                elif any(token in day_desc.lower() for token in ['cloud', 'fog', 'mist', 'haze', 'overcast']):
+                    icon_for_day = 'cloud'
+
+                pop_percent = None
+                try:
+                    if representative.get('chanceofrain') is not None:
+                        pop_percent = int(representative.get('chanceofrain'))
+                except (TypeError, ValueError):
+                    pop_percent = None
+
+                forecast_days.append({
+                    'date': day_date.isoformat() if day_date else '',
+                    'label': day_date.strftime('%a') if day_date else '',
+                    'temp_min_display': f"{day.get('mintempC')}°C" if day.get('mintempC') not in (None, '') else '',
+                    'temp_max_display': f"{day.get('maxtempC')}°C" if day.get('maxtempC') not in (None, '') else '',
+                    'description': day_desc,
+                    'icon': icon_for_day,
+                    'pop_percent': pop_percent,
+                })
+
+        parts = []
+        if temp_c is not None:
+            parts.append(f"Aktuell {temp_c}°C")
+        if description:
+            parts.append(description.lower())
+        if area_name or query:
+            parts.append(f"in {area_name or query}")
+        if feels_c is not None:
+            parts.append(f"(gefühlt {feels_c}°C)")
+        if wind_kmph is not None:
+            parts.append(f"Wind {wind_kmph} km/h")
+        if humidity is not None:
+            parts.append(f"Luftfeuchte {humidity}%")
+
+        summary = ', '.join([p for p in parts if p]).strip(', ')
+        if hourly_preview:
+            summary = f"{summary}. {hourly_preview}" if summary else hourly_preview
+        if daily_preview:
+            summary = f"{summary} {daily_preview}" if summary else daily_preview
+
+        return {
+            'success': True,
+            'configured': True,
+            'status': 'ok',
+            'location_name': area_name or location_name,
+            'lat': lat,
+            'lon': lon,
+            'temperature': float(temp_c) if temp_c not in (None, '') else None,
+            'temperature_display': f"{temp_c}°C" if temp_c not in (None, '') else '',
+            'description': description,
+            'icon': icon,
+            'alerts': [],
+            'alerts_count': 0,
+            'hourly_preview': hourly_preview,
+            'daily_preview': daily_preview,
+            'summary': summary or 'Wetterdaten von wttr.in verfügbar.',
+            'forecast_days': forecast_days
+        }
+    except Exception as exc:
+        logger.debug('wttr.in fallback failed: %s', exc)
+        return None
+
+
 def get_local_weather_status() -> Dict[str, Any]:
     """Collect local weather and forecast from OpenWeather for configured coordinates."""
     result = {
@@ -5379,13 +5668,16 @@ def get_local_weather_status() -> Dict[str, Any]:
         'alerts_count': 0,
         'hourly_preview': '',
         'daily_preview': '',
-        'summary': ''
+        'summary': '',
+        'forecast_days': []
     }
 
     try:
         registry = get_api_registry()
         config = registry.load_config('openweather')
         result['location_name'] = _safe_text(config.get('location_name'))
+        result['lat'] = config.get('lat')
+        result['lon'] = config.get('lon')
 
         client = registry.create_api_instance('openweather')
         if not client:
@@ -5421,6 +5713,40 @@ def get_local_weather_status() -> Dict[str, Any]:
                 result['hourly_preview'] = f"In der nächsten Stunde etwa {next_hour_temp}{pop_text}."
 
         daily = payload.get('daily') if isinstance(payload, dict) else []
+        forecast_days = []
+        if isinstance(daily, list):
+            for day in daily[:6]:
+                if not isinstance(day, dict):
+                    continue
+
+                day_weather_entries = day.get('weather') if isinstance(day.get('weather'), list) else []
+                day_weather = day_weather_entries[0] if day_weather_entries else {}
+
+                day_date = None
+                try:
+                    if day.get('dt') is not None:
+                        day_date = datetime.fromtimestamp(int(day.get('dt'))).date()
+                except Exception:
+                    day_date = None
+
+                temp_block = day.get('temp') if isinstance(day.get('temp'), dict) else {}
+                pop_percent = None
+                try:
+                    if day.get('pop') is not None:
+                        pop_percent = max(0, min(100, int(round(float(day.get('pop')) * 100))))
+                except (TypeError, ValueError):
+                    pop_percent = None
+
+                forecast_days.append({
+                    'date': day_date.isoformat() if day_date else '',
+                    'label': day_date.strftime('%a') if day_date else '',
+                    'temp_min_display': _format_temperature(temp_block.get('min'), client.units),
+                    'temp_max_display': _format_temperature(temp_block.get('max'), client.units),
+                    'description': _safe_text(day_weather.get('description') or day_weather.get('main')),
+                    'icon': _classify_weather_icon(day_weather.get('id'), day_weather.get('main')),
+                    'pop_percent': pop_percent,
+                })
+        result['forecast_days'] = forecast_days
         if isinstance(daily, list) and len(daily) > 1 and isinstance(daily[1], dict):
             tomorrow = daily[1]
             temp_block = tomorrow.get('temp') if isinstance(tomorrow.get('temp'), dict) else {}
@@ -5465,6 +5791,16 @@ def get_local_weather_status() -> Dict[str, Any]:
 
     except Exception as exc:
         logger.warning('OpenWeather status failed: %s', exc)
+
+        # Fallback without API key using wttr.in
+        fallback = _load_weather_from_wttr(
+            location_name=result.get('location_name', ''),
+            lat=result.get('lat'),
+            lon=result.get('lon')
+        )
+        if fallback:
+            return fallback
+
         result['status'] = 'error'
         result['summary'] = f"Wetter konnte nicht geladen werden: {str(exc)}"
         return result
@@ -6925,6 +7261,27 @@ def agent_query():
                 'error': 'Keine Anfrage erhalten'
             }), 400
 
+        # Fast path: manual briefing request from chat.
+        if _is_manual_briefing_query(prompt):
+            kind = _requested_briefing_kind(prompt)
+            force_refresh = True
+
+            item = generate_proactive_briefing(kind=kind, force=force_refresh)
+            response_text = item.get('content') or 'Ich konnte gerade kein Briefing erstellen.'
+
+            return jsonify({
+                'success': True,
+                'response': response_text,
+                'action': 'manual_briefing',
+                'requires_input': False,
+                'briefing': item,
+                'sources': [],
+                'ui_cards': [],
+                'context_used': False,
+                'context_count': 0,
+                'training_saved': False
+            })
+
         # Fast path for compose/send email requests before running other
         # potentially slow context gatherers (weather/security/activity).
         if is_email_send_query(prompt):
@@ -7713,6 +8070,98 @@ WICHTIG:
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/chat/summarize', methods=['POST'])
+def summarize_chat():
+    """Create a robust summary for a provided chat transcript."""
+    try:
+        data = request.get_json() or {}
+        messages = data.get('messages') or []
+        language = str(data.get('language') or 'de').strip().lower()
+        title = str(data.get('title') or '').strip()
+
+        if not isinstance(messages, list):
+            return jsonify({'success': False, 'error': 'Ungültiges Nachrichtenformat.'}), 400
+
+        filtered: List[Dict[str, str]] = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            role = str(msg.get('role') or '').strip().lower()
+            if role not in ('user', 'assistant'):
+                continue
+            content = str(msg.get('content') or '').strip()
+            if not content:
+                continue
+            # Keep payload bounded but informative.
+            filtered.append({'role': role, 'content': content[:3000]})
+
+        if not filtered:
+            return jsonify({'success': False, 'error': 'Keine Inhalte zum Zusammenfassen gefunden.'}), 400
+
+        # Keep recent context with a soft cap for model stability.
+        filtered = filtered[-120:]
+
+        transcript_lines = []
+        for idx, msg in enumerate(filtered, 1):
+            prefix = 'Nutzer' if msg['role'] == 'user' else 'Assistent'
+            transcript_lines.append(f"{idx}. {prefix}: {msg['content']}")
+
+        transcript = '\n'.join(transcript_lines)
+
+        is_german = language.startswith('de')
+        heading_kernidee = 'Kernidee' if is_german else 'Core Idea'
+        heading_decisions = 'Wichtige Entscheidungen' if is_german else 'Key Decisions'
+        heading_open = 'Offene Punkte' if is_german else 'Open Questions'
+        heading_next = 'Naechste sinnvolle Schritte' if is_german else 'Next Practical Steps'
+
+        system_prompt = (
+            "Du bist ein präziser Zusammenfassungs-Assistent. "
+            "Erstelle nur eine kompakte, korrekte Chat-Zusammenfassung aus dem gegebenen Verlauf. "
+            "Keine Halluzinationen, keine neuen Fakten."
+        )
+
+        user_prompt = '\n'.join([
+            f"Chat-Titel: {title or 'Unbenannter Chat'}",
+            "",
+            "Aufgabe:",
+            "Fasse den Verlauf strukturiert zusammen.",
+            "Nutze exakt diese Markdown-Struktur:",
+            f"## {heading_kernidee}",
+            f"## {heading_decisions}",
+            f"## {heading_open}",
+            f"## {heading_next}",
+            "",
+            "Regeln:",
+            "- Nur Inhalte aus dem Chat verwenden.",
+            "- Kurz, konkret, umsetzbar.",
+            "- Wenn ein Abschnitt keine Inhalte hat, schreibe 'Keine.'",
+            "",
+            "Verlauf:",
+            transcript,
+        ])
+
+        response = ollama_client.chat([
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_prompt},
+        ], context=[])
+
+        if 'error' in response:
+            return jsonify({'success': False, 'error': response.get('error') or 'Zusammenfassung fehlgeschlagen.'}), 500
+
+        summary_text = str(response.get('message', {}).get('content') or '').strip()
+        if not summary_text:
+            return jsonify({'success': False, 'error': 'Leere Zusammenfassung erhalten.'}), 500
+
+        return jsonify({
+            'success': True,
+            'summary': summary_text,
+            'message_count': len(filtered)
+        })
+    except Exception as e:
+        logger.error(f"Chat summary error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/suggestions/query', methods=['POST'])
 def get_query_suggestions():
