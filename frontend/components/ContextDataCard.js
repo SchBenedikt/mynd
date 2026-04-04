@@ -56,6 +56,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
   const [emailBcc, setEmailBcc] = useState(card?.bcc || '');
   const [emailConfirmed, setEmailConfirmed] = useState(false);
   const [emailStatus, setEmailStatus] = useState('');
+  const [weatherIndex, setWeatherIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [payload, setPayload] = useState(null);
@@ -68,6 +69,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
   const isPhoto = type === 'photos';
   const isEmail = type === 'email';
   const isContacts = type === 'contacts';
+  const isWeather = type === 'weather';
   const photoItems = card?.photos || [];
   const photoPersonOptions = card?.people_options || [];
   const photoDateOptions = card?.date_options || [];
@@ -88,6 +90,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
     setEmailBcc(card?.bcc || '');
     setEmailConfirmed(false);
     setEmailStatus('');
+    setWeatherIndex(0);
   }, [card]);
 
   const fetchUrl = useMemo(() => {
@@ -101,7 +104,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
   }, [isCalendar, calendarView, taskScope, anchorDate]);
 
   useEffect(() => {
-    if (isPhoto) {
+    if (isPhoto || isWeather) {
       return undefined;
     }
 
@@ -138,7 +141,11 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
     return () => {
       cancelled = true;
     };
-  }, [fetchUrl, isPhoto]);
+  }, [fetchUrl, isPhoto, isWeather]);
+
+  const weatherDays = Array.isArray(card?.forecast_days) ? card.forecast_days : [];
+  const safeWeatherIndex = weatherDays.length > 0 ? Math.max(0, Math.min(weatherIndex, weatherDays.length - 1)) : 0;
+  const activeWeatherDay = weatherDays[safeWeatherIndex] || null;
 
   const buildPhotoQuery = ({ person = photoPerson, datePhrase = photoDatePhrase, isoDate = photoDate } = {}) => {
     const parts = ['Zeig mir Fotos'];
@@ -323,6 +330,10 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
       return 'compact';
     }
 
+    if (isWeather) {
+      return 'medium';
+    }
+
     if (isCalendar) {
       if (calendarView === 'day' && calendarItems.length <= 3) return 'compact';
       if (calendarView === 'week' || calendarView === 'month' || calendarItems.length >= 8) return 'wide';
@@ -332,14 +343,14 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
     if (taskScope === 'today' && taskItems.length <= 4) return 'compact';
     if (taskScope === 'all' || taskItems.length >= 10) return 'wide';
     return 'medium';
-  }, [isPhoto, isEmail, isContacts, photoItems.length, isCalendar, calendarView, calendarItems.length, taskScope, taskItems.length]);
+  }, [isPhoto, isEmail, isContacts, isWeather, photoItems.length, isCalendar, calendarView, calendarItems.length, taskScope, taskItems.length]);
 
   return (
     <div className={`context-data-card context-data-card--${widthVariant}`}>
       <div className="context-data-head">
         <div className="context-data-title-wrap">
           <div className="context-data-title">
-            {isPhoto ? (card?.title || t('Fotos', 'Photos')) : (isCalendar ? t('Kalenderübersicht', 'Calendar Overview') : isEmail ? (card?.title || t('E-Mail verfassen', 'Compose email')) : isContacts ? (card?.title || t('Kontakte', 'Contacts')) : t('Aufgabenübersicht', 'Task Overview'))}
+            {isPhoto ? (card?.title || t('Fotos', 'Photos')) : (isCalendar ? t('Kalenderübersicht', 'Calendar Overview') : isEmail ? (card?.title || t('E-Mail verfassen', 'Compose email')) : isContacts ? (card?.title || t('Kontakte', 'Contacts')) : isWeather ? (card?.title || t('Wetter', 'Weather')) : t('Aufgabenübersicht', 'Task Overview'))}
           </div>
           <div className="context-data-subtitle">
             {isPhoto
@@ -350,7 +361,9 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
                   ? emailDescription
                   : isContacts
                     ? (card?.description || t('Kontakte auswählen und E-Mails vorbereiten.', 'Select contacts and prepare emails.'))
-                  : `${payload?.count || 0} items`}
+                  : isWeather
+                    ? (card?.subtitle || t('Lokales Wetter', 'Local weather'))
+                    : `${payload?.count || 0} items`}
           </div>
           {isEmail && card?.requires_confirmation && (
             <div className="context-data-note" style={{marginTop: '0.5rem'}}>
@@ -359,7 +372,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
           )}
         </div>
 
-        {!isPhoto && !isEmail && !isContacts && (
+        {!isPhoto && !isEmail && !isContacts && !isWeather && (
           <div className="context-data-controls">
             {isCalendar ? (
               <>
@@ -393,7 +406,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
         )}
       </div>
 
-      {!isPhoto && !isEmail && !isContacts && (
+      {!isPhoto && !isEmail && !isContacts && !isWeather && (
         <div className="context-data-nav">
           <button
             type="button"
@@ -519,6 +532,86 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
               </div>
             );
           })}
+        </div>
+      )}
+
+      {isWeather && !error && (
+        <div className="weather-card-body">
+          <div className="weather-card-main">
+            <div className={`weather-card-icon weather-${card?.icon || 'sun'}`} aria-hidden="true">
+              <i className={`fas ${card?.icon === 'rain' ? 'fa-cloud-rain' : card?.icon === 'cloud' ? 'fa-cloud' : 'fa-sun'}`}></i>
+            </div>
+            <div className="weather-card-main-meta">
+              <div className="weather-card-temp">{card?.temperature_display || '—'}</div>
+              <div className="weather-card-desc">{card?.description || t('Keine Details', 'No details')}</div>
+              {card?.summary && <div className="weather-card-summary">{card.summary}</div>}
+            </div>
+          </div>
+
+          {weatherDays.length > 0 && (
+            <>
+              <div className="context-data-nav weather-nav">
+                <button
+                  type="button"
+                  className="context-nav-btn"
+                  onClick={() => setWeatherIndex((prev) => Math.max(0, prev - 1))}
+                  aria-label={t('Tag zurück', 'Previous day')}
+                  disabled={safeWeatherIndex === 0}
+                >
+                  <i className="fas fa-chevron-left"></i>
+                </button>
+                <div className="context-data-anchor">
+                  {(activeWeatherDay?.label || '') + (activeWeatherDay?.date ? ` • ${activeWeatherDay.date}` : '')}
+                </div>
+                <button
+                  type="button"
+                  className="context-nav-btn"
+                  onClick={() => setWeatherIndex((prev) => Math.min(weatherDays.length - 1, prev + 1))}
+                  aria-label={t('Tag weiter', 'Next day')}
+                  disabled={safeWeatherIndex >= weatherDays.length - 1}
+                >
+                  <i className="fas fa-chevron-right"></i>
+                </button>
+              </div>
+
+              <div className="weather-day-detail">
+                <div className="weather-day-temps">
+                  <span>{activeWeatherDay?.temp_min_display || ''}</span>
+                  <span className="weather-day-sep">→</span>
+                  <span>{activeWeatherDay?.temp_max_display || ''}</span>
+                </div>
+                <div className="weather-day-desc">{activeWeatherDay?.description || ''}</div>
+                {activeWeatherDay?.pop_percent !== null && activeWeatherDay?.pop_percent !== undefined && (
+                  <div className="weather-day-rain">{t('Regenrisiko', 'Rain chance')}: {activeWeatherDay.pop_percent}%</div>
+                )}
+              </div>
+
+              <div className="weather-forecast-strip">
+                {weatherDays.map((day, idx) => {
+                  const maxRaw = Number(String(day?.temp_max_display || '').replace(/[^0-9.-]/g, ''));
+                  const minRaw = Number(String(day?.temp_min_display || '').replace(/[^0-9.-]/g, ''));
+                  const height = Number.isFinite(maxRaw) && Number.isFinite(minRaw)
+                    ? Math.max(22, Math.min(48, 22 + (maxRaw - minRaw) * 3))
+                    : 26;
+                  return (
+                    <button
+                      type="button"
+                      key={`${day?.date || day?.label || 'day'}-${idx}`}
+                      className={`weather-day-chip ${idx === safeWeatherIndex ? 'active' : ''}`}
+                      onClick={() => setWeatherIndex(idx)}
+                    >
+                      <span className="weather-day-chip-label">{day?.label || `D${idx + 1}`}</span>
+                      <span className="weather-day-chip-bar" style={{ height: `${height}px` }}></span>
+                      <span className="weather-day-chip-temp">{day?.temp_max_display || '—'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {card?.hourly_preview && <div className="context-data-note">{card.hourly_preview}</div>}
+          {card?.daily_preview && <div className="context-data-note">{card.daily_preview}</div>}
         </div>
       )}
 
