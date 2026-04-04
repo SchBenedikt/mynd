@@ -1433,99 +1433,6 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="panel-section" style={{marginTop: '2rem'}}>
-                  <div className="section-title">Gemini TTS</div>
-                  <div className="input-group">
-                    <label>{tr('TTS-Anbieter', 'TTS Provider')}</label>
-                    <select value={ttsProvider} onChange={(e) => setTtsProvider(e.target.value)}>
-                      <option value="browser">{tr('Browser (lokal)', 'Browser (local)')}</option>
-                      <option value="gemini">Gemini TTS</option>
-                    </select>
-                  </div>
-
-                  <div className="input-group">
-                    <label>{tr('Browser-Stimme', 'Browser Voice')}</label>
-                    {speechSynthesisSupported ? (
-                      <>
-                        <select value={selectedVoiceUri} onChange={(e) => setSelectedVoiceUri(e.target.value)}>
-                          <option value="">{tr('Automatische Stimme', 'Automatic voice')}</option>
-                          {visibleVoices.map((voice) => (
-                            <option key={voice.voiceURI} value={voice.voiceURI}>
-                              {formatVoiceLabel(voice)}
-                            </option>
-                          ))}
-                        </select>
-                        {language === 'de' && (
-                          <div className="status-text">{tr('Bei deutscher Sprache werden nur deutsche Stimmen angeboten.', 'Only German voices are shown for German language.')}</div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="status-text">{tr('Sprachausgabe wird von diesem Browser nicht unterstuetzt.', 'Speech synthesis is not supported in this browser.')}</div>
-                    )}
-                  </div>
-
-                  <div className="input-group">
-                    <label>Gemini API Key</label>
-                    <input
-                      type="password"
-                      value={geminiTtsApiKey}
-                      onChange={(e) => setGeminiTtsApiKey(e.target.value)}
-                      placeholder={geminiTtsApiKeySet ? tr('Bereits gesetzt (neu eingeben zum Ueberschreiben)', 'Already set (enter new key to overwrite)') : 'AIza...'}
-                    />
-                    {geminiTtsApiKeySet && !geminiTtsApiKey.trim() && (
-                      <div className="status-text">{tr('API Key ist gesetzt.', 'API key is set.')}</div>
-                    )}
-                  </div>
-
-                  <div className="input-group">
-                    <label>{tr('Gemini Modell', 'Gemini Model')}</label>
-                    <select value={geminiTtsModel} onChange={(e) => setGeminiTtsModel(e.target.value)}>
-                      <option value="gemini-2.5-flash-tts">gemini-2.5-flash-tts</option>
-                      <option value="gemini-2.5-pro-tts">gemini-2.5-pro-tts</option>
-                    </select>
-                  </div>
-
-                  <div className="input-group">
-                    <label>{tr('Gemini Stimme', 'Gemini Voice')}</label>
-                    <select value={geminiTtsVoice} onChange={(e) => setGeminiTtsVoice(e.target.value)}>
-                      {geminiVoices.map((voiceName) => (
-                        <option key={voiceName} value={voiceName}>{voiceName}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="input-group">
-                    <label>{tr('Gemini Sprache (BCP-47)', 'Gemini Language (BCP-47)')}</label>
-                    <input type="text" value={geminiTtsLanguageCode} onChange={(e) => setGeminiTtsLanguageCode(e.target.value)} placeholder="de-DE" />
-                  </div>
-
-                  <div className="input-group">
-                    <label>{tr('Audio-Format', 'Audio Encoding')}</label>
-                    <select value={geminiTtsAudioEncoding} onChange={(e) => setGeminiTtsAudioEncoding(e.target.value)}>
-                      <option value="MP3">MP3</option>
-                      <option value="LINEAR16">LINEAR16</option>
-                      <option value="OGG_OPUS">OGG_OPUS</option>
-                      <option value="MULAW">MULAW</option>
-                      <option value="ALAW">ALAW</option>
-                      <option value="PCM">PCM</option>
-                    </select>
-                  </div>
-
-                  <div className="input-group">
-                    <label>{tr('Stil-Prompt (optional)', 'Style Prompt (optional)')}</label>
-                    <input
-                      type="text"
-                      value={geminiTtsStylePrompt}
-                      onChange={(e) => setGeminiTtsStylePrompt(e.target.value)}
-                      placeholder={tr('z.B. Sprich ruhig und freundlich', 'e.g. Speak in a calm and friendly tone')}
-                    />
-                  </div>
-
-                  <div className="button-group">
-                    <button className="btn primary" onClick={saveAIConfig}>{t('save')}</button>
-                  </div>
-                </div>
-
-                <div className="panel-section" style={{marginTop: '2rem'}}>
                   <div className="section-title">Personalisierung</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
                     Dieser Name wird für die persönliche Begrüßung auf der Startseite genutzt.
@@ -1617,6 +1524,100 @@ export default function SettingsPage() {
             {activeTab === 'apis' && (
               <div className="settings-panel">
                 <div className="panel-section">
+                  <div className="section-title">Gemini TTS</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1rem 0'}}>
+                    {tr('TTS-Konfiguration zusammen mit den Integrationen und API-Zugaengen.', 'TTS configuration grouped with integrations and API credentials.')}
+                  </p>
+                  <div className="input-group">
+                    <label>{tr('TTS-Anbieter', 'TTS Provider')}</label>
+                    <select value={ttsProvider} onChange={(e) => setTtsProvider(e.target.value)}>
+                      <option value="browser">{tr('Browser (lokal)', 'Browser (local)')}</option>
+                      <option value="gemini">Gemini TTS</option>
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Browser-Stimme', 'Browser Voice')}</label>
+                    {speechSynthesisSupported ? (
+                      <>
+                        <select value={selectedVoiceUri} onChange={(e) => setSelectedVoiceUri(e.target.value)}>
+                          <option value="">{tr('Automatische Stimme', 'Automatic voice')}</option>
+                          {visibleVoices.map((voice) => (
+                            <option key={voice.voiceURI} value={voice.voiceURI}>
+                              {formatVoiceLabel(voice)}
+                            </option>
+                          ))}
+                        </select>
+                        {language === 'de' && (
+                          <div className="status-text">{tr('Bei deutscher Sprache werden nur deutsche Stimmen angeboten.', 'Only German voices are shown for German language.')}</div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="status-text">{tr('Sprachausgabe wird von diesem Browser nicht unterstuetzt.', 'Speech synthesis is not supported in this browser.')}</div>
+                    )}
+                  </div>
+
+                  <div className="input-group">
+                    <label>Gemini API Key</label>
+                    <input
+                      type="password"
+                      value={geminiTtsApiKey}
+                      onChange={(e) => setGeminiTtsApiKey(e.target.value)}
+                      placeholder={geminiTtsApiKeySet ? tr('Bereits gesetzt (neu eingeben zum Ueberschreiben)', 'Already set (enter new key to overwrite)') : 'AIza...'}
+                    />
+                    {geminiTtsApiKeySet && !geminiTtsApiKey.trim() && (
+                      <div className="status-text">{tr('API Key ist gesetzt.', 'API key is set.')}</div>
+                    )}
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Gemini Modell', 'Gemini Model')}</label>
+                    <select value={geminiTtsModel} onChange={(e) => setGeminiTtsModel(e.target.value)}>
+                      <option value="gemini-2.5-flash-tts">gemini-2.5-flash-tts</option>
+                      <option value="gemini-2.5-pro-tts">gemini-2.5-pro-tts</option>
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Gemini Stimme', 'Gemini Voice')}</label>
+                    <select value={geminiTtsVoice} onChange={(e) => setGeminiTtsVoice(e.target.value)}>
+                      {geminiVoices.map((voiceName) => (
+                        <option key={voiceName} value={voiceName}>{voiceName}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Gemini Sprache (BCP-47)', 'Gemini Language (BCP-47)')}</label>
+                    <input type="text" value={geminiTtsLanguageCode} onChange={(e) => setGeminiTtsLanguageCode(e.target.value)} placeholder="de-DE" />
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Audio-Format', 'Audio Encoding')}</label>
+                    <select value={geminiTtsAudioEncoding} onChange={(e) => setGeminiTtsAudioEncoding(e.target.value)}>
+                      <option value="MP3">MP3</option>
+                      <option value="LINEAR16">LINEAR16</option>
+                      <option value="OGG_OPUS">OGG_OPUS</option>
+                      <option value="MULAW">MULAW</option>
+                      <option value="ALAW">ALAW</option>
+                      <option value="PCM">PCM</option>
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Stil-Prompt (optional)', 'Style Prompt (optional)')}</label>
+                    <input
+                      type="text"
+                      value={geminiTtsStylePrompt}
+                      onChange={(e) => setGeminiTtsStylePrompt(e.target.value)}
+                      placeholder={tr('z.B. Sprich ruhig und freundlich', 'e.g. Speak in a calm and friendly tone')}
+                    />
+                  </div>
+
+                  <div className="button-group" style={{marginBottom: '1.5rem'}}>
+                    <button className="btn primary" onClick={saveAIConfig}>{t('save')}</button>
+                  </div>
+
                   <div className="section-title">{tr('Integrationen', 'Integrations')}</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1.25rem 0'}}>
                     {tr('Konfiguriere verbundene Dienste für erweiterte Funktionen', 'Configure connected services for extended functionality')}
