@@ -1601,6 +1601,76 @@ body {
   transform: translateY(-1px);
 }
 
+.input-wrapper .voice-btn,
+.composer .voice-btn {
+  background: var(--chip-bg);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+.input-wrapper .voice-select,
+.composer .voice-select {
+  width: min(220px, 34vw);
+  min-width: 120px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--chip-bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.5rem;
+  outline: none;
+}
+
+.input-wrapper .voice-select:focus,
+.composer .voice-select:focus {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--line));
+}
+
+.input-wrapper .voice-btn:hover:not(:disabled),
+.composer .voice-btn:hover:not(:disabled) {
+  background: var(--chip-hover);
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--brand) 36%, var(--line));
+}
+
+.input-wrapper .voice-btn.active,
+.composer .voice-btn.active {
+  background: color-mix(in srgb, var(--brand) 16%, var(--chip-bg));
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 46%, var(--line));
+}
+
+.input-wrapper .voice-btn.listening,
+.composer .voice-btn.listening {
+  background: color-mix(in srgb, #ef4444 18%, var(--chip-bg));
+  color: #ef4444;
+  border-color: color-mix(in srgb, #ef4444 40%, var(--line));
+  animation: pulse-listening 1.2s ease-in-out infinite;
+}
+
+.input-wrapper .voice-btn:disabled,
+.composer .voice-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@keyframes pulse-listening {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, #ef4444 20%, transparent);
+  }
+  70% {
+    transform: scale(1.03);
+    box-shadow: 0 0 0 8px color-mix(in srgb, #ef4444 0%, transparent);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, #ef4444 0%, transparent);
+  }
+}
+
 /* Conversation */
 .conversation {
   flex: 1;
@@ -3214,6 +3284,13 @@ body {
     width: 32px;
     height: 32px;
     font-size: 0.85rem;
+  }
+
+  .input-wrapper .voice-select,
+  .composer .voice-select {
+    width: min(46vw, 170px);
+    font-size: 0.72rem;
+    padding: 0.32rem 0.4rem;
   }
 }
 
