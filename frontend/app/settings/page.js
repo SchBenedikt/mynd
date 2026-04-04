@@ -9,6 +9,7 @@ import { ThemeSelector } from '../../components/ThemeSelector';
 const API_BASE = '';
 const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
+const VOICE_SELECTION_STORAGE_KEY = 'mynd_voice_selection_v1';
 const API_DISPLAY_NAMES = {
   immich: 'Immich',
   homeassistant: 'Home Assistant',
@@ -164,6 +165,13 @@ const normalizeEmailConfig = (config = {}) => {
   };
 };
 
+const formatVoiceLabel = (voice) => {
+  const name = String(voice?.name || '').trim();
+  const lang = String(voice?.lang || '').trim();
+  if (name && lang) return `${name} (${lang})`;
+  return name || lang || 'System Voice';
+};
+
 export default function SettingsPage() {
   const router = useRouter();
   const { theme, darkMode, motionStyle, contrastColor, setTheme, setDarkMode, setMotionStyle, setContrastColor } = useTheme();
@@ -173,6 +181,9 @@ export default function SettingsPage() {
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
   const [displayName, setDisplayName] = useState('');
+  const [speechSynthesisSupported, setSpeechSynthesisSupported] = useState(false);
+  const [availableVoices, setAvailableVoices] = useState([]);
+  const [selectedVoiceUri, setSelectedVoiceUri] = useState('');
   
   const [aiProtocol, setAiProtocol] = useState('http');
   const [aiHost, setAiHost] = useState('127.0.0.1');
@@ -271,6 +282,9 @@ export default function SettingsPage() {
     });
   const configuredApiCount = catalogApis.filter((api) => api.configured).length;
   const healthyApiCount = catalogApis.filter((api) => apiHealth[api.api_name]?.status === 'healthy').length;
+  const visibleVoices = language === 'de'
+    ? availableVoices.filter((voice) => String(voice.lang || '').toLowerCase().startsWith('de'))
+    : availableVoices;
 
   useEffect(() => {
     loadAIConfig();
@@ -321,6 +335,57 @@ export default function SettingsPage() {
       console.error('Error saving sidebar state:', err);
     }
   }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const supportsSynthesis = 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance !== 'undefined';
+    setSpeechSynthesisSupported(supportsSynthesis);
+
+    try {
+      const storedVoice = localStorage.getItem(VOICE_SELECTION_STORAGE_KEY);
+      if (storedVoice) {
+        setSelectedVoiceUri(storedVoice);
+      }
+    } catch (err) {
+      console.error('Error loading selected voice:', err);
+    }
+
+    if (!supportsSynthesis) return;
+
+    const updateVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      const normalized = voices.map((voice) => ({
+        voiceURI: voice.voiceURI,
+        name: voice.name,
+        lang: voice.lang,
+        default: voice.default
+      }));
+      setAvailableVoices(normalized);
+    };
+
+    updateVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
+    return () => {
+      window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VOICE_SELECTION_STORAGE_KEY, selectedVoiceUri || '');
+    } catch (err) {
+      console.error('Error saving selected voice:', err);
+    }
+  }, [selectedVoiceUri]);
+
+  useEffect(() => {
+    if (!selectedVoiceUri) return;
+    const exists = visibleVoices.some((voice) => voice.voiceURI === selectedVoiceUri);
+    if (!exists) {
+      setSelectedVoiceUri('');
+    }
+  }, [selectedVoiceUri, visibleVoices]);
 
   const loadNextcloudConfig = async () => {
     try {
@@ -2232,6 +2297,29 @@ export default function SettingsPage() {
                       <option key={entry.code} value={entry.code}>{entry.label}</option>
                     ))}
                   </select>
+                </div>
+                <div className="input-group" style={{ marginBottom: '1rem' }}>
+                  <label>{tr('Stimme', 'Voice')}</label>
+                  {speechSynthesisSupported ? (
+                    <>
+                      <select value={selectedVoiceUri} onChange={(e) => setSelectedVoiceUri(e.target.value)}>
+                        <option value="">{tr('Automatische Stimme', 'Automatic voice')}</option>
+                        {visibleVoices.map((voice) => (
+                          <option key={voice.voiceURI} value={voice.voiceURI}>
+                            {formatVoiceLabel(voice)}
+                          </option>
+                        ))}
+                      </select>
+                      {language === 'de' && (
+                        <div className="status-text">{tr('Bei deutscher Sprache werden nur deutsche Stimmen angeboten.', 'Only German voices are shown for German language.')}</div>
+                      )}
+                      {language === 'de' && visibleVoices.length === 0 && (
+                        <div className="status-text">{tr('Keine deutschen Stimmen im Browser gefunden. Bitte installiere eine deutsche Systemstimme.', 'No German voices found in the browser. Please install a German system voice.')}</div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="status-text">{tr('Sprachausgabe wird von diesem Browser nicht unterstuetzt.', 'Speech synthesis is not supported in this browser.')}</div>
+                  )}
                 </div>
                 <ThemeSelector
                   currentTheme={theme}

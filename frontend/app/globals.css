@@ -1608,25 +1608,6 @@ body {
   border: 1px solid var(--line);
 }
 
-.input-wrapper .voice-select,
-.composer .voice-select {
-  width: min(220px, 34vw);
-  min-width: 120px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--chip-bg);
-  color: var(--ink);
-  font: inherit;
-  font-size: 0.78rem;
-  padding: 0.4rem 0.5rem;
-  outline: none;
-}
-
-.input-wrapper .voice-select:focus,
-.composer .voice-select:focus {
-  border-color: color-mix(in srgb, var(--brand) 40%, var(--line));
-}
-
 .input-wrapper .voice-btn:hover:not(:disabled),
 .composer .voice-btn:hover:not(:disabled) {
   background: var(--chip-hover);
@@ -3286,12 +3267,6 @@ body {
     font-size: 0.85rem;
   }
 
-  .input-wrapper .voice-select,
-  .composer .voice-select {
-    width: min(46vw, 170px);
-    font-size: 0.72rem;
-    padding: 0.32rem 0.4rem;
-  }
 }
 
 /* Suggestions Panel - AI-generated query suggestions */
