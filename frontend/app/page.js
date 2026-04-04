@@ -1736,36 +1736,15 @@ export default function HomePage() {
       error: ''
     });
 
-    const transcript = messagesForSummary
-      .slice(-80)
-      .map((message, index) => {
-        const role = message.role === 'user' ? 'Nutzer' : 'Assistent';
-        return `${index + 1}. ${role}: ${String(message.content || '').trim()}`;
-      })
-      .join('\n');
-
     try {
-      const prompt = [
-        'Erstelle eine moderne, klare Gespraechszusammenfassung auf Deutsch.',
-        'Nutze exakt diese Struktur mit Markdown-UEberschriften:',
-        '## Kernidee',
-        '## Wichtige Entscheidungen',
-        '## Offene Punkte',
-        '## Naechste sinnvolle Schritte',
-        'Halte die Zusammenfassung praezise, hilfreich und ohne Floskeln.',
-        '',
-        'Gespraech:',
-        transcript
-      ].join('\n');
-
-      const res = await fetch(`${API_BASE}/api/agent/query`, {
+      const res = await fetch(`${API_BASE}/api/chat/summarize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt,
+          messages: messagesForSummary,
+          title: chat.title,
           language: 'de',
-          preferred_source: 'auto',
-          context: transcript
+          preferred_source: 'auto'
         })
       });
 
@@ -1774,7 +1753,7 @@ export default function HomePage() {
         throw new Error(data?.error || `Request failed with status ${res.status}`);
       }
 
-      const summaryText = String(data?.response || '').trim();
+      const summaryText = String(data?.summary || '').trim();
       const generatedAt = Date.now();
 
       setChats((prevChats) => prevChats.map((item) => (
@@ -1889,6 +1868,10 @@ export default function HomePage() {
 
   const goToSettings = () => {
     router.push('/settings');
+  };
+
+  const goToKnowledgeGraph = () => {
+    router.push('/knowledge-graph');
   };
 
   const canSend = inputValue.trim().length > 0;
@@ -2008,6 +1991,14 @@ export default function HomePage() {
           >
             <i className="fas fa-cog"></i>
             {!isSidebarCollapsed && t('settings')}
+          </button>
+          <button
+            className="new-chat-btn settings-btn"
+            onClick={goToKnowledgeGraph}
+            title="Wissensgraph"
+          >
+            <i className="fas fa-project-diagram"></i>
+            {!isSidebarCollapsed && 'Wissensgraph'}
           </button>
           <div className="status-badges">
             <div className={`status-badge ${health.ollama}`}>
@@ -2599,8 +2590,11 @@ export default function HomePage() {
           </>
         )}
       </div>
-      {weatherInfo?.success && weatherInfo?.temperature_display && (
-        <div className="weather-mini-widget" title={weatherInfo.description || 'Lokales Wetter'}>
+      {!conversationActive && weatherInfo?.temperature_display && (
+        <div
+          className="weather-mini-widget weather-mini-widget--landing"
+          title={weatherInfo.summary || weatherInfo.description || 'Lokales Wetter'}
+        >
           {renderWeatherMiniIcon(weatherInfo.icon)}
           <span className="weather-mini-temp">{weatherInfo.temperature_display}</span>
         </div>
