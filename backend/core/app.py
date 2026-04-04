@@ -45,6 +45,7 @@ class SemanticSearchEngine:
 from backend.features.knowledge.search import SimpleSearchEngine
 from backend.features.training.manager import TrainingManager
 from backend.features.knowledge.metadata import MetadataExtractor
+from backend.features.knowledge.graph import get_knowledge_graph
 # from backend.features.calendar.manager import create_calendar_manager
 # Temporär deaktiviert wegen caldav Problemen
 def create_calendar_manager():
@@ -96,6 +97,12 @@ logger = logging.getLogger(__name__)
 
 _briefing_lock = threading.Lock()
 _briefing_scheduler_started = False
+
+# Knowledge Graph globals
+_knowledge_graph = None
+_knowledge_graph_lock = threading.Lock()
+_knowledge_graph_scheduler_started = False
+KNOWLEDGE_GRAPH_FILE = os.path.join(DATA_DIR, 'knowledge_graph.json')
 
 
 def _load_briefing_store() -> Dict[str, Any]:
@@ -372,7 +379,225 @@ def start_briefing_scheduler() -> None:
     thread.start()
 
 
-@app.route('/api/assistant/briefing/current', methods=['GET'])
+# ==================== KNOWLEDGE GRAPH ====================
+
+def _collect_calendar_data() -> List[Dict[str, Any]]:
+    """Collect calendar events for knowledge graph."""
+    try:
+        calendar_manager = create_simple_calendar_manager()
+        if not calendar_manager:
+            return []
+        
+        today = date.today()
+        start = today - timedelta(days=30)
+        end = today + timedelta(days=30)
+        
+        events = calendar_manager.get_events_for_period(start, end)
+        return events if events else []
+    except Exception as e:
+        logger.debug(f"Error collecting calendar data: {e}")
+        return []
+
+
+def _collect_email_data() -> List[Dict[str, Any]]:
+    """Collect emails for knowledge graph."""
+    try:
+        email_client = EmailClient()
+        if not email_client.is_connected:
+            email_client.connect()
+        
+        # Fetch recent emails (last 7 days)
+        emails = email_client.fetch_emails(
+            folders=['INBOX'],
+            limit=50,
+            days_back=7
+        )
+        
+        return [
+            {
+                'from': email.get('from', ''),
+                'to': email.get('to', []),
+                'subject': email.get('subject', ''),
+                'attachments': email.get('attachments', []),
+                'date': email.get('date', '')
+            }
+            for email in (emails if emails else [])
+        ]
+    except Exception as e:
+        logger.debug(f"Error collecting email data: {e}")
+        return []
+
+
+def _collect_task_data() -> List[Dict[str, Any]]:
+    """Collect tasks/todos for knowledge graph."""
+    try:
+        from backend.features.tasks.manager import task_manager
+        
+        all_tasks = task_manager.get_all_tasks()
+        
+        return [
+            {
+                'title': task.get('title', ''),
+                'description': task.get('description', ''),
+                'due_date': task.get('due_date', ''),
+                'status': task.get('status', 'open'),
+                'priority': task.get('priority', 'normal'),
+                'assigned_to': task.get('assigned_to')
+            }
+            for task in (all_tasks if all_tasks else [])
+        ]
+    except Exception as e:
+        logger.debug(f"Error collecting task data: {e}")
+        return []
+
+
+def _collect_document_data() -> List[Dict[str, Any]]:
+    """Collect documents from Nextcloud for knowledge graph."""
+    try:
+        nextcloud_client = NextcloudClient()
+        if not nextcloud_client.is_connected:
+            return []
+        
+        # Get files from home directory
+        files = nextcloud_client.list_files('/')
+        if not files:
+            return []
+        
+        documents = []
+        for file_entry in files:
+            if isinstance(file_entry, dict):
+                documents.append({
+                    'name': file_entry.get('name', ''),
+                    'path': file_entry.get('path', ''),
+                    'size': file_entry.get('size', 0),
+                    'mime_type': file_entry.get('mime_type', ''),
+                    'modified': file_entry.get('modified', '')
+                })
+        
+        return documents
+    except Exception as e:
+        logger.debug(f"Error collecting document data: {e}")
+        return []
+
+
+def _update_knowledge_graph() -> None:
+    """Update knowledge graph with data from all sources."""
+    try:
+        graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
+        
+        # Collect data from all sources
+        calendar_events = _collect_calendar_data()
+        emails = _collect_email_data()
+        tasks = _collect_task_data()
+        documents = _collect_document_data()
+        
+        # Update graph
+        graph.update_from_data_sources({
+            'calendar_events': calendar_events,
+            'emails': emails,
+            'tasks': tasks,
+            'documents': documents
+        })
+        
+        logger.info(f"Knowledge graph updated: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
+    except Exception as e:
+        logger.error(f"Error updating knowledge graph: {e}")
+
+
+def _knowledge_graph_scheduler_loop() -> None:
+    """Background loop updating knowledge graph periodically."""
+    logger.info("Knowledge graph scheduler started")
+    while True:
+        try:
+            _update_knowledge_graph()
+        except Exception as e:
+            logger.warning(f"Knowledge graph scheduler loop error: {e}")
+        time.sleep(3600)  # Update every hour
+
+
+def start_knowledge_graph_scheduler() -> None:
+    """Start the knowledge graph update scheduler once per process."""
+    global _knowledge_graph_scheduler_started
+    if _knowledge_graph_scheduler_started:
+        return
+    _knowledge_graph_scheduler_started = True
+    thread = threading.Thread(target=_knowledge_graph_scheduler_loop, daemon=True)
+    thread.start()
+
+
+@app.route('/api/knowledge/graph', methods=['GET'])
+def get_knowledge_graph_data():
+    """Return the current knowledge graph data."""
+    try:
+        # Optionally force update
+        force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+        if force_refresh:
+            _update_knowledge_graph()
+        
+        graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
+        graph_data = graph.get_graph_data()
+        
+        return jsonify({
+            'success': True,
+            'data': graph_data
+        })
+    except Exception as e:
+        logger.error(f"Error fetching knowledge graph: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Wissensgraph konnte nicht geladen werden.'
+        }), 500
+
+
+@app.route('/api/knowledge/graph/node/<node_id>', methods=['GET'])
+def get_knowledge_graph_node(node_id):
+    """Get a specific node and its related nodes."""
+    try:
+        max_depth = request.args.get('depth', '2', type=int)
+        
+        graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
+        related = graph.get_related_nodes(node_id, max_depth=max_depth)
+        
+        return jsonify({
+            'success': True,
+            'data': related
+        })
+    except Exception as e:
+        logger.error(f"Error fetching graph node: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Knoten nicht gefunden.'
+        }), 404
+
+
+@app.route('/api/knowledge/graph/query', methods=['GET'])
+def query_knowledge_graph():
+    """Query knowledge graph by node type or search term."""
+    try:
+        node_type = request.args.get('type')
+        
+        graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
+        
+        if node_type:
+            nodes = graph.query_by_type(node_type)
+            return jsonify({
+                'success': True,
+                'nodes': nodes,
+                'count': len(nodes)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Bitte geben Sie einen node_type an.'
+            }), 400
+    except Exception as e:
+        logger.error(f"Error querying knowledge graph: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Abfrage fehlgeschlagen.'
+        }), 500
+
+
 def get_current_proactive_briefing():
     """Return the current daily briefing and Monday weekly briefing."""
     try:
@@ -3111,7 +3336,7 @@ def knowledge_status():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/knowledge/graph-data', methods=['GET'])
-def get_knowledge_graph_data():
+def get_knowledge_base_chunks():
     """Gibt Daten für Knowledge Graph Visualization zurück"""
     try:
         return jsonify({
@@ -7996,6 +8221,11 @@ try:
     start_briefing_scheduler()
 except Exception as e:
     logger.error(f"Error starting briefing scheduler: {e}")
+
+try:
+    start_knowledge_graph_scheduler()
+except Exception as e:
+    logger.error(f"Error starting knowledge graph scheduler: {e}")
 
 if __name__ == '__main__':
     # Initialize knowledge base
