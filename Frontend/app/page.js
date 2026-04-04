@@ -17,6 +17,22 @@ const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
 const LOCATION_AUTO_RESOLVE_KEY = 'mynd_location_auto_resolve_v1';
 const BRIEFING_SEEN_KEY = 'mynd_seen_briefings_v1';
+const VOICE_SELECTION_STORAGE_KEY = 'mynd_voice_selection_v1';
+
+const SPEECH_LANG_MAP = {
+  de: 'de-DE',
+  en: 'en-US',
+  fr: 'fr-FR',
+  es: 'es-ES',
+  it: 'it-IT',
+  pt: 'pt-PT',
+  nl: 'nl-NL',
+  pl: 'pl-PL',
+  tr: 'tr-TR',
+  ru: 'ru-RU',
+  ja: 'ja-JP',
+  zh: 'zh-CN'
+};
 
 const LANGUAGE_COMMANDS = {
   de: ['deutsch', 'german'],
@@ -138,6 +154,24 @@ const getTodayDateTimeForInputs = () => {
   };
 };
 
+const resolveSpeechLocale = (langCode) => SPEECH_LANG_MAP[langCode] || 'de-DE';
+
+const cleanTextForSpeech = (value) => String(value || '')
+  .replace(/```[\s\S]*?```/g, ' ')
+  .replace(/`([^`]+)`/g, '$1')
+  .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+  .replace(/\[[^\]]+\]\([^)]*\)/g, '$1')
+  .replace(/[#>*_~\-]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const formatVoiceLabel = (voice) => {
+  const name = String(voice?.name || '').trim();
+  const lang = String(voice?.lang || '').trim();
+  if (name && lang) return `${name} (${lang})`;
+  return name || lang || 'Systemstimme';
+};
+
 export default function HomePage() {
   const router = useRouter();
   const {
@@ -164,6 +198,12 @@ export default function HomePage() {
   const [proactiveBriefings, setProactiveBriefings] = useState([]);
   const [displayName, setDisplayName] = useState('');
   const [, setGreetingTick] = useState(0);
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceError, setVoiceError] = useState('');
+  const [speechCapabilities, setSpeechCapabilities] = useState({ input: false, output: false });
+  const [availableVoices, setAvailableVoices] = useState([]);
+  const [selectedVoiceUri, setSelectedVoiceUri] = useState('');
   
   const [aiProtocol, setAiProtocol] = useState('http');
   const [aiHost, setAiHost] = useState('127.0.0.1');
@@ -253,6 +293,7 @@ export default function HomePage() {
   });
   const progressIntervalRef = useRef(null);
   const requestAbortRef = useRef(null);
+  const speechRecognitionRef = useRef(null);
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -261,6 +302,8 @@ export default function HomePage() {
   const messages = activeChat?.messages || [];
   const conversationActive = messages.length > 0;
   const weatherInfo = securityStatus?.weather || null;
+  const speechRecognitionSupported = speechCapabilities.input;
+  const speechSynthesisSupported = speechCapabilities.output;
 
   const languageLabel = (code) => languages.find((l) => l.code === code)?.label || code;
 
@@ -463,6 +506,33 @@ export default function HomePage() {
   }, [isThinking, pendingQueue]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setSpeechCapabilities({
+      input: 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window,
+      output: 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance !== 'undefined'
+    });
+
+    if (!('speechSynthesis' in window)) return;
+
+    const updateVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      const normalized = voices.map((voice) => ({
+        voiceURI: voice.voiceURI,
+        name: voice.name,
+        lang: voice.lang,
+        default: voice.default
+      }));
+      setAvailableVoices(normalized);
+    };
+
+    updateVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
+    return () => {
+      window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
+    };
+  }, []);
+
+  useEffect(() => {
     loadAIConfig();
     loadOllamaModels();
     updateStatus();
@@ -572,6 +642,11 @@ export default function HomePage() {
         setDisplayName(rawDisplayName);
       }
 
+      const storedVoiceSelection = localStorage.getItem(VOICE_SELECTION_STORAGE_KEY);
+      if (storedVoiceSelection) {
+        setSelectedVoiceUri(storedVoiceSelection);
+      }
+
       const rawChats = localStorage.getItem(CHAT_STORAGE_KEY);
       const rawActiveChatId = localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
       const rawSidebarCollapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
@@ -622,6 +697,14 @@ export default function HomePage() {
       console.error('Error saving sidebar state:', err);
     }
   }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VOICE_SELECTION_STORAGE_KEY, selectedVoiceUri || '');
+    } catch (err) {
+      console.error('Error saving voice selection:', err);
+    }
+  }, [selectedVoiceUri]);
 
   useEffect(() => {
     if (!photoPreview.open) return undefined;
@@ -921,12 +1004,12 @@ export default function HomePage() {
     }
   };
 
-  const queueMessage = (text, chatId) => {
+  const queueMessage = (text, chatId, meta = {}) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     const messageId = createMessageId();
     appendMessageToChat(chatId, { role: 'user', content: trimmed, id: messageId, queued: true }, trimmed);
-    setPendingQueue((prev) => [...prev, { chatId, text: trimmed, messageId }]);
+    setPendingQueue((prev) => [...prev, { chatId, text: trimmed, messageId, fromVoice: Boolean(meta.fromVoice) }]);
     setInputValue('');
     if (inputRef.current) inputRef.current.value = '';
   };
@@ -935,7 +1018,12 @@ export default function HomePage() {
     if (pendingQueue.length === 0) return;
     const [next, ...rest] = pendingQueue;
     setPendingQueue(rest);
-    sendMessage(next.text, { fromQueue: true, chatId: next.chatId, messageId: next.messageId });
+    sendMessage(next.text, {
+      fromQueue: true,
+      chatId: next.chatId,
+      messageId: next.messageId,
+      fromVoice: Boolean(next.fromVoice)
+    });
   };
 
   const sendMessage = async (text, options = {}) => {
@@ -946,10 +1034,10 @@ export default function HomePage() {
         const newChat = createEmptyChat();
         setChats([newChat]);
         setActiveChatId(newChat.id);
-        queueMessage(text, newChat.id);
+        queueMessage(text, newChat.id, { fromVoice: options.fromVoice });
         return;
       }
-      queueMessage(text, targetId);
+      queueMessage(text, targetId, { fromVoice: options.fromVoice });
       return;
     }
     text = text.trim();
@@ -1024,13 +1112,18 @@ export default function HomePage() {
         return;
       }
 
+      const assistantMessageId = createMessageId();
       insertMessageAfter(targetChatId, userMessageId, {
         role: 'assistant',
         content: data.response,
         sources: data.sources || [],
         uiCards: data.ui_cards || [],
-        id: createMessageId()
+        id: assistantMessageId
       });
+
+      if (options.fromVoice) {
+        speakAssistantText(data.response);
+      }
 
       if (data?.requires_input && data?.action === 'calendar_missing_input') {
         const extracted = data?.extracted_info || {};
@@ -1141,6 +1234,137 @@ export default function HomePage() {
       requestAbortRef.current = null;
     }
   };
+
+  const stopVoiceInput = () => {
+    const recognition = speechRecognitionRef.current;
+    if (!recognition) return;
+    recognition.stop();
+  };
+
+  const speakAssistantText = (text) => {
+    if (!speechSynthesisSupported) return;
+    const prepared = cleanTextForSpeech(text).slice(0, 1100);
+    if (!prepared) return;
+
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new window.SpeechSynthesisUtterance(prepared);
+      const locale = resolveSpeechLocale(language);
+      utterance.lang = locale;
+      utterance.rate = 1;
+      utterance.pitch = 1;
+
+      const browserVoices = window.speechSynthesis.getVoices();
+      const selectedVoice = selectedVoiceUri
+        ? browserVoices.find((voice) => voice.voiceURI === selectedVoiceUri)
+        : null;
+      const matchingVoice = selectedVoice
+        || browserVoices.find((voice) => voice.lang?.toLowerCase().startsWith(language.toLowerCase()))
+        || browserVoices.find((voice) => voice.lang?.toLowerCase().startsWith(locale.slice(0, 2).toLowerCase()));
+
+      if (matchingVoice) {
+        utterance.voice = matchingVoice;
+      }
+
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+      };
+
+      utterance.onend = () => {
+        setIsSpeaking(false);
+      };
+
+      utterance.onerror = () => {
+        setIsSpeaking(false);
+        setVoiceError(language === 'de' ? 'Sprachausgabe fehlgeschlagen.' : 'Text-to-speech failed.');
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      setIsSpeaking(false);
+      setVoiceError(language === 'de' ? 'Sprachausgabe nicht verfuegbar.' : 'Text-to-speech is unavailable.');
+    }
+  };
+
+  const startVoiceInput = () => {
+    if (!speechRecognitionSupported) {
+      setVoiceError(language === 'de' ? 'Spracheingabe wird von diesem Browser nicht unterstuetzt.' : 'Speech recognition is not supported in this browser.');
+      return;
+    }
+
+    if (isListening) {
+      stopVoiceInput();
+      return;
+    }
+
+    const RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!RecognitionClass) {
+      setVoiceError(language === 'de' ? 'Spracheingabe ist nicht verfuegbar.' : 'Speech recognition is unavailable.');
+      return;
+    }
+
+    let finalTranscript = '';
+    const recognition = new RecognitionClass();
+    speechRecognitionRef.current = recognition;
+    recognition.lang = resolveSpeechLocale(language);
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setVoiceError('');
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event) => {
+      let interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const text = event.results[i][0]?.transcript || '';
+        if (event.results[i].isFinal) {
+          finalTranscript += ` ${text}`;
+        } else {
+          interimTranscript += ` ${text}`;
+        }
+      }
+      const previewText = (finalTranscript + interimTranscript).trim();
+      setInputValue(previewText);
+      if (inputRef.current) {
+        inputRef.current.value = previewText;
+      }
+    };
+
+    recognition.onerror = (event) => {
+      const code = String(event.error || '');
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        setVoiceError(language === 'de' ? 'Mikrofonzugriff wurde verweigert.' : 'Microphone permission was denied.');
+      } else if (code !== 'aborted') {
+        setVoiceError(language === 'de' ? `Spracheingabe-Fehler: ${code}` : `Speech input error: ${code}`);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      speechRecognitionRef.current = null;
+      const transcript = finalTranscript.trim();
+      if (transcript) {
+        sendMessage(transcript, { fromVoice: true });
+      }
+    };
+
+    recognition.start();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.stop();
+        speechRecognitionRef.current = null;
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   const parseBackendDateTimeToInput = (value) => {
     if (!value || typeof value !== 'string') return '';
@@ -1876,6 +2100,13 @@ export default function HomePage() {
 
   const canSend = inputValue.trim().length > 0;
   const queueReady = isThinking && canSend;
+  const showVoiceSelector = speechSynthesisSupported && availableVoices.length > 0;
+  const voiceStatusText = (() => {
+    if (voiceError) return voiceError;
+    if (isListening) return language === 'de' ? 'Voice: Ich hoere zu...' : 'Voice: Listening...';
+    if (isSpeaking) return language === 'de' ? 'Voice: Ich antworte gerade...' : 'Voice: Speaking...';
+    return '';
+  })();
 
   return (
     <div className={`container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -2089,6 +2320,34 @@ export default function HomePage() {
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && sendMessage(e.target.value)}
               />
+              {showVoiceSelector && (
+                <select
+                  className="voice-select"
+                  value={selectedVoiceUri}
+                  onChange={(event) => setSelectedVoiceUri(event.target.value)}
+                  title={language === 'de' ? 'Stimme auswaehlen' : 'Select voice'}
+                >
+                  <option value="">{language === 'de' ? 'Auto-Stimme' : 'Auto voice'}</option>
+                  {availableVoices.map((voice) => (
+                    <option key={voice.voiceURI} value={voice.voiceURI}>
+                      {formatVoiceLabel(voice)}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                type="button"
+                className={`voice-btn ${isListening ? 'listening' : ''}`}
+                onClick={startVoiceInput}
+                disabled={!speechRecognitionSupported}
+                title={!speechRecognitionSupported
+                  ? (language === 'de' ? 'Spracheingabe wird von diesem Browser nicht unterstuetzt' : 'Speech input is not supported in this browser')
+                  : (isListening
+                    ? (language === 'de' ? 'Aufnahme stoppen' : 'Stop listening')
+                    : (language === 'de' ? 'Mit Sprache sprechen' : 'Speak with voice'))}
+              >
+                <i className={`fas ${isListening ? 'fa-wave-square' : 'fa-microphone'}`}></i>
+              </button>
               <button
                 onClick={() => sendMessage(inputRef.current?.value || '')}
                 disabled={!canSend}
@@ -2564,8 +2823,12 @@ export default function HomePage() {
               </div>
             </div>
             <div className="composer-shell">
-              {isThinking && (
-                <div className="composer-hint">Anfrage läuft · Strg+C zum Abbrechen</div>
+              {(isThinking || voiceStatusText) && (
+                <div className="composer-hint">
+                  {isThinking && 'Anfrage laeuft · Strg+C zum Abbrechen'}
+                  {isThinking && voiceStatusText ? ' | ' : ''}
+                  {voiceStatusText}
+                </div>
               )}
               <div className={`composer ${isThinking ? 'is-thinking' : ''}`}>
                 <input 
@@ -2576,6 +2839,34 @@ export default function HomePage() {
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && !e.ctrlKey && sendMessage(e.target.value)}
                 />
+                {showVoiceSelector && (
+                  <select
+                    className="voice-select"
+                    value={selectedVoiceUri}
+                    onChange={(event) => setSelectedVoiceUri(event.target.value)}
+                    title={language === 'de' ? 'Stimme auswaehlen' : 'Select voice'}
+                  >
+                    <option value="">{language === 'de' ? 'Auto-Stimme' : 'Auto voice'}</option>
+                    {availableVoices.map((voice) => (
+                      <option key={voice.voiceURI} value={voice.voiceURI}>
+                        {formatVoiceLabel(voice)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  className={`voice-btn ${isListening ? 'listening' : ''}`}
+                  onClick={startVoiceInput}
+                  disabled={!speechRecognitionSupported}
+                  title={!speechRecognitionSupported
+                    ? (language === 'de' ? 'Spracheingabe wird von diesem Browser nicht unterstuetzt' : 'Speech input is not supported in this browser')
+                    : (isListening
+                      ? (language === 'de' ? 'Aufnahme stoppen' : 'Stop listening')
+                      : (language === 'de' ? 'Mit Sprache sprechen' : 'Speak with voice'))}
+                >
+                  <i className={`fas ${isListening ? 'fa-wave-square' : 'fa-microphone'}`}></i>
+                </button>
                 <button
                   onClick={() => sendMessage(inputRef.current?.value || '')}
                   disabled={!canSend}
