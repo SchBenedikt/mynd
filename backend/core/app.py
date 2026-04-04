@@ -1264,6 +1264,14 @@ def load_ai_config() -> dict:
         'briefing_daily_enabled': BRIEFING_DAILY_ENABLED_DEFAULT,
         'briefing_weekly_enabled': BRIEFING_WEEKLY_ENABLED_DEFAULT,
         'briefing_morning_hour': int(BRIEFING_MORNING_HOUR),
+        'tts_provider': 'browser',
+        'browser_tts_voice_uri': '',
+        'gemini_tts_api_key': '',
+        'gemini_tts_model': 'gemini-2.5-flash-tts',
+        'gemini_tts_voice': 'Kore',
+        'gemini_tts_language_code': 'de-DE',
+        'gemini_tts_style_prompt': '',
+        'gemini_tts_audio_encoding': 'MP3',
     }
 
     if os.path.exists(AI_CONFIG_FILE):
@@ -1284,6 +1292,16 @@ def load_ai_config() -> dict:
             config['briefing_daily_enabled'] = bool(file_config.get('briefing_daily_enabled', config['briefing_daily_enabled']))
             config['briefing_weekly_enabled'] = bool(file_config.get('briefing_weekly_enabled', config['briefing_weekly_enabled']))
             config['briefing_morning_hour'] = max(0, min(23, int(file_config.get('briefing_morning_hour', config['briefing_morning_hour']))))
+            config['tts_provider'] = str(file_config.get('tts_provider', config['tts_provider'])).strip().lower() or 'browser'
+            if config['tts_provider'] not in ('browser', 'gemini'):
+                config['tts_provider'] = 'browser'
+            config['browser_tts_voice_uri'] = str(file_config.get('browser_tts_voice_uri', config['browser_tts_voice_uri'])).strip()
+            config['gemini_tts_api_key'] = str(file_config.get('gemini_tts_api_key', config['gemini_tts_api_key'])).strip()
+            config['gemini_tts_model'] = str(file_config.get('gemini_tts_model', config['gemini_tts_model'])).strip() or 'gemini-2.5-flash-tts'
+            config['gemini_tts_voice'] = str(file_config.get('gemini_tts_voice', config['gemini_tts_voice'])).strip() or 'Kore'
+            config['gemini_tts_language_code'] = str(file_config.get('gemini_tts_language_code', config['gemini_tts_language_code'])).strip() or 'de-DE'
+            config['gemini_tts_style_prompt'] = str(file_config.get('gemini_tts_style_prompt', config['gemini_tts_style_prompt'])).strip()
+            config['gemini_tts_audio_encoding'] = str(file_config.get('gemini_tts_audio_encoding', config['gemini_tts_audio_encoding'])).strip().upper() or 'MP3'
         except Exception as e:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
 
@@ -1291,7 +1309,7 @@ def load_ai_config() -> dict:
     return config
 
 
-def save_ai_config(base_url: str, model: str) -> None:
+def save_ai_config(base_url: str, model: str, **overrides: Any) -> None:
     """Speichert AI-Konfiguration persistent in einer lokalen JSON-Datei."""
     config = {}
     if os.path.exists(AI_CONFIG_FILE):
@@ -1304,6 +1322,20 @@ def save_ai_config(base_url: str, model: str) -> None:
     config['provider'] = 'ollama'
     config['base_url'] = base_url.rstrip('/')
     config['model'] = model
+
+    allowed_overrides = {
+        'tts_provider',
+        'browser_tts_voice_uri',
+        'gemini_tts_api_key',
+        'gemini_tts_model',
+        'gemini_tts_voice',
+        'gemini_tts_language_code',
+        'gemini_tts_style_prompt',
+        'gemini_tts_audio_encoding',
+    }
+    for key, value in overrides.items():
+        if key in allowed_overrides:
+            config[key] = value
 
     with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
@@ -3826,11 +3858,20 @@ def ai_config():
     """Liest oder speichert die AI-Konfiguration (aktuell Ollama)."""
     try:
         if request.method == 'GET':
+            persisted = load_ai_config()
             return jsonify({
                 'provider': 'ollama',
                 'base_url': ollama_client.base_url,
                 'model': ollama_client.model,
-                'connected': ollama_client.check_connection()
+                'connected': ollama_client.check_connection(),
+                'tts_provider': persisted.get('tts_provider', 'browser'),
+                'browser_tts_voice_uri': persisted.get('browser_tts_voice_uri', ''),
+                'gemini_tts_model': persisted.get('gemini_tts_model', 'gemini-2.5-flash-tts'),
+                'gemini_tts_voice': persisted.get('gemini_tts_voice', 'Kore'),
+                'gemini_tts_language_code': persisted.get('gemini_tts_language_code', 'de-DE'),
+                'gemini_tts_style_prompt': persisted.get('gemini_tts_style_prompt', ''),
+                'gemini_tts_audio_encoding': persisted.get('gemini_tts_audio_encoding', 'MP3'),
+                'gemini_tts_api_key_set': bool(persisted.get('gemini_tts_api_key'))
             })
 
         data = request.json or {}
@@ -3843,15 +3884,50 @@ def ai_config():
         if not (base_url.startswith('http://') or base_url.startswith('https://')):
             return jsonify({'error': 'base_url muss mit http:// oder https:// beginnen'}), 400
 
+        tts_provider = str(data.get('tts_provider', 'browser')).strip().lower() or 'browser'
+        if tts_provider not in ('browser', 'gemini'):
+            return jsonify({'error': 'tts_provider muss browser oder gemini sein'}), 400
+
+        existing = load_ai_config()
+        gemini_tts_api_key = str(data.get('gemini_tts_api_key', '')).strip()
+        if not gemini_tts_api_key:
+            gemini_tts_api_key = str(existing.get('gemini_tts_api_key', '')).strip()
+
+        browser_tts_voice_uri = str(data.get('browser_tts_voice_uri', '')).strip()
+        gemini_tts_model = str(data.get('gemini_tts_model', existing.get('gemini_tts_model', 'gemini-2.5-flash-tts'))).strip() or 'gemini-2.5-flash-tts'
+        gemini_tts_voice = str(data.get('gemini_tts_voice', existing.get('gemini_tts_voice', 'Kore'))).strip() or 'Kore'
+        gemini_tts_language_code = str(data.get('gemini_tts_language_code', existing.get('gemini_tts_language_code', 'de-DE'))).strip() or 'de-DE'
+        gemini_tts_style_prompt = str(data.get('gemini_tts_style_prompt', existing.get('gemini_tts_style_prompt', ''))).strip()
+        gemini_tts_audio_encoding = str(data.get('gemini_tts_audio_encoding', existing.get('gemini_tts_audio_encoding', 'MP3'))).strip().upper() or 'MP3'
+
         ollama_client.update_config(base_url, model)
-        save_ai_config(base_url, model)
+        save_ai_config(
+            base_url,
+            model,
+            tts_provider=tts_provider,
+            browser_tts_voice_uri=browser_tts_voice_uri,
+            gemini_tts_api_key=gemini_tts_api_key,
+            gemini_tts_model=gemini_tts_model,
+            gemini_tts_voice=gemini_tts_voice,
+            gemini_tts_language_code=gemini_tts_language_code,
+            gemini_tts_style_prompt=gemini_tts_style_prompt,
+            gemini_tts_audio_encoding=gemini_tts_audio_encoding,
+        )
 
         return jsonify({
             'status': 'saved',
             'provider': 'ollama',
             'base_url': ollama_client.base_url,
             'model': ollama_client.model,
-            'connected': ollama_client.check_connection()
+            'connected': ollama_client.check_connection(),
+            'tts_provider': tts_provider,
+            'browser_tts_voice_uri': browser_tts_voice_uri,
+            'gemini_tts_model': gemini_tts_model,
+            'gemini_tts_voice': gemini_tts_voice,
+            'gemini_tts_language_code': gemini_tts_language_code,
+            'gemini_tts_style_prompt': gemini_tts_style_prompt,
+            'gemini_tts_audio_encoding': gemini_tts_audio_encoding,
+            'gemini_tts_api_key_set': bool(gemini_tts_api_key)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -3897,6 +3973,101 @@ def ai_test():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+def _trim_utf8_bytes(value: str, max_bytes: int) -> str:
+    encoded = value.encode('utf-8')
+    if len(encoded) <= max_bytes:
+        return value
+    return encoded[:max_bytes].decode('utf-8', errors='ignore')
+
+
+@app.route('/api/tts/synthesize', methods=['POST'])
+def tts_synthesize():
+    """Synthetisiert Audio ueber Gemini TTS (Google Cloud Text-to-Speech API)."""
+    try:
+        data = request.json or {}
+        text = str(data.get('text', '')).strip()
+        if not text:
+            return jsonify({'success': False, 'error': 'text darf nicht leer sein'}), 400
+
+        config = load_ai_config()
+        tts_provider = str(config.get('tts_provider', 'browser')).strip().lower()
+        if tts_provider != 'gemini':
+            return jsonify({'success': False, 'error': 'tts_provider ist nicht auf gemini gesetzt'}), 400
+
+        api_key = str(config.get('gemini_tts_api_key', '')).strip()
+        if not api_key:
+            return jsonify({'success': False, 'error': 'Gemini TTS API Key ist nicht konfiguriert'}), 400
+
+        prompt = str(data.get('prompt', config.get('gemini_tts_style_prompt', ''))).strip()
+        text = _trim_utf8_bytes(text, 4000)
+        prompt = _trim_utf8_bytes(prompt, 4000)
+
+        combined_bytes = len(text.encode('utf-8')) + len(prompt.encode('utf-8'))
+        if combined_bytes > 8000:
+            allowed_prompt_bytes = max(0, 8000 - len(text.encode('utf-8')))
+            prompt = _trim_utf8_bytes(prompt, allowed_prompt_bytes)
+
+        model_name = str(data.get('model', config.get('gemini_tts_model', 'gemini-2.5-flash-tts'))).strip() or 'gemini-2.5-flash-tts'
+        voice_name = str(data.get('voice', config.get('gemini_tts_voice', 'Kore'))).strip() or 'Kore'
+        language_code = str(data.get('language_code', config.get('gemini_tts_language_code', 'de-DE'))).strip() or 'de-DE'
+        audio_encoding = str(data.get('audio_encoding', config.get('gemini_tts_audio_encoding', 'MP3'))).strip().upper() or 'MP3'
+
+        payload = {
+            'input': {
+                'text': text
+            },
+            'voice': {
+                'languageCode': language_code,
+                'name': voice_name,
+                'modelName': model_name
+            },
+            'audioConfig': {
+                'audioEncoding': audio_encoding
+            }
+        }
+
+        if prompt:
+            payload['input']['prompt'] = prompt
+
+        endpoint = f"https://texttospeech.googleapis.com/v1/text:synthesize?key={api_key}"
+        upstream = requests.post(endpoint, json=payload, timeout=60)
+
+        try:
+            upstream_data = upstream.json()
+        except Exception:
+            upstream_data = {'error': {'message': upstream.text[:500]}}
+
+        if upstream.status_code >= 400:
+            upstream_error = upstream_data.get('error', {}) if isinstance(upstream_data, dict) else {}
+            error_message = upstream_error.get('message') or f"Google TTS Fehler ({upstream.status_code})"
+            return jsonify({'success': False, 'error': error_message}), 502
+
+        audio_content = str(upstream_data.get('audioContent', '')).strip() if isinstance(upstream_data, dict) else ''
+        if not audio_content:
+            return jsonify({'success': False, 'error': 'Keine Audiodaten von Gemini TTS erhalten'}), 502
+
+        mime_type_map = {
+            'MP3': 'audio/mpeg',
+            'LINEAR16': 'audio/wav',
+            'ALAW': 'audio/basic',
+            'MULAW': 'audio/basic',
+            'OGG_OPUS': 'audio/ogg',
+            'PCM': 'audio/L16'
+        }
+
+        return jsonify({
+            'success': True,
+            'audio_base64': audio_content,
+            'mime_type': mime_type_map.get(audio_encoding, 'audio/mpeg'),
+            'model': model_name,
+            'voice': voice_name,
+            'language_code': language_code,
+            'audio_encoding': audio_encoding
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Kalender API Endpunkte
 @app.route('/api/calendar/status', methods=['GET'])
