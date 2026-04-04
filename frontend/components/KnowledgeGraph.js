@@ -38,7 +38,7 @@ export default function KnowledgeGraphComponent() {
   useEffect(() => {
     const fetchGraph = async () => {
       try {
-        const response = await fetch('/api/knowledge/graph');
+        const response = await fetch('/api/knowledge/graph?refresh=true');
         const result = await response.json();
         
         if (result.success) {
