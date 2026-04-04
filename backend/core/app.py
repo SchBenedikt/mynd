@@ -4,6 +4,7 @@ import sys
 import html
 import requests
 import numpy as np
+import threading
 from flask import Flask, request, jsonify, redirect, url_for, session, Response
 from dotenv import load_dotenv
 import re
@@ -72,6 +73,10 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 BACKEND_DIR = os.path.join(BASE_DIR, 'backend')
 TEMPLATES_DIR = os.path.join(BACKEND_DIR, 'templates')
 DB_PATH = os.path.join(BASE_DIR, 'knowledge_base.db')
+BRIEFING_STORE_FILE = os.path.join(DATA_DIR, 'assistant_briefings.json')
+BRIEFING_MORNING_HOUR = int(os.getenv('BRIEFING_MORNING_HOUR', '7'))
+BRIEFING_DAILY_ENABLED_DEFAULT = os.getenv('BRIEFING_DAILY_ENABLED', 'true').lower() in ('true', '1', 'yes')
+BRIEFING_WEEKLY_ENABLED_DEFAULT = os.getenv('BRIEFING_WEEKLY_ENABLED', 'true').lower() in ('true', '1', 'yes')
 
 # Setup directories
 os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -88,6 +93,307 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+_briefing_lock = threading.Lock()
+_briefing_scheduler_started = False
+
+
+def _load_briefing_store() -> Dict[str, Any]:
+    """Load persisted briefing items from disk."""
+    try:
+        if not os.path.exists(BRIEFING_STORE_FILE):
+            return {'items': {}}
+        with open(BRIEFING_STORE_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {'items': {}}
+        items = data.get('items')
+        if not isinstance(items, dict):
+            data['items'] = {}
+        return data
+    except Exception as exc:
+        logger.warning('Could not load briefing store: %s', exc)
+        return {'items': {}}
+
+
+def _save_briefing_store(store: Dict[str, Any]) -> None:
+    """Persist briefing items to disk."""
+    try:
+        os.makedirs(os.path.dirname(BRIEFING_STORE_FILE), exist_ok=True)
+        with open(BRIEFING_STORE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(store, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.warning('Could not save briefing store: %s', exc)
+
+
+def _get_briefing_settings() -> Dict[str, Any]:
+    """Load briefing settings from ai_config with env-based defaults."""
+    settings = {
+        'daily_enabled': BRIEFING_DAILY_ENABLED_DEFAULT,
+        'weekly_enabled': BRIEFING_WEEKLY_ENABLED_DEFAULT,
+        'morning_hour': int(BRIEFING_MORNING_HOUR),
+    }
+
+    try:
+        if os.path.exists(AI_CONFIG_FILE):
+            with open(AI_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            settings['daily_enabled'] = bool(cfg.get('briefing_daily_enabled', settings['daily_enabled']))
+            settings['weekly_enabled'] = bool(cfg.get('briefing_weekly_enabled', settings['weekly_enabled']))
+            settings['morning_hour'] = int(cfg.get('briefing_morning_hour', settings['morning_hour']))
+    except Exception as exc:
+        logger.debug('Could not load briefing settings from config: %s', exc)
+
+    settings['morning_hour'] = max(0, min(23, int(settings['morning_hour'])))
+    return settings
+
+
+def _calendar_events_for_today(limit: int = 8) -> List[Dict[str, Any]]:
+    """Fetch today's calendar events in a robust way."""
+    if not simple_calendar_manager:
+        refresh_simple_calendar_manager()
+    if not simple_calendar_manager:
+        return []
+
+    try:
+        if hasattr(simple_calendar_manager, 'get_events_today'):
+            events = simple_calendar_manager.get_events_today() or []
+        else:
+            events = []
+        return [event for event in events if isinstance(event, dict)][:limit]
+    except Exception as exc:
+        logger.debug('Could not load today events for briefing: %s', exc)
+        return []
+
+
+def _calendar_events_for_week(limit: int = 12) -> List[Dict[str, Any]]:
+    """Fetch current week calendar events in a robust way."""
+    if not simple_calendar_manager:
+        refresh_simple_calendar_manager()
+    if not simple_calendar_manager:
+        return []
+
+    try:
+        if hasattr(simple_calendar_manager, 'get_events_this_week'):
+            events = simple_calendar_manager.get_events_this_week() or []
+        else:
+            events = []
+        return [event for event in events if isinstance(event, dict)][:limit]
+    except Exception as exc:
+        logger.debug('Could not load week events for briefing: %s', exc)
+        return []
+
+
+def _build_daily_briefing() -> Dict[str, Any]:
+    """Build the daily morning briefing payload."""
+    today = date.today()
+    weather = get_local_weather_status()
+    security = get_local_security_status()
+    todo_data = get_todo_data('heute')
+
+    tasks = todo_data.get('tasks', []) or []
+    overdue = 0
+    due_today = 0
+    for task in tasks:
+        due = _parse_task_due_date(task.get('due_date'))
+        if not due:
+            continue
+        if due < today:
+            overdue += 1
+        elif due == today:
+            due_today += 1
+
+    calendar_events = _calendar_events_for_today(limit=6)
+
+    email_results = []
+    try:
+        email_client = get_email_client()
+        if email_client:
+            email_results = email_client.fetch_emails(
+                limit=5,
+                folder_focus='inbox',
+                since=today,
+                until=today,
+                unread=None,
+            ) or []
+    except Exception as exc:
+        logger.debug('Could not load emails for daily briefing: %s', exc)
+
+    lines = [
+        f"Guten Morgen. Hier ist dein Briefing für {today.strftime('%d.%m.%Y')}:",
+        "",
+        f"• Wetter: {weather.get('summary') or 'Nicht verfügbar.'}",
+        f"• Sicherheitslage: {security.get('headline') or 'Keine Daten.'}",
+        f"• Aufgaben: {len(tasks)} offen ({overdue} überfällig, {due_today} heute fällig).",
+        f"• Termine heute: {len(calendar_events)}",
+        f"• Neue E-Mails heute: {len(email_results)}",
+        "",
+    ]
+
+    if calendar_events:
+        lines.append("Top-Termine heute:")
+        for idx, event in enumerate(calendar_events[:3], 1):
+            title = str(event.get('summary') or event.get('title') or 'Termin').strip()
+            start = str(event.get('start') or '').strip()
+            lines.append(f"{idx}. {title}" + (f" ({start})" if start else ""))
+        lines.append("")
+
+    if email_results:
+        lines.append("Wichtige neue Mails:")
+        for idx, mail in enumerate(email_results[:3], 1):
+            subject = str(mail.get('subject') or '(kein Betreff)').strip()
+            sender = str(mail.get('sender') or '').strip()
+            lines.append(f"{idx}. {subject}" + (f" — {sender}" if sender else ""))
+
+    return {
+        'kind': 'daily',
+        'title': f"Tagesbriefing • {today.strftime('%d.%m.%Y')}",
+        'content': '\n'.join(lines).strip(),
+        'stats': {
+            'tasks_open': len(tasks),
+            'tasks_overdue': overdue,
+            'tasks_today': due_today,
+            'events_today': len(calendar_events),
+            'emails_today': len(email_results),
+            'warnings': int(security.get('nina_warning_count') or 0),
+        }
+    }
+
+
+def _build_weekly_briefing() -> Dict[str, Any]:
+    """Build the Monday weekly kickoff briefing payload."""
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    week_no = today.isocalendar()[1]
+
+    week_events = _calendar_events_for_week(limit=10)
+    todo_data = get_todo_data('diese woche')
+    tasks = todo_data.get('tasks', []) or []
+
+    due_this_week = 0
+    overdue = 0
+    for task in tasks:
+        due = _parse_task_due_date(task.get('due_date'))
+        if not due:
+            continue
+        if due < today:
+            overdue += 1
+        if week_start <= due <= week_end:
+            due_this_week += 1
+
+    lines = [
+        f"Wochenstart-Briefing (KW {week_no}) für {week_start.strftime('%d.%m.')} bis {week_end.strftime('%d.%m.%Y')}.",
+        "",
+        f"• Termine diese Woche: {len(week_events)}",
+        f"• Aufgaben mit Fälligkeit diese Woche: {due_this_week}",
+        f"• Überfällige Aufgaben: {overdue}",
+        "",
+    ]
+
+    if week_events:
+        lines.append("Wichtige Termine:")
+        for idx, event in enumerate(week_events[:5], 1):
+            title = str(event.get('summary') or event.get('title') or 'Termin').strip()
+            start = str(event.get('start') or '').strip()
+            lines.append(f"{idx}. {title}" + (f" ({start})" if start else ""))
+
+    return {
+        'kind': 'weekly',
+        'title': f"Wochenstart • KW {week_no}",
+        'content': '\n'.join(lines).strip(),
+        'stats': {
+            'events_week': len(week_events),
+            'tasks_due_week': due_this_week,
+            'tasks_overdue': overdue,
+            'week_number': week_no,
+        }
+    }
+
+
+def _get_briefing_storage_key(kind: str) -> str:
+    today = date.today()
+    if kind == 'weekly':
+        week = today.isocalendar()[1]
+        return f"weekly:{today.year}-W{week:02d}"
+    return f"daily:{today.isoformat()}"
+
+
+def generate_proactive_briefing(kind: str = 'daily', force: bool = False) -> Dict[str, Any]:
+    """Generate (or reuse) a proactive briefing payload for daily or weekly cadence."""
+    normalized_kind = 'weekly' if str(kind).lower() == 'weekly' else 'daily'
+    key = _get_briefing_storage_key(normalized_kind)
+
+    with _briefing_lock:
+        store = _load_briefing_store()
+        items = store.setdefault('items', {})
+        existing = items.get(key)
+        if existing and not force:
+            return existing
+
+        built = _build_weekly_briefing() if normalized_kind == 'weekly' else _build_daily_briefing()
+        item = {
+            'key': key,
+            'kind': normalized_kind,
+            'title': built.get('title', ''),
+            'content': built.get('content', ''),
+            'stats': built.get('stats', {}),
+            'generated_at': int(time.time()),
+        }
+
+        items[key] = item
+        _save_briefing_store(store)
+        return item
+
+
+def _briefing_scheduler_loop() -> None:
+    """Background loop generating morning and Monday briefings automatically."""
+    logger.info('⏰ Proactive briefing scheduler started (daily + weekly)')
+    while True:
+        try:
+            now = datetime.now()
+            briefing_settings = _get_briefing_settings()
+            if briefing_settings.get('daily_enabled') and now.hour >= int(briefing_settings.get('morning_hour', BRIEFING_MORNING_HOUR)):
+                generate_proactive_briefing('daily', force=False)
+                if briefing_settings.get('weekly_enabled') and now.weekday() == 0:
+                    generate_proactive_briefing('weekly', force=False)
+        except Exception as exc:
+            logger.warning('Briefing scheduler loop error: %s', exc)
+        time.sleep(60)
+
+
+def start_briefing_scheduler() -> None:
+    """Start the proactive briefing scheduler once per process."""
+    global _briefing_scheduler_started
+    if _briefing_scheduler_started:
+        return
+    _briefing_scheduler_started = True
+    thread = threading.Thread(target=_briefing_scheduler_loop, daemon=True)
+    thread.start()
+
+
+@app.route('/api/assistant/briefing/current', methods=['GET'])
+def get_current_proactive_briefing():
+    """Return the current daily briefing and Monday weekly briefing."""
+    try:
+        force = request.args.get('force', 'false').lower() == 'true'
+        include_weekly = request.args.get('include_weekly', 'true').lower() != 'false'
+
+        briefing_settings = _get_briefing_settings()
+        items = []
+        if briefing_settings.get('daily_enabled'):
+            items.append(generate_proactive_briefing('daily', force=force))
+        if include_weekly and briefing_settings.get('weekly_enabled') and date.today().weekday() == 0:
+            items.append(generate_proactive_briefing('weekly', force=force))
+
+        return jsonify({
+            'success': True,
+            'items': items,
+            'count': len(items)
+        })
+    except Exception as exc:
+        logger.error('Failed to build proactive briefing: %s', exc)
+        return jsonify({'success': False, 'error': 'Briefing konnte nicht geladen werden.'}), 500
 
 AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
 CALENDAR_CONFIG_FILE = os.path.join(CONFIG_DIR, "calendar_config.json")
@@ -605,7 +911,10 @@ def load_ai_config() -> dict:
         'vector_db_path': './qdrant_data',
         'calendar_auto_reindex_hours': 6,
         'calendar_auto_reindex_past_days': 730,
-        'calendar_auto_reindex_future_days': 365
+        'calendar_auto_reindex_future_days': 365,
+        'briefing_daily_enabled': BRIEFING_DAILY_ENABLED_DEFAULT,
+        'briefing_weekly_enabled': BRIEFING_WEEKLY_ENABLED_DEFAULT,
+        'briefing_morning_hour': int(BRIEFING_MORNING_HOUR),
     }
 
     if os.path.exists(AI_CONFIG_FILE):
@@ -623,6 +932,9 @@ def load_ai_config() -> dict:
             config['calendar_auto_reindex_hours'] = file_config.get('calendar_auto_reindex_hours', 6)
             config['calendar_auto_reindex_past_days'] = file_config.get('calendar_auto_reindex_past_days', 730)
             config['calendar_auto_reindex_future_days'] = file_config.get('calendar_auto_reindex_future_days', 365)
+            config['briefing_daily_enabled'] = bool(file_config.get('briefing_daily_enabled', config['briefing_daily_enabled']))
+            config['briefing_weekly_enabled'] = bool(file_config.get('briefing_weekly_enabled', config['briefing_weekly_enabled']))
+            config['briefing_morning_hour'] = max(0, min(23, int(file_config.get('briefing_morning_hour', config['briefing_morning_hour']))))
         except Exception as e:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
 
@@ -632,11 +944,17 @@ def load_ai_config() -> dict:
 
 def save_ai_config(base_url: str, model: str) -> None:
     """Speichert AI-Konfiguration persistent in einer lokalen JSON-Datei."""
-    config = {
-        'provider': 'ollama',
-        'base_url': base_url.rstrip('/'),
-        'model': model
-    }
+    config = {}
+    if os.path.exists(AI_CONFIG_FILE):
+        try:
+            with open(AI_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        except Exception:
+            config = {}
+
+    config['provider'] = 'ollama'
+    config['base_url'] = base_url.rstrip('/')
+    config['model'] = model
 
     with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
@@ -5376,7 +5694,10 @@ def ui_system_config():
                     'immich_api_key_default': config.get('immich_api_key_default', ''),
                     'vector_db_enabled': config.get('vector_db_enabled', True),
                     'vector_db_provider': config.get('vector_db_provider', 'qdrant'),
-                    'vector_db_path': config.get('vector_db_path', './qdrant_data')
+                    'vector_db_path': config.get('vector_db_path', './qdrant_data'),
+                    'briefing_daily_enabled': config.get('briefing_daily_enabled', BRIEFING_DAILY_ENABLED_DEFAULT),
+                    'briefing_weekly_enabled': config.get('briefing_weekly_enabled', BRIEFING_WEEKLY_ENABLED_DEFAULT),
+                    'briefing_morning_hour': config.get('briefing_morning_hour', int(BRIEFING_MORNING_HOUR)),
                 }
             })
 
@@ -5395,6 +5716,12 @@ def ui_system_config():
             config['model'] = data['model']
         if 'vector_db_enabled' in data:
             config['vector_db_enabled'] = data['vector_db_enabled']
+        if 'briefing_daily_enabled' in data:
+            config['briefing_daily_enabled'] = bool(data['briefing_daily_enabled'])
+        if 'briefing_weekly_enabled' in data:
+            config['briefing_weekly_enabled'] = bool(data['briefing_weekly_enabled'])
+        if 'briefing_morning_hour' in data:
+            config['briefing_morning_hour'] = max(0, min(23, int(data['briefing_morning_hour'])))
 
         # Save to file
         with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -7664,6 +7991,11 @@ try:
     initialize_tasks_from_config()
 except Exception as e:
     logger.error(f"Error in initialize_tasks_from_config: {e}")
+
+try:
+    start_briefing_scheduler()
+except Exception as e:
+    logger.error(f"Error starting briefing scheduler: {e}")
 
 if __name__ == '__main__':
     # Initialize knowledge base
