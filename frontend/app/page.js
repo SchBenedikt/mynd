@@ -1499,40 +1499,8 @@ export default function HomePage() {
           playbackChain = playbackChain.then(async () => {
             if (currentPlaybackToken !== ttsPlaybackTokenRef.current) return;
             try {
-              const context = await ensureUnlockedAudioContext();
-              if (context) {
-                const encodedBuffer = base64ToArrayBuffer(audioBase64);
-                const decodedBuffer = await context.decodeAudioData(encodedBuffer.slice(0));
-
-                if (activeAudioSourceRef.current) {
-                  try {
-                    activeAudioSourceRef.current.stop();
-                  } catch (_) {}
-                  activeAudioSourceRef.current = null;
-                }
-
-                const source = context.createBufferSource();
-                source.buffer = decodedBuffer;
-                source.connect(context.destination);
-                activeAudioSourceRef.current = source;
-
-                await new Promise((resolve, reject) => {
-                  source.onended = () => {
-                    if (activeAudioSourceRef.current === source) {
-                      activeAudioSourceRef.current = null;
-                    }
-                    resolve(true);
-                  };
-                  try {
-                    source.start(0);
-                  } catch (err) {
-                    if (activeAudioSourceRef.current === source) {
-                      activeAudioSourceRef.current = null;
-                    }
-                    reject(err);
-                  }
-                });
-              } else {
+              const playedWithWebAudio = await playGeminiAudioWithWebAudio(audioBase64);
+              if (!playedWithWebAudio) {
                 await playGeminiAudioWithHtmlAudio(audioBase64, mimeType || 'audio/wav');
               }
             } catch (_) {

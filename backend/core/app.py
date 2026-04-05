@@ -3939,7 +3939,9 @@ def ai_config():
             'gemini_tts_language_code': gemini_tts_language_code,
             'gemini_tts_style_prompt': gemini_tts_style_prompt,
             'gemini_tts_audio_encoding': gemini_tts_audio_encoding,
-            'gemini_tts_api_key_set': bool(gemini_tts_api_key)
+            'gemini_tts_api_key_set': bool(gemini_tts_api_key),
+            'gemini_live_model': gemini_live_model,
+            'gemini_live_voice': gemini_live_voice,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
