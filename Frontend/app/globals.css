@@ -898,7 +898,8 @@ body {
 .settings-full .settings-tabs .tab-btn {
   padding: 0.6rem 1.2rem;
   font-size: 0.9rem;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
 }
 
 .settings-full .settings-content {
@@ -909,14 +910,17 @@ body {
 .settings-full .settings-panel {
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 20px;
+  border-radius: var(--radius-xl);
   padding: 1.75rem;
   margin-bottom: 1.25rem;
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
 }
 
 [data-mode="dark"] .settings-full .settings-panel {
   background: rgba(24, 24, 24, 0.88);
   border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: var(--shadow-md);
 }
 
 .settings-full .panel-section {
@@ -2606,11 +2610,22 @@ body {
   position: fixed;
   inset: 0;
   z-index: 2150;
-  background: rgba(10, 12, 18, 0.56);
+  background: rgba(10, 12, 18, 0.6);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1rem;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .source-detail-modal {
@@ -2618,9 +2633,11 @@ body {
   max-height: min(82vh, 760px);
   overflow-y: auto;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--bubble-assistant);
   padding: 0.88rem;
+  box-shadow: var(--shadow-xl);
+  animation: slideInUp 0.25s ease-out;
 }
 
 .source-detail-head {
@@ -2643,10 +2660,23 @@ body {
   width: 30px;
   height: 30px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--chip-bg);
   color: var(--ink);
   cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: var(--shadow-sm);
+}
+
+.source-detail-close:hover {
+  background: var(--chip-hover);
+  border-color: var(--brand);
+  box-shadow: var(--shadow);
+  transform: scale(1.05);
+}
+
+.source-detail-close:active {
+  transform: scale(0.95);
 }
 
 .source-detail-grid {
