@@ -235,7 +235,12 @@ export async function POST(request) {
           });
 
           session.sendClientContent({
-            turns: [payload.userText],
+            turns: [
+              {
+                role: 'user',
+                parts: [{ text: payload.userText }],
+              },
+            ],
           });
         } catch (error) {
           send({ type: 'error', error: String(error?.message || error) });
