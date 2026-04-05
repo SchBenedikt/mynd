@@ -163,7 +163,7 @@ export async function POST(request) {
             model: payload.model,
             config: {
                 responseModalities: [Modality?.AUDIO || 'AUDIO'],
-                mediaResolution: MediaResolution?.MEDIA_RESOLUTION_MEDIUM || 'MEDIA_RESOLUTION_MEDIUM',
+                mediaResolution: MediaResolution?.MEDIA_RESOLUTION_LOW || 'MEDIA_RESOLUTION_LOW',
               speechConfig: {
                 voiceConfig: {
                   prebuiltVoiceConfig: {
@@ -172,8 +172,8 @@ export async function POST(request) {
                 },
               },
                 contextWindowCompression: {
-                  triggerTokens: '104857',
-                  slidingWindow: { targetTokens: '52428' },
+                  triggerTokens: '52428',
+                  slidingWindow: { targetTokens: '26214' },
                 },
                 tools: [
                   {
@@ -235,7 +235,12 @@ export async function POST(request) {
           });
 
           session.sendClientContent({
-            turns: [payload.userText],
+            turns: [
+              {
+                role: 'user',
+                parts: [{ text: payload.userText }],
+              },
+            ],
           });
         } catch (error) {
           send({ type: 'error', error: String(error?.message || error) });

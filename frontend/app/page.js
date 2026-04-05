@@ -1499,7 +1499,10 @@ export default function HomePage() {
           playbackChain = playbackChain.then(async () => {
             if (currentPlaybackToken !== ttsPlaybackTokenRef.current) return;
             try {
-              await playGeminiAudioWithWebAudio(audioBase64);
+              const playedWithWebAudio = await playGeminiAudioWithWebAudio(audioBase64);
+              if (!playedWithWebAudio) {
+                await playGeminiAudioWithHtmlAudio(audioBase64, mimeType || 'audio/wav');
+              }
             } catch (_) {
               await playGeminiAudioWithHtmlAudio(audioBase64, mimeType || 'audio/wav');
             }
