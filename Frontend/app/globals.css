@@ -44,6 +44,31 @@ body {
   --input-bg: rgba(255, 252, 247, 0.78);
   --bubble-user: #fef3c7;
   --bubble-assistant: #ffffff;
+
+  /* Design System Enhancements */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing: 0.75rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+
+  --transition-fast: 0.15s ease;
+  --transition: 0.2s ease;
+  --transition-slow: 0.3s ease;
 }
 
 @keyframes ambient-shift {
@@ -220,6 +245,13 @@ body {
   --surface: rgba(20, 20, 20, 0.85);
   --surface-strong: rgba(24, 24, 24, 0.95);
   --panel: #1f1f1f;
+
+  /* Dark mode shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7);
 }
 
 [data-mode="dark"] body {
@@ -415,19 +447,26 @@ body {
   border: 1px solid var(--line);
   background: var(--chip-bg);
   color: var(--ink);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   width: 38px;
   height: 38px;
   display: grid;
   place-items: center;
   cursor: pointer;
   font-size: 1rem;
-  transition: all 0.2s ease;
+  transition: all var(--transition);
+  box-shadow: var(--shadow-sm);
 }
 
 .icon-btn:hover {
   background: var(--chip-hover);
   transform: scale(1.05);
+  box-shadow: var(--shadow);
+}
+
+.icon-btn:active {
+  transform: scale(0.98);
+  box-shadow: var(--shadow-sm);
 }
 
 .brand {
@@ -449,13 +488,20 @@ body {
 .brand-icon {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--brand);
   display: grid;
   place-items: center;
   color: white;
   font-weight: 700;
   font-size: 1rem;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition);
+}
+
+.brand-button:hover .brand-icon {
+  box-shadow: var(--shadow);
+  transform: scale(1.05);
 }
 
 /* Status Badges */
@@ -465,19 +511,26 @@ body {
   gap: 0.6rem;
   border: 1px solid var(--line);
   background: var(--chip-bg);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   padding: 0.45rem 0.7rem;
   font-size: 0.8rem;
   color: var(--muted);
-  transition: all 0.2s ease;
+  transition: all var(--transition);
+  box-shadow: var(--shadow-sm);
+}
+
+.status-badge:hover {
+  box-shadow: var(--shadow);
 }
 
 .status-badge.ok {
   border-color: rgba(34, 197, 94, 0.35);
+  background: color-mix(in srgb, #22c55e 8%, var(--chip-bg));
 }
 
 .status-badge.error {
   border-color: rgba(239, 68, 68, 0.4);
+  background: color-mix(in srgb, #ef4444 8%, var(--chip-bg));
 }
 
 .status-meta {
@@ -605,13 +658,14 @@ body {
   border: 1px solid var(--line);
   background: var(--chip-bg);
   color: var(--ink);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font: inherit;
   font-size: 0.9rem;
   font-weight: 500;
-  transition: all 0.2s ease;
+  transition: all var(--transition);
   margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
 }
 
 .new-chat-btn.compact {
@@ -625,6 +679,13 @@ body {
 .new-chat-btn:hover {
   background: var(--chip-hover);
   border-color: var(--brand);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.new-chat-btn:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
 }
 
 .new-chat-btn.settings-btn {
@@ -665,11 +726,18 @@ body {
   background: transparent;
   text-align: left;
   padding: 0.6rem 0.8rem;
-  border-radius: 10px;
+  border-radius: var(--radius);
   cursor: pointer;
   font-size: 0.9rem;
   color: var(--muted);
-  transition: all 0.2s ease;
+  transition: all var(--transition);
+}
+
+.history-item:hover,
+.history-item.active {
+  background: var(--chip-bg);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
 }
 
 .history-title {
@@ -715,17 +783,23 @@ body {
   color: var(--muted);
   width: 26px;
   height: 26px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--transition-fast);
 }
 
 .history-action:hover {
   background: var(--chip-hover);
   color: var(--ink);
   border-color: var(--line);
+  box-shadow: var(--shadow-sm);
+  transform: scale(1.05);
+}
+
+.history-action:active {
+  transform: scale(0.95);
 }
 
 .history-action.danger:hover {
@@ -749,12 +823,6 @@ body {
   margin-top: 0.35rem;
   font-size: 0.75rem;
   color: var(--muted);
-}
-
-.history-item:hover,
-.history-item.active {
-  background: var(--chip-bg);
-  color: var(--ink);
 }
 
 .sidebar-footer {
@@ -911,23 +979,31 @@ body {
   border: 1px solid var(--line);
   background: var(--chip-bg);
   color: var(--ink);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 0.5rem 0.6rem;
   cursor: pointer;
   font-size: 0.85rem;
   font-weight: 500;
-  transition: all 0.2s ease;
+  transition: all var(--transition);
   white-space: nowrap;
+  box-shadow: var(--shadow-sm);
 }
 
 .tab-btn:hover {
   background: var(--chip-hover);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.tab-btn:active {
+  transform: translateY(0);
 }
 
 .tab-btn.active {
   background: var(--brand);
   color: white;
   border-color: var(--brand);
+  box-shadow: var(--shadow);
 }
 
 /* Sidebar Sections */
@@ -964,20 +1040,26 @@ body {
 .input-group input,
 .input-group select {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--input-bg);
   color: var(--ink);
   padding: 0.55rem 0.75rem;
   font: inherit;
   font-size: 0.9rem;
-  transition: all 0.2s ease;
+  transition: all var(--transition);
+  box-shadow: var(--shadow-sm);
+}
+
+.input-group input:hover,
+.input-group select:hover {
+  border-color: color-mix(in srgb, var(--brand) 50%, var(--line));
 }
 
 .input-group input:focus,
 .input-group select:focus {
   outline: none;
   border-color: var(--brand);
-  box-shadow: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent);
 }
 
 .button-group {
@@ -991,35 +1073,50 @@ body {
   border: 1px solid var(--line);
   background: var(--chip-bg);
   color: var(--ink);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 0.55rem 1rem;
   cursor: pointer;
   font: inherit;
   font-size: 0.9rem;
   font-weight: 500;
-  transition: all 0.2s ease;
+  transition: all var(--transition);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn:hover {
   background: var(--chip-hover);
   transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.btn:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn.primary {
   border: none;
   color: white;
   background: var(--brand);
+  box-shadow: var(--shadow);
 }
 
 .btn.primary:hover {
   transform: translateY(-1px);
   background: var(--brand-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.btn.primary:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow);
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none !important;
+  box-shadow: var(--shadow-sm) !important;
 }
 
 /* Progress Bar */
@@ -1692,27 +1789,45 @@ body {
 .bubble {
   max-width: min(97%, 1500px);
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   padding: 0.9rem 1.1rem;
   line-height: 1.6;
   white-space: pre-wrap;
   font-size: 0.95rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--shadow);
+  transition: box-shadow var(--transition);
+}
+
+.bubble:hover {
+  box-shadow: var(--shadow-md);
 }
 
 /* Markdown Styles */
 .bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 {
-  margin: 1em 0 0.5em 0;
+  margin: 1.2em 0 0.6em 0;
   color: var(--ink);
   font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
 }
 
-.bubble h1 { font-size: 1.5em; }
-.bubble h2 { font-size: 1.3em; }
-.bubble h3 { font-size: 1.1em; }
+.bubble h1 {
+  font-size: 1.6em;
+  font-weight: 700;
+  margin-top: 0.8em;
+}
+.bubble h2 {
+  font-size: 1.4em;
+  margin-top: 1em;
+}
+.bubble h3 {
+  font-size: 1.15em;
+  margin-top: 1em;
+}
 
 .bubble p {
-  margin: 0.5em 0;
+  margin: 0.65em 0;
+  line-height: 1.7;
 }
 
 .bubble ul, .bubble ol {
@@ -1736,30 +1851,34 @@ body {
 .bubble code {
   background: var(--chip-bg);
   padding: 0.2em 0.4em;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-ibm-plex-mono), monospace;
-  font-size: 0.9em;
+  font-size: 0.88em;
   color: var(--ink);
+  border: 1px solid var(--line);
 }
 
 .bubble pre {
   background: var(--chip-bg);
   padding: 1em;
-  border-radius: 8px;
+  border-radius: var(--radius);
   overflow-x: auto;
   margin: 0.5em 0;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
 }
 
 .bubble pre code {
   background: none;
   padding: 0;
-  font-size: 0.9em;
+  font-size: 0.88em;
+  border: none;
 }
 
 .bubble blockquote {
   border-left: 4px solid var(--brand);
   padding-left: 1em;
-  margin: 0.5em 0;
+  margin: 0.75em 0;
   font-style: italic;
   color: var(--muted);
 }
@@ -2292,7 +2411,7 @@ body {
 /* Composer */
 .composer {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--input-bg);
   padding: 0.55rem;
   display: flex;
@@ -2300,16 +2419,18 @@ body {
   align-items: center;
   width: 100%;
   margin: 0;
-  transition: all 0.2s ease;
+  transition: all var(--transition);
+  box-shadow: var(--shadow-sm);
 }
 
 .composer:hover {
   border-color: var(--brand);
+  box-shadow: var(--shadow);
 }
 
 .composer:focus-within {
   border-color: var(--brand);
-  box-shadow: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent);
 }
 
 .composer input {
@@ -2334,25 +2455,33 @@ body {
   width: 36px;
   height: 36px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--brand);
   color: white;
   cursor: pointer;
   font-size: 0.9rem;
   display: grid;
   place-items: center;
-  transition: all 0.2s ease;
+  transition: all var(--transition);
   flex-shrink: 0;
+  box-shadow: var(--shadow);
 }
 
 .composer button:hover:not(:disabled) {
   background: var(--brand-hover);
   transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.composer button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: var(--shadow);
 }
 
 .composer button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: var(--shadow-sm);
 }
 
 /* Source Cards - below AI responses */
@@ -2403,12 +2532,24 @@ body {
   gap: 0.55rem;
   padding: 0.45rem 0.62rem;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bubble-assistant);
   color: var(--ink);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.16s ease, transform 0.16s ease;
+  transition: all var(--transition-fast);
+  box-shadow: var(--shadow-sm);
+}
+
+.source-file-btn:hover {
+  border-color: var(--brand);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.source-file-btn:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
 }
 
 @media (max-width: 640px) {
@@ -3328,15 +3469,16 @@ body {
 .suggestion-chip {
   background: var(--input-bg);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   padding: 0.45rem 0.9rem;
   font-size: 0.82rem;
   color: var(--ink);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--transition);
   font-family: inherit;
   white-space: nowrap;
   animation: fadeInScale 0.25s ease-out both;
+  box-shadow: var(--shadow-sm);
 }
 
 [data-mode="dark"] .suggestion-chip {
@@ -3347,11 +3489,12 @@ body {
   background: var(--chip-hover);
   border-color: var(--brand);
   transform: translateY(-2px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-md);
 }
 
 .suggestion-chip:active {
   transform: translateY(0);
+  box-shadow: var(--shadow);
 }
 
 .suggestions-shimmer {
