@@ -17,6 +17,7 @@ const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
 const LOCATION_AUTO_RESOLVE_KEY = 'mynd_location_auto_resolve_v1';
 const BRIEFING_SEEN_KEY = 'mynd_seen_briefings_v1';
+const TTS_PROVIDER_STORAGE_KEY = 'mynd_tts_provider_v1';
 
 const SPEECH_LANG_MAP = {
   de: 'de-DE',
@@ -115,6 +116,10 @@ const createMessageId = () => {
   return `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 };
 
+const normalizeTtsProvider = (value) => {
+  return String(value || '').trim().toLowerCase() === 'gemini' ? 'gemini' : 'browser';
+};
+
 const createEmptyChat = () => {
   const now = Date.now();
   return {
@@ -156,6 +161,8 @@ const getTodayDateTimeForInputs = () => {
 const resolveSpeechLocale = (langCode) => SPEECH_LANG_MAP[langCode] || 'de-DE';
 
 const cleanTextForSpeech = (value) => String(value || '')
+  .replace(/(^|\n)\s*(?:\*\*|__)?\s*(assistant|assistent)\s*(?:\*\*|__)?\s*[:：-]\s*/gim, '$1')
+  .replace(/\b(?:assistant|assistent)\b\s*[:：-]\s*/gi, '')
   .replace(/```[\s\S]*?```/g, ' ')
   .replace(/`([^`]+)`/g, '$1')
   .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
@@ -163,6 +170,35 @@ const cleanTextForSpeech = (value) => String(value || '')
   .replace(/[#>*_~\-]+/g, ' ')
   .replace(/\s+/g, ' ')
   .trim();
+
+const splitTextForGeminiTts = (text, maxChars = 280) => {
+  const normalized = String(text || '').trim();
+  if (!normalized) return [];
+
+  const sentenceParts = normalized.match(/[^.!?]+[.!?]?/g) || [normalized];
+  const chunks = [];
+  let current = '';
+
+  for (const sentence of sentenceParts) {
+    const part = sentence.trim();
+    if (!part) continue;
+
+    if (!current) {
+      current = part;
+      continue;
+    }
+
+    if ((`${current} ${part}`).length <= maxChars) {
+      current = `${current} ${part}`;
+    } else {
+      chunks.push(current);
+      current = part;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+};
 
 export default function HomePage() {
   const router = useRouter();
@@ -287,6 +323,9 @@ export default function HomePage() {
   const requestAbortRef = useRef(null);
   const speechRecognitionRef = useRef(null);
   const activeAudioRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const activeAudioSourceRef = useRef(null);
+  const ttsPlaybackTokenRef = useRef(0);
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -779,7 +818,20 @@ export default function HomePage() {
       setAiHost(url.hostname);
       setAiPort(url.port || '11434');
       setAiModel(config.model);
-      setTtsProvider(String(config.tts_provider || 'browser').toLowerCase() === 'gemini' ? 'gemini' : 'browser');
+
+      const hasServerTtsProvider = Object.prototype.hasOwnProperty.call(config, 'tts_provider');
+      const storedTtsProvider = typeof window !== 'undefined'
+        ? window.localStorage.getItem(TTS_PROVIDER_STORAGE_KEY)
+        : '';
+      const resolvedTtsProvider = hasServerTtsProvider
+        ? normalizeTtsProvider(config.tts_provider)
+        : normalizeTtsProvider(storedTtsProvider);
+
+      setTtsProvider(resolvedTtsProvider);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(TTS_PROVIDER_STORAGE_KEY, resolvedTtsProvider);
+      }
+
       setSelectedVoiceUri(String(config.browser_tts_voice_uri || ''));
       setAiStatus('Loaded');
     } catch (err) {
@@ -1204,11 +1256,106 @@ export default function HomePage() {
     recognition.stop();
   };
 
+  const ensureUnlockedAudioContext = async () => {
+    if (typeof window === 'undefined') return null;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextClass();
+    }
+
+    if (audioContextRef.current.state === 'suspended') {
+      try {
+        await audioContextRef.current.resume();
+      } catch (_) {
+        return audioContextRef.current;
+      }
+    }
+
+    return audioContextRef.current;
+  };
+
+  const base64ToArrayBuffer = (base64) => {
+    const binaryString = window.atob(String(base64 || ''));
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i += 1) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+  };
+
+  const playGeminiAudioWithWebAudio = async (audioBase64) => {
+    const context = await ensureUnlockedAudioContext();
+    if (!context) return false;
+
+    const encodedBuffer = base64ToArrayBuffer(audioBase64);
+    const decodedBuffer = await context.decodeAudioData(encodedBuffer.slice(0));
+
+    if (activeAudioSourceRef.current) {
+      try {
+        activeAudioSourceRef.current.stop();
+      } catch (_) {
+        // ignore stop errors from stale sources
+      }
+      activeAudioSourceRef.current = null;
+    }
+
+    const source = context.createBufferSource();
+    source.buffer = decodedBuffer;
+    source.connect(context.destination);
+    activeAudioSourceRef.current = source;
+
+    return new Promise((resolve, reject) => {
+      source.onended = () => {
+        if (activeAudioSourceRef.current === source) {
+          activeAudioSourceRef.current = null;
+        }
+        resolve(true);
+      };
+
+      try {
+        source.start(0);
+      } catch (err) {
+        if (activeAudioSourceRef.current === source) {
+          activeAudioSourceRef.current = null;
+        }
+        reject(err);
+      }
+    });
+  };
+
+  const playGeminiAudioWithHtmlAudio = async (audioBase64, mimeType = 'audio/mpeg') => {
+    const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
+    activeAudioRef.current = audio;
+
+    return new Promise((resolve, reject) => {
+      audio.onended = () => {
+        if (activeAudioRef.current === audio) {
+          activeAudioRef.current = null;
+        }
+        resolve(true);
+      };
+
+      audio.onerror = () => {
+        if (activeAudioRef.current === audio) {
+          activeAudioRef.current = null;
+        }
+        reject(new Error(language === 'de' ? 'Gemini-Audio konnte nicht abgespielt werden.' : 'Gemini audio playback failed.'));
+      };
+
+      audio.play().catch(reject);
+    });
+  };
+
   const speakAssistantText = (text) => {
     const prepared = cleanTextForSpeech(text).slice(0, 1100);
     if (!prepared) return;
 
     const stopAudioPlayback = () => {
+      ttsPlaybackTokenRef.current += 1;
+
       const activeAudio = activeAudioRef.current;
       if (activeAudio) {
         try {
@@ -1218,6 +1365,17 @@ export default function HomePage() {
         }
         activeAudioRef.current = null;
       }
+
+      if (activeAudioSourceRef.current) {
+        try {
+          activeAudioSourceRef.current.stop();
+        } catch (_) {
+          // ignore stop errors from stale sources
+        }
+        activeAudioSourceRef.current = null;
+      }
+
+      setIsSpeaking(false);
     };
 
     const speakWithBrowser = () => {
@@ -1264,18 +1422,22 @@ export default function HomePage() {
       }
     };
 
-    const speakWithGemini = async () => {
-      try {
-        stopAudioPlayback();
-        if (speechSynthesisSupported) {
-          window.speechSynthesis.cancel();
+    const speakWithGeminiFallback = async (playbackToken) => {
+      const chunks = splitTextForGeminiTts(prepared, 260);
+      if (!chunks.length) {
+        return;
+      }
+
+      for (const chunk of chunks) {
+        if (playbackToken !== ttsPlaybackTokenRef.current) {
+          return;
         }
 
-        const response = await fetch(`${API_BASE}/api/tts/synthesize`, {
+        const response = await fetch('/internal/tts/synthesize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: prepared,
+            text: chunk,
             language_code: resolveSpeechLocale(language)
           })
         });
@@ -1285,34 +1447,156 @@ export default function HomePage() {
           throw new Error(data?.error || `Gemini TTS request failed (${response.status})`);
         }
 
-        const mimeType = data?.mime_type || 'audio/mpeg';
-        const audio = new Audio(`data:${mimeType};base64,${data.audio_base64}`);
-        activeAudioRef.current = audio;
+        if (playbackToken !== ttsPlaybackTokenRef.current) {
+          return;
+        }
 
-        audio.onplay = () => {
-          setIsSpeaking(true);
-          setVoiceError('');
-        };
-        audio.onended = () => {
-          setIsSpeaking(false);
-          if (activeAudioRef.current === audio) {
-            activeAudioRef.current = null;
-          }
-        };
-        audio.onerror = () => {
-          setIsSpeaking(false);
-          if (activeAudioRef.current === audio) {
-            activeAudioRef.current = null;
-          }
-          setVoiceError(language === 'de' ? 'Gemini-Audio konnte nicht abgespielt werden.' : 'Gemini audio playback failed.');
+        try {
+          await playGeminiAudioWithWebAudio(data.audio_base64);
+        } catch (_) {
+          await playGeminiAudioWithHtmlAudio(data.audio_base64, data?.mime_type || 'audio/mpeg');
+        }
+      }
+    };
+
+    const speakWithGemini = async () => {
+      let currentPlaybackToken = 0;
+
+      try {
+        stopAudioPlayback();
+        ttsPlaybackTokenRef.current += 1;
+        currentPlaybackToken = ttsPlaybackTokenRef.current;
+
+        if (speechSynthesisSupported) {
+          window.speechSynthesis.cancel();
+        }
+
+        setIsSpeaking(true);
+        setVoiceError('');
+
+        const response = await fetch('/internal/tts/live', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: prepared,
+            language_code: resolveSpeechLocale(language)
+          })
+        });
+
+        if (!response.ok || !response.body) {
+          await speakWithGeminiFallback(currentPlaybackToken);
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let gotAudio = false;
+        let streamError = '';
+        let playbackChain = Promise.resolve();
+
+        const enqueueAudioChunk = (audioBase64, mimeType) => {
+          playbackChain = playbackChain.then(async () => {
+            if (currentPlaybackToken !== ttsPlaybackTokenRef.current) return;
+            try {
+              await playGeminiAudioWithWebAudio(audioBase64);
+            } catch (_) {
+              await playGeminiAudioWithHtmlAudio(audioBase64, mimeType || 'audio/wav');
+            }
+          });
         };
 
-        await audio.play();
+        let streamDone = false;
+        while (!streamDone) {
+          const { value, done } = await reader.read();
+          if (done) {
+            streamDone = true;
+          } else {
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+
+              let event = null;
+              try {
+                event = JSON.parse(trimmed);
+              } catch {
+                continue;
+              }
+
+              if (event?.type === 'audio' && event?.audio_base64) {
+                gotAudio = true;
+                enqueueAudioChunk(event.audio_base64, event.mime_type);
+              }
+
+              if (event?.type === 'error') {
+                streamError = String(event.error || 'Live stream failed');
+              }
+
+              if (event?.type === 'done') {
+                streamDone = true;
+              }
+            }
+          }
+
+          if (currentPlaybackToken !== ttsPlaybackTokenRef.current) {
+            try {
+              await reader.cancel();
+            } catch (_) {
+              // ignore reader cancel errors from closed streams
+            }
+            return;
+          }
+        }
+
+        if (streamError) {
+          throw new Error(streamError);
+        }
+
+        if (buffer.trim()) {
+          try {
+            const lastEvent = JSON.parse(buffer.trim());
+            if (lastEvent?.type === 'audio' && lastEvent?.audio_base64) {
+              gotAudio = true;
+              enqueueAudioChunk(lastEvent.audio_base64, lastEvent.mime_type);
+            }
+            if (lastEvent?.type === 'error') {
+              throw new Error(String(lastEvent.error || 'Live stream failed'));
+            }
+          } catch (err) {
+            if (err instanceof Error) {
+              throw err;
+            }
+          }
+        }
+
+        await playbackChain;
+
+        if (!gotAudio) {
+          await speakWithGeminiFallback(currentPlaybackToken);
+        }
       } catch (err) {
-        setVoiceError(language === 'de'
-          ? `Gemini-TTS Fehler: ${err.message}. Fallback auf Browser-Stimme.`
-          : `Gemini TTS error: ${err.message}. Falling back to browser voice.`);
-        speakWithBrowser();
+        if (currentPlaybackToken && currentPlaybackToken !== ttsPlaybackTokenRef.current) {
+          return;
+        }
+
+        try {
+          await speakWithGeminiFallback(currentPlaybackToken);
+          return;
+        } catch (fallbackErr) {
+          const fallbackMessage = fallbackErr?.message || err?.message || 'Unknown error';
+          setVoiceError(language === 'de'
+            ? `Gemini-TTS Fehler: ${fallbackMessage}. Fallback auf Browser-Stimme.`
+            : `Gemini TTS error: ${fallbackMessage}. Falling back to browser voice.`);
+          speakWithBrowser();
+        }
+      } finally {
+        if (currentPlaybackToken && currentPlaybackToken === ttsPlaybackTokenRef.current) {
+          setIsSpeaking(false);
+        }
       }
     };
 
@@ -1393,6 +1677,32 @@ export default function HomePage() {
   };
 
   useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const unlockAudio = () => {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContextClass();
+      }
+
+      if (audioContextRef.current.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {
+          // ignore resume errors on restrictive browsers
+        });
+      }
+    };
+
+    window.addEventListener('pointerdown', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio);
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (speechRecognitionRef.current) {
         speechRecognitionRef.current.stop();
@@ -1405,6 +1715,20 @@ export default function HomePage() {
           // ignore pause errors from stale audio instances
         }
         activeAudioRef.current = null;
+      }
+      if (activeAudioSourceRef.current) {
+        try {
+          activeAudioSourceRef.current.stop();
+        } catch (_) {
+          // ignore stop errors from stale sources
+        }
+        activeAudioSourceRef.current = null;
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {
+          // ignore close errors on torn-down contexts
+        });
+        audioContextRef.current = null;
       }
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
