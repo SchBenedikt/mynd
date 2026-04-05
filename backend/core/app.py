@@ -1272,6 +1272,8 @@ def load_ai_config() -> dict:
         'gemini_tts_language_code': 'de-DE',
         'gemini_tts_style_prompt': '',
         'gemini_tts_audio_encoding': 'MP3',
+        'gemini_live_model': 'gemini-3.1-flash-live-preview',
+        'gemini_live_voice': 'Zephyr',
     }
 
     if os.path.exists(AI_CONFIG_FILE):
@@ -1302,6 +1304,8 @@ def load_ai_config() -> dict:
             config['gemini_tts_language_code'] = str(file_config.get('gemini_tts_language_code', config['gemini_tts_language_code'])).strip() or 'de-DE'
             config['gemini_tts_style_prompt'] = str(file_config.get('gemini_tts_style_prompt', config['gemini_tts_style_prompt'])).strip()
             config['gemini_tts_audio_encoding'] = str(file_config.get('gemini_tts_audio_encoding', config['gemini_tts_audio_encoding'])).strip().upper() or 'MP3'
+            config['gemini_live_model'] = str(file_config.get('gemini_live_model', config['gemini_live_model'])).strip() or 'gemini-3.1-flash-live-preview'
+            config['gemini_live_voice'] = str(file_config.get('gemini_live_voice', config['gemini_live_voice'])).strip() or 'Zephyr'
         except Exception as e:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
 
@@ -1332,6 +1336,8 @@ def save_ai_config(base_url: str, model: str, **overrides: Any) -> None:
         'gemini_tts_language_code',
         'gemini_tts_style_prompt',
         'gemini_tts_audio_encoding',
+        'gemini_live_model',
+        'gemini_live_voice',
     }
     for key, value in overrides.items():
         if key in allowed_overrides:
@@ -3871,6 +3877,8 @@ def ai_config():
                 'gemini_tts_language_code': persisted.get('gemini_tts_language_code', 'de-DE'),
                 'gemini_tts_style_prompt': persisted.get('gemini_tts_style_prompt', ''),
                 'gemini_tts_audio_encoding': persisted.get('gemini_tts_audio_encoding', 'MP3'),
+                'gemini_live_model': persisted.get('gemini_live_model', 'gemini-3.1-flash-live-preview'),
+                'gemini_live_voice': persisted.get('gemini_live_voice', 'Zephyr'),
                 'gemini_tts_api_key_set': bool(persisted.get('gemini_tts_api_key'))
             })
 
@@ -3899,6 +3907,8 @@ def ai_config():
         gemini_tts_language_code = str(data.get('gemini_tts_language_code', existing.get('gemini_tts_language_code', 'de-DE'))).strip() or 'de-DE'
         gemini_tts_style_prompt = str(data.get('gemini_tts_style_prompt', existing.get('gemini_tts_style_prompt', ''))).strip()
         gemini_tts_audio_encoding = str(data.get('gemini_tts_audio_encoding', existing.get('gemini_tts_audio_encoding', 'MP3'))).strip().upper() or 'MP3'
+        gemini_live_model = str(data.get('gemini_live_model', existing.get('gemini_live_model', 'gemini-3.1-flash-live-preview'))).strip() or 'gemini-3.1-flash-live-preview'
+        gemini_live_voice = str(data.get('gemini_live_voice', existing.get('gemini_live_voice', 'Zephyr'))).strip() or 'Zephyr'
 
         ollama_client.update_config(base_url, model)
         save_ai_config(
@@ -3912,6 +3922,8 @@ def ai_config():
             gemini_tts_language_code=gemini_tts_language_code,
             gemini_tts_style_prompt=gemini_tts_style_prompt,
             gemini_tts_audio_encoding=gemini_tts_audio_encoding,
+            gemini_live_model=gemini_live_model,
+            gemini_live_voice=gemini_live_voice,
         )
 
         return jsonify({
@@ -3927,7 +3939,9 @@ def ai_config():
             'gemini_tts_language_code': gemini_tts_language_code,
             'gemini_tts_style_prompt': gemini_tts_style_prompt,
             'gemini_tts_audio_encoding': gemini_tts_audio_encoding,
-            'gemini_tts_api_key_set': bool(gemini_tts_api_key)
+            'gemini_tts_api_key_set': bool(gemini_tts_api_key),
+            'gemini_live_model': gemini_live_model,
+            'gemini_live_voice': gemini_live_voice,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
