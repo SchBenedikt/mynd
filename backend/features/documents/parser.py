@@ -316,6 +316,18 @@ class DocumentParser:
             re.MULTILINE
         )
 
+        # Media placeholder patterns in multiple languages (German, English, etc.)
+        _MEDIA_PLACEHOLDER = re.compile(
+            r'^(?:'
+            r'Bild\s+weggelassen|GIF\s+weggelassen|Video\s+weggelassen'
+            r'|Audio\s+weggelassen|Dokument\s+weggelassen|Sticker\s+weggelassen|Datei\s+weggelassen'
+            r'|image\s+omitted|video\s+omitted|audio\s+omitted|document\s+omitted'
+            r'|sticker\s+omitted|gif\s+omitted|file\s+omitted'
+            r'|<Media\s+omitted>'
+            r')$',
+            re.IGNORECASE
+        )
+
         messages = []
         for match in line_pattern.finditer(content):
             date_str, time_str, sender, message = match.groups()
@@ -323,7 +335,7 @@ class DocumentParser:
             message = message.strip()
 
             # Skip system messages that are just attachment placeholders
-            if re.match(r'^(Bild|GIF|Video|Audio|Dokument|Sticker|Datei)\s+weggelassen$', message, re.IGNORECASE):
+            if _MEDIA_PLACEHOLDER.match(message):
                 continue
             if not message:
                 continue

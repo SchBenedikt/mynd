@@ -3835,6 +3835,22 @@ def _index_txt_file(file_path: str, original_name: str) -> dict:
         return {'chunks': len(chunks)}
 
 
+def _secure_txt_filename(filename: str) -> str:
+    """Return a safe filename for an uploaded .txt file."""
+    try:
+        from werkzeug.utils import secure_filename
+        safe = secure_filename(filename)
+    except Exception:
+        safe = re.sub(r'[^\w.\-]', '_', filename)
+    # Ensure it ends with .txt
+    if not safe.lower().endswith('.txt'):
+        safe = safe + '.txt'
+    # Prevent hidden files
+    if safe.startswith('.'):
+        safe = 'upload_' + safe
+    return safe or 'upload.txt'
+
+
 @app.route('/api/knowledge/upload-txt', methods=['POST'])
 def upload_txt_files():
     """Upload one or more .txt files and index them into the knowledge base."""
@@ -3853,11 +3869,10 @@ def upload_txt_files():
         ext = os.path.splitext(original_name)[1].lower()
 
         if ext not in ALLOWED_TXT_EXTENSIONS:
-            errors.append(f'{original_name}: Nur .txt Dateien sind erlaubt')
+            errors.append(f'{original_name}: Nur .txt Dateien sind erlaubt / Only .txt files are allowed')
             continue
 
-        # Sanitize filename to prevent path traversal
-        safe_name = re.sub(r'[^\w\s.\-]', '_', original_name)
+        safe_name = _secure_txt_filename(original_name)
         dest_path = os.path.join(TXT_UPLOAD_DIR, safe_name)
 
         # Avoid overwriting – append a counter if needed
@@ -3873,20 +3888,19 @@ def upload_txt_files():
             # Reject files that are too large
             if os.path.getsize(dest_path) > TXT_MAX_SIZE_BYTES:
                 os.remove(dest_path)
-                errors.append(f'{original_name}: Datei zu groß (max. 50 MB)')
+                errors.append(f'{original_name}: Datei zu groß / File too large (max. 50 MB)')
                 continue
 
             index_result = _index_txt_file(dest_path, original_name)
             results.append({
                 'name': original_name,
                 'saved_as': os.path.basename(dest_path),
-                'path': dest_path,
                 'chunks': index_result.get('chunks', 0),
                 'warning': index_result.get('warning')
             })
         except Exception as e:
             logger.error(f"Error uploading {original_name}: {e}")
-            errors.append(f'{original_name}: {str(e)}')
+            errors.append(f'{original_name}: Upload fehlgeschlagen / Upload failed')
             if os.path.exists(dest_path):
                 try:
                     os.remove(dest_path)
@@ -3916,7 +3930,7 @@ def list_txt_files():
                        COUNT(c.id) AS chunk_count
                 FROM documents d
                 LEFT JOIN chunks c ON c.document_id = d.id
-                WHERE d.metadata LIKE '%uploaded_txt%'
+                WHERE json_extract(d.metadata, '$.source') = 'uploaded_txt'
                 GROUP BY d.id
                 ORDER BY d.created_at DESC
             """)
@@ -3924,20 +3938,18 @@ def list_txt_files():
                 files.append({
                     'id': row['id'],
                     'name': row['name'],
-                    'path': row['path'],
                     'created_at': row['created_at'],
                     'chunk_count': row['chunk_count'],
                     'file_exists': os.path.exists(row['path'])
                 })
         else:
             # Fallback: scan directory
-            for fname in os.listdir(TXT_UPLOAD_DIR):
+            for fname in sorted(os.listdir(TXT_UPLOAD_DIR)):
                 fpath = os.path.join(TXT_UPLOAD_DIR, fname)
                 if fname.endswith('.txt') and os.path.isfile(fpath):
                     files.append({
                         'id': None,
                         'name': fname,
-                        'path': fpath,
                         'created_at': os.path.getctime(fpath),
                         'chunk_count': 0,
                         'file_exists': True
@@ -3945,7 +3957,8 @@ def list_txt_files():
 
         return jsonify({'files': files})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error listing txt files: {e}")
+        return jsonify({'error': 'Could not list files'}), 500
 
 
 @app.route('/api/knowledge/txt-files/<int:doc_id>', methods=['DELETE'])
@@ -3969,6 +3982,7 @@ def delete_txt_file(doc_id: int):
             return jsonify({'error': 'Document is not an uploaded txt file'}), 400
 
         file_path = row['path']
+        doc_name = row['name']
 
         # Remove from database (CASCADE deletes chunks)
         cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
@@ -3981,10 +3995,11 @@ def delete_txt_file(doc_id: int):
             except Exception as e:
                 logger.warning(f"Could not delete file {file_path}: {e}")
 
-        return jsonify({'status': 'deleted', 'name': row['name']})
+        return jsonify({'status': 'deleted', 'name': doc_name})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error deleting txt file {doc_id}: {e}")
+        return jsonify({'error': 'Could not delete file'}), 500
 
 
 @app.route('/api/training/stats', methods=['GET'])
