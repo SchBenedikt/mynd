@@ -3784,6 +3784,209 @@ def update_embeddings():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+TXT_UPLOAD_DIR = os.path.join(DATA_DIR, 'uploaded_txt')
+os.makedirs(TXT_UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_TXT_EXTENSIONS = {'.txt'}
+TXT_MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+def _index_txt_file(file_path: str, original_name: str) -> dict:
+    """Parse a text/WhatsApp file and add its chunks to the knowledge database."""
+    parser = DocumentParser()
+    content = parser.parse_file(file_path)
+
+    if not content or len(content.strip()) < 10:
+        return {'chunks': 0, 'warning': 'File appears empty or too short to index'}
+
+    # Split into chunks
+    chunks = knowledge_base.split_text(content)
+
+    if not chunks:
+        return {'chunks': 0, 'warning': 'No indexable chunks found'}
+
+    if knowledge_base.db:
+        # Use file path as unique document identifier so re-uploads replace old data
+        doc_id = knowledge_base.db.add_document(
+            name=original_name,
+            path=file_path,
+            file_type='.txt',
+            metadata={'source': 'uploaded_txt', 'original_name': original_name}
+        )
+
+        # Delete old chunks for this document before re-inserting
+        try:
+            knowledge_base.db.connection.execute(
+                "DELETE FROM chunks_fts WHERE document_id = ?", (doc_id,)
+            )
+            knowledge_base.db.connection.execute(
+                "DELETE FROM chunks WHERE document_id = ?", (doc_id,)
+            )
+            knowledge_base.db.connection.commit()
+        except Exception:
+            pass
+
+        knowledge_base.db.add_chunks(doc_id, chunks)
+        logger.info(f"Indexed {len(chunks)} chunks for uploaded file: {original_name}")
+        return {'chunks': len(chunks), 'doc_id': doc_id}
+    else:
+        # Fallback: extend in-memory knowledge
+        knowledge_base.knowledge_chunks.extend(chunks)
+        return {'chunks': len(chunks)}
+
+
+@app.route('/api/knowledge/upload-txt', methods=['POST'])
+def upload_txt_files():
+    """Upload one or more .txt files and index them into the knowledge base."""
+    if 'files' not in request.files:
+        return jsonify({'error': 'No files provided'}), 400
+
+    uploaded_files = request.files.getlist('files')
+    if not uploaded_files:
+        return jsonify({'error': 'No files provided'}), 400
+
+    results = []
+    errors = []
+
+    for upload in uploaded_files:
+        original_name = upload.filename or 'unknown.txt'
+        ext = os.path.splitext(original_name)[1].lower()
+
+        if ext not in ALLOWED_TXT_EXTENSIONS:
+            errors.append(f'{original_name}: Nur .txt Dateien sind erlaubt')
+            continue
+
+        # Sanitize filename to prevent path traversal
+        safe_name = re.sub(r'[^\w\s.\-]', '_', original_name)
+        dest_path = os.path.join(TXT_UPLOAD_DIR, safe_name)
+
+        # Avoid overwriting – append a counter if needed
+        counter = 1
+        base, suffix = os.path.splitext(dest_path)
+        while os.path.exists(dest_path):
+            dest_path = f"{base}_{counter}{suffix}"
+            counter += 1
+
+        try:
+            upload.save(dest_path)
+
+            # Reject files that are too large
+            if os.path.getsize(dest_path) > TXT_MAX_SIZE_BYTES:
+                os.remove(dest_path)
+                errors.append(f'{original_name}: Datei zu groß (max. 50 MB)')
+                continue
+
+            index_result = _index_txt_file(dest_path, original_name)
+            results.append({
+                'name': original_name,
+                'saved_as': os.path.basename(dest_path),
+                'path': dest_path,
+                'chunks': index_result.get('chunks', 0),
+                'warning': index_result.get('warning')
+            })
+        except Exception as e:
+            logger.error(f"Error uploading {original_name}: {e}")
+            errors.append(f'{original_name}: {str(e)}')
+            if os.path.exists(dest_path):
+                try:
+                    os.remove(dest_path)
+                except Exception:
+                    pass
+
+    if not results and errors:
+        return jsonify({'error': '; '.join(errors)}), 400
+
+    return jsonify({
+        'status': 'success',
+        'uploaded': results,
+        'errors': errors,
+        'total_chunks': sum(r['chunks'] for r in results)
+    })
+
+
+@app.route('/api/knowledge/txt-files', methods=['GET'])
+def list_txt_files():
+    """List all uploaded .txt files."""
+    try:
+        files = []
+        if knowledge_base.db:
+            cursor = knowledge_base.db.connection.cursor()
+            cursor.execute("""
+                SELECT d.id, d.name, d.path, d.created_at,
+                       COUNT(c.id) AS chunk_count
+                FROM documents d
+                LEFT JOIN chunks c ON c.document_id = d.id
+                WHERE d.metadata LIKE '%uploaded_txt%'
+                GROUP BY d.id
+                ORDER BY d.created_at DESC
+            """)
+            for row in cursor.fetchall():
+                files.append({
+                    'id': row['id'],
+                    'name': row['name'],
+                    'path': row['path'],
+                    'created_at': row['created_at'],
+                    'chunk_count': row['chunk_count'],
+                    'file_exists': os.path.exists(row['path'])
+                })
+        else:
+            # Fallback: scan directory
+            for fname in os.listdir(TXT_UPLOAD_DIR):
+                fpath = os.path.join(TXT_UPLOAD_DIR, fname)
+                if fname.endswith('.txt') and os.path.isfile(fpath):
+                    files.append({
+                        'id': None,
+                        'name': fname,
+                        'path': fpath,
+                        'created_at': os.path.getctime(fpath),
+                        'chunk_count': 0,
+                        'file_exists': True
+                    })
+
+        return jsonify({'files': files})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/knowledge/txt-files/<int:doc_id>', methods=['DELETE'])
+def delete_txt_file(doc_id: int):
+    """Delete an uploaded .txt file and remove it from the knowledge base."""
+    try:
+        if not knowledge_base.db:
+            return jsonify({'error': 'Database not available'}), 500
+
+        cursor = knowledge_base.db.connection.cursor()
+        cursor.execute(
+            "SELECT id, name, path, metadata FROM documents WHERE id = ?", (doc_id,)
+        )
+        row = cursor.fetchone()
+
+        if not row:
+            return jsonify({'error': 'File not found'}), 404
+
+        metadata = json.loads(row['metadata'] or '{}')
+        if metadata.get('source') != 'uploaded_txt':
+            return jsonify({'error': 'Document is not an uploaded txt file'}), 400
+
+        file_path = row['path']
+
+        # Remove from database (CASCADE deletes chunks)
+        cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        knowledge_base.db.connection.commit()
+
+        # Remove physical file
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                logger.warning(f"Could not delete file {file_path}: {e}")
+
+        return jsonify({'status': 'deleted', 'name': row['name']})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/training/stats', methods=['GET'])
 def training_stats():
     """Gibt Trainings-Statistiken zurück"""
