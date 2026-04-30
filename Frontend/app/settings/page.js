@@ -231,6 +231,9 @@ export default function SettingsPage() {
   });
   const [indexingPath, setIndexingPath] = useState('');
   const [indexingPathStatus, setIndexingPathStatus] = useState('');
+  const [txtFiles, setTxtFiles] = useState([]);
+  const [txtUploadStatus, setTxtUploadStatus] = useState('');
+  const [txtUploading, setTxtUploading] = useState(false);
   
   const [nextcloudUrl, setNextcloudUrl] = useState('');
   const [nextcloudStatus, setNextcloudStatus] = useState('');
@@ -318,6 +321,7 @@ export default function SettingsPage() {
     loadCalendarOptions();
     loadIndexingConfig();
     loadAllApis();
+    loadTxtFiles();
     updateStatus();
 
     const statusInterval = setInterval(() => {
@@ -788,6 +792,91 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error('Error loading indexing path:', err);
+    }
+  };
+
+  const loadTxtFiles = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/knowledge/txt-files`);
+      if (res.ok) {
+        const data = await res.json();
+        setTxtFiles(data.files || []);
+      }
+    } catch (err) {
+      console.error('Error loading txt files:', err);
+    }
+  };
+
+  const uploadTxtFiles = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setTxtUploading(true);
+    setTxtUploadStatus('');
+
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/knowledge/upload-txt`, {
+        method: 'POST',
+        body: formData
+      });
+
+      // Only attempt JSON parsing when the server returns JSON
+      let data = {};
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch (err) {
+          data = { error: 'Invalid JSON response from server' };
+        }
+      } else {
+        // Non-JSON response (e.g. HTML error page) — capture as text
+        const text = await res.text();
+        data = { error: text };
+      }
+
+      if (res.ok) {
+        const count = data.uploaded ? data.uploaded.length : 0;
+        const totalChunks = data.total_chunks || 0;
+        setTxtUploadStatus(
+          tr(
+            `✓ ${count} Datei(en) hochgeladen, ${totalChunks} Chunks indexiert`,
+            `✓ ${count} file(s) uploaded, ${totalChunks} chunks indexed`
+          ) + (data.errors && data.errors.length > 0 ? ' | ' + data.errors.join('; ') : '')
+        );
+        await loadTxtFiles();
+      } else {
+        // Prefer server-provided error, otherwise show raw text
+        const errMsg = (data && data.error) ? data.error : 'Unknown error';
+        setTxtUploadStatus(tr('Fehler: ', 'Error: ') + errMsg);
+      }
+    } catch (err) {
+      setTxtUploadStatus('Error: ' + err.message);
+    } finally {
+      setTxtUploading(false);
+      // Reset file input so the same file can be re-uploaded
+      e.target.value = '';
+    }
+  };
+
+  const deleteTxtFile = async (docId, name) => {
+    if (!confirm(tr(`"${name}" wirklich löschen?`, `Really delete "${name}"?`))) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/knowledge/txt-files/${docId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setTxtUploadStatus(tr(`✓ "${name}" gelöscht`, `✓ "${name}" deleted`));
+        await loadTxtFiles();
+      } else {
+        const data = await res.json();
+        setTxtUploadStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      setTxtUploadStatus('Error: ' + err.message);
     }
   };
 
@@ -2434,6 +2523,73 @@ export default function SettingsPage() {
                           </div>
                         </div>
                       )}
+                    </div>
+                  )}
+                </div>
+
+                {/* TXT File Upload Section */}
+                <div className="panel-section" style={{marginTop: '2rem'}}>
+                  <div className="section-title">{tr('Eigene Textdateien', 'Custom Text Files')}</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                    {tr(
+                      'Lade eigene .txt Dateien hoch (z.B. WhatsApp-Chatverläufe). Diese werden automatisch erkannt, verarbeitet und in die Wissensdatenbank aufgenommen.',
+                      'Upload custom .txt files (e.g. WhatsApp chat exports). They are automatically detected, processed, and added to the knowledge base.'
+                    )}
+                  </p>
+
+                  <div className="button-group" style={{marginTop: '1rem'}}>
+                    <label className="btn primary" style={{cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.5rem'}}>
+                      <i className="fas fa-upload"></i>
+                      {txtUploading ? tr('Hochladen…', 'Uploading…') : tr('.txt Dateien hochladen', 'Upload .txt files')}
+                      <input
+                        type="file"
+                        accept=".txt"
+                        multiple
+                        style={{display: 'none'}}
+                        onChange={uploadTxtFiles}
+                        disabled={txtUploading}
+                      />
+                    </label>
+                  </div>
+                  {txtUploadStatus && (
+                    <div className="status-text" style={{marginTop: '0.5rem'}}>{txtUploadStatus}</div>
+                  )}
+
+                  {txtFiles.length > 0 && (
+                    <div style={{marginTop: '1.5rem'}}>
+                      <div style={{fontWeight: '600', marginBottom: '0.75rem', fontSize: '0.9rem'}}>
+                        <i className="fas fa-file-alt" style={{marginRight: '0.5rem'}}></i>
+                        {tr('Hochgeladene Dateien', 'Uploaded Files')} ({txtFiles.length})
+                      </div>
+                      <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
+                        {txtFiles.map((file) => (
+                          <div key={file.id} style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '0.6rem 0.75rem',
+                            background: 'var(--background)',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border)',
+                            fontSize: '0.875rem'
+                          }}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem', overflow: 'hidden'}}>
+                              <i className="fas fa-file-alt" style={{color: 'var(--primary)', flexShrink: 0}}></i>
+                              <span style={{fontWeight: '500', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{file.name}</span>
+                              <span style={{color: 'var(--muted)', flexShrink: 0, fontSize: '0.8rem'}}>
+                                ({file.chunk_count} {tr('Chunks', 'chunks')})
+                              </span>
+                            </div>
+                            <button
+                              className="btn secondary"
+                              style={{padding: '0.25rem 0.6rem', fontSize: '0.8rem', flexShrink: 0, marginLeft: '0.5rem'}}
+                              onClick={() => deleteTxtFile(file.id, file.name)}
+                            >
+                              <i className="fas fa-trash"></i>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
