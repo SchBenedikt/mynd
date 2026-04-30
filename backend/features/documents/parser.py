@@ -276,21 +276,97 @@ class DocumentParser:
             return ""
     
     def parse_text(self, file_path):
-        """Parst reine Textdateien"""
+        """Parst reine Textdateien, erkennt automatisch WhatsApp-Chatverläufe"""
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
-                return self.clean_text(file.read())
+                content = file.read()
         except UnicodeDecodeError:
-            # Versuche mit anderer Kodierung
             try:
                 with open(file_path, 'r', encoding='latin-1') as file:
-                    return self.clean_text(file.read())
+                    content = file.read()
             except Exception as e:
                 self.logger.error(f"Text parsing error: {str(e)}")
                 return ""
         except Exception as e:
             self.logger.error(f"Text parsing error: {str(e)}")
             return ""
+
+        if self._is_whatsapp_chat(content):
+            return self.parse_whatsapp_chat_content(content)
+        return self.clean_text(content)
+
+    def _is_whatsapp_chat(self, content: str) -> bool:
+        """Erkennt, ob der Inhalt ein WhatsApp-Chatverlauf ist"""
+        # WhatsApp format: [DD.MM.YY, HH:MM:SS] Name: Message  or  DD.MM.YY, HH:MM - Name: Message
+        pattern = re.compile(
+            r'^\[?\d{1,2}[./]\d{1,2}[./]\d{2,4},?\s+\d{1,2}:\d{2}(?::\d{2})?\]?\s*[-–]?\s*\S',
+            re.MULTILINE
+        )
+        matches = pattern.findall(content[:3000])
+        return len(matches) >= 3
+
+    def parse_whatsapp_chat_content(self, content: str) -> str:
+        """
+        Parst WhatsApp-Chatverläufe und erzeugt strukturierten Text für die Indexierung.
+        Unterstützt das Format: [DD.MM.YY, HH:MM:SS] Name: Nachricht
+        """
+        # Matches both [DD.MM.YY, HH:MM:SS] Name: and DD.MM.YY, HH:MM - Name:
+        line_pattern = re.compile(
+            r'^\[?(\d{1,2}[./]\d{1,2}[./]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*[-–]?\s*([^:]+?):\s*(.*)',
+            re.MULTILINE
+        )
+
+        messages = []
+        for match in line_pattern.finditer(content):
+            date_str, time_str, sender, message = match.groups()
+            sender = sender.strip()
+            message = message.strip()
+
+            # Skip system messages that are just attachment placeholders
+            if re.match(r'^(Bild|GIF|Video|Audio|Dokument|Sticker|Datei)\s+weggelassen$', message, re.IGNORECASE):
+                continue
+            if not message:
+                continue
+
+            messages.append({
+                'date': date_str,
+                'time': time_str,
+                'sender': sender,
+                'message': message
+            })
+
+        if not messages:
+            return self.clean_text(content)
+
+        # Group messages by day for better chunking
+        days: dict = {}
+        for msg in messages:
+            day_key = msg['date']
+            if day_key not in days:
+                days[day_key] = []
+            days[day_key].append(msg)
+
+        lines = []
+        for day, day_msgs in days.items():
+            lines.append(f"\n=== {day} ===")
+            for m in day_msgs:
+                lines.append(f"[{m['time']}] {m['sender']}: {m['message']}")
+
+        return '\n'.join(lines).strip()
+
+    def parse_whatsapp_chat(self, file_path: str) -> str:
+        """Parst eine WhatsApp-Chatdatei"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                content = file.read()
+        except UnicodeDecodeError:
+            try:
+                with open(file_path, 'r', encoding='latin-1') as file:
+                    content = file.read()
+            except Exception as e:
+                self.logger.error(f"WhatsApp chat parsing error: {str(e)}")
+                return ""
+        return self.parse_whatsapp_chat_content(content)
     
     def parse_html(self, file_path):
         """Parst HTML-Dateien"""
