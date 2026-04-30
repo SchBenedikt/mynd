@@ -824,7 +824,22 @@ export default function SettingsPage() {
         method: 'POST',
         body: formData
       });
-      const data = await res.json();
+
+      // Only attempt JSON parsing when the server returns JSON
+      let data = {};
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch (err) {
+          data = { error: 'Invalid JSON response from server' };
+        }
+      } else {
+        // Non-JSON response (e.g. HTML error page) — capture as text
+        const text = await res.text();
+        data = { error: text };
+      }
+
       if (res.ok) {
         const count = data.uploaded ? data.uploaded.length : 0;
         const totalChunks = data.total_chunks || 0;
@@ -836,7 +851,9 @@ export default function SettingsPage() {
         );
         await loadTxtFiles();
       } else {
-        setTxtUploadStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unknown error'));
+        // Prefer server-provided error, otherwise show raw text
+        const errMsg = (data && data.error) ? data.error : 'Unknown error';
+        setTxtUploadStatus(tr('Fehler: ', 'Error: ') + errMsg);
       }
     } catch (err) {
       setTxtUploadStatus('Error: ' + err.message);
