@@ -7481,7 +7481,7 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
 
     # Erkenne Foto-Anfragen
     photo_keywords = ['foto', 'fotos', 'bild', 'bilder', 'image', 'images', 'photo', 'photos',
-                     'immich', 'person', 'personen', 'gesicht', 'album', 'aufnahme', 
+                     'immich', 'gesicht', 'album', 'aufnahme',
                      'zeig mir', 'gib mir', 'show me', 'finde', 'find',
                      'katze', 'hund', 'baum', 'auto', 'haus', 'mensch',
                      'katzen', 'hunde', 'bäume', 'autos', 'häuser', 'menschen']
@@ -8266,8 +8266,6 @@ WICHTIG:
         if requires_nextcloud and not get_nextcloud_runtime_config():
             return jsonify(_build_integration_connect_response('nextcloud', prompt, language, feature='nextcloud_context'))
 
-        if intent == 'photos' and not get_immich_client(username):
-            return jsonify(_build_integration_connect_response('immich', prompt, language, feature='photo_search'))
 
         logger.info(f"Query intent: {intent}, preferred_source: {preferred_source}")
 
@@ -8288,7 +8286,9 @@ WICHTIG:
 
         # Gather file context for file/mixed/general queries so indexed chunks are
         # consistently available for broad knowledge questions.
-        if intent in ['files', 'mixed', 'general']:
+        # Also fall back to file context for photo-intent queries when Immich is not configured.
+        immich_unavailable_fallback = intent == 'photos' and photo_context is None
+        if intent in ['files', 'mixed', 'general'] or immich_unavailable_fallback:
             file_context = gather_file_context(knowledge_base, training_manager, prompt)
             if file_context:
                 logger.info(f"Found {file_context[0].get('metadata', {}).get('count', 0)} file results with enhanced context (intent-based)")
