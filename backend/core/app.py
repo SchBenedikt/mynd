@@ -1163,13 +1163,13 @@ Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": 0.2,      # Leicht erhöht für besseres Reasoning, aber noch faktentreu
+                "temperature": 0.3,      # Slightly higher for more natural, varied responses
                 "top_p": 0.85,           # Verbesserte Balance zwischen Fokus und Vielfalt
                 "top_k": 40,             # Erweiterte Token-Auswahl für präzisere Formulierungen
-                "max_tokens": 3072,      # Mehr Tokens für komplexe Antworten mit Reasoning
+                "max_tokens": 4096,      # Mehr Tokens für komplexe Antworten mit Reasoning
                 "repeat_penalty": 1.15,  # Stärkere Vermeidung von Wiederholungen
-                "num_predict": 3072,     # Maximale Antwortlänge erhöht
-                "num_ctx": 4096,         # Kontextfenster für besseres Verständnis
+                "num_predict": 4096,     # Maximale Antwortlänge erhöht
+                "num_ctx": 8192,         # Larger context window for richer multi-turn conversations
                 "mirostat": 2,           # Aktiviere Mirostat für konsistente Qualität
                 "mirostat_tau": 5.0,     # Ziel-Perplexität für kohärente Antworten
                 "mirostat_eta": 0.1      # Lernrate für Mirostat-Anpassung
@@ -7528,6 +7528,52 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
         return 'general'
 
 
+def _parse_conversation_context(context: str) -> List[Dict[str, str]]:
+    """Parse a flat conversation-history string into a list of role/content dicts.
+
+    The frontend serialises conversation turns as::
+
+        User: <turn>
+        Assistant: <turn>
+        ...
+
+    This function reconstructs the individual dicts so the model receives a proper
+    multi-turn conversation history rather than a single opaque assistant blob.
+    """
+    if not context or not context.strip():
+        return []
+
+    parsed: List[Dict[str, str]] = []
+    current_role: Optional[str] = None
+    current_lines: List[str] = []
+
+    for line in context.split('\n'):
+        if line.startswith('User: '):
+            if current_role and current_lines:
+                content = '\n'.join(current_lines).strip()
+                if content:
+                    parsed.append({'role': current_role, 'content': content})
+            current_role = 'user'
+            current_lines = [line[6:]]
+        elif line.startswith('Assistant: '):
+            if current_role and current_lines:
+                content = '\n'.join(current_lines).strip()
+                if content:
+                    parsed.append({'role': current_role, 'content': content})
+            current_role = 'assistant'
+            current_lines = [line[11:]]
+        elif current_role is not None:
+            current_lines.append(line)
+
+    # Flush the final turn
+    if current_role and current_lines:
+        content = '\n'.join(current_lines).strip()
+        if content:
+            parsed.append({'role': current_role, 'content': content})
+
+    return parsed
+
+
 def _build_integration_connect_response(provider: str, prompt: str, language: str = 'de', feature: str = '') -> Dict[str, Any]:
     """Builds a unified interactive setup response for missing integrations."""
     is_german = str(language or '').lower().startswith('de')
@@ -8406,14 +8452,16 @@ WICHTIG:
         # Build system message with context using gatherers helper
         system_message = build_agent_system_message(combined_context, language)
 
-        # Generate AI response
-        messages = [
-            {'role': 'system', 'content': system_message},
-            {'role': 'user', 'content': prompt}
-        ]
+        # Reconstruct structured conversation history from the flat context string so the
+        # model receives proper multi-turn turns instead of a single opaque blob.
+        history = _parse_conversation_context(context)
+        # Drop any trailing user turns to avoid duplicating the current user prompt.
+        while history and history[-1]['role'] == 'user':
+            history.pop()
 
-        if context:
-            messages.insert(1, {'role': 'assistant', 'content': context})
+        messages = [{'role': 'system', 'content': system_message}]
+        messages.extend(history)
+        messages.append({'role': 'user', 'content': prompt})
 
         try:
             response = ollama_client.chat(messages, [])
