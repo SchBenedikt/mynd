@@ -84,97 +84,181 @@ class NextcloudClient:
             self.logger.error(f"Nextcloud connection failed: {str(e)}")
             return False
     
-    def list_files(self, remote_path: str = '/', recursive: bool = True) -> List[Dict]:
-        """Listet Dateien in einem Nextcloud-Verzeichnis auf - verbesserte Erkennung"""
-        files = []
+    def list_files(self, remote_path: str = '/', recursive: bool = True, exclude_paths: list = None) -> List[Dict]:
+        """Listet Dateien in einem Nextcloud-Verzeichnis auf - verbesserte Erkennung
         
+        Args:
+            remote_path: Starting path (default: '/')
+            recursive: Traverse subdirectories (default: True)
+            exclude_paths: List of path prefixes to skip (e.g., ['/Fotosharing', '/Videos'])
+        """
+        files = []
+        if exclude_paths is None:
+            exclude_paths = []
+        # Normalize exclude paths
+        exclude_paths = [p.rstrip('/') for p in exclude_paths]
+
         try:
-            url = f"{self.url}/remote.php/dav/files/{self.username}{remote_path}"
-            
-            # PROPFIND request für Verzeichnisinhalt
-            headers = {'Depth': '1' if not recursive else 'infinity'}
-            response = requests.request('PROPFIND', url, auth=self.auth_provider.get_auth(), headers=headers, timeout=60)
-            
-            if response.status_code in [200, 207]:
-                # XML-Verarbeitung mit besserer Fehlerbehandlung
-                content = response.text
-                import xml.etree.ElementTree as ET
-                
+            # Normalize remote_path: empty -> '/', ensure leading slash and trailing slash for directory base
+            rp = (remote_path or '/').strip()
+            if not rp:
+                rp = '/'
+            if not rp.startswith('/'):
+                rp = '/' + rp
+
+            # Ensure a single trailing slash for directory base
+            dir_base = rp if rp.endswith('/') else rp + '/'
+
+            # We'll perform a safe BFS traversal using Depth: 1 for each directory to avoid servers rejecting 'infinity'.
+            dirs_to_visit = [dir_base]
+            visited_dirs = set()
+
+            import xml.etree.ElementTree as ET
+            import re
+
+            while dirs_to_visit:
+                current_dir = dirs_to_visit.pop(0)
+                if current_dir in visited_dirs:
+                    continue
+                visited_dirs.add(current_dir)
+
+                # Skip excluded paths
+                current_path = current_dir.rstrip('/')
+                if any(current_path.startswith(exc) for exc in exclude_paths):
+                    self.logger.debug(f"Skipping excluded path: {current_dir}")
+                    continue
+
+                url = f"{self.url}/remote.php/dav/files/{self.username}{current_dir}"
+                headers = {'Depth': '1'}
                 try:
-                    # Versuche XML zu parsen
+                    response = requests.request('PROPFIND', url, auth=self.auth_provider.get_auth(), headers=headers, timeout=60)
+                except Exception as e:
+                    self.logger.error(f"PROPFIND failed for {current_dir}: {e}")
+                    continue
+
+                if response.status_code not in (200, 207, 404):
+                    # Skip directories we can't access
+                    self.logger.debug(f"Skipping {current_dir}, status {response.status_code}")
+                    continue
+
+                content = response.text
+
+                # Try XML parse first
+                try:
                     root = ET.fromstring(content)
-                    
-                    # Namespace für WebDAV
-                    namespaces = {
-                        'd': 'DAV:',
-                        'oc': 'http://owncloud.org/ns',
-                        'nc': 'http://nextcloud.org/ns'
-                    }
-                    
+                    namespaces = {'d': 'DAV:', 'oc': 'http://owncloud.org/ns', 'nc': 'http://nextcloud.org/ns'}
+                    base_href = f"/remote.php/dav/files/{self.username}{current_dir}"
+
                     for response_elem in root.findall('.//d:response', namespaces):
                         href_elem = response_elem.find('d:href', namespaces)
-                        if href_elem is not None:
-                            href = href_elem.text
-                            
-                            # Überspringe das Verzeichnis selbst
-                            if href == f"/remote.php/dav/files/{self.username}{remote_path.rstrip('/')}/":
-                                continue
-                            
-                            # Dateiname und Extension extrahieren
-                            file_name = href.split('/')[-1]
-                            if not file_name or file_name.endswith('/'):
-                                continue  # Überspringe Verzeichnisse
-                                
-                            file_ext = os.path.splitext(file_name)[1].lower()
-                            
-                            # Alle Dateien aufnehmen, nicht nur unterstützte Formate
-                            # Filterung erfolgt später bei der Verarbeitung
-                            files.append({
-                                'path': href.replace(f"/remote.php/dav/files/{self.username}", ''),
-                                'name': file_name,
-                                'size': 0,  # Wird später geholt
-                                'extension': file_ext
-                            })
-                            
+                        if href_elem is None:
+                            continue
+                        href = href_elem.text
+
+                        # Some servers return encoded or different href formatting; normalize
+                        if not href:
+                            continue
+
+                        # Normalize href to always start with '/remote.php/dav/files/{username}/'
+                        if not href.startswith('/remote.php/dav/files/'):
+                            continue
+
+                        # Skip directory itself
+                        if href.rstrip('/') == base_href.rstrip('/'):
+                            continue
+
+                        # Try to inspect prop to see if this is a collection (directory)
+                        prop = response_elem.find('d:propstat/d:prop', namespaces)
+                        is_collection = False
+                        size = 0
+                        if prop is not None:
+                            res_type = prop.find('d:resourcetype', namespaces)
+                            if res_type is not None and res_type.find('d:collection', namespaces) is not None:
+                                is_collection = True
+
+                            size_elem = prop.find('d:getcontentlength', namespaces)
+                            if size_elem is not None and size_elem.text and size_elem.text.isdigit():
+                                size = int(size_elem.text)
+
+                        # If server didn't mark directories via trailing '/', rely on resourcetype
+                        if is_collection or href.endswith('/'):
+                            rel_dir = href.replace(f"/remote.php/dav/files/{self.username}", '')
+                            if not rel_dir.startswith('/'):
+                                rel_dir = '/' + rel_dir
+                            if not rel_dir.endswith('/'):
+                                rel_dir = rel_dir + '/'
+                            # Skip if excluded
+                            if not any(rel_dir.rstrip('/').startswith(exc) for exc in exclude_paths):
+                                dirs_to_visit.append(rel_dir)
+                            continue
+
+                        # File entry
+                        # Decode URL-encoded names
+                        try:
+                            from urllib.parse import unquote
+                            decoded_href = unquote(href)
+                        except Exception:
+                            decoded_href = href
+
+                        name = decoded_href.split('/')[-1]
+                        if not name:
+                            continue
+
+                        ext = os.path.splitext(name)[1].lower()
+                        files.append({
+                            'path': decoded_href.replace(f"/remote.php/dav/files/{self.username}", ''),
+                            'name': name,
+                            'size': size,
+                            'extension': ext
+                        })
+
                 except ET.ParseError:
-                    # Fallback auf Regex wenn XML fehlerhaft
-                    import re
-                    
-                    # Finde alle Dateipfade
-                    href_pattern = r'<d:href>([^<]+)</d:href>'
-                    hrefs = re.findall(href_pattern, content)
-                    
+                    # Fallback: regex parse
+                    hrefs = re.findall(r'<d:href>([^<]+)</d:href>', content or '')
+                    base_href = f"/remote.php/dav/files/{self.username}{current_dir}"
                     for href in hrefs:
-                        if href != f"/remote.php/dav/files/{self.username}{remote_path}":
-                            # Dateiname extrahieren
-                            file_name = href.split('/')[-1]
-                            if not file_name or file_name.endswith('/'):
-                                continue
-                                
-                            file_ext = os.path.splitext(file_name)[1].lower()
-                            
-                            # Alle Dateien aufnehmen
-                            files.append({
-                                'path': href.replace(f"/remote.php/dav/files/{self.username}", ''),
-                                'name': file_name,
-                                'size': 0,
-                                'extension': file_ext
-                            })
-                
-                self.logger.info(f"Found {len(files)} total files in {remote_path}")
-                
-                # Logge gefundene Dateitypen für Analyse
-                extensions = set()
-                for f in files:
-                    if f['extension']:
-                        extensions.add(f['extension'])
-                
-                if extensions:
-                    self.logger.info(f"File extensions found: {sorted(list(extensions))}")
-            
+                        if not href or not href.startswith('/remote.php/dav/files/'):
+                            continue
+                        if href.rstrip('/') == base_href.rstrip('/'):
+                            continue
+
+                        # Heuristic: if endswith '/', directory
+                        if href.endswith('/'):
+                            rel_dir = href.replace(f"/remote.php/dav/files/{self.username}", '')
+                            if not rel_dir.startswith('/'):
+                                rel_dir = '/' + rel_dir
+                            if not rel_dir.endswith('/'):
+                                rel_dir = rel_dir + '/'
+                            dirs_to_visit.append(rel_dir)
+                            continue
+
+                        try:
+                            from urllib.parse import unquote
+                            decoded_href = unquote(href)
+                        except Exception:
+                            decoded_href = href
+
+                        name = decoded_href.split('/')[-1]
+                        if not name:
+                            continue
+
+                        ext = os.path.splitext(name)[1].lower()
+                        files.append({
+                            'path': decoded_href.replace(f"/remote.php/dav/files/{self.username}", ''),
+                            'name': name,
+                            'size': 0,
+                            'extension': ext
+                        })
+
+            self.logger.info(f"Found {len(files)} total files in {remote_path}")
+            # Log extensions
+            exts = sorted({f['extension'] for f in files if f['extension']})
+            if exts:
+                self.logger.info(f"File extensions found: {exts}")
+
         except Exception as e:
             self.logger.error(f"Error listing files in {remote_path}: {str(e)}")
-        
+
         return files
     
     def download_file(self, remote_path: str, local_path: str) -> bool:
@@ -249,16 +333,20 @@ class NextcloudClient:
             self.logger.error(f"Error parsing remote file {remote_path}: {str(e)}")
             return ""
     
-    def build_knowledge_base(self, remote_path: str = '/', max_files: int = 100) -> Dict:
+    def build_knowledge_base(self, remote_path: str = '/', max_files: int = 100, exclude_paths: list = None) -> Dict:
         """Baut eine Wissensbasis aus Nextcloud-Dateien"""
         self.logger.info(f"Building knowledge base from {remote_path}")
         
-        # Dateien auflisten
-        files = self.list_files(remote_path, recursive=True)
+        # Dateien auflisten mit Exclude-Filter
+        files = self.list_files(remote_path, recursive=True, exclude_paths=exclude_paths)
+        
+        # Filter für unterstützte Formate
+        supported_files = [f for f in files if f['extension'] in self.supported_formats]
+        self.logger.info(f"Found {len(files)} total files, {len(supported_files)} with supported formats")
         
         # Begrenze die Anzahl der Dateien
-        if len(files) > max_files:
-            files = files[:max_files]
+        if len(supported_files) > max_files:
+            supported_files = supported_files[:max_files]
             self.logger.warning(f"Limited to {max_files} files")
         
         knowledge_base = {
@@ -268,7 +356,7 @@ class NextcloudClient:
             'errors': []
         }
         
-        for file_info in files:
+        for file_info in supported_files:
             try:
                 self.logger.info(f"Processing: {file_info['name']}")
                 

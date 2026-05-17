@@ -80,20 +80,28 @@ class IndexingManager:
             except Exception as e:
                 self.logger.error(f"Error in progress callback: {str(e)}")
     
-    def save_nextcloud_config(self, url: str, username: str, password: str, remote_path: str = "/"):
+    def save_nextcloud_config(self, url: str, username: str, password: str, remote_path: str = "/", exclude_paths: list = None):
         """Speichert Nextcloud-Konfiguration"""
+        # Normalize path: empty or None -> '/', ensure leading '/'
+        path = (remote_path or '/').strip()
+        if not path:
+            path = '/'
+        if not path.startswith('/'):
+            path = '/' + path
+
         self.nextcloud_config = {
             'url': url,
             'username': username,
             'password': password,
-            'path': remote_path
+            'path': path,
+            'exclude_paths': exclude_paths or ['/Fotosharing', '/Videos', '/Handys']  # Default excludes
         }
         
         try:
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
             with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(self.nextcloud_config, f)
-            self.logger.info("Nextcloud configuration saved")
+                json.dump(self.nextcloud_config, f, indent=2)
+            self.logger.info(f"Nextcloud configuration saved to {self.config_file}")
         except Exception as e:
             self.logger.error(f"Error saving config: {str(e)}")
     
@@ -112,7 +120,8 @@ class IndexingManager:
                     'url': str(loaded.get('url') or loaded.get('nextcloud_url') or '').strip(),
                     'username': str(loaded.get('username') or '').strip(),
                     'password': str(loaded.get('password') or '').strip(),
-                    'path': str(loaded.get('path') or '/').strip() or '/'
+                    'path': str(loaded.get('path') or '/').strip() or '/',
+                    'exclude_paths': loaded.get('exclude_paths', ['/Fotosharing', '/Videos', '/Handys'])
                 }
 
                 # Skip unusable entries and continue searching for valid credentials.
@@ -201,8 +210,12 @@ class IndexingManager:
                 raise Exception("Nextcloud connection failed - check URL, username, and password")
             
             self.logger.info("Connection successful, listing files...")
+            # Get exclude paths from config
+            exclude_paths = self.nextcloud_config.get('exclude_paths', [])
+            if exclude_paths:
+                self.logger.info(f"Excluding paths: {exclude_paths}")
             # Dateien auflisten
-            files = nc_client.list_files(self.nextcloud_config.get('path', '/'), recursive=True)
+            files = nc_client.list_files(self.nextcloud_config.get('path', '/'), recursive=True, exclude_paths=exclude_paths)
             
             if not files:
                 self.logger.info("No files found")

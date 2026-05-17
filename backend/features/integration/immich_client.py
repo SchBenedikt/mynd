@@ -602,8 +602,8 @@ class ImmichClient:
             yesterday = today - timedelta(days=1)
             return yesterday.isoformat(), today.isoformat()
         
-        # Diese Woche
-        elif any(word in query_lower for word in ['diese woche', 'this week', 'diese woche']):
+        # Diese Woche (inkl. Flexionen wie "dieser Woche")
+        elif any(word in query_lower for word in ['diese woche', 'dieser woche', 'diesem woche', 'this week']):
             monday = today - timedelta(days=today.weekday())
             return monday.isoformat(), (today + timedelta(days=1)).isoformat()
         
@@ -664,8 +664,12 @@ class ImmichClient:
             ('letzte woche', 'letzte Woche'),
             ('last week', 'last week'),
             ('diese woche', 'diese Woche'),
+            ('dieser woche', 'diese Woche'),
+            ('diesem woche', 'diese Woche'),
             ('this week', 'this week'),
             ('diesen monat', 'diesen Monat'),
+            ('dieser monat', 'diesen Monat'),
+            ('diesem monat', 'diesen Monat'),
             ('this month', 'this month'),
             ('letzter monat', 'letzter Monat'),
             ('last month', 'last month'),
@@ -683,9 +687,18 @@ class ImmichClient:
             elif euro_date_match:
                 date_phrase = euro_date_match.group(1)
 
+        # Extrahiere relevante Terme frühzeitig, um unnötig teure Person-Requests zu vermeiden.
+        relevant_terms = self._extract_relevant_terms(query)
+
+        # Bei reinen Datumsabfragen ohne sinnvolle Stichworte kann das Laden aller Personen
+        # (mehrere API-Seiten) den Endpunkt stark verlangsamen und Proxy-Timeouts auslösen.
+        date_only_markers = {'dieser', 'diesem', 'dieses', 'diese', 'diesen'}
+        has_non_date_terms = any(term not in date_only_markers for term in relevant_terms)
+        should_detect_people = not (date_from or date_to) or has_non_date_terms
+
         # Erkenne genannte Personen robust anhand der Immich-Personenliste
-        people = self.get_people()
-        mentioned_people = self._detect_people_in_query(query, people)
+        people = self.get_people() if should_detect_people else []
+        mentioned_people = self._detect_people_in_query(query, people) if people else []
         mentioned_person_names = [p.get('name', '').strip() for p in mentioned_people if p.get('name')]
         all_people_names = [p.get('name', '').strip() for p in people if p.get('name')]
 
@@ -699,7 +712,6 @@ class ImmichClient:
                     similar_people_names.append(candidate)
 
         # Extrahiere relevante Terme für gezielte Suchanfragen und UI-Search-Kontext.
-        relevant_terms = self._extract_relevant_terms(query)
         if (date_from or date_to) and mentioned_person_names:
             # Bei Person+Zeitraum nur Person(en) als Query-Kontext nutzen.
             metadata_query = ' '.join(mentioned_person_names[:2])
