@@ -216,7 +216,7 @@ export default function SettingsPage() {
   const [briefingSendWeekly, setBriefingSendWeekly] = useState(false);
   const [briefingSendRecipients, setBriefingSendRecipients] = useState('');
   const [briefingSendAccountId, setBriefingSendAccountId] = useState('');
-  const [emailAccounts, setEmailAccounts] = useState([]);
+  const [briefingEmailAccounts, setBriefingEmailAccounts] = useState([]);
   
   const [indexingProgress, setIndexingProgress] = useState(0);
   const [indexingStatus, setIndexingStatus] = useState('idle');
@@ -681,7 +681,7 @@ export default function SettingsPage() {
       const data = await res.json();
       if (res.ok && data?.success) {
         const accounts = Array.isArray(data.accounts) ? data.accounts : (data.config?.accounts || []);
-        setEmailAccounts(accounts.map(a => ({ account_id: a.account_id || a.id, display_name: a.display_name || a.username || a.account_id || a.id })));
+        setBriefingEmailAccounts(accounts.map(a => ({ account_id: a.account_id || a.id, display_name: a.display_name || a.username || a.account_id || a.id })));
         if (!briefingSendAccountId && accounts.length > 0) {
           setBriefingSendAccountId(accounts[0].account_id || accounts[0].id);
         }
@@ -1609,7 +1609,7 @@ export default function SettingsPage() {
                     <label>{tr('E‑Mail Konto zum Senden', 'Email account to send from')}</label>
                     <select value={briefingSendAccountId} onChange={(e) => setBriefingSendAccountId(e.target.value)}>
                       <option value="">{tr('Auswählen...', 'Select...')}</option>
-                      {emailAccounts.map((acc) => (
+                      {briefingEmailAccounts.map((acc) => (
                         <option key={acc.account_id} value={acc.account_id}>{acc.display_name}</option>
                       ))}
                     </select>
