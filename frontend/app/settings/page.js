@@ -211,6 +211,12 @@ export default function SettingsPage() {
   const [briefingWeeklyEnabled, setBriefingWeeklyEnabled] = useState(true);
   const [briefingMorningHour, setBriefingMorningHour] = useState(7);
   const [briefingStatus, setBriefingStatus] = useState('');
+  // Email send settings for proactive briefings
+  const [briefingSendDaily, setBriefingSendDaily] = useState(false);
+  const [briefingSendWeekly, setBriefingSendWeekly] = useState(false);
+  const [briefingSendRecipients, setBriefingSendRecipients] = useState('');
+  const [briefingSendAccountId, setBriefingSendAccountId] = useState('');
+  const [emailAccounts, setEmailAccounts] = useState([]);
   
   const [indexingProgress, setIndexingProgress] = useState(0);
   const [indexingStatus, setIndexingStatus] = useState('idle');
@@ -312,6 +318,7 @@ export default function SettingsPage() {
   useEffect(() => {
     loadAIConfig();
     loadImmichConfig();
+    loadEmailAccounts();
     loadOllamaModels();
     loadNextcloudConfig();
     loadCalendarConfig();
@@ -655,12 +662,32 @@ export default function SettingsPage() {
         setBriefingDailyEnabled(Boolean(data.config.briefing_daily_enabled ?? true));
         setBriefingWeeklyEnabled(Boolean(data.config.briefing_weekly_enabled ?? true));
         setBriefingMorningHour(Number.isFinite(Number(data.config.briefing_morning_hour)) ? Number(data.config.briefing_morning_hour) : 7);
+        setBriefingSendDaily(Boolean(data.config.briefing_send_daily ?? false));
+        setBriefingSendWeekly(Boolean(data.config.briefing_send_weekly ?? false));
+        setBriefingSendRecipients(String(data.config.briefing_send_recipients || ''));
+        setBriefingSendAccountId(String(data.config.briefing_send_account_id || ''));
         setImmichStatus(tr('Geladen', 'Loaded'));
       } else {
         setImmichStatus(tr('Fehler beim Laden der Immich-Konfiguration', 'Error loading Immich config'));
       }
     } catch (err) {
       setImmichStatus(tr('Fehler beim Laden der Immich-Konfiguration', 'Error loading Immich config'));
+    }
+  };
+
+  const loadEmailAccounts = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/email/accounts`);
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        const accounts = Array.isArray(data.accounts) ? data.accounts : (data.config?.accounts || []);
+        setEmailAccounts(accounts.map(a => ({ account_id: a.account_id || a.id, display_name: a.display_name || a.username || a.account_id || a.id })));
+        if (!briefingSendAccountId && accounts.length > 0) {
+          setBriefingSendAccountId(accounts[0].account_id || accounts[0].id);
+        }
+      }
+    } catch (err) {
+      // ignore
     }
   };
 
@@ -698,7 +725,11 @@ export default function SettingsPage() {
         body: JSON.stringify({
           briefing_daily_enabled: briefingDailyEnabled,
           briefing_weekly_enabled: briefingWeeklyEnabled,
-          briefing_morning_hour: safeHour
+          briefing_morning_hour: safeHour,
+          briefing_send_daily: briefingSendDaily,
+          briefing_send_weekly: briefingSendWeekly,
+          briefing_send_recipients: briefingSendRecipients,
+          briefing_send_account_id: briefingSendAccountId
         })
       });
 
@@ -1540,6 +1571,48 @@ export default function SettingsPage() {
                       value={briefingMorningHour}
                       onChange={(e) => setBriefingMorningHour(e.target.value)}
                     />
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Briefing per E-Mail senden (täglich)', 'Send briefing via email (daily)')}</label>
+                    <select
+                      value={briefingSendDaily ? 'true' : 'false'}
+                      onChange={(e) => setBriefingSendDaily(e.target.value === 'true')}
+                    >
+                      <option value="true">{tr('Ja', 'Yes')}</option>
+                      <option value="false">{tr('Nein', 'No')}</option>
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Briefing per E-Mail senden (Montag)', 'Send briefing via email (Monday)')}</label>
+                    <select
+                      value={briefingSendWeekly ? 'true' : 'false'}
+                      onChange={(e) => setBriefingSendWeekly(e.target.value === 'true')}
+                    >
+                      <option value="true">{tr('Ja', 'Yes')}</option>
+                      <option value="false">{tr('Nein', 'No')}</option>
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Empfänger (Komma-getrennt)', 'Recipients (comma-separated)')}</label>
+                    <input
+                      type="text"
+                      value={briefingSendRecipients}
+                      onChange={(e) => setBriefingSendRecipients(e.target.value)}
+                      placeholder={tr('z.B. max@beispiel.de,anna@beispiel.de', 'e.g. max@example.com,anna@example.com')}
+                    />
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('E‑Mail Konto zum Senden', 'Email account to send from')}</label>
+                    <select value={briefingSendAccountId} onChange={(e) => setBriefingSendAccountId(e.target.value)}>
+                      <option value="">{tr('Auswählen...', 'Select...')}</option>
+                      {emailAccounts.map((acc) => (
+                        <option key={acc.account_id} value={acc.account_id}>{acc.display_name}</option>
+                      ))}
+                    </select>
                   </div>
 
                   <div className="button-group">
