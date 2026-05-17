@@ -139,6 +139,11 @@ def _get_briefing_settings() -> Dict[str, Any]:
         'daily_enabled': BRIEFING_DAILY_ENABLED_DEFAULT,
         'weekly_enabled': BRIEFING_WEEKLY_ENABLED_DEFAULT,
         'morning_hour': int(BRIEFING_MORNING_HOUR),
+        # email send defaults
+        'send_daily': False,
+        'send_weekly': False,
+        'send_recipients': [],
+        'send_account_id': None,
     }
 
     try:
@@ -148,11 +153,55 @@ def _get_briefing_settings() -> Dict[str, Any]:
             settings['daily_enabled'] = bool(cfg.get('briefing_daily_enabled', settings['daily_enabled']))
             settings['weekly_enabled'] = bool(cfg.get('briefing_weekly_enabled', settings['weekly_enabled']))
             settings['morning_hour'] = int(cfg.get('briefing_morning_hour', settings['morning_hour']))
+            # optional automatic email sending settings
+            settings['send_daily'] = bool(cfg.get('briefing_send_daily', settings.get('send_daily', False)))
+            settings['send_weekly'] = bool(cfg.get('briefing_send_weekly', settings.get('send_weekly', False)))
+            # recipients may be a list or comma-separated string
+            recipients = cfg.get('briefing_send_recipients', settings.get('send_recipients', []))
+            if isinstance(recipients, str):
+                recipients = [r.strip() for r in re.split(r'[;,]', recipients) if r.strip()]
+            settings['send_recipients'] = recipients or []
+            settings['send_account_id'] = cfg.get('briefing_send_account_id') or None
     except Exception as exc:
         logger.debug('Could not load briefing settings from config: %s', exc)
 
     settings['morning_hour'] = max(0, min(23, int(settings['morning_hour'])))
     return settings
+
+
+def _send_briefing_via_email(item: Dict[str, Any], recipients: List[str], account_id: Optional[str] = None) -> bool:
+    """Send a generated briefing `item` as email to `recipients` using configured EmailClient.
+
+    Returns True on success, False otherwise (errors are logged).
+    """
+    if not recipients:
+        logger.debug('No recipients provided for briefing email.')
+        return False
+
+    try:
+        client = get_email_client(account_id=account_id) if account_id else get_email_client()
+        if not client:
+            logger.warning('No email client available to send briefing.')
+            return False
+
+        to_str = ', '.join(recipients)
+        subject = item.get('title', 'Briefing')
+        body = item.get('content', '')
+
+        try:
+            client.send_email(
+                to=to_str,
+                subject=subject,
+                body=body,
+            )
+            logger.info('Briefing emailed to %s (kind=%s)', to_str, item.get('kind'))
+            return True
+        except Exception as exc:
+            logger.warning('Failed to send briefing email: %s', exc)
+            return False
+    except Exception as exc:
+        logger.debug('Error preparing email client for briefing: %s', exc)
+        return False
 
 
 def _calendar_events_for_today(limit: int = 8) -> List[Dict[str, Any]]:
@@ -465,9 +514,21 @@ def _briefing_scheduler_loop() -> None:
             now = datetime.now()
             briefing_settings = _get_briefing_settings()
             if briefing_settings.get('daily_enabled') and now.hour >= int(briefing_settings.get('morning_hour', BRIEFING_MORNING_HOUR)):
-                generate_proactive_briefing('daily', force=False)
+                item = generate_proactive_briefing('daily', force=False)
+                # optionally send by email
+                try:
+                    if briefing_settings.get('send_daily') and briefing_settings.get('send_recipients'):
+                        _send_briefing_via_email(item, briefing_settings.get('send_recipients', []), briefing_settings.get('send_account_id'))
+                except Exception:
+                    logger.debug('Error while sending daily briefing email', exc_info=True)
+
                 if briefing_settings.get('weekly_enabled') and now.weekday() == 0:
-                    generate_proactive_briefing('weekly', force=False)
+                    item_w = generate_proactive_briefing('weekly', force=False)
+                    try:
+                        if briefing_settings.get('send_weekly') and briefing_settings.get('send_recipients'):
+                            _send_briefing_via_email(item_w, briefing_settings.get('send_recipients', []), briefing_settings.get('send_account_id'))
+                    except Exception:
+                        logger.debug('Error while sending weekly briefing email', exc_info=True)
         except Exception as exc:
             logger.warning('Briefing scheduler loop error: %s', exc)
         time.sleep(60)
@@ -6444,6 +6505,11 @@ def ui_system_config():
                     'briefing_daily_enabled': config.get('briefing_daily_enabled', BRIEFING_DAILY_ENABLED_DEFAULT),
                     'briefing_weekly_enabled': config.get('briefing_weekly_enabled', BRIEFING_WEEKLY_ENABLED_DEFAULT),
                     'briefing_morning_hour': config.get('briefing_morning_hour', int(BRIEFING_MORNING_HOUR)),
+                    # Email send settings for proactive briefings
+                    'briefing_send_daily': config.get('briefing_send_daily', False),
+                    'briefing_send_weekly': config.get('briefing_send_weekly', False),
+                    'briefing_send_recipients': config.get('briefing_send_recipients', ''),
+                    'briefing_send_account_id': config.get('briefing_send_account_id', ''),
                 }
             })
 
@@ -6468,6 +6534,16 @@ def ui_system_config():
             config['briefing_weekly_enabled'] = bool(data['briefing_weekly_enabled'])
         if 'briefing_morning_hour' in data:
             config['briefing_morning_hour'] = max(0, min(23, int(data['briefing_morning_hour'])))
+
+        # Email send options
+        if 'briefing_send_daily' in data:
+            config['briefing_send_daily'] = bool(data['briefing_send_daily'])
+        if 'briefing_send_weekly' in data:
+            config['briefing_send_weekly'] = bool(data['briefing_send_weekly'])
+        if 'briefing_send_recipients' in data:
+            config['briefing_send_recipients'] = str(data['briefing_send_recipients'] or '')
+        if 'briefing_send_account_id' in data:
+            config['briefing_send_account_id'] = str(data['briefing_send_account_id'] or '')
 
         # Save to file
         with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
