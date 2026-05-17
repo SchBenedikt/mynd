@@ -16,18 +16,20 @@ from urllib.parse import urljoin
 from urllib.parse import urlencode
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Optional, List, Dict, Any
+import hmac
+import hashlib
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-
 # Import package side effects to register all API clients in APIRegistry.
-import backend.features.integration  # noqa: F401
 
 from backend.features.documents.parser import DocumentParser
 from backend.features.integration.nextcloud_client import NextcloudClient
 from backend.features.integration.activity_client import NextcloudActivityClient
 from backend.features.integration.notifications_client import NextcloudNotificationsClient
 from backend.features.integration.search_client import NextcloudSearchClient
+from backend.features.integration.talk_client import NextcloudTalkClient
+
 from backend.features.integration.auth_manager import get_auth_manager, AuthManager
 from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
@@ -162,6 +164,9 @@ def _get_briefing_settings() -> Dict[str, Any]:
                 recipients = [r.strip() for r in re.split(r'[;,]', recipients) if r.strip()]
             settings['send_recipients'] = recipients or []
             settings['send_account_id'] = cfg.get('briefing_send_account_id') or None
+            # Nextcloud Talk delivery options
+            settings['send_talk'] = bool(cfg.get('briefing_send_talk', False))
+            settings['talk_room_id'] = str(cfg.get('briefing_talk_room_id') or '').strip() or None
     except Exception as exc:
         logger.debug('Could not load briefing settings from config: %s', exc)
 
@@ -1367,6 +1372,14 @@ def load_ai_config() -> dict:
             config['gemini_tts_audio_encoding'] = str(file_config.get('gemini_tts_audio_encoding', config['gemini_tts_audio_encoding'])).strip().upper() or 'MP3'
             config['gemini_live_model'] = str(file_config.get('gemini_live_model', config['gemini_live_model'])).strip() or 'gemini-3.1-flash-live-preview'
             config['gemini_live_voice'] = str(file_config.get('gemini_live_voice', config['gemini_live_voice'])).strip() or 'Zephyr'
+            # Proactive briefing / Talk settings
+            config['briefing_send_daily'] = bool(file_config.get('briefing_send_daily', config.get('briefing_send_daily', False)))
+            config['briefing_send_weekly'] = bool(file_config.get('briefing_send_weekly', config.get('briefing_send_weekly', False)))
+            config['briefing_send_recipients'] = file_config.get('briefing_send_recipients', config.get('briefing_send_recipients', ''))
+            config['briefing_send_account_id'] = file_config.get('briefing_send_account_id', config.get('briefing_send_account_id', ''))
+            config['briefing_send_talk'] = bool(file_config.get('briefing_send_talk', config.get('briefing_send_talk', False)))
+            config['briefing_talk_room_id'] = str(file_config.get('briefing_talk_room_id', config.get('briefing_talk_room_id', '')))
+            config['briefing_talk_webhook_secret'] = str(file_config.get('briefing_talk_webhook_secret', config.get('briefing_talk_webhook_secret', '')))
         except Exception as e:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
 
@@ -1862,6 +1875,35 @@ def should_use_calendar(message: str) -> bool:
             return True
     
     return False
+
+
+def _send_briefing_via_nextcloud_talk(item: Dict[str, Any], room_id: str, username: Optional[str] = None) -> bool:
+    """Send a briefing `item` as a message to a Nextcloud Talk room specified by `room_id`.
+
+    Uses runtime Nextcloud credentials (indexing / config) or environment variables.
+    """
+    if not room_id:
+        logger.debug('No Talk room_id provided for briefing')
+        return False
+
+    try:
+        cfg = get_nextcloud_runtime_config() or {}
+        if not cfg or not all(cfg.get(k) for k in ['url', 'username', 'password']):
+            logger.warning('Nextcloud credentials missing; cannot send briefing to Talk')
+            return False
+
+        talk_client = NextcloudTalkClient(url=cfg.get('url'), username=cfg.get('username'), password=cfg.get('password'))
+        title = item.get('title') or 'Briefing'
+        content = item.get('content') or ''
+        message = f"{title}\n\n{content}"
+
+        success = talk_client.send_message(room_id, message, format='plain')
+        if success:
+            logger.info('Briefing posted to Talk room %s', room_id)
+        return success
+    except Exception as e:
+        logger.debug('Error sending briefing to Talk: %s', e)
+        return False
 
 def should_use_tasks(message: str) -> bool:
     """
@@ -3538,6 +3580,172 @@ def nextcloud_disconnect():
     except Exception as e:
         logger.error(f"Error disconnecting Nextcloud: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/nextcloud/talk/webhook', methods=['POST'])
+def nextcloud_talk_webhook():
+    """Receive incoming Talk messages (webhook) and optionally reply via the agent.
+
+    Expected JSON: { 'room_id': str, 'message': str, 'username': str (optional), 'language': 'de'|'en', 'reply': bool }
+    """
+    try:
+        # Raw body for HMAC verification and flexible parsing
+        raw_body = request.get_data() or b''
+        body_json = None
+        try:
+            body_json = json.loads(raw_body.decode('utf-8')) if raw_body else None
+        except Exception:
+            body_json = None
+
+        # Support two formats:
+        # 1) Simple API from frontend: { room_id, message, username, language, reply }
+        # 2) Nextcloud Talk ActivityStreams payload (bot webhook)
+        room_id = ''
+        incoming = ''
+        username = None
+        language = 'de'
+        do_reply = True
+
+        if isinstance(body_json, dict):
+            # Simple frontend format
+            if 'room_id' in body_json and 'message' in body_json:
+                room_id = str(body_json.get('room_id') or '').strip()
+                incoming = str(body_json.get('message') or '').strip()
+                username = body_json.get('username')
+                language = str(body_json.get('language') or 'de')
+                do_reply = bool(body_json.get('reply', True))
+            else:
+                # ActivityStreams format from Nextcloud Talk
+                try:
+                    # type e.g. 'Create'
+                    obj = body_json.get('object', {})
+                    target = body_json.get('target', {})
+                    # room token
+                    room_id = str(target.get('id') or '').strip()
+                    # content may be JSON-encoded string
+                    content_raw = obj.get('content')
+                    if isinstance(content_raw, str):
+                        try:
+                            inner = json.loads(content_raw)
+                            incoming = str(inner.get('message') or '').strip()
+                        except Exception:
+                            incoming = content_raw
+                    else:
+                        incoming = str(content_raw or '').strip()
+
+                    actor = body_json.get('actor', {})
+                    username = actor.get('name') or actor.get('id')
+                    # default language remains 'de'
+                except Exception:
+                    room_id = ''
+                    incoming = ''
+
+        # Validate basic fields
+        if not room_id or not incoming:
+            return jsonify({'success': False, 'error': 'room_id and message required'}), 400
+
+        # Verify HMAC signature using Nextcloud Talk bot headers if configured
+        try:
+            logger.debug('Talk webhook raw body: %r', raw_body[:512])
+            # Secret precedence: env var -> AI config file
+            secret = os.getenv('BRIEFING_TALK_WEBHOOK_SECRET') or ''
+            if not secret:
+                cfg = load_ai_config()
+                secret = str(cfg.get('briefing_talk_webhook_secret') or '').strip()
+
+            # Nextcloud bot headers (recommended): Random + Signature
+            random_hdr = request.headers.get('X-Nextcloud-Talk-Random') or request.headers.get('HTTP_X_NEXTCLOUD_TALK_RANDOM')
+            sig_hdr = request.headers.get('X-Nextcloud-Talk-Signature') or request.headers.get('HTTP_X_NEXTCLOUD_TALK_SIGNATURE')
+
+            # Backwards-compatible: support X-Mynd-Signature / X-Hub-Signature-256 (raw body HMAC)
+            legacy_sig = request.headers.get('X-Mynd-Signature') or request.headers.get('X-Hub-Signature-256')
+
+            if secret:
+                if random_hdr and sig_hdr:
+                    # Compute HMAC-SHA256 over RANDOM + raw_body (Nextcloud spec)
+                    msg = (str(random_hdr).encode('utf-8') + raw_body)
+                    computed = hmac.new(secret.encode('utf-8'), msg, hashlib.sha256).hexdigest()
+                    sig = sig_hdr.lower()
+                    if sig.startswith('sha256='):
+                        sig = sig.split('=', 1)[1]
+                    if not hmac.compare_digest(computed, sig):
+                        logger.warning('Invalid Talk bot webhook signature: computed=%s header=%s', computed[:8], sig[:8])
+                        return jsonify({'success': False, 'error': 'Invalid signature'}), 401
+                    logger.info('Talk webhook verified via Nextcloud bot headers')
+                elif legacy_sig:
+                    # Legacy: compare HMAC over raw body
+                    if legacy_sig.startswith('sha256='):
+                        ls = legacy_sig.split('=', 1)[1]
+                    else:
+                        ls = legacy_sig
+                    computed2 = hmac.new(secret.encode('utf-8'), raw_body, hashlib.sha256).hexdigest()
+                    if not hmac.compare_digest(computed2, ls):
+                        logger.warning('Invalid legacy webhook signature: computed=%s header=%s', computed2[:8], ls[:8])
+                        return jsonify({'success': False, 'error': 'Invalid signature'}), 401
+                    logger.info('Talk webhook verified via legacy signature header')
+                else:
+                    logger.warning('Talk webhook signature expected but missing')
+                    return jsonify({'success': False, 'error': 'Signature expected but missing'}), 401
+            else:
+                # No secret configured - accept unsigned webhooks (development)
+                logger.info('Talk webhook accepted without signature (no secret configured)')
+        except Exception as e:
+            logger.debug('Error verifying Talk webhook signature: %s', e)
+            return jsonify({'success': False, 'error': 'Signature verification error'}), 401
+
+        # Build a concise system message and gather lightweight context
+        try:
+            # Reuse some context gatherers for enriched responses where possible
+            weather_context = gather_weather_context(get_local_weather_status, is_weather_query, incoming, _safe_text)
+            security_context = gather_security_context(get_local_security_status, is_security_query, incoming)
+            activity_context = gather_activity_context(get_updates_context, is_activity_query, incoming)
+            nextcloud_search_context = None
+            try:
+                search_client = get_nextcloud_search_client(username)
+                if search_client:
+                    nextcloud_search_context = gather_nextcloud_search_context(search_client, incoming, extract_search_terms)
+            except Exception:
+                nextcloud_search_context = None
+
+            combined_context = combine_contexts(weather_context, security_context, activity_context, None, None, None, None, nextcloud_search_context)
+            system_message = build_agent_system_message(combined_context, language)
+        except Exception as e:
+            logger.debug('Error building context for Talk webhook: %s', e)
+            system_message = 'Du bist ein hilfreicher Assistent.'
+
+        messages = [
+            {'role': 'system', 'content': system_message},
+            {'role': 'user', 'content': incoming}
+        ]
+
+        try:
+            response = ollama_client.chat(messages, [])
+            if 'error' in response:
+                ai_text = f'Entschuldigung, ich konnte gerade nicht antworten.'
+            else:
+                ai_text = str(response.get('message', {}).get('content') or '').strip() or 'Keine Antwort vom Modell.'
+        except Exception as e:
+            logger.error('AI generation error for Talk webhook: %s', e)
+            ai_text = 'Entschuldigung, ich konnte gerade keine Antwort generieren.'
+
+        # Optionally post reply back to Talk
+        posted = False
+        if do_reply:
+            try:
+                cfg = get_nextcloud_runtime_config() or {}
+                if cfg and all(cfg.get(k) for k in ['url', 'username', 'password']):
+                    talk = NextcloudTalkClient(url=cfg.get('url'), username=cfg.get('username'), password=cfg.get('password'))
+                    posted = talk.send_message(room_id, ai_text)
+                else:
+                    logger.warning('No Nextcloud credentials available to reply to Talk webhook')
+            except Exception as e:
+                logger.debug('Error posting Talk reply: %s', e)
+
+        return jsonify({'success': True, 'reply_posted': bool(posted), 'reply_text': ai_text})
+
+    except Exception as e:
+        logger.error(f"Talk webhook error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/knowledge/sources', methods=['GET'])
 def get_knowledge_sources():
@@ -6510,6 +6718,9 @@ def ui_system_config():
                     'briefing_send_weekly': config.get('briefing_send_weekly', False),
                     'briefing_send_recipients': config.get('briefing_send_recipients', ''),
                     'briefing_send_account_id': config.get('briefing_send_account_id', ''),
+                    'briefing_send_talk': config.get('briefing_send_talk', False),
+                    'briefing_talk_room_id': config.get('briefing_talk_room_id', ''),
+                    'briefing_talk_webhook_secret_set': bool(config.get('briefing_talk_webhook_secret'))
                 }
             })
 
@@ -6544,6 +6755,18 @@ def ui_system_config():
             config['briefing_send_recipients'] = str(data['briefing_send_recipients'] or '')
         if 'briefing_send_account_id' in data:
             config['briefing_send_account_id'] = str(data['briefing_send_account_id'] or '')
+        if 'briefing_send_talk' in data:
+            config['briefing_send_talk'] = bool(data['briefing_send_talk'])
+        if 'briefing_talk_room_id' in data:
+            config['briefing_talk_room_id'] = str(data['briefing_talk_room_id'] or '')
+        if 'briefing_talk_webhook_secret' in data:
+            # persist only if non-empty; store as-is
+            secret = str(data['briefing_talk_webhook_secret'] or '').strip()
+            if secret:
+                config['briefing_talk_webhook_secret'] = secret
+            else:
+                # allow clearing
+                config.pop('briefing_talk_webhook_secret', None)
 
         # Save to file
         with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
