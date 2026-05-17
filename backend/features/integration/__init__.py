@@ -16,6 +16,7 @@ from .autobahn_client import AutobahnClient
 from .dashboard_deutschland_client import DashboardDeutschlandClient
 from .deutschland_atlas_client import DeutschlandAtlasClient
 from .email_client import EmailClient
+from .talk_client import NextcloudTalkClient
 
 __all__ = [
     'NextcloudClient',
@@ -33,7 +34,8 @@ __all__ = [
     'AutobahnClient',
     'DashboardDeutschlandClient',
     'DeutschlandAtlasClient',
-    'EmailClient'
+    'EmailClient',
+    'NextcloudTalkClient'
 ]
 
 # Register API types on module import

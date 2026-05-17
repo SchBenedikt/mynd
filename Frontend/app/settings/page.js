@@ -216,6 +216,12 @@ export default function SettingsPage() {
   const [briefingSendWeekly, setBriefingSendWeekly] = useState(false);
   const [briefingSendRecipients, setBriefingSendRecipients] = useState('');
   const [briefingSendAccountId, setBriefingSendAccountId] = useState('');
+  const [briefingSendTalk, setBriefingSendTalk] = useState(false);
+  const [briefingTalkRoomId, setBriefingTalkRoomId] = useState('');
+  const [briefingTalkWebhookSecret, setBriefingTalkWebhookSecret] = useState('');
+  const [briefingBotId, setBriefingBotId] = useState('');
+  const [briefingBotSecretLocal, setBriefingBotSecretLocal] = useState('');
+  const [showNcBotPanel, setShowNcBotPanel] = useState(false);
   const [briefingEmailAccounts, setBriefingEmailAccounts] = useState([]);
   
   const [indexingProgress, setIndexingProgress] = useState(0);
@@ -666,6 +672,10 @@ export default function SettingsPage() {
         setBriefingSendWeekly(Boolean(data.config.briefing_send_weekly ?? false));
         setBriefingSendRecipients(String(data.config.briefing_send_recipients || ''));
         setBriefingSendAccountId(String(data.config.briefing_send_account_id || ''));
+        setBriefingSendTalk(Boolean(data.config.briefing_send_talk ?? false));
+        setBriefingTalkRoomId(String(data.config.briefing_talk_room_id || ''));
+        // Note: briefing_talk_webhook_secret is never sent by backend, so we keep it empty
+        setBriefingTalkWebhookSecret('');
         setImmichStatus(tr('Geladen', 'Loaded'));
       } else {
         setImmichStatus(tr('Fehler beim Laden der Immich-Konfiguration', 'Error loading Immich config'));
@@ -719,6 +729,13 @@ export default function SettingsPage() {
   const saveBriefingConfig = async () => {
     try {
       const safeHour = Math.max(0, Math.min(23, Number(briefingMorningHour) || 7));
+      // Extract room_id from URL if full URL is provided
+      let roomId = briefingTalkRoomId.trim();
+      const urlMatch = roomId.match(/\/call\/([^\/]+)$/);
+      if (urlMatch) {
+        roomId = urlMatch[1];
+      }
+
       const res = await fetch(`${API_BASE}/api/ui/system-config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -729,16 +746,71 @@ export default function SettingsPage() {
           briefing_send_daily: briefingSendDaily,
           briefing_send_weekly: briefingSendWeekly,
           briefing_send_recipients: briefingSendRecipients,
-          briefing_send_account_id: briefingSendAccountId
+          briefing_send_account_id: briefingSendAccountId,
+          briefing_send_talk: briefingSendTalk,
+          briefing_talk_room_id: roomId,
+          ...(briefingTalkWebhookSecret ? { briefing_talk_webhook_secret: briefingTalkWebhookSecret } : {})
         })
       });
 
       const data = await res.json();
       if (res.ok && data?.success) {
         setBriefingMorningHour(safeHour);
+        setBriefingTalkRoomId(roomId);
+        setBriefingTalkWebhookSecret('');
         setBriefingStatus(tr('Briefing-Einstellungen gespeichert', 'Briefing settings saved'));
       } else {
         setBriefingStatus(`Error: ${data?.error || tr('Briefing-Einstellungen konnten nicht gespeichert werden', 'Could not save briefing settings')}`);
+      }
+    } catch (err) {
+      setBriefingStatus('Error: ' + err.message);
+    }
+  };
+
+  const testTalkWebhook = async () => {
+    try {
+      setBriefingStatus(tr('Teste Talk-Webhook...', 'Testing Talk webhook...'));
+      
+      const testMessage = {
+        room_id: briefingTalkRoomId,
+        message: tr('Test: Dies ist eine Test-Nachricht von Mynd.', 'Test: This is a test message from Mynd.'),
+        username: 'Mynd-Test',
+        language: 'de',
+        reply: true
+      };
+
+      const payload = JSON.stringify(testMessage);
+      let headers = { 'Content-Type': 'application/json' };
+
+      // Compute HMAC-SHA256 signature if secret is provided
+      if (briefingTalkWebhookSecret?.trim()) {
+        // Use SubtleCrypto for HMAC-SHA256
+        const encoder = new TextEncoder();
+        const key = await crypto.subtle.importKey(
+          'raw',
+          encoder.encode(briefingTalkWebhookSecret),
+          { name: 'HMAC', hash: 'SHA-256' },
+          false,
+          ['sign']
+        );
+        const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
+        const hexSignature = Array.from(new Uint8Array(signature))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('');
+        headers['X-Mynd-Signature'] = `sha256=${hexSignature}`;
+      }
+
+      const res = await fetch(`${API_BASE}/api/nextcloud/talk/webhook`, {
+        method: 'POST',
+        headers,
+        body: payload
+      });
+
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setBriefingStatus(tr('✓ Talk-Webhook erfolgreich getestet', '✓ Talk webhook test successful'));
+      } else {
+        setBriefingStatus(`Error: ${data?.error || tr('Talk-Webhook Test fehlgeschlagen', 'Talk webhook test failed')}`);
       }
     } catch (err) {
       setBriefingStatus('Error: ' + err.message);
@@ -1615,10 +1687,153 @@ export default function SettingsPage() {
                     </select>
                   </div>
 
-                  <div className="button-group">
+                  <div style={{marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--line)'}}>
+                    <div style={{fontSize: '0.95rem', fontWeight: '600', marginBottom: '1rem', color: 'var(--text)'}}>
+                      {tr('Nextcloud Talk', 'Nextcloud Talk')}
+                    </div>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Briefing per Nextcloud Talk senden', 'Send briefing via Nextcloud Talk')}</label>
+                    <select
+                      value={briefingSendTalk ? 'true' : 'false'}
+                      onChange={(e) => setBriefingSendTalk(e.target.value === 'true')}
+                    >
+                      <option value="true">{tr('Ja', 'Yes')}</option>
+                      <option value="false">{tr('Nein', 'No')}</option>
+                    </select>
+                  </div>
+
+                  {briefingSendTalk && (
+                    <>
+                      <div className="input-group">
+                        <label>{tr('Talk Room ID oder URL', 'Talk Room ID or URL')}</label>
+                        <input
+                          type="text"
+                          value={briefingTalkRoomId}
+                          onChange={(e) => setBriefingTalkRoomId(e.target.value)}
+                          placeholder={tr('z.B. ofexbgra oder https://cloud.example.de/call/ofexbgra', 'e.g. ofexbgra or https://cloud.example.de/call/ofexbgra')}
+                        />
+                        <small style={{fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                          {tr('Raum-Slug oder volle Talk-URL', 'Room slug or full Talk URL')}
+                        </small>
+                      </div>
+
+                      <div className="input-group">
+                        <label>{tr('Webhook-Sicherheitsschlüssel (optional)', 'Webhook security key (optional)')}</label>
+                        <input
+                          type="password"
+                          value={briefingTalkWebhookSecret}
+                          onChange={(e) => setBriefingTalkWebhookSecret(e.target.value)}
+                          placeholder={tr('Gemeinsamer Schlüssel für HMAC-Signatur', 'Shared secret for HMAC signing')}
+                        />
+                        <small style={{fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                          {tr('Für die Sicherung des Webhooks (optional)', 'For webhook security (optional)')}
+                        </small>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="button-group" style={{marginTop: '1.5rem'}}>
                     <button className="btn primary" onClick={saveBriefingConfig}>{tr('Briefing speichern', 'Save briefing')}</button>
+                    {briefingSendTalk && briefingTalkRoomId && (
+                      <button 
+                        className="btn" 
+                        onClick={() => testTalkWebhook()}
+                        style={{background: 'var(--accent)'}}
+                      >
+                        {tr('Talk testen', 'Test Talk')}
+                      </button>
+                    )}
                   </div>
                   {briefingStatus && <div className="status-text">{briefingStatus}</div>}
+
+                  <div style={{marginTop: '1.25rem', padding: '1rem', border: '1px dashed var(--line)', borderRadius: '6px', background: 'var(--panel)'}}>
+                    <div style={{fontSize: '0.95rem', fontWeight: '700', marginBottom: '0.5rem'}}>Nextcloud Bot: Schnellstart (für Admins)</div>
+                    <div style={{fontSize: '0.9rem', color: 'var(--muted)', marginBottom: '0.75rem'}}>
+                      Folge diesen Schritten auf dem Nextcloud‑Server, um den Mynd‑Bot anzulegen und in einen Talk‑Raum hinzuzufügen.
+                    </div>
+                    <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.5rem'}}>
+                      1) Auf dem Nextcloud‑Server als Webserver‑User ausführen:
+                    </div>
+                    <pre style={{whiteSpace: 'pre-wrap', fontSize: '0.82rem', background: 'var(--bg)', padding: '0.6rem', borderRadius: '4px', overflowX: 'auto'}}>
+sudo -u www-data php /var/www/nextcloud/occ talk:bot:install "Mynd Bot" "&lt;BOT_SECRET&gt;" "https://your.public.url/api/nextcloud/talk/webhook"
+sudo -u www-data php /var/www/nextcloud/occ talk:bot:setup &lt;BOT_ID&gt; ofexbgra
+sudo -u www-data php /var/www/nextcloud/occ talk:bot:list
+                    </pre>
+                    <div>
+                      <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem'}}>
+                        <button className="btn" onClick={() => setShowNcBotPanel((s) => !s)}>
+                          {showNcBotPanel ? tr('Anleitung ausblenden', 'Hide instructions') : tr('Anleitung einblenden', 'Show instructions')}
+                        </button>
+                        <div style={{fontSize: '0.85rem', color: 'var(--muted)'}}>Administrator‑Anleitung für Nextcloud Bot</div>
+                      </div>
+
+                      {showNcBotPanel && (
+                        <div style={{padding: '1rem', border: '1px dashed var(--line)', borderRadius: '6px', background: 'var(--panel)'}}>
+                          <div style={{fontSize: '0.95rem', fontWeight: '700', marginBottom: '0.5rem'}}>Nextcloud Bot: Schnellstart (für Admins)</div>
+                          <div style={{fontSize: '0.9rem', color: 'var(--muted)', marginBottom: '0.75rem'}}>
+                            Folge diesen Schritten auf dem Nextcloud‑Server, um den Mynd‑Bot anzulegen und in einen Talk‑Raum hinzuzufügen.
+                          </div>
+
+                          <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.5rem'}}>
+                            1) Auf dem Nextcloud‑Server als Webserver‑User ausführen:
+                          </div>
+                          <pre style={{whiteSpace: 'pre-wrap', fontSize: '0.82rem', background: 'var(--bg)', padding: '0.6rem', borderRadius: '4px', overflowX: 'auto'}}>
+  sudo -u www-data php /var/www/nextcloud/occ talk:bot:install "Mynd Bot" "&lt;BOT_SECRET&gt;" "https://your.public.url/api/nextcloud/talk/webhook"
+  sudo -u www-data php /var/www/nextcloud/occ talk:bot:setup &lt;BOT_ID&gt; ofexbgra
+  sudo -u www-data php /var/www/nextcloud/occ talk:bot:list
+                          </pre>
+
+                          <div style={{marginTop: '0.6rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem'}}>
+                            <div>
+                              <label style={{display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem'}}>{tr('Bot ID (aus occ output)', 'Bot ID (from occ output)')}</label>
+                              <input type="text" value={briefingBotId} onChange={(e) => setBriefingBotId(e.target.value)} style={{width: '100%'}} />
+                            </div>
+                            <div>
+                              <label style={{display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem'}}>{tr('Dein Bot Secret (wird hier nicht gespeichert)', 'Your bot secret (not stored)')}</label>
+                              <input type="password" value={briefingBotSecretLocal} onChange={(e) => setBriefingBotSecretLocal(e.target.value)} style={{width: '100%'}} />
+                            </div>
+                          </div>
+
+                          <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.6rem'}}>
+                            2) Secret in Mynd konfigurieren: empfohlen via Webinterface (Briefing → Talk). Verwende die Weboberfläche, nicht zwingend `.env`.
+                          </div>
+
+                          <div style={{marginTop: '0.6rem'}}>
+                            <button className="btn primary" onClick={() => {
+                              const room = briefingTalkRoomId || 'ofexbgra';
+                              const botId = briefingBotId || '<BOT_ID>';
+                              const secret = briefingBotSecretLocal || '<BOT_SECRET>';
+                              const install = `sudo -u www-data php /var/www/nextcloud/occ talk:bot:install \"Mynd Bot\" \"${secret}\" \"https://your.public.url/api/nextcloud/talk/webhook\"`;
+                              const setup = `sudo -u www-data php /var/www/nextcloud/occ talk:bot:setup ${botId} ${room}`;
+                              const exportCmd = `export BRIEFING_TALK_WEBHOOK_SECRET=\"${secret}\"`;
+                              const txt = `${install}\n${setup}\n# Mynd: Secret konfigurieren\n${exportCmd}`;
+                              navigator.clipboard.writeText(txt).then(() => setBriefingStatus(tr('Befehle in die Zwischenablage kopiert', 'Commands copied to clipboard')));
+                            }}>{tr('Vollständige Befehle kopieren', 'Copy full commands')}</button>
+                            <button className="btn" style={{marginLeft: '0.5rem'}} onClick={() => {
+                              // show generated commands in a prompt/modal simple fallback
+                              const room = briefingTalkRoomId || 'ofexbgra';
+                              const botId = briefingBotId || '<BOT_ID>';
+                              const secret = briefingBotSecretLocal || '<BOT_SECRET>';
+                              const install = `sudo -u www-data php /var/www/nextcloud/occ talk:bot:install \"Mynd Bot\" \"${secret}\" \"https://your.public.url/api/nextcloud/talk/webhook\"`;
+                              const setup = `sudo -u www-data php /var/www/nextcloud/occ talk:bot:setup ${botId} ${room}`;
+                              const exportCmd = `export BRIEFING_TALK_WEBHOOK_SECRET=\"${secret}\"`;
+                              const txt = `${install}\n${setup}\n# Mynd: Secret konfigurieren\n${exportCmd}`;
+                              alert(txt);
+                            }}>{tr('Befehle anzeigen', 'Show commands')}</button>
+                          </div>
+
+                          <div style={{fontSize: '0.82rem', color: 'var(--muted)', marginTop: '0.6rem'}}>
+                            3) Backend neu starten und per "Talk testen" prüfen. Bei Problemen prüfe `/tmp/mynd_backend.log`.
+                          </div>
+
+                          <div style={{fontSize: '0.82rem', color: 'var(--muted)', marginTop: '0.6rem'}}>
+                            Hinweis: Die Callback‑URL muss vom Nextcloud‑Server erreichbar sein (HTTPS). Nutze Tunnel (ngrok) für lokale Tests.
+                          </div>
+                        </div>
+                      )}
+                    </div>
                 </div>
               </div>
             )}
