@@ -8105,13 +8105,15 @@ WICHTIG:
         # This searches across all Nextcloud providers (files, contacts, calendar, tasks)
         nextcloud_search_context = None
         try:
-            search_client = get_nextcloud_search_client(username)
-            if search_client:
-                nextcloud_search_context = gather_nextcloud_search_context(
-                    search_client, prompt, extract_search_terms
-                )
-                if nextcloud_search_context:
-                    logger.info(f"Nextcloud search found {nextcloud_search_context.get('metadata', {}).get('count', 0)} results")
+            # Pure photo queries should not trigger cross-provider Nextcloud search.
+            if intent != 'photos':
+                search_client = get_nextcloud_search_client(username)
+                if search_client:
+                    nextcloud_search_context = gather_nextcloud_search_context(
+                        search_client, prompt, extract_search_terms
+                    )
+                    if nextcloud_search_context:
+                        logger.info(f"Nextcloud search found {nextcloud_search_context.get('metadata', {}).get('count', 0)} results")
         except Exception as e:
             logger.warning(f"Nextcloud search error: {e}")
 
@@ -8119,7 +8121,7 @@ WICHTIG:
         # The agent proactively searches multiple sources and gathers detailed information
         autonomous_context = None
         _ai_cfg = load_ai_config()
-        autonomous_enabled = _ai_cfg.get('autonomous_agent_enabled', True)
+        autonomous_enabled = _ai_cfg.get('autonomous_agent_enabled', True) and intent != 'photos'
         try:
             if autonomous_enabled:
                 # Get clients for autonomous agent
