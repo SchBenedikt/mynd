@@ -12,6 +12,23 @@ const safeReadJson = async (response) => {
   }
 };
 
+// Default suggestions helper (declared at module scope so it's hoisted/available)
+function getDefaultSuggestions(lang) {
+  const defaults = {
+    de: [
+      'Was steht heute auf meinem Kalender?',
+      'Zeige mir meine Aufgaben für heute',
+      'Was ist neu in meinen Dateien?'
+    ],
+    en: [
+      'What\'s on my calendar today?',
+      'Show me my tasks for today',
+      'What\'s new in my files?'
+    ]
+  };
+  return defaults[lang] || defaults.en;
+}
+
 /**
  * SuggestionsPanel component displays AI-generated query suggestions
  * that adapt based on time of day and user behavior patterns.
@@ -102,21 +119,7 @@ export default function SuggestionsPanel({
     });
   };
 
-  const getDefaultSuggestions = (lang) => {
-    const defaults = {
-      de: [
-        'Was steht heute auf meinem Kalender?',
-        'Zeige mir meine Aufgaben für heute',
-        'Was ist neu in meinen Dateien?'
-      ],
-      en: [
-        'What\'s on my calendar today?',
-        'Show me my tasks for today',
-        'What\'s new in my files?'
-      ]
-    };
-    return defaults[lang] || defaults.en;
-  };
+  
 
   const handleSuggestionClick = (suggestion) => {
     if (onSuggestionClick) {
