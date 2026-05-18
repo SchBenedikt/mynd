@@ -68,13 +68,20 @@ class NextcloudTalkClient:
 
             resp = requests.post(endpoint, json={'message': message}, headers=headers, timeout=30)
             if resp.status_code in (200, 201):
-                logger.info('Sent Talk message via Bot API to token %s', token)
+                logger.info('✅ Sent Talk message via Bot API to token %s (sig_len=%d)', token[:8], len(sig))
                 return True
-
-            logger.warning('Bot API message failed: status=%s body=%s', resp.status_code, resp.text[:400])
+            
+            # Log detailed failure info
+            resp_text = resp.text[:500] if resp.text else '(empty)'
+            if resp.status_code == 401:
+                logger.warning('⚠️ Bot API 401 (Unauthorized): Bot not installed or secret mismatch. Response: %s', resp_text)
+            elif resp.status_code == 404:
+                logger.warning('⚠️ Bot API 404: Endpoint not found or bot not set up for room. URL=%s', endpoint)
+            else:
+                logger.warning('⚠️ Bot API failed: status=%s body=%s', resp.status_code, resp_text)
             return False
         except Exception as e:
-            logger.exception('Error sending via Bot API: %s', e)
+            logger.exception('❌ Error sending via Bot API: %s', e)
             return False
 
     def _send_via_user_api(self, room_id: str, message: str, format: str = 'plain') -> bool:
@@ -89,10 +96,12 @@ class NextcloudTalkClient:
             auth = self._build_auth()
             resp = requests.post(endpoint, json=payload, headers=headers, auth=auth, timeout=30)
             if resp.status_code in (200, 201, 202):
-                logger.info('Sent Talk message via User API to room %s', room_id)
+                logger.info('✅ Sent Talk message via User API to room %s (status=%s)', room_id[:8], resp.status_code)
                 return True
-            logger.warning('User API message failed: status=%s body=%s', resp.status_code, resp.text[:400])
+            
+            resp_text = resp.text[:400] if resp.text else '(empty)'
+            logger.warning('⚠️ User API message failed: status=%s body=%s', resp.status_code, resp_text)
             return False
         except Exception as e:
-            logger.exception('Error sending via User API: %s', e)
+            logger.exception('❌ Error sending via User API: %s', e)
             return False

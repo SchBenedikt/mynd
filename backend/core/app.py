@@ -3614,81 +3614,126 @@ def nextcloud_talk_webhook():
                 username = body_json.get('username')
                 language = str(body_json.get('language') or 'de')
                 do_reply = bool(body_json.get('reply', True))
+                logger.debug('📬 Simple Talk webhook format: room=%s message=%s', room_id[:8] if room_id else '?', incoming[:50] if incoming else '?')
             else:
-                # ActivityStreams format from Nextcloud Talk
+                # ActivityStreams format from Nextcloud Talk bot
+                event_type = str(body_json.get('type', 'Unknown')).strip()
+                logger.debug('📬 Nextcloud Talk ActivityStreams event: type=%s', event_type)
+                
                 try:
-                    # type e.g. 'Create'
+                    actor = body_json.get('actor', {})
                     obj = body_json.get('object', {})
                     target = body_json.get('target', {})
-                    # room token
+                    
+                    # Extract room token from target
                     room_id = str(target.get('id') or '').strip()
-                    # content may be JSON-encoded string
-                    content_raw = obj.get('content')
-                    if isinstance(content_raw, str):
-                        try:
-                            inner = json.loads(content_raw)
-                            incoming = str(inner.get('message') or '').strip()
-                        except Exception:
-                            incoming = content_raw
+                    
+                    # Extract username from actor
+                    actor_name = actor.get('name', 'Unknown')
+                    
+                    # Process based on event type
+                    if event_type.lower() == 'create':
+                        # Incoming message from user
+                        content_raw = obj.get('content')
+                        if isinstance(content_raw, str):
+                            try:
+                                inner = json.loads(content_raw)
+                                incoming = str(inner.get('message') or '').strip()
+                            except Exception:
+                                incoming = str(content_raw or '').strip()
+                        else:
+                            incoming = str(content_raw or '').strip()
+                        
+                        do_reply = True
+                        logger.info('📨 Talk message from %s in room %s: %s', actor_name, room_id[:8], incoming[:80] if incoming else '(empty)')
+                        
+                    elif event_type.lower() == 'join':
+                        # Bot was added to room
+                        incoming = f'[Bot wurde zum Raum hinzugefügt von {actor_name}]'
+                        do_reply = False
+                        logger.info('🤝 Talk bot joined room %s by %s', room_id[:8], actor_name)
+                        
+                    elif event_type.lower() == 'leave':
+                        # Bot was removed from room
+                        incoming = f'[Bot wurde aus dem Raum entfernt von {actor_name}]'
+                        do_reply = False
+                        logger.info('👋 Talk bot left room %s (removed by %s)', room_id[:8], actor_name)
+                        
+                    elif event_type.lower() == 'like':
+                        # Reaction added
+                        content = obj.get('content', 'emoji')
+                        incoming = f'[Reaktion hinzugefügt: {content}]'
+                        do_reply = False
+                        logger.debug('👍 Talk reaction from %s: %s', actor_name, content)
+                        
+                    elif event_type.lower() == 'undo':
+                        # Reaction removed
+                        incoming = f'[Reaktion entfernt von {actor_name}]'
+                        do_reply = False
+                        logger.debug('🔄 Talk reaction undone by %s', actor_name)
                     else:
-                        incoming = str(content_raw or '').strip()
-
-                    actor = body_json.get('actor', {})
-                    username = actor.get('name') or actor.get('id')
-                    # default language remains 'de'
-                except Exception:
-                    room_id = ''
-                    incoming = ''
+                        logger.warning('⚠️ Unknown ActivityStreams event type: %s', event_type)
+                        do_reply = False
+                        
+                except Exception as e:
+                    logger.error('❌ Error parsing ActivityStreams payload: %s', e)
+                    do_reply = False
 
         # Validate basic fields
         if not room_id or not incoming:
+            logger.warning('⚠️ Talk webhook validation failed: room_id=%s incoming=%s', bool(room_id), bool(incoming))
             return jsonify({'success': False, 'error': 'room_id and message required'}), 400
 
         # Verify HMAC signature using Nextcloud Talk bot headers if configured
         try:
-            logger.debug('Talk webhook raw body: %r', raw_body[:512])
+            logger.debug('📨 Talk webhook raw body size: %d bytes', len(raw_body))
             # Secret precedence: env var -> AI config file
             secret = os.getenv('BRIEFING_TALK_WEBHOOK_SECRET') or ''
             if not secret:
                 cfg = load_ai_config()
                 secret = str(cfg.get('briefing_talk_webhook_secret') or '').strip()
 
-            # Nextcloud bot headers (recommended): Random + Signature
+            # Extract all possible headers
             random_hdr = request.headers.get('X-Nextcloud-Talk-Random') or request.headers.get('HTTP_X_NEXTCLOUD_TALK_RANDOM')
             sig_hdr = request.headers.get('X-Nextcloud-Talk-Signature') or request.headers.get('HTTP_X_NEXTCLOUD_TALK_SIGNATURE')
-
-            # Backwards-compatible: support X-Mynd-Signature / X-Hub-Signature-256 (raw body HMAC)
             legacy_sig = request.headers.get('X-Mynd-Signature') or request.headers.get('X-Hub-Signature-256')
+            backend_hdr = request.headers.get('X-Nextcloud-Talk-Backend')
 
+            logger.debug('Talk webhook headers: Random=%s Sig=%s Legacy=%s Backend=%s', bool(random_hdr), bool(sig_hdr), bool(legacy_sig), bool(backend_hdr))
+
+            # Verify signature if secret configured
             if secret:
                 if random_hdr and sig_hdr:
-                    # Compute HMAC-SHA256 over RANDOM + raw_body (Nextcloud spec)
+                    # Nextcloud spec: HMAC-SHA256(RANDOM_HEADER + raw_body) per spec
                     msg = (str(random_hdr).encode('utf-8') + raw_body)
                     computed = hmac.new(secret.encode('utf-8'), msg, hashlib.sha256).hexdigest()
                     sig = sig_hdr.lower()
                     if sig.startswith('sha256='):
                         sig = sig.split('=', 1)[1]
                     if not hmac.compare_digest(computed, sig):
-                        logger.warning('Invalid Talk bot webhook signature: computed=%s header=%s', computed[:8], sig[:8])
+                        logger.error('❌ Invalid Talk bot webhook signature: computed=%s header=%s (secret=%s bytes, body=%s bytes)', computed[:16], sig[:16], len(secret), len(raw_body))
                         return jsonify({'success': False, 'error': 'Invalid signature'}), 401
-                    logger.info('Talk webhook verified via Nextcloud bot headers')
+                    logger.info('✅ Talk webhook verified via Nextcloud bot signature (random=%s bytes)', len(random_hdr))
                 elif legacy_sig:
-                    # Legacy: compare HMAC over raw body
+                    # Legacy: compare HMAC over raw body only
                     if legacy_sig.startswith('sha256='):
                         ls = legacy_sig.split('=', 1)[1]
                     else:
                         ls = legacy_sig
                     computed2 = hmac.new(secret.encode('utf-8'), raw_body, hashlib.sha256).hexdigest()
                     if not hmac.compare_digest(computed2, ls):
-                        logger.warning('Invalid legacy webhook signature: computed=%s header=%s', computed2[:8], ls[:8])
+                        logger.error('❌ Invalid legacy webhook signature: computed=%s header=%s', computed2[:16], ls[:16])
                         return jsonify({'success': False, 'error': 'Invalid signature'}), 401
-                    logger.info('Talk webhook verified via legacy signature header')
+                    logger.info('✅ Talk webhook verified via legacy signature')
+                elif isinstance(body_json, dict) and 'room_id' in body_json and 'message' in body_json:
+                    # Simple frontend test format without signature - accept for development/testing
+                    logger.warning('⚠️ Talk webhook accepted without signature (simple format - development/testing)')
                 else:
-                    logger.warning('Talk webhook signature expected but missing')
+                    logger.error('❌ Talk webhook signature expected but missing (no Random/Sig headers)')
                     return jsonify({'success': False, 'error': 'Signature expected but missing'}), 401
             else:
-                # No secret configured - accept unsigned webhooks (development)
-                logger.info('Talk webhook accepted without signature (no secret configured)')
+                # No secret configured - accept unsigned webhooks (development/testing)
+                logger.warning('⚠️ Talk webhook accepted without signature verification (no secret configured)')
         except Exception as e:
             logger.debug('Error verifying Talk webhook signature: %s', e)
             return jsonify({'success': False, 'error': 'Signature verification error'}), 401
@@ -3730,22 +3775,108 @@ def nextcloud_talk_webhook():
 
         # Optionally post reply back to Talk
         posted = False
-        if do_reply:
+        if do_reply and room_id and incoming:
             try:
                 cfg = get_nextcloud_runtime_config() or {}
-                if cfg and all(cfg.get(k) for k in ['url', 'username', 'password']):
-                    talk = NextcloudTalkClient(url=cfg.get('url'), username=cfg.get('username'), password=cfg.get('password'))
+                if cfg and cfg.get('url'):
+                    # Initialize with bot_secret for proper Bot API usage
+                    bot_secret = os.getenv('BRIEFING_TALK_WEBHOOK_SECRET') or ''
+                    if not bot_secret:
+                        ai_cfg = load_ai_config()
+                        bot_secret = str(ai_cfg.get('briefing_talk_webhook_secret') or '').strip()
+                    
+                    talk = NextcloudTalkClient(
+                        url=cfg.get('url'),
+                        username=cfg.get('username'),
+                        password=cfg.get('password'),
+                        bot_secret=bot_secret  # <-- CRITICAL: pass bot_secret for Bot API
+                    )
                     posted = talk.send_message(room_id, ai_text)
+                    
+                    if posted:
+                        logger.info('✅ Talk reply posted successfully to room %s (bot_secret_available=%s)', room_id, bool(bot_secret))
+                    else:
+                        logger.warning('⚠️ Talk reply failed to post to room %s', room_id)
                 else:
-                    logger.warning('No Nextcloud credentials available to reply to Talk webhook')
+                    logger.warning('❌ No Nextcloud credentials available to reply to Talk webhook')
             except Exception as e:
-                logger.debug('Error posting Talk reply: %s', e)
+                logger.error('❌ Error posting Talk reply: %s', e)
 
         return jsonify({'success': True, 'reply_posted': bool(posted), 'reply_text': ai_text})
 
     except Exception as e:
         logger.error(f"Talk webhook error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/nextcloud/talk/webhook-debug', methods=['POST'])
+def nextcloud_talk_webhook_debug():
+    """Debug endpoint: Test webhook with ActivityStreams format from Nextcloud Talk
+    
+    Expected JSON for ActivityStreams test:
+    {
+      "type": "create",
+      "actor": {"name": "testuser"},
+      "object": {"content": "Test message"},
+      "target": {"id": "mychannel"}
+    }
+    """
+    try:
+        logger.info('🧪 DEBUG: Webhook-Debug endpoint aufgerufen')
+        
+        raw_body = request.get_data() or b''
+        payload = request.get_json() or {}
+        
+        logger.info('🧪 Raw body size: %d bytes', len(raw_body))
+        logger.info('🧪 Payload: %s', payload)
+        
+        # Log all headers
+        headers_dict = dict(request.headers)
+        logger.info('🧪 Headers: %s', {k: v for k, v in headers_dict.items() if 'talk' in k.lower() or 'signature' in k.lower()})
+        
+        # Attempt to parse as ActivityStreams
+        event_type = payload.get('type', 'unknown')
+        actor = payload.get('actor', {})
+        obj = payload.get('object', {})
+        target = payload.get('target', {})
+        
+        room_id = str(target.get('id') or '').strip()
+        actor_name = actor.get('name', 'Unknown')
+        
+        logger.info('🧪 ActivityStreams Parse: type=%s actor=%s room=%s', event_type, actor_name, room_id[:8] if room_id else '?')
+        
+        if event_type.lower() == 'create':
+            content_raw = obj.get('content')
+            if isinstance(content_raw, str):
+                try:
+                    inner = json.loads(content_raw)
+                    message = str(inner.get('message') or '').strip()
+                except Exception:
+                    message = str(content_raw or '').strip()
+            else:
+                message = str(content_raw or '').strip()
+            
+            logger.info('🧪 Message from %s: %s', actor_name, message[:100] if message else '(empty)')
+            
+            return jsonify({
+                'success': True,
+                'debug': 'ActivityStreams message parsed successfully',
+                'room_id': room_id,
+                'message': message,
+                'actor': actor_name,
+                'event_type': event_type
+            })
+        
+        return jsonify({
+            'success': True,
+            'debug': f'Event type {event_type} received',
+            'event_type': event_type
+        })
+        
+    except Exception as e:
+        logger.error('🧪 DEBUG Error: %s', e)
+        return jsonify({'success': False, 'error': str(e), 'debug': 'Check backend logs'}), 500
+
 
 @app.route('/api/knowledge/sources', methods=['GET'])
 def get_knowledge_sources():

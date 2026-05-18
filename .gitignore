@@ -215,6 +215,10 @@ data/assistant_briefings.json
 data/cache/
 data/knowledge_graph.json
 
+# Sensitive runtime configs (contain API keys/secrets)
+backend/config/ai_config.json
+config/ai_config.json
+
 # Coverage directory used by tools like istanbul
 coverage/
 *.lcov
