@@ -105,13 +105,7 @@ In Mynd **Settings → Talk Bot Setup** → "Bot zum Raum hinzufügen":
 
 ### **Schritt 6: Secret in Mynd speichern**
 
-In Mynd **Settings → Talk Bot Setup** → "Secret in Mynd speichern":
-
-1. Gebe das exakt gleiche Secret ein wie in **Schritt 2**
-2. Klick "💾 Secret speichern"
-3. Du solltest sehen: "✅ Secret ist gespeichert"
-
-**⚠️ WICHTIG:** Das Secret MUSS exakt mit dem OCC-Setup übereinstimmen!
+Dieser Schritt ist redundant, da das Secret bereits in **Schritt 2** generiert und gespeichert wurde. Bitte stelle sicher, dass das Secret in **Schritt 2** korrekt eingegeben wurde.
 
 ---
 

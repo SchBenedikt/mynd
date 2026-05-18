@@ -136,12 +136,6 @@ const buildTalkBotSetupInstructions = ({ webhookUrl, botName, botSecret, roomTok
       },
       {
         step: 6,
-        title: 'Secret in Mynd speichern',
-        desc: 'Gehe zu Mynd Settings → Talk/Webhook → trage dasselbe Secret ein → Speichern',
-        action: 'manual'
-      },
-      {
-        step: 7,
         title: 'Webhook testen',
         desc: 'In Mynd Settings: Klick "Talk Webhook testen"',
         action: 'test'
@@ -2583,42 +2577,10 @@ export default function SettingsPage() {
                       }}>📋 {tr('Befehl kopieren', 'Copy command')}</button>
                     </div>
 
-                    {/* Secret in Mynd */}
-                    <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
-                      <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
-                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>6️⃣</span>
-                        <strong>{tr('Secret in Mynd speichern', 'Save Secret in Mynd')}</strong>
-                      </div>
-                      <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 0.5rem 0'}}>
-                        {tr('Trage hier das Secret ein (exakt wie in Schritt 2):', 'Enter the secret here (exactly as in Step 2):')}
-                      </p>
-                      <div style={{display: 'flex', gap: '0.5rem', marginBottom: '0.5rem'}}>
-                        <input 
-                          type="password" 
-                          value={briefingTalkWebhookSecret} 
-                          onChange={(e) => setBriefingTalkWebhookSecret(e.target.value)}
-                          placeholder="(dasselbe wie in Schritt 2)"
-                          style={{flex: 1}}
-                        />
-                        <button className="btn" onClick={() => {
-                          navigator.clipboard.writeText(briefingTalkWebhookSecret);
-                          alert('Secret kopiert!');
-                        }} disabled={!briefingTalkWebhookSecret}>📋</button>
-                      </div>
-                      <button className="btn primary" onClick={saveBriefingConfig} style={{marginBottom: '0.5rem', width: '100%'}}>
-                        💾 {tr('Secret speichern', 'Save secret')}
-                      </button>
-                      {briefingTalkWebhookSecretSet && (
-                        <p style={{fontSize: '0.85rem', color: 'var(--success)', margin: '0.5rem 0'}}>
-                          ✅ {tr('Secret ist gespeichert', 'Secret is saved')}
-                        </p>
-                      )}
-                    </div>
-
                     {/* Test */}
                     <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
                       <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
-                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>7️⃣</span>
+                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>6️⃣</span>
                         <strong>{tr('Webhook testen', 'Test Webhook')}</strong>
                       </div>
                       <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 0.5rem 0'}}>
