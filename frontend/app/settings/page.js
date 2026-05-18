@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTheme } from '../../hooks/useTheme';
 import { useLanguage } from '../../hooks/useLanguage';
 import { ThemeSelector } from '../../components/ThemeSelector';
+import { EMAIL_PROVIDER_PRESETS, normalizeEmailConfig } from '../../data/emailConfig';
 
 const API_BASE = '';
 const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
@@ -23,149 +24,6 @@ const API_DISPLAY_NAMES = {
   email: 'E-Mail'
 };
 
-const EMAIL_PROVIDER_PRESETS = {
-  custom: {
-    labelDe: 'Eigene Angaben',
-    labelEn: 'Custom',
-    values: {}
-  },
-  'web.de': {
-    labelDe: 'WEB.DE',
-    labelEn: 'WEB.DE',
-    values: {
-      imap_host: 'imap.web.de',
-      imap_port: '993',
-      use_ssl: 'true',
-      smtp_host: 'smtp.web.de',
-      smtp_port: '587',
-      smtp_starttls: 'true',
-      smtp_use_ssl: 'false'
-    }
-  },
-  'gmx.de': {
-    labelDe: 'GMX',
-    labelEn: 'GMX',
-    values: {
-      imap_host: 'imap.gmx.net',
-      imap_port: '993',
-      use_ssl: 'true',
-      smtp_host: 'mail.gmx.net',
-      smtp_port: '587',
-      smtp_starttls: 'true',
-      smtp_use_ssl: 'false'
-    }
-  },
-  'gmail.com': {
-    labelDe: 'Gmail',
-    labelEn: 'Gmail',
-    values: {
-      imap_host: 'imap.gmail.com',
-      imap_port: '993',
-      use_ssl: 'true',
-      smtp_host: 'smtp.gmail.com',
-      smtp_port: '587',
-      smtp_starttls: 'true',
-      smtp_use_ssl: 'false'
-    }
-  },
-  'outlook.com': {
-    labelDe: 'Outlook / Microsoft',
-    labelEn: 'Outlook / Microsoft',
-    values: {
-      imap_host: 'outlook.office365.com',
-      imap_port: '993',
-      use_ssl: 'true',
-      smtp_host: 'smtp.office365.com',
-      smtp_port: '587',
-      smtp_starttls: 'true',
-      smtp_use_ssl: 'false'
-    }
-  }
-};
-
-const EMAIL_ACCOUNT_FIELDS = [
-  'provider_preset',
-  'username',
-  'password',
-  'imap_host',
-  'imap_port',
-  'use_ssl',
-  'smtp_host',
-  'smtp_port',
-  'smtp_starttls',
-  'smtp_use_ssl',
-  'folders',
-  'max_emails',
-  'from_name',
-  'from_address'
-];
-
-const _pickEmailFields = (value = {}) => {
-  const picked = {};
-  EMAIL_ACCOUNT_FIELDS.forEach((field) => {
-    if (Object.prototype.hasOwnProperty.call(value, field)) {
-      picked[field] = value[field];
-    }
-  });
-  return picked;
-};
-
-const _normalizeSingleEmailAccount = (rawAccount = {}, fallbackId = 'account_1', fallbackName = '') => {
-  const accountId = String(rawAccount.account_id || rawAccount.id || fallbackId).trim() || fallbackId;
-  const username = String(rawAccount.username || '').trim();
-  const displayName = String(rawAccount.display_name || fallbackName || username || accountId).trim();
-  return {
-    account_id: accountId,
-    display_name: displayName,
-    provider_preset: 'custom',
-    folders: 'INBOX',
-    use_ssl: 'true',
-    smtp_starttls: 'true',
-    smtp_use_ssl: 'false',
-    max_emails: '50',
-    ..._pickEmailFields(rawAccount)
-  };
-};
-
-const normalizeEmailConfig = (config = {}) => {
-  const base = { ...(config || {}) };
-  let accounts = Array.isArray(base.accounts)
-    ? base.accounts
-        .filter((item) => item && typeof item === 'object')
-        .map((item, index) => _normalizeSingleEmailAccount(item, `account_${index + 1}`))
-    : [];
-
-  if (accounts.length === 0) {
-    const hasLegacyFields = ['username', 'imap_host', 'password', 'smtp_host'].some((key) => {
-      const value = base[key];
-      return value !== undefined && value !== null && String(value).trim() !== '';
-    });
-
-    if (hasLegacyFields) {
-      accounts = [_normalizeSingleEmailAccount(base, 'account_1')];
-    }
-  }
-
-  if (accounts.length === 0) {
-    accounts = [_normalizeSingleEmailAccount({}, 'account_1', 'Konto 1')];
-  }
-
-  let activeAccountId = String(base.active_account_id || base.selected_account_id || base.account_id || '').trim();
-  if (!accounts.find((account) => account.account_id === activeAccountId)) {
-    activeAccountId = accounts[0].account_id;
-  }
-
-  const activeAccount = accounts.find((account) => account.account_id === activeAccountId) || accounts[0];
-
-  return {
-    ...base,
-    accounts,
-    active_account_id: activeAccountId,
-    selected_account_id: activeAccountId,
-    ..._pickEmailFields(activeAccount)
-  };
-};
-
 const normalizeTtsProvider = (value) => {
   return String(value || '').trim().toLowerCase() === 'gemini' ? 'gemini' : 'browser';
 };
@@ -175,6 +33,125 @@ const formatVoiceLabel = (voice) => {
   const lang = String(voice?.lang || '').trim();
   if (name && lang) return `${name} (${lang})`;
   return name || lang || 'System Voice';
+};
+
+const bytesToHex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const shellQuote = (value, fallback = '') => {
+  const resolved = String(value || fallback);
+  return `"${resolved.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+};
+
+const shellArg = (value, fallback = '') => {
+  const resolved = String(value || fallback).trim();
+  return resolved || fallback;
+};
+
+const buildTalkWebhookRequest = async ({ roomId, botId, secret, language }) => {
+  const normalizedRoomId = String(roomId || 'ofexbgra').trim() || 'ofexbgra';
+  const normalizedBotId = String(botId || 'Mynd Bot').trim() || 'Mynd Bot';
+  const payload = {
+    room_id: normalizedRoomId,
+    message: 'Testnachricht von Mynd',
+    username: normalizedBotId,
+    language: String(language || 'de').trim() || 'de'
+  };
+  const body = JSON.stringify(payload);
+  const endpoint = '/api/nextcloud/talk/webhook';
+  const terminalEndpoint = 'http://127.0.0.1:5001/api/nextcloud/talk/webhook';
+  const headers = { 'Content-Type': 'application/json' };
+  const commandLines = [
+    "curl -sS -X POST '" + terminalEndpoint + "' \\",
+    "  -H 'Content-Type: application/json'"
+  ];
+
+  if (secret) {
+    const randomHeader = Array.from(window.crypto.getRandomValues(new Uint8Array(8)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const encoder = new TextEncoder();
+    const key = await window.crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signature = await window.crypto.subtle.sign('HMAC', key, encoder.encode(randomHeader + body));
+    const signatureHex = bytesToHex(new Uint8Array(signature));
+
+    headers['X-Nextcloud-Talk-Random'] = randomHeader;
+    headers['X-Nextcloud-Talk-Signature'] = `sha256=${signatureHex}`;
+    commandLines.push("  -H 'X-Nextcloud-Talk-Random: " + randomHeader + "' \\");
+    commandLines.push(`  -H 'X-Nextcloud-Talk-Signature: sha256=${signatureHex}'`);
+  }
+
+  commandLines.push(`  --data-binary @- <<'JSON'`);
+  commandLines.push(body);
+  commandLines.push('JSON');
+
+  return {
+    payload,
+    body,
+    endpoint,
+    headers,
+    command: commandLines.join('\n'),
+    hasSecret: Boolean(secret)
+  };
+};
+
+const buildTalkBotSetupInstructions = ({ webhookUrl, botName, botSecret, roomToken, ncUrl }) => {
+  const normUrl = String(webhookUrl || 'https://mynd.example.com/api/nextcloud/talk/webhook').trim().replace(/\/$/, '');
+  const botN = String(botName || 'Mynd Bot').trim() || 'Mynd Bot';
+  const botSec = String(botSecret || 'openssl_random_secret').trim();
+  const roomT = String(roomToken || 'ofexbgra').trim() || 'ofexbgra';
+  
+  return {
+    steps: [
+      {
+        step: 1,
+        title: 'Webhook-URL von Mynd',
+        desc: 'Die URL muss externe Requests von Nextcloud akzeptieren:',
+        value: normUrl,
+        action: 'copy'
+      },
+      {
+        step: 2,
+        title: 'Bot-Secret generieren (oder verwenden)',
+        desc: 'Mind. 32 Zeichen, z.B. mit: openssl rand -hex 24',
+        value: botSec,
+        action: 'copy'
+      },
+      {
+        step: 3,
+        title: 'Bot auf Nextcloud-Server installieren (ssh)',
+        desc: 'Admin-Rechte erforderlich. Ersetze <URL>, <SECRET>, <ROOM_TOKEN>:',
+        command: `sudo -u www-data php /var/www/nextcloud/occ talk:bot:install --feature response --no-setup "${botN}" "${botSec}" "${normUrl}"`,
+        note: 'Kopiere die Bot-ID (SHA1) aus der Ausgabe'
+      },
+      {
+        step: 4,
+        title: 'Bot-Liste abrufen',
+        command: `sudo -u www-data php /var/www/nextcloud/occ talk:bot:list`,
+        desc: 'Suche nach "Mynd Bot" — die erste Spalte ist die BOT_ID'
+      },
+      {
+        step: 5,
+        title: 'Bot zum Raum hinzufügen',
+        desc: 'Ersetze <BOT_ID> mit dem Wert aus Schritt 4 und <ROOM_TOKEN> mit dem Raum-Token:',
+        command: `sudo -u www-data php /var/www/nextcloud/occ talk:bot:setup <BOT_ID> ${roomT}`,
+        example: `sudo -u www-data php /var/www/nextcloud/occ talk:bot:setup bot-abc123def456 ${roomT}`
+      },
+      {
+        step: 6,
+        title: 'Secret in Mynd speichern',
+        desc: 'Gehe zu Mynd Settings → Talk/Webhook → trage dasselbe Secret ein → Speichern',
+        action: 'manual'
+      },
+      {
+        step: 7,
+        title: 'Webhook testen',
+        desc: 'In Mynd Settings: Klick "Talk Webhook testen"',
+        action: 'test'
+      }
+    ]
+  };
+};
+
+const getEffectiveTalkSecret = (botSecret, webhookSecret) => {
+  return String(webhookSecret || '').trim() || String(botSecret || '').trim();
 };
 
 export default function SettingsPage() {
@@ -216,7 +193,15 @@ export default function SettingsPage() {
   const [briefingSendWeekly, setBriefingSendWeekly] = useState(false);
   const [briefingSendRecipients, setBriefingSendRecipients] = useState('');
   const [briefingSendAccountId, setBriefingSendAccountId] = useState('');
-  const [emailAccounts, setEmailAccounts] = useState([]);
+  const [briefingEmailAccounts, setBriefingEmailAccounts] = useState([]);
+  const [briefingBotId, setBriefingBotId] = useState('');
+  const [briefingTalkWebhookUrl, setBriefingTalkWebhookUrl] = useState('');
+  const [briefingTalkServerBotId, setBriefingTalkServerBotId] = useState('');
+  const [briefingBotSecretLocal, setBriefingBotSecretLocal] = useState('');
+  const [briefingSendTalk, setBriefingSendTalk] = useState(false);
+  const [briefingTalkRoomId, setBriefingTalkRoomId] = useState('');
+  const [briefingTalkWebhookSecret, setBriefingTalkWebhookSecret] = useState('');
+  const [briefingTalkWebhookSecretSet, setBriefingTalkWebhookSecretSet] = useState(false);
   
   const [indexingProgress, setIndexingProgress] = useState(0);
   const [indexingStatus, setIndexingStatus] = useState('idle');
@@ -239,6 +224,7 @@ export default function SettingsPage() {
   const [indexingPathStatus, setIndexingPathStatus] = useState('');
   
   const [nextcloudUrl, setNextcloudUrl] = useState('');
+  const [showNcBotPanel, setShowNcBotPanel] = useState(false);
   const [nextcloudStatus, setNextcloudStatus] = useState('');
   const [calendarConfig, setCalendarConfig] = useState({
     default_calendar_name: ''
@@ -248,6 +234,50 @@ export default function SettingsPage() {
   const [nextcloudConfigured, setNextcloudConfigured] = useState(false);
   const [nextcloudDisplayName, setNextcloudDisplayName] = useState('');
   const [nextcloudLoggingIn, setNextcloudLoggingIn] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !briefingTalkWebhookUrl.trim()) {
+      setBriefingTalkWebhookUrl(`${window.location.origin}/api/nextcloud/talk/webhook`);
+    }
+  }, [briefingTalkWebhookUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const updateSetupPreview = () => {
+      try {
+        const preview = buildTalkBotCommands({
+          webhookUrl: briefingTalkWebhookUrl,
+          botName: briefingBotId,
+          botSecret: getEffectiveTalkSecret(briefingBotSecretLocal, briefingTalkWebhookSecret),
+          botId: briefingTalkServerBotId,
+          roomToken: briefingTalkRoomId
+        });
+
+        if (!cancelled) {
+          setBriefingTalkBotSetupPreview(preview);
+          if (briefingBotSecretLocal.trim() && briefingBotSecretLocal.trim().length < 40) {
+            setBriefingTalkBotSetupStatus(tr('Bot-Secret ist zu kurz (mindestens 40 Zeichen).', 'Bot secret is too short (minimum 40 characters).'));
+          } else if (briefingTalkServerBotId.trim()) {
+            setBriefingTalkBotSetupStatus(tr('Setup-Befehle sind vollständig.', 'Setup commands are complete.'));
+          } else {
+            setBriefingTalkBotSetupStatus(tr('Führe zuerst talk:bot:list aus und trage dann die Bot-ID ein.', 'Run talk:bot:list first and then enter the bot ID.'));
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setBriefingTalkBotSetupPreview('');
+          setBriefingTalkBotSetupStatus(`Error: ${err.message}`);
+        }
+      }
+    };
+
+    updateSetupPreview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [briefingTalkWebhookUrl, briefingBotId, briefingBotSecretLocal, briefingTalkServerBotId, briefingTalkRoomId, language]);
 
   // API Registry State
   const [apis, setApis] = useState([]);
@@ -666,6 +696,15 @@ export default function SettingsPage() {
         setBriefingSendWeekly(Boolean(data.config.briefing_send_weekly ?? false));
         setBriefingSendRecipients(String(data.config.briefing_send_recipients || ''));
         setBriefingSendAccountId(String(data.config.briefing_send_account_id || ''));
+        // Nextcloud Talk briefing settings
+        setBriefingSendTalk(Boolean(data.config.briefing_send_talk ?? false));
+        setBriefingTalkRoomId(String(data.config.briefing_talk_room_id || ''));
+        setBriefingTalkWebhookSecretSet(Boolean(data.config.briefing_talk_webhook_secret_set));
+        // Do not populate webhook secret from server; only show whether it's set
+        if (data.config.briefing_talk_webhook_secret_set) {
+          setBriefingTalkWebhookSecret('');
+          setShowNcBotPanel(true);
+        }
         setImmichStatus(tr('Geladen', 'Loaded'));
       } else {
         setImmichStatus(tr('Fehler beim Laden der Immich-Konfiguration', 'Error loading Immich config'));
@@ -680,8 +719,8 @@ export default function SettingsPage() {
       const res = await fetch(`${API_BASE}/api/email/accounts`);
       const data = await res.json();
       if (res.ok && data?.success) {
-        const accounts = Array.isArray(data.accounts) ? data.accounts : (data.config?.accounts || []);
-        setEmailAccounts(accounts.map(a => ({ account_id: a.account_id || a.id, display_name: a.display_name || a.username || a.account_id || a.id })));
+          const accounts = Array.isArray(data.accounts) ? data.accounts : (data.config?.accounts || []);
+          setBriefingEmailAccounts(accounts.map(a => ({ account_id: a.account_id || a.id, display_name: a.display_name || a.username || a.account_id || a.id })));
         if (!briefingSendAccountId && accounts.length > 0) {
           setBriefingSendAccountId(accounts[0].account_id || accounts[0].id);
         }
@@ -719,6 +758,7 @@ export default function SettingsPage() {
   const saveBriefingConfig = async () => {
     try {
       const safeHour = Math.max(0, Math.min(23, Number(briefingMorningHour) || 7));
+      const effectiveTalkSecret = getEffectiveTalkSecret(briefingBotSecretLocal, briefingTalkWebhookSecret);
       const res = await fetch(`${API_BASE}/api/ui/system-config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -729,13 +769,20 @@ export default function SettingsPage() {
           briefing_send_daily: briefingSendDaily,
           briefing_send_weekly: briefingSendWeekly,
           briefing_send_recipients: briefingSendRecipients,
-          briefing_send_account_id: briefingSendAccountId
+          briefing_send_account_id: briefingSendAccountId,
+          // Nextcloud Talk settings
+          briefing_send_talk: briefingSendTalk,
+          briefing_talk_room_id: briefingTalkRoomId,
+          ...(effectiveTalkSecret ? { briefing_talk_webhook_secret: effectiveTalkSecret } : {})
         })
       });
 
       const data = await res.json();
       if (res.ok && data?.success) {
         setBriefingMorningHour(safeHour);
+        if (briefingTalkWebhookSecret.trim()) {
+          setBriefingTalkWebhookSecretSet(true);
+        }
         setBriefingStatus(tr('Briefing-Einstellungen gespeichert', 'Briefing settings saved'));
       } else {
         setBriefingStatus(`Error: ${data?.error || tr('Briefing-Einstellungen konnten nicht gespeichert werden', 'Could not save briefing settings')}`);
@@ -744,6 +791,45 @@ export default function SettingsPage() {
       setBriefingStatus('Error: ' + err.message);
     }
   };
+
+    const testTalkWebhook = async () => {
+      try {
+          const effectiveTalkSecret = getEffectiveTalkSecret(briefingBotSecretLocal, briefingTalkWebhookSecret);
+          if (!effectiveTalkSecret && briefingTalkWebhookSecretSet) {
+          setBriefingStatus(tr('Für den Test fehlt das Secret im Formular. Bitte denselben Wert wie beim Bot-Setup eintragen und erneut testen.', 'Secret is required for the test. Please enter the same value used for bot setup and test again.'));
+          return;
+        }
+
+        setBriefingStatus(tr('Teste Talk Webhook...', 'Testing Talk webhook...'));
+          const request = await buildTalkWebhookRequest({
+            roomId: briefingTalkRoomId || 'ofexbgra',
+            botId: briefingBotId || 'Mynd Bot',
+              secret: effectiveTalkSecret,
+            language
+          });
+
+          const res = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setBriefingStatus(tr('✅ Talk Webhook erfolgreich getestet! Bot ist aktiv.', '✅ Talk webhook test succeeded! Bot is active.'));
+        } else if (res.status === 401) {
+          const errMsg = String(data?.error || '').toLowerCase();
+          if (errMsg.includes('signature expected')) {
+            setBriefingStatus(tr('❌ Signatur-Fehler: Bot-Secret ist falsch oder nicht gespeichert. Prüfe die OCC-Installation und das Secret in Mynd Settings.', '❌ Signature error: bot secret is wrong or not saved. Check OCC setup and secret in Mynd Settings.'));
+          } else if (errMsg.includes('invalid')) {
+            setBriefingStatus(tr('❌ Ungültige Signatur: Bot-Secret stimmt nicht überein. Stelle sicher, dass das Secret in Mynd exakt mit dem OCC-Setup übereinstimmt.', '❌ Invalid signature: bot secret mismatch. Ensure the secret in Mynd matches the OCC setup exactly.'));
+          } else {
+            setBriefingStatus(tr('❌ Bot-Authentifizierung fehlgeschlagen (401). Bot ist möglicherweise nicht korrekt konfiguriert.', '❌ Bot authentication failed (401). Bot may not be configured correctly.'));
+          }
+        } else if (res.status === 404) {
+          setBriefingStatus(tr('❌ Endpoint nicht gefunden (404). Nextcloud-URL oder Bot ist nicht erreichbar.', '❌ Endpoint not found (404). Nextcloud URL or bot not reachable.'));
+        } else {
+          setBriefingStatus(`❌ Error (${res.status}): ${data?.error || res.statusText}`);
+        }
+      } catch (err) {
+        setBriefingStatus('❌ Error: ' + err.message);
+      }
+    };
 
   const testImmichConnection = async () => {
     try {
@@ -1454,6 +1540,7 @@ export default function SettingsPage() {
           <div className="settings-tabs">
             <button className={`tab-btn ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>{t('tabConfig')}</button>
             <button className={`tab-btn ${activeTab === 'apis' ? 'active' : ''}`} onClick={() => setActiveTab('apis')}>{tr('APIs', 'APIs')}</button>
+            <button className={`tab-btn ${activeTab === 'talk-bot' ? 'active' : ''}`} onClick={() => setActiveTab('talk-bot')}>{tr('Talk Bot Setup', 'Talk Bot Setup')}</button>
             <button className={`tab-btn ${activeTab === 'indexing' ? 'active' : ''}`} onClick={() => setActiveTab('indexing')}>{t('tabIndexing')}</button>
             <button className={`tab-btn ${activeTab === 'sources' ? 'active' : ''}`} onClick={() => setActiveTab('sources')}>{t('tabSources')}</button>
             <button className={`tab-btn ${activeTab === 'design' ? 'active' : ''}`} onClick={() => setActiveTab('design')}>{t('tabDesign')}</button>
@@ -1609,11 +1696,111 @@ export default function SettingsPage() {
                     <label>{tr('E‑Mail Konto zum Senden', 'Email account to send from')}</label>
                     <select value={briefingSendAccountId} onChange={(e) => setBriefingSendAccountId(e.target.value)}>
                       <option value="">{tr('Auswählen...', 'Select...')}</option>
-                      {emailAccounts.map((acc) => (
+                      {briefingEmailAccounts.map((acc) => (
                         <option key={acc.account_id} value={acc.account_id}>{acc.display_name}</option>
                       ))}
                     </select>
                   </div>
+
+                  <div className="input-group">
+                    <label>{tr('Briefing per Nextcloud Talk senden (täglich)', 'Send briefing via Nextcloud Talk (daily)')}</label>
+                    <select
+                      value={briefingSendTalk ? 'true' : 'false'}
+                      onChange={(e) => setBriefingSendTalk(e.target.value === 'true')}
+                    >
+                      <option value="true">{tr('Ja', 'Yes')}</option>
+                      <option value="false">{tr('Nein', 'No')}</option>
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Talk Raum-Slug / Token', 'Talk room slug / token')}</label>
+                    <input
+                      type="text"
+                      value={briefingTalkRoomId}
+                      onFocus={() => setShowNcBotPanel(true)}
+                      onChange={(e) => setBriefingTalkRoomId(e.target.value)}
+                      placeholder={tr('z.B. ofexbgra', 'e.g. ofexbgra')}
+                    />
+                    <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                      {tr('Den Slug findest du in der Talk-URL des Raums. Wenn du ins Feld klickst, öffnet sich die Anleitung.', 'You can find the slug in the room URL. Clicking the field opens the guide.')}
+                    </small>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Nextcloud Talk Bot', 'Nextcloud Talk bot')}</label>
+                    <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap'}}>
+                      <button className="btn" type="button" onClick={() => setShowNcBotPanel(prev => !prev)}>{showNcBotPanel ? tr('Ausblenden', 'Hide') : tr('Anzeigen', 'Show')}</button>
+                      <button className="btn" type="button" onClick={testTalkWebhook}>{tr('Talk Webhook testen', 'Test Talk webhook')}</button>
+                    </div>
+                  </div>
+
+                  {showNcBotPanel && (
+                    <>
+                      <div className="input-group">
+                        <label>{tr('Bot-Name / Anzeigename', 'Bot name / display name')}</label>
+                        <input type="text" value={briefingBotId} onChange={(e) => setBriefingBotId(e.target.value)} placeholder={tr('z.B. Mynd Bot', 'e.g. Mynd Bot')} />
+                        <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                          {tr('Der Name ist frei wählbar und wird beim Installieren des Bots verwendet.', 'The name is freely selectable and is used when installing the bot.')}
+                        </small>
+                      </div>
+                      <div className="input-group">
+                        <label>{tr('Mynd Webhook URL (für talk:bot:install)', 'Mynd webhook URL (for talk:bot:install)')}</label>
+                        <input type="text" value={briefingTalkWebhookUrl} onChange={(e) => setBriefingTalkWebhookUrl(e.target.value)} placeholder="https://mynd.example.com/api/nextcloud/talk/webhook" />
+                        <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                          {tr('Wichtig: Hier muss die öffentlich erreichbare Mynd-URL stehen, nicht die Nextcloud-URL.', 'Important: This must be the publicly reachable Mynd URL, not the Nextcloud URL.')}
+                        </small>
+                      </div>
+                      <div className="input-group">
+                        <label>{tr('Bot Secret für die Signatur', 'Bot secret for the signature')}</label>
+                        <input type="password" value={briefingBotSecretLocal} onChange={(e) => setBriefingBotSecretLocal(e.target.value)} placeholder={tr('Mindestens 40 Zeichen', 'Minimum 40 characters')} />
+                        <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                          {tr('Nextcloud verlangt 40 bis 128 Zeichen. Wenn leer, wird im Befehl automatisch ein zufälliges Secret erzeugt.', 'Nextcloud requires 40 to 128 characters. If empty, the command generates a random secret automatically.')}
+                        </small>
+                      </div>
+                      <div className="input-group">
+                        <label>{tr('OCC-Kommandos für Nextcloud', 'OCC commands for Nextcloud')}</label>
+                        <pre style={{margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', padding: '0.9rem', borderRadius: '10px', background: 'rgba(0,0,0,0.08)', border: '1px solid var(--line)', fontSize: '0.82rem', lineHeight: 1.45, overflowX: 'auto'}}>{briefingTalkBotSetupPreview || tr('Bitte Nextcloud-URL, Bot-Name und Raum-Token eintragen.', 'Please enter Nextcloud URL, bot name, and room token.')}</pre>
+                        <div style={{display: 'flex', gap: '0.5rem', marginTop: '0.6rem', flexWrap: 'wrap'}}>
+                          <button
+                            className="btn"
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                if (briefingTalkBotSetupPreview) {
+                                  await navigator.clipboard.writeText(briefingTalkBotSetupPreview);
+                                  setBriefingTalkBotSetupStatus(tr('OCC-Befehle kopiert.', 'OCC commands copied.'));
+                                }
+                              } catch (err) {
+                                setBriefingTalkBotSetupStatus(`Error: ${err.message}`);
+                              }
+                            }}
+                          >
+                            {tr('OCC-Befehle kopieren', 'Copy OCC commands')}
+                          </button>
+                          {briefingTalkBotSetupStatus && (
+                            <div className="status-text" style={{margin: 0, alignSelf: 'center'}}>{briefingTalkBotSetupStatus}</div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="input-group">
+                        <label>{tr('Bot-ID aus talk:bot:list (Schritt 3)', 'Bot ID from talk:bot:list (step 3)')}</label>
+                        <input type="text" value={briefingTalkServerBotId} onChange={(e) => setBriefingTalkServerBotId(e.target.value)} placeholder={tr('z.B. bots/bot-…', 'e.g. bots/bot-…')} />
+                        <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                          {tr('Erst nach Schritt 3 eintragen; danach wird Schritt 4 im Befehl automatisch konkretisiert.', 'Enter this only after step 3; then step 4 in the command is updated automatically.')}
+                        </small>
+                      </div>
+                      <div className="input-group">
+                        <label>{tr('Webhook Secret (wird auf dem Server gesetzt)', 'Webhook secret (stored on server)')}</label>
+                        <input type="password" value={briefingTalkWebhookSecret} onChange={(e) => setBriefingTalkWebhookSecret(e.target.value)} placeholder={briefingTalkWebhookSecretSet ? tr('Bereits gesetzt - neu eingeben zum Überschreiben', 'Already set - enter again to overwrite') : tr('Optional: Webhook Secret', 'Optional: webhook secret')} />
+                        {briefingTalkWebhookSecretSet && !briefingTalkWebhookSecret.trim() && (
+                          <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                            {tr('Ein Secret ist bereits gespeichert. Für den Test bitte den Secret-Wert hier erneut eingeben.', 'A secret is already saved. For testing, please enter it again here.')}
+                          </small>
+                        )}
+                      </div>
+                    </>
+                  )}
 
                   <div className="button-group">
                     <button className="btn primary" onClick={saveBriefingConfig}>{tr('Briefing speichern', 'Save briefing')}</button>
@@ -1837,20 +2024,20 @@ export default function SettingsPage() {
                                     )}
                                     {ninaWarnings.length > 0 && (
                                       <div className="api-warning-list">
-                                        {ninaWarnings.slice(0, 10).map((warning, index) => (
-                                          <div
-                                            key={`${warning.identifier || warning.id || index}`}
-                                            className="api-warning-item"
-                                          >
-                                            <div style={{fontWeight: '600'}}>{getNinaWarningTitle(warning)}</div>
-                                            {getNinaWarningDescription(warning) && (
-                                              <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.35rem'}}>
-                                                {getNinaWarningDescription(warning)}
+                                            {ninaWarnings.slice(0, 10).map((warning, index) => (
+                                              <div
+                                                key={`${warning.identifier || warning.id || index}`}
+                                                className="api-warning-item"
+                                              >
+                                                <div style={{fontWeight: '600'}}>{getNinaWarningTitle(warning)}</div>
+                                                {getNinaWarningDescription(warning) && (
+                                                  <div style={{fontSize: '0.85rem', color: 'var(--muted)', marginTop: '0.35rem'}}>
+                                                    {getNinaWarningDescription(warning)}
+                                                  </div>
+                                                )}
                                               </div>
-                                            )}
+                                            ))}
                                           </div>
-                                        ))}
-                                      </div>
                                     )}
                                   </div>
                                 </>
@@ -2286,6 +2473,227 @@ export default function SettingsPage() {
                         </div>
                       )}
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {activeTab === 'talk-bot' && (
+              <div className="settings-panel">
+                <div className="panel-section">
+                  <div className="section-title" style={{fontSize: '1.4rem', marginBottom: '1rem'}}>
+                    🤖 Nextcloud Talk Bot Setup
+                  </div>
+                  <p style={{fontSize: '1rem', color: 'var(--muted)', lineHeight: '1.6', margin: '0 0 1rem 0'}}>
+                    {tr('Diese Anleitung zeigt die Schritte zur Installation und Konfiguration des Mynd Talk Bots auf deinem Nextcloud-Server.', 'This guide shows the steps to install and configure the Mynd Talk Bot on your Nextcloud server.')}
+                  </p>
+                  
+                  <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1.5rem', border: '1px solid var(--border-color)'}}>
+                    <strong>⚠️ {tr('Voraussetzungen', 'Requirements')}:</strong>
+                    <ul style={{margin: '0.5rem 0 0 1.5rem'}}>
+                      <li>{tr('SSH-Zugriff auf den Nextcloud-Server mit Admin-Rechten', 'SSH access to Nextcloud server with admin privileges')}</li>
+                      <li>{tr('Mynd Backend läuft und ist über öffentliche URL erreichbar', 'Mynd backend is running and reachable via public URL')}</li>
+                      <li>{tr('Die Webhook-URL muss von außen erreichbar sein (z.B. über ngrok wenn lokal)', 'Webhook URL must be externally reachable (e.g., via ngrok if local)')}</li>
+                    </ul>
+                  </div>
+
+                  {/* Step-by-step instructions */}
+                  <div style={{display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem'}}>
+                    {/* Webhook URL */}
+                    <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
+                      <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
+                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>1️⃣</span>
+                        <strong>{tr('Webhook-URL von Mynd', 'Mynd Webhook URL')}</strong>
+                      </div>
+                      <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 0.5rem 0'}}>
+                        {tr('Diese URL kopierst du in den OCC-Befehl weiter unten:', 'Copy this URL to the OCC command below:')}
+                      </p>
+                      <div style={{display: 'flex', gap: '0.5rem'}}>
+                        <input 
+                          type="text" 
+                          value={briefingTalkWebhookUrl || 'https://mynd.example.com/api/nextcloud/talk/webhook'} 
+                          onChange={(e) => setBriefingTalkWebhookUrl(e.target.value)}
+                          style={{flex: 1}}
+                          placeholder="https://mynd.example.com/api/nextcloud/talk/webhook"
+                        />
+                        <button className="btn" onClick={() => {
+                          navigator.clipboard.writeText(briefingTalkWebhookUrl || 'https://mynd.example.com/api/nextcloud/talk/webhook');
+                          alert('Kopiert!');
+                        }}>📋</button>
+                      </div>
+                    </div>
+
+                    {/* Secret */}
+                    <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
+                      <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
+                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>2️⃣</span>
+                        <strong>{tr('Bot-Secret generieren', 'Generate Bot Secret')}</strong>
+                      </div>
+                      <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 0.5rem 0'}}>
+                        {tr('Auf dem Nextcloud-Server (SSH):', 'On Nextcloud server (SSH):')}
+                      </p>
+                      <code style={{display: 'block', backgroundColor: 'var(--bg-dark)', padding: '0.5rem', borderRadius: '0.25rem', fontSize: '0.9rem', color: 'var(--success)', marginBottom: '0.5rem', wordBreak: 'break-all'}}>
+                        openssl rand -hex 24
+                      </code>
+                      <p style={{fontSize: '0.85rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                        {tr('Kopiere die 48-Zeichen-Ausgabe:', 'Copy the 48-character output:')}
+                      </p>
+                      <div style={{display: 'flex', gap: '0.5rem'}}>
+                        <input 
+                          type="text" 
+                          value={briefingBotSecretLocal} 
+                          onChange={(e) => setBriefingBotSecretLocal(e.target.value)}
+                          style={{flex: 1}}
+                          placeholder="(z.B. a1b2c3d4e5f6...)"
+                        />
+                        <button className="btn" onClick={() => {
+                          navigator.clipboard.writeText(briefingBotSecretLocal);
+                          alert('Kopiert!');
+                        }} disabled={!briefingBotSecretLocal}>📋</button>
+                      </div>
+                    </div>
+
+                    {/* Bot Installation Command */}
+                    <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
+                      <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
+                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>3️⃣</span>
+                        <strong>{tr('Bot auf Nextcloud installieren', 'Install Bot on Nextcloud')}</strong>
+                      </div>
+                      <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 0.5rem 0'}}>
+                        {tr('Führe diesen Befehl auf dem Nextcloud-Server aus (SSH mit sudo):', 'Run this command on Nextcloud server (SSH with sudo):')}
+                      </p>
+                      <div style={{backgroundColor: 'var(--bg-dark)', padding: '0.75rem', borderRadius: '0.25rem', fontSize: '0.85rem', color: 'var(--success)', fontFamily: 'monospace', marginBottom: '0.5rem', wordBreak: 'break-all', whiteSpace: 'pre-wrap', maxHeight: '200px', overflow: 'auto'}}>
+                        {'sudo -u www-data php /var/www/nextcloud/occ talk:bot:install \\\n  --feature response --no-setup \\\n  "Mynd Bot" \\\n  "' + (briefingBotSecretLocal || '<SECRET>') + '" \\\n  "' + (briefingTalkWebhookUrl || 'https://mynd.example.com/api/nextcloud/talk/webhook') + '"'}
+                      </div>
+                      <button className="btn" onClick={() => {
+                        const cmd = `sudo -u www-data php /var/www/nextcloud/occ talk:bot:install --feature response --no-setup "Mynd Bot" "${briefingBotSecretLocal || '<SECRET>'}" "${briefingTalkWebhookUrl || 'https://mynd.example.com/api/nextcloud/talk/webhook'}"`;
+                        navigator.clipboard.writeText(cmd);
+                        alert('Befehl kopiert! Einfügen im SSH-Terminal.');
+                      }}>📋 {tr('Befehl kopieren', 'Copy command')}</button>
+                      <p style={{fontSize: '0.85rem', color: 'var(--warning)', margin: '0.5rem 0', fontStyle: 'italic'}}>
+                        ℹ️ {tr('Speichere die Bot-ID (SHA1 Hash) aus der Ausgabe auf!', 'Save the Bot ID (SHA1 hash) from the output!')}
+                      </p>
+                    </div>
+
+                    {/* Bot ID */}
+                    <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
+                      <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
+                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>4️⃣</span>
+                        <strong>{tr('Bot-ID abrufen', 'Get Bot ID')}</strong>
+                      </div>
+                      <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 0.5rem 0'}}>
+                        {tr('Führe aus um die Bot-ID zu sehen:', 'Run to see the Bot ID:')}
+                      </p>
+                      <code style={{display: 'block', backgroundColor: 'var(--bg-dark)', padding: '0.5rem', borderRadius: '0.25rem', fontSize: '0.9rem', color: 'var(--success)', marginBottom: '0.5rem'}}>
+                        sudo -u www-data php /var/www/nextcloud/occ talk:bot:list
+                      </code>
+                      <p style={{fontSize: '0.85rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                        {tr('Suche nach "Mynd Bot" und kopiere die Bot-ID (lange Zeichenkette):', 'Find "Mynd Bot" and copy the Bot ID (long string):')}
+                      </p>
+                      <input 
+                        type="text" 
+                        value={briefingTalkServerBotId} 
+                        onChange={(e) => setBriefingTalkServerBotId(e.target.value)}
+                        placeholder="z.B. bot1a2b3c4d5e6f7g8h9i0j..."
+                        style={{width: '100%'}}
+                      />
+                    </div>
+
+                    {/* Room Setup */}
+                    <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
+                      <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
+                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>5️⃣</span>
+                        <strong>{tr('Bot zum Raum hinzufügen', 'Add Bot to Room')}</strong>
+                      </div>
+                      <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 0.5rem 0'}}>
+                        {tr('Room-Token (Raum-ID) eingeben:', 'Enter Room Token (Room ID):')}
+                      </p>
+                      <input 
+                        type="text" 
+                        value={briefingTalkRoomId} 
+                        onChange={(e) => setBriefingTalkRoomId(e.target.value)}
+                        placeholder="z.B. ofexbgra"
+                        style={{width: '100%', marginBottom: '0.5rem'}}
+                      />
+                      <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                        {tr('Danach diesen Befehl ausführen:', 'Then run this command:')}
+                      </p>
+                      <div style={{backgroundColor: 'var(--bg-dark)', padding: '0.75rem', borderRadius: '0.25rem', fontSize: '0.85rem', color: 'var(--success)', fontFamily: 'monospace', marginBottom: '0.5rem', wordBreak: 'break-all'}}>
+                        {'sudo -u www-data php /var/www/nextcloud/occ talk:bot:setup \\\n  ' + (briefingTalkServerBotId || '<BOT_ID>') + ' \\\n  ' + (briefingTalkRoomId || '<ROOM_TOKEN>')}
+                      </div>
+                      <button className="btn" onClick={() => {
+                        const cmd = `sudo -u www-data php /var/www/nextcloud/occ talk:bot:setup "${briefingTalkServerBotId || '<BOT_ID>'}" "${briefingTalkRoomId || '<ROOM_TOKEN>'}"`;
+                        navigator.clipboard.writeText(cmd);
+                        alert('Befehl kopiert!');
+                      }}>📋 {tr('Befehl kopieren', 'Copy command')}</button>
+                    </div>
+
+                    {/* Secret in Mynd */}
+                    <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
+                      <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
+                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>6️⃣</span>
+                        <strong>{tr('Secret in Mynd speichern', 'Save Secret in Mynd')}</strong>
+                      </div>
+                      <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 0.5rem 0'}}>
+                        {tr('Trage hier das Secret ein (exakt wie in Schritt 2):', 'Enter the secret here (exactly as in Step 2):')}
+                      </p>
+                      <div style={{display: 'flex', gap: '0.5rem', marginBottom: '0.5rem'}}>
+                        <input 
+                          type="password" 
+                          value={briefingTalkWebhookSecret} 
+                          onChange={(e) => setBriefingTalkWebhookSecret(e.target.value)}
+                          placeholder="(dasselbe wie in Schritt 2)"
+                          style={{flex: 1}}
+                        />
+                        <button className="btn" onClick={() => {
+                          navigator.clipboard.writeText(briefingTalkWebhookSecret);
+                          alert('Secret kopiert!');
+                        }} disabled={!briefingTalkWebhookSecret}>📋</button>
+                      </div>
+                      <button className="btn primary" onClick={saveBriefingConfig} style={{marginBottom: '0.5rem', width: '100%'}}>
+                        💾 {tr('Secret speichern', 'Save secret')}
+                      </button>
+                      {briefingTalkWebhookSecretSet && (
+                        <p style={{fontSize: '0.85rem', color: 'var(--success)', margin: '0.5rem 0'}}>
+                          ✅ {tr('Secret ist gespeichert', 'Secret is saved')}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Test */}
+                    <div style={{backgroundColor: 'var(--bg-light)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
+                      <div style={{display: 'flex', alignItems: 'center', marginBottom: '0.5rem'}}>
+                        <span style={{fontSize: '1.2rem', marginRight: '0.5rem'}}>7️⃣</span>
+                        <strong>{tr('Webhook testen', 'Test Webhook')}</strong>
+                      </div>
+                      <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0 0 0.5rem 0'}}>
+                        {tr('Klick unten um eine Test-Nachricht zu senden:', 'Click below to send a test message:')}
+                      </p>
+                      <button className="btn primary" onClick={testTalkWebhook} style={{width: '100%'}}>
+                        🧪 {tr('Talk Webhook testen', 'Test Talk webhook')}
+                      </button>
+                      {briefingStatus && (
+                        <div style={{
+                          marginTop: '0.5rem',
+                          padding: '0.5rem',
+                          borderRadius: '0.25rem',
+                          backgroundColor: briefingStatus.includes('✅') ? 'var(--success-bg)' : briefingStatus.includes('❌') ? 'var(--error-bg)' : 'var(--info-bg)',
+                          color: briefingStatus.includes('✅') ? 'var(--success)' : briefingStatus.includes('❌') ? 'var(--error)' : 'var(--info)',
+                          fontSize: '0.9rem'
+                        }}>
+                          {briefingStatus}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{marginTop: '2rem', padding: '1rem', backgroundColor: 'var(--bg-light)', borderRadius: '0.5rem', border: '1px solid var(--border-color)'}}>
+                    <strong>{tr('Troubleshooting', 'Troubleshooting')}:</strong>
+                    <ul style={{margin: '0.5rem 0 0 1.5rem', fontSize: '0.9rem'}}>
+                      <li><strong>❌ Signatur-Fehler:</strong> {tr('Das Secret im Mynd Settings muss EXAKT mit dem OCC-Setup übereinstimmen', 'The secret in Mynd settings must EXACTLY match the OCC setup')}</li>
+                      <li><strong>❌ Bot nicht gefunden:</strong> {tr('Stelle sicher dass der OCC install Befehl erfolgreich war', 'Make sure the OCC install command succeeded')}</li>
+                      <li><strong>❌ Webhook erreicht Backend nicht:</strong> {tr('Prüfe dass die Webhook-URL von Nextcloud aus erreichbar ist (nicht localhost!)', 'Check that the webhook URL is reachable from Nextcloud (not localhost!)')}</li>
+                      <li><strong>❌ Messages erscheinen als User:</strong> {tr('Bot ist wahrscheinlich nicht korrekt installiert', 'Bot probably is not correctly installed')}</li>
+                    </ul>
                   </div>
                 </div>
               </div>
