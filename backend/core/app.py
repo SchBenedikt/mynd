@@ -514,26 +514,55 @@ def generate_proactive_briefing(kind: str = 'daily', force: bool = False) -> Dic
 def _briefing_scheduler_loop() -> None:
     """Background loop generating morning and Monday briefings automatically."""
     logger.info('⏰ Proactive briefing scheduler started (daily + weekly)')
+    last_sent_date = {}  # Track which days we've already sent briefings
     while True:
         try:
             now = datetime.now()
             briefing_settings = _get_briefing_settings()
+            
+            # Check if it's time for daily briefing
             if briefing_settings.get('daily_enabled') and now.hour >= int(briefing_settings.get('morning_hour', BRIEFING_MORNING_HOUR)):
-                item = generate_proactive_briefing('daily', force=False)
-                # optionally send by email
-                try:
-                    if briefing_settings.get('send_daily') and briefing_settings.get('send_recipients'):
-                        _send_briefing_via_email(item, briefing_settings.get('send_recipients', []), briefing_settings.get('send_account_id'))
-                except Exception:
-                    logger.debug('Error while sending daily briefing email', exc_info=True)
+                today_str = now.strftime('%Y-%m-%d')
+                if last_sent_date.get('daily') != today_str:
+                    item = generate_proactive_briefing('daily', force=False)
+                    
+                    # Send by email if configured
+                    try:
+                        if briefing_settings.get('send_daily') and briefing_settings.get('send_recipients'):
+                            _send_briefing_via_email(item, briefing_settings.get('send_recipients', []), briefing_settings.get('send_account_id'))
+                    except Exception:
+                        logger.debug('Error while sending daily briefing email', exc_info=True)
+                    
+                    # Send via Nextcloud Talk if configured
+                    try:
+                        if briefing_settings.get('send_talk') and briefing_settings.get('talk_room_id'):
+                            _send_briefing_via_nextcloud_talk(item, briefing_settings.get('talk_room_id'))
+                    except Exception:
+                        logger.debug('Error while sending daily briefing to Talk', exc_info=True)
+                    
+                    last_sent_date['daily'] = today_str
 
-                if briefing_settings.get('weekly_enabled') and now.weekday() == 0:
+            # Check if it's time for weekly briefing (Monday)
+            if briefing_settings.get('weekly_enabled') and now.weekday() == 0 and now.hour >= int(briefing_settings.get('morning_hour', BRIEFING_MORNING_HOUR)):
+                week_str = now.strftime('%Y-W%U')
+                if last_sent_date.get('weekly') != week_str:
                     item_w = generate_proactive_briefing('weekly', force=False)
+                    
+                    # Send by email if configured
                     try:
                         if briefing_settings.get('send_weekly') and briefing_settings.get('send_recipients'):
                             _send_briefing_via_email(item_w, briefing_settings.get('send_recipients', []), briefing_settings.get('send_account_id'))
                     except Exception:
                         logger.debug('Error while sending weekly briefing email', exc_info=True)
+                    
+                    # Send via Nextcloud Talk if configured
+                    try:
+                        if briefing_settings.get('send_talk') and briefing_settings.get('talk_room_id'):
+                            _send_briefing_via_nextcloud_talk(item_w, briefing_settings.get('talk_room_id'))
+                    except Exception:
+                        logger.debug('Error while sending weekly briefing to Talk', exc_info=True)
+                    
+                    last_sent_date['weekly'] = week_str
         except Exception as exc:
             logger.warning('Briefing scheduler loop error: %s', exc)
         time.sleep(60)
