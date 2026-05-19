@@ -253,11 +253,46 @@ export default function SettingsPage() {
   const [nextcloudDisplayName, setNextcloudDisplayName] = useState('');
   const [nextcloudLoggingIn, setNextcloudLoggingIn] = useState(false);
 
+  // Email Indexing State
+  const [emailConfig, setEmailConfig] = useState({
+    imap_host: '',
+    imap_port: 993,
+    username: '',
+    password: '',
+    folders: 'INBOX',
+    max_emails: 50,
+    use_ssl: true
+  });
+  const [emailConfigStatus, setEmailConfigStatus] = useState('');
+  const [emailTestLoading, setEmailTestLoading] = useState(false);
+  const [emailIndexingMode, setEmailIndexingMode] = useState('manual');
+  const [emailIndexingAccountId, setEmailIndexingAccountId] = useState('');
+  const [emailIndexingStatus, setEmailIndexingStatus] = useState('idle');
+  const [emailIndexingProgress, setEmailIndexingProgress] = useState(0);
+  const [emailIndexingDetails, setEmailIndexingDetails] = useState({
+    processed: 0,
+    elapsed: 0,
+    current_folder: '',
+    message: ''
+  });
+
   useEffect(() => {
     if (typeof window !== 'undefined' && !briefingTalkWebhookUrl.trim()) {
       setBriefingTalkWebhookUrl(`${window.location.origin}/api/nextcloud/talk/webhook`);
     }
   }, [briefingTalkWebhookUrl]);
+
+  useEffect(() => {
+    if (briefingEmailAccounts.length > 0) {
+      setEmailIndexingMode((current) => current === 'manual' && !emailIndexingAccountId ? 'existing' : current);
+      if (!emailIndexingAccountId || !briefingEmailAccounts.some((account) => account.account_id === emailIndexingAccountId)) {
+        setEmailIndexingAccountId(briefingEmailAccounts[0].account_id);
+      }
+    } else if (emailIndexingMode === 'existing') {
+      setEmailIndexingMode('manual');
+      setEmailIndexingAccountId('');
+    }
+  }, [briefingEmailAccounts, emailIndexingAccountId, emailIndexingMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -372,6 +407,7 @@ export default function SettingsPage() {
     loadCalendarConfig();
     loadCalendarOptions();
     loadIndexingConfig();
+    loadEmailIndexingConfig();
     loadAllApis();
     updateStatus();
     // initial load of persistent indexing stats
@@ -929,6 +965,54 @@ export default function SettingsPage() {
     }
   };
 
+  const loadEmailIndexingConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/email-indexing/config`);
+      if (res.ok) {
+        const config = await res.json();
+        // Don't display the password for security
+        setEmailConfig(prev => ({
+          ...prev,
+          imap_host: config.imap_host || '',
+          imap_port: config.imap_port || 993,
+          username: config.username || '',
+          folders: config.folders || 'INBOX',
+          max_emails: config.max_emails || 50,
+          use_ssl: config.use_ssl !== false
+          // password stays as-is (empty after load for security)
+        }));
+      }
+    } catch (err) {
+      console.error('Error loading email indexing config:', err);
+    }
+  };
+
+  const buildEmailIndexingPayload = () => {
+    const safeFolders = String(emailConfig.folders || 'INBOX').trim() || 'INBOX';
+    const safeMaxEmails = Number.isFinite(Number(emailConfig.max_emails)) ? Number(emailConfig.max_emails) : 50;
+
+    if (emailIndexingMode === 'existing' && emailIndexingAccountId) {
+      return {
+        account_id: emailIndexingAccountId,
+        folders: safeFolders,
+        max_emails: safeMaxEmails,
+        use_ssl: Boolean(emailConfig.use_ssl)
+      };
+    }
+
+    return {
+      email_config: {
+        imap_host: String(emailConfig.imap_host || '').trim(),
+        imap_port: Number.isFinite(Number(emailConfig.imap_port)) ? Number(emailConfig.imap_port) : 993,
+        username: String(emailConfig.username || '').trim(),
+        password: String(emailConfig.password || ''),
+        folders: safeFolders,
+        max_emails: safeMaxEmails,
+        use_ssl: Boolean(emailConfig.use_ssl)
+      }
+    };
+  };
+
   const saveIndexingConfig = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/indexing/path`, {
@@ -1070,6 +1154,113 @@ export default function SettingsPage() {
       }
     } catch (err) {
       setIndexingStatus('error: ' + err.message);
+    }
+  };
+
+  // ========== Email Indexing Functions ==========
+  
+  const testEmailConnection = async () => {
+    setEmailTestLoading(true);
+    try {
+      const payload = emailIndexingMode === 'existing' && emailIndexingAccountId
+        ? { account_id: emailIndexingAccountId }
+        : { config: buildEmailIndexingPayload().email_config };
+
+      const res = await fetch(`${API_BASE}/api/email/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEmailConfigStatus(data?.message || tr('Verbindung erfolgreich.', 'Connection successful.'));
+      } else {
+        const data = await res.json();
+        setEmailConfigStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unbekannter Fehler'));
+      }
+    } catch (err) {
+      setEmailConfigStatus(tr('Fehler: ', 'Error: ') + err.message);
+    } finally {
+      setEmailTestLoading(false);
+    }
+  };
+
+  const saveEmailConfig = async () => {
+    try {
+      if (emailIndexingMode === 'existing' && emailIndexingAccountId) {
+        setEmailConfigStatus(tr('Für bestehende Konten ist kein separates Speichern nötig.', 'No separate save is needed for existing accounts.'));
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/api/email-indexing/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(emailConfig)
+      });
+      if (res.ok) {
+        setEmailConfigStatus(tr('E-Mail-Konfiguration erfolgreich gespeichert!', 'Email configuration saved successfully!'));
+      } else {
+        const data = await res.json();
+        setEmailConfigStatus(tr('Fehler beim Speichern: ', 'Error saving: ') + (data.error || 'Unbekannter Fehler'));
+      }
+    } catch (err) {
+      setEmailConfigStatus(tr('Fehler: ', 'Error: ') + err.message);
+    }
+  };
+
+  const startEmailIndexing = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/email-indexing/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildEmailIndexingPayload())
+      });
+      
+      if (res.ok) {
+        setEmailIndexingStatus('running');
+        const progressInterval = setInterval(async () => {
+          try {
+            const res = await fetch(`${API_BASE}/api/email-indexing/progress`);
+            if (res.ok) {
+              const data = await res.json();
+              setEmailIndexingProgress(Math.round(data.progress_percentage || 0));
+              setEmailIndexingDetails({
+                processed: data.emails_processed || 0,
+                elapsed: Math.round(data.elapsed_time || 0),
+                current_folder: data.current_folder || '',
+                message: data.status_message || ''
+              });
+              
+              if (data.status === 'completed' || data.status === 'error') {
+                setEmailIndexingStatus(data.status);
+                clearInterval(progressInterval);
+              }
+            }
+          } catch (err) {
+            console.error('Error checking email indexing progress:', err);
+          }
+        }, 1000);
+      } else {
+        const data = await res.json();
+        setEmailIndexingStatus('error');
+        setEmailConfigStatus(tr('Fehler: ', 'Error: ') + (data.error || 'Unbekannter Fehler'));
+      }
+    } catch (err) {
+      setEmailIndexingStatus('error');
+      setEmailConfigStatus(tr('Fehler: ', 'Error: ') + err.message);
+    }
+  };
+
+  const stopEmailIndexing = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/email-indexing/stop`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        setEmailIndexingStatus('stopped');
+      }
+    } catch (err) {
+      console.error('Error stopping email indexing:', err);
     }
   };
 
@@ -2887,6 +3078,231 @@ export default function SettingsPage() {
                               <div key={index} style={{marginBottom: '0.25rem'}}>• {error}</div>
                             ))}
                           </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="panel-section" style={{marginTop: '2rem'}}>
+                  <div className="section-title">{tr('E-Mail-Indexierung', 'Email Indexing')}</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
+                    {tr('Indexiere deine E-Mails für die semantische Suche', 'Index your emails for semantic search')}
+                  </p>
+
+                  <div className="input-group">
+                    <label>{tr('Quelle für die E-Mail-Indexierung', 'Email indexing source')}</label>
+                    <select
+                      value={emailIndexingMode}
+                      onChange={(e) => setEmailIndexingMode(e.target.value)}
+                    >
+                      <option value="existing">{tr('Gespeichertes Konto verwenden', 'Use saved account')}</option>
+                      <option value="manual">{tr('Eigenes Konto manuell angeben', 'Enter custom account')}</option>
+                    </select>
+                  </div>
+
+                  {emailIndexingMode === 'existing' ? (
+                    <>
+                      <div className="input-group">
+                        <label>{tr('Gespeichertes E-Mail-Konto', 'Saved email account')}</label>
+                        <select
+                          value={emailIndexingAccountId}
+                          onChange={(e) => setEmailIndexingAccountId(e.target.value)}
+                        >
+                          {briefingEmailAccounts.length === 0 ? (
+                            <option value="">{tr('Keine Konten verfügbar', 'No accounts available')}</option>
+                          ) : (
+                            briefingEmailAccounts.map((account) => (
+                              <option key={account.account_id} value={account.account_id}>
+                                {account.display_name}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                        <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                          {tr('Es wird die unter APIs bereits gespeicherte Konfiguration verwendet. Manuelle IMAP-Daten sind dann nicht nötig.', 'The already saved API configuration is used. Manual IMAP details are not needed.')} 
+                        </small>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="input-group">
+                        <label>IMAP Host</label>
+                        <input 
+                          type="text" 
+                          value={emailConfig.imap_host}
+                          onChange={(e) => setEmailConfig({...emailConfig, imap_host: e.target.value})}
+                          placeholder="imap.gmail.com"
+                        />
+                      </div>
+
+                      <div className="input-group">
+                        <label>IMAP Port</label>
+                        <input 
+                          type="number" 
+                          value={emailConfig.imap_port}
+                          onChange={(e) => setEmailConfig({...emailConfig, imap_port: parseInt(e.target.value)})}
+                          placeholder="993"
+                        />
+                      </div>
+
+                      <div className="input-group">
+                        <label>{tr('E-Mail-Adresse', 'Email Address')}</label>
+                        <input 
+                          type="email" 
+                          value={emailConfig.username}
+                          onChange={(e) => setEmailConfig({...emailConfig, username: e.target.value})}
+                          placeholder="your-email@example.com"
+                        />
+                      </div>
+
+                      <div className="input-group">
+                        <label>{tr('Passwort', 'Password')}</label>
+                        <input 
+                          type="password" 
+                          value={emailConfig.password}
+                          onChange={(e) => setEmailConfig({...emailConfig, password: e.target.value})}
+                          placeholder="••••••••"
+                        />
+                        <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                          {tr('Für Gmail: Verwende App-Passwort (nicht dein normales Passwort)', 'For Gmail: Use App Password (not your regular password)')}
+                        </small>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="input-group">
+                    <label>{tr('Ordner (kommasepariert)', 'Folders (comma-separated)')}</label>
+                    <input 
+                      type="text" 
+                      value={emailConfig.folders}
+                      onChange={(e) => setEmailConfig({...emailConfig, folders: e.target.value})}
+                      placeholder="INBOX, Sent, Drafts"
+                    />
+                    <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                      {tr('Welche E-Mail-Ordner sollen indexiert werden?', 'Which email folders should be indexed?')}
+                    </small>
+                  </div>
+
+                  <div className="input-group">
+                    <label>{tr('Max E-Mails pro Ordner', 'Max Emails per Folder')}</label>
+                    <input 
+                      type="number" 
+                      value={emailConfig.max_emails}
+                      onChange={(e) => setEmailConfig({...emailConfig, max_emails: parseInt(e.target.value)})}
+                      placeholder="50"
+                    />
+                  </div>
+
+                  <div className="input-group" style={{display: 'flex', alignItems: 'center'}}>
+                    <label style={{display: 'flex', alignItems: 'center', cursor: 'pointer', marginBottom: 0}}>
+                      <input 
+                        type="checkbox" 
+                        checked={emailConfig.use_ssl}
+                        onChange={(e) => setEmailConfig({...emailConfig, use_ssl: e.target.checked})}
+                        style={{marginRight: '0.5rem'}}
+                      />
+                      {tr('SSL/TLS verwenden', 'Use SSL/TLS')}
+                    </label>
+                  </div>
+
+                  <div className="button-group" style={{marginTop: '1.5rem'}}>
+                    <button className="btn secondary" onClick={testEmailConnection} disabled={emailTestLoading}>
+                      <i className="fas fa-flask" style={{marginRight: '0.5rem'}}></i>
+                      {emailTestLoading ? tr('Teste Verbindung...', 'Testing Connection...') : tr('Verbindung testen', 'Test Connection')}
+                    </button>
+                    {emailIndexingMode === 'manual' && (
+                      <button className="btn primary" onClick={saveEmailConfig} disabled={!emailConfig.imap_host || !emailConfig.username || !emailConfig.password}>
+                        <i className="fas fa-save" style={{marginRight: '0.5rem'}}></i>
+                        {tr('Manuelle Konfiguration speichern', 'Save manual config')}
+                      </button>
+                    )}
+                  </div>
+
+                  {emailConfigStatus && <div className={`status-text ${emailConfigStatus.includes('Fehler') ? 'error' : 'success'}`}>{emailConfigStatus}</div>}
+
+                  <div className="button-group" style={{marginTop: '1.5rem'}}>
+                    <button className="btn primary" onClick={startEmailIndexing} disabled={emailIndexingStatus === 'running'}>
+                      <i className="fas fa-envelope" style={{marginRight: '0.5rem'}}></i>
+                      {emailIndexingStatus === 'running' ? tr('E-Mail-Indexierung läuft...', 'Email Indexing...') : tr('E-Mail-Indexierung starten', 'Start Email Indexing')}
+                    </button>
+                    {emailIndexingStatus === 'running' && (
+                      <button className="btn secondary" onClick={stopEmailIndexing}>
+                        {tr('Stoppen', 'Stop')}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Email Indexing Progress */}
+                  {(emailIndexingStatus !== 'idle' || emailIndexingDetails.processed > 0) && (
+                    <div style={{marginTop: '1.5rem', padding: '1rem', background: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--border)'}}>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem'}}>
+                        <h4 style={{margin: 0, fontSize: '1rem', fontWeight: '600'}}>
+                          <i className="fas fa-chart-line" style={{marginRight: '0.5rem'}}></i>
+                          {tr('E-Mail-Indexierungsfortschritt', 'Email Indexing Progress')}
+                        </h4>
+                        <span style={{
+                          fontSize: '0.8rem',
+                          padding: '0.25rem 0.75rem',
+                          borderRadius: '12px',
+                          background: emailIndexingStatus === 'running' ? 'var(--primary)' : 
+                                     emailIndexingStatus === 'completed' ? 'var(--success)' : 
+                                     emailIndexingStatus === 'error' ? 'var(--error)' : 'var(--muted)',
+                          color: 'white',
+                          fontWeight: '500'
+                        }}>
+                          {emailIndexingStatus.toUpperCase()}
+                        </span>
+                      </div>
+
+                      {emailIndexingStatus === 'running' && (
+                        <div className="progress-bar-wrapper" style={{marginBottom: '1rem'}}>
+                          <div className="progress-bar" style={{
+                            height: '8px',
+                            background: 'var(--border)',
+                            borderRadius: '4px',
+                            overflow: 'hidden',
+                            position: 'relative'
+                          }}>
+                            <div className="progress-fill" style={{
+                              height: '100%',
+                              background: 'linear-gradient(90deg, var(--primary), var(--primary-light))',
+                              transition: 'width 0.5s ease',
+                              width: `${emailIndexingProgress}%`,
+                              borderRadius: '4px'
+                            }}></div>
+                          </div>
+                          <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.5rem'}}>
+                            <span>{emailIndexingProgress}% {tr('abgeschlossen', 'Complete')}</span>
+                            <span>{emailIndexingDetails.processed} {tr('E-Mails verarbeitet', 'Emails Processed')}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', marginBottom: '1rem'}}>
+                        <div style={{textAlign: 'center', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px'}}>
+                          <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)'}}>
+                            {emailIndexingDetails.processed}
+                          </div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('E-Mails verarbeitet', 'Emails Processed')}</div>
+                        </div>
+                        <div style={{textAlign: 'center', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px'}}>
+                          <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--accent)'}}>
+                            {Math.floor((emailIndexingDetails.elapsed || 0) / 60)}:{((emailIndexingDetails.elapsed || 0) % 60).toString().padStart(2, '0')}
+                          </div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Verstrichene Zeit', 'Time Elapsed')}</div>
+                        </div>
+                        <div style={{textAlign: 'center', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px'}}>
+                          <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)'}}>
+                            {emailIndexingDetails.current_folder || '--'}
+                          </div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Aktueller Ordner', 'Current Folder')}</div>
+                        </div>
+                      </div>
+
+                      {emailIndexingDetails.message && (
+                        <div style={{marginBottom: '1rem', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px', fontSize: '0.85rem', color: 'var(--muted)'}}>
+                          {emailIndexingDetails.message}
                         </div>
                       )}
                     </div>
