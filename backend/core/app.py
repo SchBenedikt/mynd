@@ -39,6 +39,7 @@ from backend.features.integration.homeassistant_client import HomeAssistantClien
 from backend.features.integration.uptimekuma_client import UptimeKumaClient
 from backend.features.integration.email_client import EmailClient
 from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
+from backend.features.knowledge.email_indexing import email_indexing_manager, EmailIndexingProgress
 # from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
 class SemanticSearchEngine:
@@ -3207,6 +3208,153 @@ def indexing_path_config():
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+# ==================== EMAIL INDEXING ENDPOINTS ====================
+
+@app.route('/api/email-indexing/start', methods=['POST'])
+def start_email_indexing():
+    """Startet die E-Mail-Indexierung im Hintergrund"""
+    data = request.get_json(silent=True) or {}
+    account_id = str(data.get('account_id') or '').strip()
+    email_config = data.get('email_config') or data.get('config')
+    
+    # Wenn ein bestehendes Konto gewählt wurde, lade die vollständige gespeicherte Konfiguration serverseitig.
+    if account_id:
+        registry = get_api_registry()
+        saved_email_config = registry.load_config('email') or {}
+        accounts = saved_email_config.get('accounts') if isinstance(saved_email_config, dict) else []
+        if not isinstance(accounts, list) or not accounts:
+            return jsonify({'error': 'Keine gespeicherten E-Mail-Konten gefunden'}), 400
+
+        if not any(str(account.get('account_id') or account.get('id') or '').strip() == account_id for account in accounts if isinstance(account, dict)):
+            return jsonify({'error': 'Ausgewähltes E-Mail-Konto wurde nicht gefunden'}), 400
+
+        email_config = dict(saved_email_config)
+        email_config['selected_account_id'] = account_id
+        email_config['active_account_id'] = account_id
+
+        # Optionale Indexierungs-Overrides aus dem Request übernehmen.
+        for key in ('folders', 'max_emails', 'use_ssl'):
+            if key in data and data[key] not in (None, ''):
+                email_config[key] = data[key]
+
+    # Wenn keine explizite Auswahl übergeben wurde, die gespeicherte Indexierungs-Konfiguration verwenden.
+    if not email_config:
+        saved_config = email_indexing_manager.get_config(mask_password=False)
+        if not saved_config.get('password') and not saved_config.get('accounts'):
+            return jsonify({'error': 'Keine E-Mail-Konfiguration vorhanden'}), 400
+        email_config = saved_config
+    
+    try:
+        success = email_indexing_manager.start_indexing(email_config)
+        
+        if success:
+            return jsonify({
+                'status': 'started',
+                'message': 'E-Mail-Indexierung wurde gestartet'
+            })
+        else:
+            return jsonify({
+                'error': 'E-Mail-Indexierung läuft bereits oder Konfiguration fehlt'
+            }), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/email-indexing/stop', methods=['POST'])
+def stop_email_indexing():
+    """Stoppt die aktuelle E-Mail-Indexierung"""
+    try:
+        email_indexing_manager.stop_indexing()
+        return jsonify({
+            'status': 'stopped',
+            'message': 'E-Mail-Indexierung wurde gestoppt'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/email-indexing/progress', methods=['GET'])
+def get_email_indexing_progress():
+    """Gibt den aktuellen E-Mail-Indexierungs-Fortschritt zurück"""
+    try:
+        progress = email_indexing_manager.get_progress()
+        return jsonify(progress)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/email-indexing/config', methods=['GET', 'POST'])
+def email_indexing_config():
+    """Lädt oder speichert die E-Mail-Indexierung-Konfiguration"""
+    if request.method == 'GET':
+        try:
+            config = email_indexing_manager.get_config(mask_password=True)
+            return jsonify(config)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    elif request.method == 'POST':
+        try:
+            data = request.json
+            imap_host = data.get('imap_host')
+            username = data.get('username')
+            password = data.get('password')
+            imap_port = data.get('imap_port', 993)
+            folders = data.get('folders', 'INBOX')
+            max_emails = data.get('max_emails', 50)
+            use_ssl = data.get('use_ssl', True)
+            
+            if not all([imap_host, username, password]):
+                return jsonify({'error': 'IMAP Host, Username und Password werden benötigt'}), 400
+            
+            email_indexing_manager.save_email_config(
+                imap_host, username, password, imap_port, folders, max_emails, use_ssl
+            )
+            
+            return jsonify({
+                'status': 'saved',
+                'message': 'E-Mail-Konfiguration wurde gespeichert'
+            })
+            
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+@app.route('/api/email-indexing/stats', methods=['GET'])
+def get_email_indexing_stats():
+    """Gibt E-Mail-Indexierungs-Statistiken zurück"""
+    try:
+        result = {}
+        
+        # Get current progress
+        try:
+            result['progress'] = email_indexing_manager.get_progress()
+        except Exception:
+            result['progress'] = {}
+        
+        # Get database stats if available
+        if knowledge_base and knowledge_base.db:
+            try:
+                # Get email-specific stats from database
+                conn = knowledge_base.db.connection
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT COUNT(*) as count FROM documents WHERE file_type = 'email'")
+                email_docs = cursor.fetchone()['count']
+                
+                cursor.execute("SELECT SUM(LENGTH(content)) as total_size FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_type = 'email')")
+                total_size = cursor.fetchone()['total_size'] or 0
+                
+                result['db_stats'] = {
+                    'email_documents': email_docs,
+                    'total_email_content_size': total_size
+                }
+            except Exception as e:
+                result['db_stats_error'] = str(e)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
 @app.route('/api/nextcloud/oauth/authorize', methods=['POST'])
 def nextcloud_oauth_authorize():
     """
@@ -5622,10 +5770,11 @@ def test_api_connection(api_name):
 def email_test_connection():
     """Test the IMAP email connection."""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         username = data.get('username')
         account_id = data.get('account_id')
-        client = get_email_client(username=username, account_id=account_id)
+        config = data.get('config')
+        client = get_email_client(username=username, account_id=account_id, config=config)
         if not client:
             return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert. Bitte IMAP-Einstellungen setzen.'}), 400
         success = client.test_connection()
