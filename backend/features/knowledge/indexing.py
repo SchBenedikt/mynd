@@ -223,6 +223,26 @@ class IndexingManager:
                 self.current_progress.end_time = time.time()
                 self.notify_progress()
                 return
+
+            # If database available, skip files that are already indexed (simple incremental behavior)
+            try:
+                from app import knowledge_base
+                if getattr(knowledge_base, 'db', None):
+                    try:
+                        cursor = knowledge_base.db.connection.cursor()
+                        cursor.execute("SELECT path FROM documents")
+                        existing_paths = {row['path'] for row in cursor.fetchall()}
+                        # Keep only files that are not yet indexed
+                        new_files = [f for f in files if f.get('path') not in existing_paths]
+                        skipped = len(files) - len(new_files)
+                        if skipped > 0:
+                            self.logger.info(f"Skipping {skipped} already-indexed files")
+                        files = new_files
+                    except Exception:
+                        # Fallback: do not filter if DB read fails
+                        pass
+            except Exception:
+                pass
             
             # Alle Dateien verarbeiten mit parallelem Download
             self.logger.info(f"Processing all {len(files)} files with {self.max_workers} workers...")
@@ -380,45 +400,98 @@ class IndexingManager:
             from app import knowledge_base
             
             if knowledge_base.db:
-                # Clear existing data from this indexing session
-                knowledge_base.db.connection.execute("DELETE FROM chunks")
-                knowledge_base.db.connection.execute("DELETE FROM documents")
-                knowledge_base.db.connection.commit()
-                
+                # Incremental save: only replace chunks for documents that were (re-)indexed
+                conn = knowledge_base.db.connection
+                cursor = conn.cursor()
+
                 # Group chunks by document
                 doc_chunks = {}
                 for i, chunk in enumerate(chunks):
                     source = sources[i] if i < len(sources) else {'file': 'indexed', 'type': 'text'}
                     doc_key = source.get('path', source.get('file', f'doc_{i}'))
-                    
+
                     if doc_key not in doc_chunks:
                         doc_chunks[doc_key] = {
                             'chunks': [],
                             'source': source
                         }
                     doc_chunks[doc_key]['chunks'].append(chunk)
-                
-                # Add to database
+
+                # Add/update documents and their chunks
                 total_chunks = 0
                 for doc_key, doc_data in doc_chunks.items():
                     source = doc_data['source']
                     doc_chunks_list = doc_data['chunks']
-                    
-                    doc_id = knowledge_base.db.add_document(
-                        name=source.get('file', os.path.basename(doc_key)),
-                        path=source.get('path', doc_key),
-                        file_type=source.get('type', 'text'),
-                        metadata=source
-                    )
-                    
-                    chunk_ids = knowledge_base.db.add_chunks(doc_id, doc_chunks_list)
-                    total_chunks += len(chunk_ids)
-                
-                # Update search engine
+
+                    path = source.get('path', doc_key)
+                    name = source.get('file', os.path.basename(path))
+                    file_type = source.get('type', 'text')
+                    metadata = source
+
+                    # Check if document already exists
+                    cursor.execute("SELECT id FROM documents WHERE path = ?", (path,))
+                    existing = cursor.fetchone()
+
+                    if existing:
+                        # Remove existing chunks for this document before re-adding
+                        doc_id = existing['id']
+                        try:
+                            cursor.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
+                            cursor.execute("DELETE FROM chunks_fts WHERE document_id = ?", (doc_id,))
+                            conn.commit()
+                        except Exception:
+                            conn.rollback()
+
+                        # Update metadata/updated_at for the existing document
+                        try:
+                            cursor.execute(
+                                """
+                                UPDATE documents SET name = ?, file_type = ?, size = ?, updated_at = ?, metadata = ?
+                                WHERE id = ?
+                                """,
+                                (name, file_type, 0, time.time(), json.dumps(metadata or {}), doc_id)
+                            )
+                            conn.commit()
+                        except Exception:
+                            conn.rollback()
+                    else:
+                        # Insert new document
+                        doc_id = knowledge_base.db.add_document(
+                            name=name,
+                            path=path,
+                            file_type=file_type,
+                            metadata=metadata
+                        )
+
+                    # Add chunks for this document
+                    try:
+                        chunk_ids = knowledge_base.db.add_chunks(doc_id, doc_chunks_list)
+                        total_chunks += len(chunk_ids)
+                    except Exception as e:
+                        self.logger.error(f"Error adding chunks for {path}: {str(e)}")
+
+                # Update search engine index after DB changes
                 if knowledge_base.search_engine:
-                    knowledge_base.search_engine.rebuild_index()
-                
+                    try:
+                        knowledge_base.search_engine.rebuild_index()
+                    except Exception as e:
+                        self.logger.error(f"Error rebuilding search index: {str(e)}")
+
                 self.logger.info(f"Knowledge saved to database: {total_chunks} chunks from {len(doc_chunks)} documents")
+
+                # Record indexing run stats if supported by DB
+                try:
+                    if hasattr(knowledge_base.db, 'record_index_run'):
+                        knowledge_base.db.record_index_run(
+                            started_at=self.last_indexing_start or time.time(),
+                            ended_at=self.last_indexing_end or time.time(),
+                            documents_count=len(doc_chunks),
+                            chunks_count=total_chunks,
+                            errors=json.dumps(self.current_progress.errors) if self.current_progress.errors else None,
+                            scope=self.nextcloud_config.get('path', '/') if isinstance(self.nextcloud_config, dict) else None
+                        )
+                except Exception as e:
+                    self.logger.error(f"Error recording index run: {str(e)}")
             else:
                 # Fallback to JSON cache
                 cache_data = {

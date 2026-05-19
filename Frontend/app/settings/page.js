@@ -239,6 +239,7 @@ export default function SettingsPage() {
   });
   const [indexingPath, setIndexingPath] = useState('');
   const [indexingPathStatus, setIndexingPathStatus] = useState('');
+  const [persistentIndexStats, setPersistentIndexStats] = useState({ db_stats: {}, indexing_runs: [] });
   
   const [nextcloudUrl, setNextcloudUrl] = useState('');
   const [showNcBotPanel, setShowNcBotPanel] = useState(false);
@@ -373,13 +374,19 @@ export default function SettingsPage() {
     loadIndexingConfig();
     loadAllApis();
     updateStatus();
+    // initial load of persistent indexing stats
+    loadIndexingStats();
 
     const statusInterval = setInterval(() => {
       updateStatus();
       loadApiHealth();
     }, 8000);
+    const statsInterval = setInterval(() => {
+      loadIndexingStats();
+    }, 10000);
     return () => {
       clearInterval(statusInterval);
+      clearInterval(statsInterval);
     };
   }, []);
 
@@ -939,6 +946,18 @@ export default function SettingsPage() {
       setIndexingPathStatus('Error: ' + err.message);
     }
   };
+
+    const loadIndexingStats = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/indexing/stats`);
+        if (res.ok) {
+          const data = await res.json();
+          setPersistentIndexStats(data || {});
+        }
+      } catch (err) {
+        // ignore transient errors
+      }
+    };
 
   const updateStatus = async () => {
     try {
@@ -2690,6 +2709,27 @@ export default function SettingsPage() {
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
                     {tr('Indexiere deine Dokumente für die semantische Suche mit detaillierter Fortschrittsanzeige', 'Index your documents for semantic search with detailed progress tracking')}
                   </p>
+                  {/* Persistent Index Stats */}
+                  <div style={{display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap'}}>
+                    <div style={{padding: '0.6rem 0.8rem', background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--line)'}}>
+                      <div style={{fontSize: '0.95rem', fontWeight: '700'}}>{persistentIndexStats?.db_stats?.documents || 0}</div>
+                      <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Dokumente indexiert', 'Documents indexed')}</div>
+                    </div>
+                    <div style={{padding: '0.6rem 0.8rem', background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--line)'}}>
+                      <div style={{fontSize: '0.95rem', fontWeight: '700'}}>{persistentIndexStats?.db_stats?.chunks || 0}</div>
+                      <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Chunks insgesamt', 'Total chunks')}</div>
+                    </div>
+                    <div style={{padding: '0.6rem 0.8rem', background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--line)'}}>
+                      <div style={{fontSize: '0.95rem', fontWeight: '700'}}>{persistentIndexStats?.db_stats?.embeddings || 0}</div>
+                      <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Embeddings', 'Embeddings')}</div>
+                    </div>
+                    {persistentIndexStats?.indexing_runs?.length > 0 && (
+                      <div style={{padding: '0.6rem 0.8rem', background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--line)'}}>
+                        <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>Letzte Indexierung</div>
+                        <div style={{fontSize: '0.8rem'}}>{new Date((persistentIndexStats.indexing_runs[0].ended_at || 0) * 1000).toLocaleString('de-DE')}</div>
+                      </div>
+                    )}
+                  </div>
                   
                   <div className="input-group">
                     <label>{tr('Indexierungs-Pfad (optional)', 'Indexing Path (optional)')}</label>

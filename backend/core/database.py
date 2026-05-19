@@ -121,6 +121,20 @@ class KnowledgeDatabase:
                 created_at REAL NOT NULL
             )
         """)
+
+        # Indexing runs history
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS indexing_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at REAL,
+                ended_at REAL,
+                documents_count INTEGER DEFAULT 0,
+                chunks_count INTEGER DEFAULT 0,
+                errors TEXT,
+                scope TEXT,
+                created_at REAL NOT NULL
+            )
+        """)
         
         # Tasks table - für Nextcloud Todos Caching
         cursor.execute("""
@@ -179,6 +193,10 @@ class KnowledgeDatabase:
         
         # Tasks sync status index
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_sync_list ON tasks_sync_status(list_name)")
+
+        # Indexing runs indexes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_indexing_runs_started ON indexing_runs(started_at)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_indexing_runs_scope ON indexing_runs(scope)")
         
         self.connection.commit()
     
@@ -369,6 +387,27 @@ class KnowledgeDatabase:
         stats['file_types'] = {row['file_type']: row['count'] for row in cursor.fetchall()}
         
         return stats
+
+    def record_index_run(self, started_at: float, ended_at: float, documents_count: int, chunks_count: int, errors: str = None, scope: str = None) -> int:
+        """Record an indexing run with basic statistics."""
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO indexing_runs (started_at, ended_at, documents_count, chunks_count, errors, scope, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (started_at, ended_at, documents_count, chunks_count, errors or '', scope or '', time.time()))
+            self.connection.commit()
+            return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"Error recording index run: {str(e)}")
+            self.connection.rollback()
+            return None
+
+    def get_indexing_runs(self, limit: int = 10) -> List[Dict]:
+        """Return recent indexing runs (most recent first)."""
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT * FROM indexing_runs ORDER BY id DESC LIMIT ?", (limit,))
+        return [dict(row) for row in cursor.fetchall()]
     
     def _log_search(self, query: str, results_count: int, execution_time: float):
         """Log search query for optimization analysis"""

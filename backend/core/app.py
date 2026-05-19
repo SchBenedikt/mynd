@@ -3107,6 +3107,34 @@ def get_indexing_progress():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/indexing/stats', methods=['GET'])
+def get_indexing_stats():
+    """Gibt persistente Index-Statistiken zurück (Dokument-/Chunk-Zahlen und Run-History)"""
+    try:
+        result = {}
+        if knowledge_base and knowledge_base.db:
+            try:
+                result['db_stats'] = knowledge_base.db.get_document_stats()
+            except Exception as e:
+                result['db_stats_error'] = str(e)
+
+            try:
+                if hasattr(knowledge_base.db, 'get_indexing_runs'):
+                    result['indexing_runs'] = knowledge_base.db.get_indexing_runs(limit=10)
+            except Exception as e:
+                result['indexing_runs_error'] = str(e)
+
+        # Add current progress summary
+        try:
+            result['progress'] = indexing_manager.get_progress()
+        except Exception:
+            result['progress'] = {}
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/indexing/config', methods=['GET', 'POST'])
 def indexing_config():
     """Lädt oder speichert die Indexierung-Konfiguration"""
