@@ -273,7 +273,10 @@ export default function SettingsPage() {
     processed: 0,
     elapsed: 0,
     current_folder: '',
-    message: ''
+    message: '',
+    indexedEmails: 0,
+    skippedEmails: 0,
+    chunksCreated: 0
   });
 
   useEffect(() => {
@@ -977,7 +980,7 @@ export default function SettingsPage() {
           imap_port: config.imap_port || 993,
           username: config.username || '',
           folders: config.folders || 'INBOX',
-          max_emails: config.max_emails || 50,
+          max_emails: config.max_emails ?? 0,
           use_ssl: config.use_ssl !== false
           // password stays as-is (empty after load for security)
         }));
@@ -989,7 +992,8 @@ export default function SettingsPage() {
 
   const buildEmailIndexingPayload = () => {
     const safeFolders = String(emailConfig.folders || 'INBOX').trim() || 'INBOX';
-    const safeMaxEmails = Number.isFinite(Number(emailConfig.max_emails)) ? Number(emailConfig.max_emails) : 50;
+    const safeMaxEmails = Number.isFinite(Number(emailConfig.max_emails)) ? Number(emailConfig.max_emails) : 0;
+    const safeImapPort = Number.isFinite(Number(emailConfig.imap_port)) ? Number(emailConfig.imap_port) : 993;
 
     if (emailIndexingMode === 'existing' && emailIndexingAccountId) {
       return {
@@ -1003,7 +1007,7 @@ export default function SettingsPage() {
     return {
       email_config: {
         imap_host: String(emailConfig.imap_host || '').trim(),
-        imap_port: Number.isFinite(Number(emailConfig.imap_port)) ? Number(emailConfig.imap_port) : 993,
+        imap_port: safeImapPort,
         username: String(emailConfig.username || '').trim(),
         password: String(emailConfig.password || ''),
         folders: safeFolders,
@@ -1228,7 +1232,10 @@ export default function SettingsPage() {
                 processed: data.emails_processed || 0,
                 elapsed: Math.round(data.elapsed_time || 0),
                 current_folder: data.current_folder || '',
-                message: data.status_message || ''
+                message: data.status_message || '',
+                indexedEmails: data.indexed_emails || data.emails_processed || 0,
+                skippedEmails: data.skipped_emails || 0,
+                chunksCreated: data.indexed_chunks || 0
               });
               
               if (data.status === 'completed' || data.status === 'error') {
@@ -1262,6 +1269,11 @@ export default function SettingsPage() {
     } catch (err) {
       console.error('Error stopping email indexing:', err);
     }
+  };
+
+  const safeNumberInputValue = (value, fallback = '') => {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? String(value) : fallback;
   };
 
   // API Registry Functions
@@ -2500,12 +2512,12 @@ export default function SettingsPage() {
                               </div>
 
                               <div className="input-group">
-                                <label>{tr('Maximale Mails pro Ordner', 'Max emails per folder')}</label>
+                                <label>{tr('Maximale Mails pro Ordner (0 = alle)', 'Max emails per folder (0 = all)')}</label>
                                 <input
                                   type="number"
-                                  value={activeEmailAccount.max_emails || ''}
+                                  value={activeEmailAccount.max_emails ?? 0}
                                   onChange={(e) => updateActiveEmailAccount({ max_emails: e.target.value })}
-                                  placeholder="50"
+                                  placeholder="0"
                                 />
                               </div>
 
@@ -3140,8 +3152,8 @@ export default function SettingsPage() {
                         <label>IMAP Port</label>
                         <input 
                           type="number" 
-                          value={emailConfig.imap_port}
-                          onChange={(e) => setEmailConfig({...emailConfig, imap_port: parseInt(e.target.value)})}
+                          value={safeNumberInputValue(emailConfig.imap_port, '')}
+                          onChange={(e) => setEmailConfig({...emailConfig, imap_port: e.target.value === '' ? '' : Number(e.target.value)})}
                           placeholder="993"
                         />
                       </div>
@@ -3185,12 +3197,12 @@ export default function SettingsPage() {
                   </div>
 
                   <div className="input-group">
-                    <label>{tr('Max E-Mails pro Ordner', 'Max Emails per Folder')}</label>
+                    <label>{tr('Max E-Mails pro Ordner (0 = alle)', 'Max Emails per Folder (0 = all)')}</label>
                     <input 
                       type="number" 
-                      value={emailConfig.max_emails}
-                      onChange={(e) => setEmailConfig({...emailConfig, max_emails: parseInt(e.target.value)})}
-                      placeholder="50"
+                      value={safeNumberInputValue(emailConfig.max_emails, 0)}
+                      onChange={(e) => setEmailConfig({...emailConfig, max_emails: e.target.value === '' ? '' : Number(e.target.value)})}
+                      placeholder="0"
                     />
                   </div>
 
@@ -3284,7 +3296,7 @@ export default function SettingsPage() {
                           <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--primary)'}}>
                             {emailIndexingDetails.processed}
                           </div>
-                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('E-Mails verarbeitet', 'Emails Processed')}</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Neue E-Mails indexiert', 'New emails indexed')}</div>
                         </div>
                         <div style={{textAlign: 'center', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px'}}>
                           <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--accent)'}}>
@@ -3294,9 +3306,24 @@ export default function SettingsPage() {
                         </div>
                         <div style={{textAlign: 'center', padding: '0.75rem', background: 'var(--background)', borderRadius: '6px'}}>
                           <div style={{fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)'}}>
-                            {emailIndexingDetails.current_folder || '--'}
+                            {emailIndexingDetails.message ? emailIndexingDetails.message : (emailIndexingDetails.current_folder || '--')}
                           </div>
-                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Aktueller Ordner', 'Current Folder')}</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Aktueller Status', 'Current status')}</div>
+                        </div>
+                      </div>
+
+                      <div style={{display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1rem'}}>
+                        <div style={{padding: '0.6rem 0.8rem', background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--line)'}}>
+                          <div style={{fontSize: '0.95rem', fontWeight: '700'}}>{emailIndexingDetails.indexedEmails || emailIndexingDetails.processed || 0}</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('E-Mails insgesamt indexiert', 'Total emails indexed')}</div>
+                        </div>
+                        <div style={{padding: '0.6rem 0.8rem', background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--line)'}}>
+                          <div style={{fontSize: '0.95rem', fontWeight: '700'}}>{emailIndexingDetails.skippedEmails || 0}</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Bereits vorhandene übersprungen', 'Already indexed skipped')}</div>
+                        </div>
+                        <div style={{padding: '0.6rem 0.8rem', background: 'var(--background)', borderRadius: '8px', border: '1px solid var(--line)'}}>
+                          <div style={{fontSize: '0.95rem', fontWeight: '700'}}>{emailIndexingDetails.chunksCreated || 0}</div>
+                          <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{tr('Chunks erstellt', 'Chunks created')}</div>
                         </div>
                       </div>
 

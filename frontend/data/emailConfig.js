@@ -112,7 +112,7 @@ const normalizeSingleEmailAccount = (rawAccount = {}, fallbackId = 'account_1', 
     [EMAIL_FIELD_INCOMING_SSL]: 'true',
     [EMAIL_FIELD_OUTGOING_STARTTLS]: 'true',
     [EMAIL_FIELD_OUTGOING_SSL]: 'false',
-    [EMAIL_FIELD_MAX_EMAILS]: '50',
+    [EMAIL_FIELD_MAX_EMAILS]: '0',
     ...pickEmailFields(rawAccount)
   };
 };

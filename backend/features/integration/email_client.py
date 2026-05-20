@@ -465,12 +465,13 @@ class EmailClient(APIClient):
         """Fetch emails with optional folder, date and unread filters."""
         conn = None
         emails: List[Dict[str, Any]] = []
-        final_limit = max(1, int(limit or 1))
+        final_limit = int(limit or 0)
+        unlimited = final_limit <= 0
 
         normalized_folders = self._dedupe_preserve_order(folders or [])
         cache_payload = {
             'account': self.active_account_id or self.username,
-            'limit': final_limit,
+            'limit': None if unlimited else final_limit,
             'folder_focus': str(folder_focus or 'all'),
             'folders': normalized_folders,
             'days_back': int(days_back) if days_back is not None else None,
@@ -482,12 +483,12 @@ class EmailClient(APIClient):
         if self._query_cache and self.query_cache_ttl_seconds > 0:
             cached = self._query_cache.get('fetch_emails', cache_payload)
             if cached is not None:
-                return cached[:final_limit]
+                return cached if unlimited else cached[:final_limit]
 
         try:
             conn = self._connect()
             target_folders = self._select_target_folders(folder_focus=folder_focus, folders=normalized_folders)
-            per_folder_limit = max(final_limit, 20)
+            per_folder_limit = None if unlimited else max(final_limit, 20)
 
             if days_back is not None and since is None and until is None:
                 since = datetime.now().astimezone() - timedelta(days=int(days_back))
@@ -521,7 +522,8 @@ class EmailClient(APIClient):
                         continue
 
                     msg_ids = data[0].split()
-                    msg_ids = msg_ids[-per_folder_limit:]
+                    if per_folder_limit:
+                        msg_ids = msg_ids[-per_folder_limit:]
 
                     for msg_id in reversed(msg_ids):
                         try:
@@ -560,7 +562,7 @@ class EmailClient(APIClient):
                     logger.warning("Failed to fetch emails from folder '%s': %s", folder, e)
 
             emails.sort(key=self._mail_sort_key, reverse=True)
-            result = emails[:final_limit]
+            result = emails if unlimited else emails[:final_limit]
             if self._query_cache and self.query_cache_ttl_seconds > 0:
                 self._query_cache.set(
                     'fetch_emails',
@@ -582,7 +584,7 @@ class EmailClient(APIClient):
                     pass
 
         emails.sort(key=self._mail_sort_key, reverse=True)
-        result = emails[:final_limit]
+        result = emails if unlimited else emails[:final_limit]
         if self._query_cache and self.query_cache_ttl_seconds > 0 and result:
             self._query_cache.set(
                 'fetch_emails',

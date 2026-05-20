@@ -1577,6 +1577,28 @@ def initialize_tasks_from_config():
         tasks_enabled = False
     logger.info(f"📊 Final state: tasks_enabled={tasks_enabled}")
 
+
+def start_background_services() -> None:
+    """Start background initializers without blocking app import."""
+
+    def _runner() -> None:
+        try:
+            initialize_tasks_from_config()
+        except Exception as exc:
+            logger.error(f"Error in initialize_tasks_from_config: {exc}")
+
+        try:
+            start_briefing_scheduler()
+        except Exception as exc:
+            logger.error(f"Error starting briefing scheduler: {exc}")
+
+        try:
+            start_knowledge_graph_scheduler()
+        except Exception as exc:
+            logger.error(f"Error starting knowledge graph scheduler: {exc}")
+
+    threading.Thread(target=_runner, daemon=True).start()
+
 # Kalender-Caching für Performance
 calendar_cache = {}
 CACHE_DURATION = 300  # 5 Minuten Cache
@@ -3231,11 +3253,14 @@ def start_email_indexing():
         email_config = dict(saved_email_config)
         email_config['selected_account_id'] = account_id
         email_config['active_account_id'] = account_id
+        email_config['max_emails'] = 0
 
         # Optionale Indexierungs-Overrides aus dem Request übernehmen.
         for key in ('folders', 'max_emails', 'use_ssl'):
             if key in data and data[key] not in (None, ''):
                 email_config[key] = data[key]
+
+        email_config['max_emails'] = 0
 
     # Wenn keine explizite Auswahl übergeben wurde, die gespeicherte Indexierungs-Konfiguration verwenden.
     if not email_config:
@@ -9482,23 +9507,6 @@ Requirements:
 
     return final_suggestions[:5]  # Return max 5 suggestions
 
-# Tasks/Todos Manager initialisieren wenn Konfiguration vorhanden
-# IMPORTANT: Initialize BEFORE if __name__ == '__main__' so it runs on module import too
-try:
-    initialize_tasks_from_config()
-except Exception as e:
-    logger.error(f"Error in initialize_tasks_from_config: {e}")
-
-try:
-    start_briefing_scheduler()
-except Exception as e:
-    logger.error(f"Error starting briefing scheduler: {e}")
-
-try:
-    start_knowledge_graph_scheduler()
-except Exception as e:
-    logger.error(f"Error starting knowledge graph scheduler: {e}")
-
 if __name__ == '__main__':
     # Initialize knowledge base
     try:
@@ -9528,4 +9536,6 @@ if __name__ == '__main__':
     print(f"Todos/Tasks: {'Aktiviert' if tasks_enabled else 'Nicht verfügbar'}")
     print("Öffne http://localhost:5001 im Browser")
     
+    start_background_services()
+
     app.run(debug=False, host='0.0.0.0', port=5001, use_reloader=False)

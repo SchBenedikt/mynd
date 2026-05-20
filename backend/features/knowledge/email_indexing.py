@@ -2,6 +2,7 @@ import threading
 import time
 import sys
 import logging
+import hashlib
 from typing import Dict, Optional, Callable, List
 from dataclasses import dataclass
 from enum import Enum
@@ -28,6 +29,9 @@ class EmailIndexingProgress:
     current_email: str = ""
     processed_emails: int = 0
     total_emails: int = 0
+    indexed_emails: int = 0
+    skipped_emails: int = 0
+    indexed_chunks: int = 0
     errors: list = None
     start_time: float = 0
     end_time: float = 0
@@ -84,7 +88,7 @@ class EmailIndexingManager:
     
     def save_email_config(self, imap_host: str, username: str, password: str, 
                          imap_port: int = 993, folders: str = "INBOX", 
-                         max_emails: int = 50, use_ssl: bool = True):
+                         max_emails: int = 0, use_ssl: bool = True):
         """Speichert E-Mail-Konfiguration"""
         self.email_config = {
             'imap_host': imap_host,
@@ -181,11 +185,40 @@ class EmailIndexingManager:
             'current_email': self.current_progress.current_email,
             'processed_emails': self.current_progress.processed_emails,
             'total_emails': self.current_progress.total_emails,
+            'indexed_emails': self.current_progress.indexed_emails,
+            'skipped_emails': self.current_progress.skipped_emails,
+            'indexed_chunks': self.current_progress.indexed_chunks,
             'progress_percentage': self.current_progress.progress_percentage,
             'errors': self.current_progress.errors,
             'elapsed_time': self.current_progress.elapsed_time,
             'error_message': self.current_progress.error_message
         }
+
+    @staticmethod
+    def _sanitize_segment(value: str) -> str:
+        """Create a path-safe segment for email document paths."""
+        text = str(value or '').strip()
+        if not text:
+            return 'unknown'
+        text = text.replace('\\', '_').replace('/', '_').replace(':', '_').replace('\n', ' ').replace('\r', ' ')
+        return text[:80] or 'unknown'
+
+    def _build_email_key(self, folder: str, email_data: Dict) -> str:
+        """Build a stable key for one email so repeated runs only index new mail."""
+        candidates = [
+            str(email_data.get('message_id', '')).strip(),
+            str(email_data.get('uid', '')).strip(),
+            str(folder or '').strip(),
+            str(email_data.get('subject', '')).strip(),
+            str(email_data.get('date', '')).strip(),
+            str(email_data.get('from', email_data.get('sender', ''))).strip(),
+        ]
+        base = '|'.join(part for part in candidates if part)
+        if not base:
+            base = f"{folder}|email"
+        digest = hashlib.sha1(base.encode('utf-8', errors='ignore')).hexdigest()[:16]
+        safe_subject = self._sanitize_segment(email_data.get('subject', 'email'))
+        return f"{digest}-{safe_subject}"
     
     def _split_text(self, text: str, chunk_size: int = None) -> list:
         """Teilt Text in kleinere Chunks"""
@@ -258,6 +291,25 @@ class EmailIndexingManager:
             all_chunks = []
             sources = []
             total_emails_to_process = 0
+            existing_email_paths = set()
+
+            try:
+                from backend.core.app import knowledge_base
+                if getattr(knowledge_base, 'db', None):
+                    cursor = knowledge_base.db.connection.cursor()
+                    cursor.execute(
+                        """
+                        SELECT d.path
+                        FROM documents d
+                        JOIN chunks c ON c.document_id = d.id
+                        WHERE d.file_type = 'email'
+                        GROUP BY d.id, d.path
+                        HAVING COUNT(c.id) > 0
+                        """
+                    )
+                    existing_email_paths = {row['path'] for row in cursor.fetchall() if row['path']}
+            except Exception as e:
+                self.logger.warning(f"Could not read existing email paths: {str(e)}")
             
             # Schritt 1: Zähle E-Mails
             try:
@@ -269,12 +321,17 @@ class EmailIndexingManager:
                     
                     try:
                         # Anzahl der E-Mails in diesem Ordner
-                        email_list = email_client.search_emails(
-                            query='ALL',
-                            folder=folder,
-                            limit=self.email_config.get('max_emails', 50)
+                        email_list = email_client.fetch_emails(
+                            limit=int(self.email_config.get('max_emails', 0) or 0),
+                            folders=[folder],
+                            folder_focus='all'
                         )
-                        total_emails_to_process += len(email_list)
+                        for email_data in email_list:
+                            email_key = self._build_email_key(folder, email_data)
+                            folder_segment = self._sanitize_segment(folder)
+                            path = f"email://{folder_segment}/{email_key}"
+                            if path not in existing_email_paths:
+                                total_emails_to_process += 1
                     except Exception as e:
                         self.logger.warning(f"Error getting email count from {folder}: {str(e)}")
                 
@@ -291,10 +348,10 @@ class EmailIndexingManager:
                     
                     try:
                         # E-Mails abrufen
-                        email_list = email_client.search_emails(
-                            query='ALL',
-                            folder=folder,
-                            limit=self.email_config.get('max_emails', 50)
+                        email_list = email_client.fetch_emails(
+                            limit=int(self.email_config.get('max_emails', 0) or 0),
+                            folders=[folder],
+                            folder_focus='all'
                         )
                         
                         for email_data in email_list:
@@ -303,6 +360,14 @@ class EmailIndexingManager:
                             
                             try:
                                 subject = email_data.get('subject', '(Kein Betreff)')
+                                email_key = self._build_email_key(folder, email_data)
+                                folder_segment = self._sanitize_segment(folder)
+                                path = f"email://{folder_segment}/{email_key}"
+
+                                if path in existing_email_paths:
+                                    self.current_progress.skipped_emails += 1
+                                    continue
+
                                 self.current_progress.current_email = subject
                                 
                                 # E-Mail formatieren
@@ -317,14 +382,19 @@ class EmailIndexingManager:
                                     # Source-Informationen erstellen
                                     source_info = {
                                         'file': subject,
+                                        'path': path,
+                                        'email_key': email_key,
                                         'folder': folder,
-                                        'from': email_data.get('from', ''),
+                                        'from': email_data.get('from', email_data.get('sender', '')),
                                         'date': email_data.get('date', ''),
+                                        'message_id': email_data.get('message_id', ''),
+                                        'uid': email_data.get('uid', ''),
                                         'type': 'email'
                                     }
                                     sources.extend([source_info] * len(chunks))
                                 
                                 self.current_progress.processed_emails += 1
+                                self.current_progress.indexed_emails += 1
                                 self.notify_progress()
                                 
                             except Exception as e:
@@ -340,15 +410,19 @@ class EmailIndexingManager:
                 # Abschluss
                 if not self.stop_event.is_set():
                     # Wissensbasis aktualisieren (global)
-                    from app import knowledge_base
+                    from backend.core.app import knowledge_base
                     knowledge_base.knowledge_chunks = all_chunks
                     knowledge_base.document_sources = sources
                     
                     # Cache speichern
-                    self._save_knowledge_cache(all_chunks, sources)
+                    total_chunks = self._save_knowledge_cache(all_chunks, sources)
+                    self.current_progress.indexed_chunks = total_chunks
                     
                     self.current_progress.status = EmailIndexingStatus.COMPLETED
-                    self.logger.info(f"Email indexing completed: {len(all_chunks)} chunks from {self.current_progress.processed_emails} emails")
+                    self.logger.info(
+                        f"Email indexing completed: {self.current_progress.indexed_emails} emails, "
+                        f"{total_chunks} chunks, {self.current_progress.skipped_emails} skipped"
+                    )
                 else:
                     self.current_progress.status = EmailIndexingStatus.IDLE
                 
@@ -363,10 +437,10 @@ class EmailIndexingManager:
             self.current_progress.current_email = ""
             self.notify_progress()
     
-    def _save_knowledge_cache(self, chunks: list, sources: list):
+    def _save_knowledge_cache(self, chunks: list, sources: list) -> int:
         """Speichert die verarbeiteten E-Mail-Daten in der Datenbank"""
         try:
-            from app import knowledge_base
+            from backend.core.app import knowledge_base
             
             if knowledge_base.db:
                 conn = knowledge_base.db.connection
@@ -376,7 +450,7 @@ class EmailIndexingManager:
                 doc_chunks = {}
                 for i, chunk in enumerate(chunks):
                     source = sources[i] if i < len(sources) else {'file': 'email', 'type': 'email'}
-                    doc_key = source.get('file', f'email_{i}')
+                    doc_key = source.get('path') or source.get('email_key') or source.get('message_id') or source.get('file', f'email_{i}')
                     
                     if doc_key not in doc_chunks:
                         doc_chunks[doc_key] = {
@@ -391,7 +465,7 @@ class EmailIndexingManager:
                     source = doc_data['source']
                     doc_chunks_list = doc_data['chunks']
                     
-                    path = f"email://{source.get('folder', 'INBOX')}/{doc_key}"
+                    path = str(source.get('path') or f"email://{self._sanitize_segment(source.get('folder', 'INBOX'))}/{doc_key}")
                     name = doc_key
                     file_type = 'email'
                     metadata = source
@@ -432,19 +506,17 @@ class EmailIndexingManager:
                     
                     # Chunks hinzufügen
                     try:
-                        for chunk_text in doc_chunks_list:
-                            knowledge_base.db.add_chunk(
-                                document_id=doc_id,
-                                content=chunk_text
-                            )
-                        total_chunks += len(doc_chunks_list)
+                        chunk_ids = knowledge_base.db.add_chunks(doc_id, doc_chunks_list)
+                        total_chunks += len(chunk_ids)
                     except Exception as e:
                         self.logger.error(f"Error adding chunks: {str(e)}")
                 
                 self.logger.info(f"Saved {total_chunks} email chunks to database")
+                return total_chunks
             
         except Exception as e:
             self.logger.error(f"Error saving email cache: {str(e)}")
+            return 0
 
 
 # Globaler EmailIndexingManager
