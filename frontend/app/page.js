@@ -147,6 +147,25 @@ const safeReadJson = async (response) => {
   }
 };
 
+const buildFriendlyChatErrorMessage = (response, data, fallbackMessage = '') => {
+  const status = response?.status || 0;
+  const backendError = String(data?.error || data?.message || fallbackMessage || '').trim();
+
+  if (status >= 500 || /internal server error/i.test(backendError)) {
+    return 'Dabei ist auf dem Server ein internes Problem aufgetreten. Deine Anfrage ist nicht verloren. Bitte versuche es in ein paar Sekunden erneut. Wenn das öfter passiert, lade die Seite neu oder öffne die Einstellungen, um die E-Mail- und API-Verbindungen zu prüfen.';
+  }
+
+  if (status === 429) {
+    return 'Die Anfrage wurde gerade gebremst, weil zu viele Aufrufe in kurzer Zeit kamen. Warte bitte einen Moment und versuche es dann erneut.';
+  }
+
+  if (status >= 400 && backendError) {
+    return backendError;
+  }
+
+  return 'Die Anfrage konnte gerade nicht verarbeitet werden. Bitte versuche es erneut.';
+};
+
 const getTodayDateTimeForInputs = () => {
   const today = new Date();
   const year = String(today.getFullYear());
@@ -1118,10 +1137,10 @@ export default function HomePage() {
       });
       const data = await safeReadJson(res);
       if (!res.ok || data?.success === false) {
-        const errorMessage = data?.error || `Request failed with status ${res.status}`;
+        const errorMessage = buildFriendlyChatErrorMessage(res, data, `Request failed with status ${res.status}`);
         insertMessageAfter(targetChatId, userMessageId, {
           role: 'assistant',
-          content: `Error: ${errorMessage}`,
+          content: errorMessage,
           id: createMessageId()
         });
         return;
@@ -1239,9 +1258,12 @@ export default function HomePage() {
       if (err?.name === 'AbortError') {
         return;
       }
+      const friendlyMessage = /internal server error/i.test(String(err?.message || ''))
+        ? 'Dabei ist auf dem Server ein internes Problem aufgetreten. Bitte versuche es gleich noch einmal.'
+        : (err?.message || 'Die Anfrage konnte gerade nicht verarbeitet werden. Bitte versuche es erneut.');
       insertMessageAfter(targetChatId, userMessageId, {
         role: 'assistant',
-        content: `Error: ${err.message}`,
+        content: friendlyMessage,
         id: createMessageId()
       });
     } finally {
