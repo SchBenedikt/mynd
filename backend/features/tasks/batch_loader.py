@@ -127,6 +127,11 @@ class BatchTaskLoader:
             self.logger.error(f"❌ Error in background load: {str(e)}", exc_info=True)
         finally:
             self.is_loading = False
+            try:
+                from backend.core.app import _trigger_knowledge_graph_refresh
+                _trigger_knowledge_graph_refresh()
+            except Exception as refresh_error:
+                self.logger.debug(f"Could not trigger knowledge graph refresh after batch load: {refresh_error}")
     
     def _get_all_task_paths(self, list_name: str) -> List[str]:
         """Holt alle ICS-Pfade vom Nextcloud (schnell, nur PROPFIND)"""

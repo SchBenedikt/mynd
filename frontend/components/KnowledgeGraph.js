@@ -24,44 +24,101 @@ const NodeTypeLabels = {
   meeting: '🤝 Meeting',
 };
 
+const GRAPH_ENDPOINT = '/api/knowledge/graph';
+
+async function readGraphResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+
+  if (contentType.includes('application/json')) {
+    return response.json();
+  }
+
+  const text = await response.text();
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      success: false,
+      error: text || `Unerwartete Antwort (${response.status})`,
+    };
+  }
+}
+
 export default function KnowledgeGraphComponent() {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
+  const refreshTimerRef = useRef(null);
   const [graphData, setGraphData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
   const [selectedTypes, setSelectedTypes] = useState(new Set(Object.keys(NodeTypeColors)));
   const [selectedNode, setSelectedNode] = useState(null);
   const [relatedData, setRelatedData] = useState(null);
   const [stats, setStats] = useState(null);
 
+  const loadGraph = async ({ refresh = false } = {}) => {
+    try {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+
+      setError(null);
+      if (!graphData) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+
+      const url = refresh ? `${GRAPH_ENDPOINT}?refresh=true` : GRAPH_ENDPOINT;
+      const response = await fetch(url, { cache: 'no-store' });
+      const result = await readGraphResponse(response);
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || `Wissensgraph konnte nicht geladen werden (${response.status})`);
+      }
+
+      setGraphData(result.data);
+      setStats(result.data.stats);
+
+      if (result.refreshing && !refresh) {
+        refreshTimerRef.current = window.setTimeout(() => {
+          loadGraph();
+        }, 4000);
+      }
+
+      return true;
+    } catch (fetchError) {
+      const message = fetchError instanceof Error ? fetchError.message : 'Wissensgraph konnte nicht geladen werden.';
+      console.error('Error fetching knowledge graph:', fetchError);
+      setError(message);
+      return false;
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
   // Fetch graph data on mount
   useEffect(() => {
-    const fetchGraph = async () => {
-      try {
-        const response = await fetch('/api/knowledge/graph?refresh=true');
-        const result = await response.json();
-        
-        if (result.success) {
-          setGraphData(result.data);
-          setStats(result.data.stats);
-          setLoading(false);
-        }
-      } catch (error) {
-        console.error('Error fetching knowledge graph:', error);
-        setLoading(false);
+    loadGraph();
+
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
       }
     };
-
-    fetchGraph();
   }, []);
 
   // Fetch related node data
   const fetchRelatedNode = async (nodeId) => {
     try {
       const response = await fetch(`/api/knowledge/graph/node/${nodeId}`);
-      const result = await response.json();
+      const result = await readGraphResponse(response);
       
-      if (result.success) {
+      if (response.ok && result.success) {
         setRelatedData(result.data);
       }
     } catch (error) {
@@ -111,16 +168,15 @@ export default function KnowledgeGraphComponent() {
 
   // Render D3 graph
   useEffect(() => {
-    if (!graphData || !svgRef.current) return;
+    if (!svgRef.current) return;
 
     const filteredData = getFilteredData();
-    if (filteredData.nodes.length === 0) return;
+    d3.select(svgRef.current).selectAll('*').remove();
+
+    if (!graphData || filteredData.nodes.length === 0) return;
 
     const width = containerRef.current?.offsetWidth || 1200;
     const height = containerRef.current?.offsetHeight || 600;
-
-    // Clear previous content
-    d3.select(svgRef.current).selectAll('*').remove();
 
     // Create SVG
     const svg = d3.select(svgRef.current)
@@ -187,7 +243,7 @@ export default function KnowledgeGraphComponent() {
       .attr('font-size', '10px')
       .attr('fill', '#000')
       .attr('pointer-events', 'none')
-      .text(d => d.label.substring(0, 15));
+      .text(d => String(d.label || '').substring(0, 15));
 
     // Drag functions
     function dragstarted(event, d) {
@@ -237,9 +293,28 @@ export default function KnowledgeGraphComponent() {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <h1>🧠 Wissensgraph</h1>
-        <p>Visualisierung aller Entitäten und ihre Beziehungen</p>
+        <div>
+          <h1>🧠 Wissensgraph</h1>
+          <p>Visualisierung aller Entitäten und ihre Beziehungen</p>
+        </div>
+        <div className={styles.headerActions}>
+          <button className={styles.actionButton} onClick={() => loadGraph({ refresh: true })} disabled={refreshing}>
+            {refreshing ? 'Aktualisiere…' : 'Neu laden'}
+          </button>
+        </div>
       </div>
+
+      {error && (
+        <div className={styles.errorBanner}>
+          <div>
+            <strong>Graph nicht verfügbar.</strong>
+            <span>{error}</span>
+          </div>
+          <button className={styles.actionButton} onClick={() => loadGraph({ refresh: false })}>
+            Erneut versuchen
+          </button>
+        </div>
+      )}
 
       {stats && (
         <div className={styles.stats}>
@@ -279,6 +354,15 @@ export default function KnowledgeGraphComponent() {
 
       <div className={styles.graphContainer} ref={containerRef}>
         <svg ref={svgRef}></svg>
+        {!graphData && !error && (
+          <div className={styles.emptyState}>Noch keine Graphdaten geladen.</div>
+        )}
+        {refreshing && graphData && (
+          <div className={styles.emptyState}>Graph wird im Hintergrund aktualisiert.</div>
+        )}
+        {graphData && selectedTypes.size === 0 && (
+          <div className={styles.emptyState}>Alle Entitätstypen sind ausgeblendet.</div>
+        )}
       </div>
 
       {selectedNode && (

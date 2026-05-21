@@ -105,6 +105,8 @@ _briefing_scheduler_started = False
 _knowledge_graph = None
 _knowledge_graph_lock = threading.Lock()
 _knowledge_graph_scheduler_started = False
+_knowledge_graph_refresh_in_progress = False
+_knowledge_graph_refresh_lock = threading.Lock()
 KNOWLEDGE_GRAPH_FILE = os.path.join(DATA_DIR, 'knowledge_graph.json')
 
 
@@ -652,45 +654,102 @@ def _collect_document_data() -> List[Dict[str, Any]]:
     """Collect documents from Nextcloud for knowledge graph."""
     try:
         documents: List[Dict[str, Any]] = []
+        max_nextcloud_files = 200
+        seen_paths = set()
+
+        def add_document_entry(entry: Dict[str, Any]) -> None:
+            file_name = str(entry.get('name') or '').strip()
+            file_path = str(entry.get('path') or '').strip()
+            document_key = file_path or file_name
+
+            if not document_key or document_key in seen_paths:
+                return
+
+            seen_paths.add(document_key)
+            documents.append({
+                'name': file_name or os.path.basename(file_path),
+                'path': file_path,
+                'size': int(entry.get('size', 0) or 0),
+                'mime_type': str(entry.get('mime_type') or entry.get('file_type') or ''),
+                'modified': str(entry.get('modified') or ''),
+                'file_type': str(entry.get('file_type') or ''),
+                'source': str(entry.get('source') or 'documents'),
+                'chunk_count': int(entry.get('chunk_count', 0) or 0),
+            })
 
         # 1) Local knowledge base files are always available in this app.
         for source in getattr(knowledge_base, 'document_sources', []) or []:
             if not isinstance(source, dict):
                 continue
-            file_name = str(source.get('file') or source.get('path') or '').strip()
-            if not file_name:
-                continue
-            documents.append({
-                'name': os.path.basename(file_name),
-                'path': file_name,
-                'size': int(source.get('size', 0) or 0),
-                'mime_type': str(source.get('type') or ''),
-                'modified': ''
+            add_document_entry({
+                'name': source.get('file') or source.get('name') or source.get('path') or '',
+                'path': source.get('path') or source.get('file') or '',
+                'size': source.get('size', 0),
+                'mime_type': source.get('type') or source.get('mime_type') or source.get('file_type') or '',
+                'modified': source.get('modified') or '',
+                'source': source.get('source') or 'knowledge_base',
             })
 
-        # 2) Nextcloud files if runtime config is available.
-        nc_cfg = get_nextcloud_runtime_config()
-        if all(nc_cfg.get(k) for k in ('url', 'username', 'password')):
-            try:
-                nextcloud_client = NextcloudClient(
-                    nc_cfg['url'],
-                    nc_cfg['username'],
-                    nc_cfg['password']
-                )
-                if nextcloud_client.test_connection():
-                    files = nextcloud_client.list_files('/') or []
-                    for file_entry in files:
-                        if not isinstance(file_entry, dict):
-                            continue
-                        documents.append({
-                            'name': file_entry.get('name', ''),
-                            'path': file_entry.get('path', ''),
-                            'size': file_entry.get('size', 0),
-                            'mime_type': file_entry.get('mime_type', ''),
-                            'modified': file_entry.get('modified', '')
-                        })
-            except Exception as nc_exc:
-                logger.debug(f"Error collecting nextcloud documents: {nc_exc}")
+        # 2) Persisted documents from SQLite so the graph reflects the indexed corpus.
+        try:
+            if knowledge_base.db and getattr(knowledge_base.db, 'connection', None):
+                cursor = knowledge_base.db.connection.cursor()
+                cursor.execute("""
+                    SELECT
+                        d.name,
+                        d.path,
+                        d.size,
+                        d.file_type,
+                        d.created_at,
+                        d.updated_at,
+                        COUNT(c.id) AS chunk_count
+                    FROM documents d
+                    LEFT JOIN chunks c ON c.document_id = d.id
+                    GROUP BY d.id
+                    ORDER BY d.updated_at DESC
+                    LIMIT 1000
+                """)
+                for row in cursor.fetchall():
+                    add_document_entry({
+                        'name': row['name'],
+                        'path': row['path'],
+                        'size': row['size'],
+                        'mime_type': row['file_type'],
+                        'file_type': row['file_type'],
+                        'modified': row['updated_at'] or row['created_at'] or '',
+                        'source': 'database',
+                        'chunk_count': row['chunk_count'],
+                    })
+        except Exception as db_exc:
+            logger.debug(f"Error collecting database documents: {db_exc}")
+
+        # 3) Nextcloud files if runtime config is available and the database does not
+        # already provide a substantial document corpus. The database-backed list is
+        # far faster, so skip the expensive remote tree walk when possible.
+        if len(documents) < 100:
+            nc_cfg = get_nextcloud_runtime_config()
+            if all(nc_cfg.get(k) for k in ('url', 'username', 'password')):
+                try:
+                    nextcloud_client = NextcloudClient(
+                        nc_cfg['url'],
+                        nc_cfg['username'],
+                        nc_cfg['password']
+                    )
+                    if nextcloud_client.test_connection():
+                        files = nextcloud_client.list_files('/') or []
+                        for file_entry in files[:max_nextcloud_files]:
+                            if not isinstance(file_entry, dict):
+                                continue
+                            add_document_entry({
+                                'name': file_entry.get('name', ''),
+                                'path': file_entry.get('path', ''),
+                                'size': file_entry.get('size', 0),
+                                'mime_type': file_entry.get('mime_type', ''),
+                                'modified': file_entry.get('modified', ''),
+                                'source': 'nextcloud',
+                            })
+                except Exception as nc_exc:
+                    logger.debug(f"Error collecting nextcloud documents: {nc_exc}")
 
         return documents
     except Exception as e:
@@ -702,24 +761,56 @@ def _update_knowledge_graph() -> None:
     """Update knowledge graph with data from all sources."""
     try:
         graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
-        
-        # Collect data from all sources
-        calendar_events = _collect_calendar_data()
-        emails = _collect_email_data()
-        tasks = _collect_task_data()
+
+        graph.clear()
+
         documents = _collect_document_data()
-        
-        # Update graph
-        graph.update_from_data_sources({
-            'calendar_events': calendar_events,
-            'emails': emails,
-            'tasks': tasks,
-            'documents': documents
-        })
-        
+        if documents:
+            graph.extract_from_documents(documents)
+            graph.save_graph()
+
+        tasks = _collect_task_data()
+        if tasks:
+            graph.extract_from_tasks(tasks)
+            graph.save_graph()
+
+        calendar_events = _collect_calendar_data()
+        if calendar_events:
+            graph.extract_from_calendar(calendar_events)
+
+        emails = _collect_email_data()
+        if emails:
+            graph.extract_from_emails(emails)
+
+        if graph.nodes:
+            graph.build_co_occurrence_relationships()
+            graph.save_graph()
+
         logger.info(f"Knowledge graph updated: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
     except Exception as e:
         logger.error(f"Error updating knowledge graph: {e}")
+
+
+def _trigger_knowledge_graph_refresh() -> bool:
+    """Start a background knowledge graph refresh if none is running."""
+    global _knowledge_graph_refresh_in_progress
+
+    with _knowledge_graph_refresh_lock:
+        if _knowledge_graph_refresh_in_progress:
+            return False
+        _knowledge_graph_refresh_in_progress = True
+
+    def _refresh_worker() -> None:
+        global _knowledge_graph_refresh_in_progress
+        try:
+            _update_knowledge_graph()
+        finally:
+            with _knowledge_graph_refresh_lock:
+                _knowledge_graph_refresh_in_progress = False
+
+    thread = threading.Thread(target=_refresh_worker, daemon=True)
+    thread.start()
+    return True
 
 
 def _knowledge_graph_scheduler_loop() -> None:
@@ -747,19 +838,20 @@ def start_knowledge_graph_scheduler() -> None:
 def get_knowledge_graph_data():
     """Return the current knowledge graph data."""
     try:
-        # Optionally force update
         force_refresh = request.args.get('refresh', 'false').lower() == 'true'
         graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
 
-        if force_refresh or not graph.nodes:
-            _update_knowledge_graph()
-            graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
-
         graph_data = graph.get_graph_data()
+
+        refresh_started = False
+        if force_refresh or not graph.nodes:
+            refresh_started = _trigger_knowledge_graph_refresh()
         
         return jsonify({
             'success': True,
-            'data': graph_data
+            'data': graph_data,
+            'refreshing': refresh_started or _knowledge_graph_refresh_in_progress,
+            'refresh_requested': force_refresh,
         })
     except Exception as e:
         logger.error(f"Error fetching knowledge graph: {e}")
@@ -1596,6 +1688,11 @@ def start_background_services() -> None:
             start_knowledge_graph_scheduler()
         except Exception as exc:
             logger.error(f"Error starting knowledge graph scheduler: {exc}")
+
+        try:
+            _trigger_knowledge_graph_refresh()
+        except Exception as exc:
+            logger.error(f"Error triggering initial knowledge graph refresh: {exc}")
 
     threading.Thread(target=_runner, daemon=True).start()
 

@@ -6,6 +6,7 @@ Extracts entities (people, tasks, projects, documents, organizations) and their 
 import json
 import os
 import re
+import hashlib
 from typing import Dict, List, Set, Tuple, Optional, Any
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -38,6 +39,8 @@ EDGE_TYPES = {
 
 class KnowledgeGraph:
     """Manages entity extraction and relationship building from multiple data sources."""
+
+    MAX_GRAPH_FILE_SIZE_BYTES = 50 * 1024 * 1024
     
     def __init__(self, graph_file: str = None):
         self.graph_file = graph_file or "data/knowledge_graph.json"
@@ -51,7 +54,8 @@ class KnowledgeGraph:
         """Create unique node ID from type and value."""
         # Normalize: lowercase, replace spaces with underscores
         normalized = re.sub(r'[^a-z0-9_]', '', value.lower().replace(' ', '_'))
-        return f"{node_type.lower()}:{normalized}:{abs(hash(value)) % 10000}"
+        digest = hashlib.sha1(value.encode('utf-8')).hexdigest()[:12]
+        return f"{node_type.lower()}:{normalized}:{digest}"
     
     def add_node(self, node_type: str, label: str, properties: Dict = None, 
                  deduplicate_key: str = None) -> str:
@@ -101,6 +105,25 @@ class KnowledgeGraph:
                     "properties": properties or {},
                     "created_at": datetime.now().isoformat(),
                 })
+
+    def _extract_topics(self, text: str, limit: int = 3) -> List[str]:
+        """Extract a small set of reusable topic tokens from a free-text value."""
+        cleaned_text = (text or '').lower()
+        tokens = re.findall(r"[a-z0-9äöüß]{4,}", cleaned_text)
+        stopwords = {
+            'and', 'the', 'oder', 'und', 'von', 'mit', 'für', 'fuer', 'die', 'der', 'das',
+            'to', 'for', 'from', 'file', 'final', 'copy', 'draft', 'scan', 'image', 'note',
+            're', 'fw', 'ref', 'reply', 'subject', 'email', 'mail', 'task'
+        }
+
+        topics = []
+        for token in tokens:
+            if token in stopwords or token in topics:
+                continue
+            topics.append(token)
+            if len(topics) >= limit:
+                break
+        return topics
     
     def extract_from_calendar(self, calendar_events: List[Dict]) -> None:
         """Extract entities and relationships from calendar events."""
@@ -166,6 +189,15 @@ class KnowledgeGraph:
                 {"email": sender, "source": "email"},
                 deduplicate_key=sender
             )
+
+            for topic in self._extract_topics(subject):
+                topic_id = self.add_node(
+                    NODE_TYPES["PROJECT"],
+                    topic,
+                    {"source": "email", "kind": "topic"},
+                    deduplicate_key=f"topic:{topic}"
+                )
+                self.add_edge(sender_id, topic_id, EDGE_TYPES["MENTIONED_IN"])
             
             # Create recipient person nodes and relationships
             for recipient in recipients:
@@ -211,6 +243,15 @@ class KnowledgeGraph:
                 },
                 deduplicate_key=f"{task.get('title', '')}{task.get('due_date', '')}"
             )
+
+            for topic in self._extract_topics(task.get("title", "")):
+                topic_id = self.add_node(
+                    NODE_TYPES["PROJECT"],
+                    topic,
+                    {"source": "tasks", "kind": "topic"},
+                    deduplicate_key=f"topic:{topic}"
+                )
+                self.add_edge(task_id, topic_id, EDGE_TYPES["RELATED_TO"])
             
             # Link to assignee if available
             assignee = task.get("assigned_to")
@@ -237,32 +278,92 @@ class KnowledgeGraph:
         """Extract entities and relationships from documents."""
         if not documents:
             return
-        
+        folder_cache = {}
+
+        def get_folder_node(folder_path: str) -> str:
+            folder_path = (folder_path or '').strip()
+            if not folder_path:
+                return ''
+            if folder_path in folder_cache:
+                return folder_cache[folder_path]
+
+            folder_name = os.path.basename(folder_path.rstrip('/\\')) or folder_path
+            folder_id = self.add_node(
+                NODE_TYPES["PROJECT"],
+                folder_name,
+                {
+                    "path": folder_path,
+                    "kind": "folder",
+                    "source": "documents"
+                },
+                deduplicate_key=f"folder:{folder_path}"
+            )
+            folder_cache[folder_path] = folder_id
+
+            parent_folder = os.path.dirname(folder_path.rstrip('/\\'))
+            if parent_folder and parent_folder != folder_path:
+                parent_folder_id = get_folder_node(parent_folder)
+                if parent_folder_id and parent_folder_id != folder_id:
+                    self.add_edge(folder_id, parent_folder_id, EDGE_TYPES["RELATED_TO"])
+
+            return folder_id
+
         for doc in documents:
+            doc_name = doc.get("name", "Unnamed Document")
+            doc_path = doc.get("path", "")
+            file_type = str(doc.get("mime_type") or doc.get("file_type") or '').lower().strip()
             doc_id = self.add_node(
                 NODE_TYPES["DOCUMENT"],
-                doc.get("name", "Unnamed Document"),
+                doc_name,
                 {
-                    "path": doc.get("path", ""),
+                    "path": doc_path,
                     "size": doc.get("size", 0),
-                    "mime_type": doc.get("mime_type", ""),
+                    "mime_type": file_type,
+                    "file_type": file_type,
                     "modified": doc.get("modified", ""),
-                    "source": "documents"
+                    "chunk_count": doc.get("chunk_count", 0),
+                    "source": doc.get("source", "documents")
                 },
                 deduplicate_key=doc.get("path", doc.get("name", ""))
             )
+
+            folder_path = os.path.dirname(doc_path) if doc_path else ""
+            if folder_path:
+                folder_id = get_folder_node(folder_path)
+                if folder_id:
+                    self.add_edge(doc_id, folder_id, EDGE_TYPES["RELATED_TO"])
+
+            if file_type:
+                type_label = file_type.split('/')[-1] if '/' in file_type else file_type
+                type_id = self.add_node(
+                    NODE_TYPES["PROJECT"],
+                    type_label,
+                    {"source": "documents", "kind": "file_type"},
+                    deduplicate_key=f"file_type:{type_label}"
+                )
+                self.add_edge(doc_id, type_id, EDGE_TYPES["RELATED_TO"])
             
             # Extract tags/categories from filename
-            filename = doc.get("name", "")
+            filename = doc_name
             # Look for patterns like [tag] or #tag in filename
             tags = re.findall(r'[\[\#]([^\]\#]+)[\]\#]', filename)
             for tag in tags:
                 project_id = self.add_node(
                     NODE_TYPES["PROJECT"],
                     tag.strip(),
-                    {"source": "documents"}
+                    {"source": "documents", "kind": "tag"},
+                    deduplicate_key=f"tag:{tag.strip().lower()}"
                 )
                 self.add_edge(doc_id, project_id, EDGE_TYPES["RELATED_TO"])
+
+            for topic in self._extract_topics(os.path.splitext(filename)[0]):
+                topic_id = self.add_node(
+                    NODE_TYPES["PROJECT"],
+                    topic,
+                    {"source": "documents", "kind": "topic"},
+                    deduplicate_key=f"topic:{topic}"
+                )
+                self.add_edge(doc_id, topic_id, EDGE_TYPES["RELATED_TO"])
     
     def build_co_occurrence_relationships(self) -> None:
         """Build relationships based on entities appearing together in multiple contexts."""
@@ -328,6 +429,14 @@ class KnowledgeGraph:
         """Load graph from JSON file."""
         if not os.path.exists(self.graph_file):
             return
+
+        try:
+            if os.path.getsize(self.graph_file) > self.MAX_GRAPH_FILE_SIZE_BYTES:
+                print(f"Knowledge graph file too large, skipping load: {self.graph_file}")
+                return
+        except OSError as e:
+            print(f"Error checking knowledge graph size: {e}")
+            return
         
         try:
             with open(self.graph_file, 'r', encoding='utf-8') as f:
@@ -355,6 +464,11 @@ class KnowledgeGraph:
     
     def get_related_nodes(self, node_id: str, max_depth: int = 2) -> Dict[str, Any]:
         """Get all nodes connected to a given node up to max_depth hops away."""
+        try:
+            max_depth = int(max_depth)
+        except (TypeError, ValueError):
+            max_depth = 2
+
         visited = set()
         result = {"nodes": {}, "edges": []}
         
@@ -391,6 +505,8 @@ class KnowledgeGraph:
         emails = data_sources.get("emails", [])
         tasks = data_sources.get("tasks", [])
         documents = data_sources.get("documents", [])
+
+        self.clear()
         
         self.extract_from_calendar(calendar_events)
         self.extract_from_emails(emails)
