@@ -195,9 +195,16 @@ export default function KnowledgeGraphComponent() {
       .force('link', d3.forceLink(filteredData.links)
         .id(d => d.id)
         .distance(60))
-      .force('charge', d3.forceManyBody().strength(-300))
+      .force('charge', d3.forceManyBody().strength(-220))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide().radius(40));
+      .force('collision', d3.forceCollide().radius(48))
+      .velocityDecay(0.45)
+      .alphaDecay(0.08);
+
+    for (let i = 0; i < 220; i += 1) {
+      simulation.tick();
+    }
+    simulation.stop();
 
     // Create links
     const link = g.append('g')
@@ -247,7 +254,7 @@ export default function KnowledgeGraphComponent() {
 
     // Drag functions
     function dragstarted(event, d) {
-      if (!event.active) simulation.alphaTarget(0.3).restart();
+      if (!event.active) simulation.alphaTarget(0.25).restart();
       d.fx = d.x;
       d.fy = d.y;
     }
@@ -370,6 +377,26 @@ export default function KnowledgeGraphComponent() {
           <div className={styles.close} onClick={() => setSelectedNode(null)}>×</div>
           <h2>{selectedNode.label}</h2>
           <p className={styles.nodeType}>{NodeTypeLabels[selectedNode.type]}</p>
+
+          <div className={styles.properties}>
+            <h3>Zusammenfassung:</h3>
+            <div className={styles.property}>
+              <strong>Typ:</strong>
+              <span>{selectedNode.type}</span>
+            </div>
+            {selectedNode.properties?.source && (
+              <div className={styles.property}>
+                <strong>Quelle:</strong>
+                <span>{selectedNode.properties.source}</span>
+              </div>
+            )}
+            {selectedNode.properties?.path && (
+              <div className={styles.property}>
+                <strong>Pfad:</strong>
+                <span>{String(selectedNode.properties.path).substring(0, 50)}</span>
+              </div>
+            )}
+          </div>
           
           <div className={styles.properties}>
             <h3>Eigenschaften:</h3>

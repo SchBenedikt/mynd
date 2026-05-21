@@ -214,14 +214,18 @@ class KnowledgeGraph:
             # Extract document reference if there are attachments
             attachments = email_msg.get("attachments", [])
             for attachment in attachments:
+                filename = attachment.get("filename", "attachment")
+                attachment_size = attachment.get("size", 0)
                 doc_id = self.add_node(
                     NODE_TYPES["DOCUMENT"],
-                    attachment.get("filename", "attachment"),
+                    filename,
                     {
                         "size": attachment.get("size", 0),
                         "mime_type": attachment.get("mime_type", ""),
-                        "source": "email"
-                    }
+                        "source": "email_attachment",
+                        "attachment": True
+                    },
+                    deduplicate_key=f"attachment:{filename}:{attachment_size}"
                 )
                 self.add_edge(doc_id, sender_id, EDGE_TYPES["CREATED_BY"])
     
