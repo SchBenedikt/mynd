@@ -192,6 +192,10 @@ def _build_email_query_profile(prompt: str) -> Dict[str, Any]:
         or ('unread' in text and 'last week' in text)
     )
 
+    unread_recent = (
+        email_terms_present and 'ungelesen' in text and not unread_last_week
+    )
+
     if last_sent:
         return {
             'mode': 'last_sent',
@@ -262,6 +266,18 @@ def _build_email_query_profile(prompt: str) -> Dict[str, Any]:
             'limit': 20,
             'summary_mode': 'summary',
             'label': 'ungelesene E-Mails von letzter Woche'
+        }
+
+    if unread_recent:
+        return {
+            'mode': 'unread_recent',
+            'folder_focus': 'inbox',
+            'since': None,
+            'until': None,
+            'unread': True,
+            'limit': 20,
+            'summary_mode': 'summary',
+            'label': 'ungelesene E-Mails'
         }
 
     return {
