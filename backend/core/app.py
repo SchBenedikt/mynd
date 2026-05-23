@@ -22,6 +22,7 @@ import base64
 import json as _json
 from flask import make_response
 from passlib.hash import bcrypt
+from cryptography.fernet import Fernet, InvalidToken
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -598,20 +599,45 @@ def api_auth_nextcloud_callback():
 
 def _load_nextcloud_accounts() -> Dict[str, Any]:
     accounts_file = os.path.join(CONFIG_DIR, 'nextcloud_accounts.json')
-    if os.path.exists(accounts_file):
+    if not os.path.exists(accounts_file):
+        return {}
+    try:
+        raw = open(accounts_file, 'rb').read()
+        key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
+        if not key:
+            # derive key from JWT_SECRET
+            digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
+            key = base64.urlsafe_b64encode(digest)
+        if isinstance(key, str):
+            key = key.encode('utf-8')
+        f = Fernet(key)
         try:
-            with open(accounts_file, 'r', encoding='utf-8') as f:
-                return json.load(f) or {}
-        except Exception:
-            return {}
-    return {}
+            dec = f.decrypt(raw)
+            return json.loads(dec.decode('utf-8')) or {}
+        except InvalidToken:
+            # try without decryption (legacy)
+            try:
+                return json.loads(raw.decode('utf-8')) or {}
+            except Exception:
+                return {}
+    except Exception:
+        return {}
 
 
 def _save_nextcloud_accounts(accounts: Dict[str, Any]) -> None:
     accounts_file = os.path.join(CONFIG_DIR, 'nextcloud_accounts.json')
     try:
-        with open(accounts_file, 'w', encoding='utf-8') as f:
-            json.dump(accounts, f, ensure_ascii=False, indent=2)
+        payload = json.dumps(accounts, ensure_ascii=False, indent=2).encode('utf-8')
+        key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
+        if not key:
+            digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
+            key = base64.urlsafe_b64encode(digest)
+        if isinstance(key, str):
+            key = key.encode('utf-8')
+        f = Fernet(key)
+        enc = f.encrypt(payload)
+        with open(accounts_file, 'wb') as fh:
+            fh.write(enc)
     except Exception:
         logger.warning('Could not write nextcloud accounts file')
 
@@ -655,6 +681,127 @@ def api_auth_nextcloud_refresh():
     if not acct:
         return jsonify({'success': False, 'error': 'Could not refresh or not found'}), 404
     return jsonify({'success': True, 'account': acct})
+
+
+# --- Admin helpers & endpoints ------------------------------------------------------------
+def _require_admin_payload():
+    # check cookie or Authorization header
+    auth = request.headers.get('Authorization', '')
+    token = None
+    if auth.lower().startswith('bearer '):
+        token = auth.split(None, 1)[1]
+    else:
+        token = request.cookies.get('mynd_token')
+    if not token:
+        return None
+    payload = verify_jwt(token)
+    return payload
+
+def require_admin(fn):
+    def wrapper(*args, **kwargs):
+        payload = _require_admin_payload()
+        admin_user = os.getenv('ADMIN_USER', 'admin')
+        if not payload or payload.get('sub') != admin_user:
+            return jsonify({'success': False, 'error': 'Forbidden'}), 403
+        return fn(*args, **kwargs)
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
+
+@app.route('/api/admin/users', methods=['GET'])
+@require_admin
+def api_admin_list_users():
+    users = _load_users()
+    out = []
+    for username, entry in users.items():
+        out.append({'username': username, 'name': entry.get('name')})
+    return jsonify({'success': True, 'users': out})
+
+
+@app.route('/api/admin/users/create', methods=['POST'])
+@require_admin
+def api_admin_create_user():
+    data = request.get_json(force=True, silent=True) or {}
+    username = str(data.get('username') or '').strip()
+    password = str(data.get('password') or '')
+    name = str(data.get('name') or username)
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Missing username or password'}), 400
+    users = _load_users()
+    if username in users:
+        return jsonify({'success': False, 'error': 'User exists'}), 409
+    users[username] = {'password': bcrypt.hash(password), 'name': name}
+    try:
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(users, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.warning('Could not persist new user: %s', exc)
+        return jsonify({'success': False, 'error': 'Could not persist user'}), 500
+    return jsonify({'success': True, 'user': {'username': username, 'name': name}})
+
+
+@app.route('/api/admin/users/reset', methods=['POST'])
+@require_admin
+def api_admin_reset_password():
+    data = request.get_json(force=True, silent=True) or {}
+    username = str(data.get('username') or '').strip()
+    new_password = str(data.get('password') or '')
+    if not username or not new_password:
+        return jsonify({'success': False, 'error': 'Missing username or password'}), 400
+    users = _load_users()
+    if username not in users:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    users[username]['password'] = bcrypt.hash(new_password)
+    try:
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(users, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.warning('Could not persist reset password: %s', exc)
+        return jsonify({'success': False, 'error': 'Could not persist'}), 500
+    return jsonify({'success': True})
+
+
+# --- Nextcloud refresh scheduler ------------------------------------------------------
+_nextcloud_refresh_thread = None
+_nextcloud_refresh_lock = threading.Lock()
+
+def _nextcloud_refresh_worker(interval_seconds=60*60):
+    """Background worker that periodically refreshes Nextcloud tokens older than threshold."""
+    logger.info('Nextcloud refresh worker started, interval=%s', interval_seconds)
+    while True:
+        try:
+            accounts = _load_nextcloud_accounts()
+            now_ts = int(time.time())
+            threshold = int(os.getenv('NEXTCLOUD_REFRESH_THRESHOLD_SECONDS', str(24*60*60)))
+            for key, acct in list(accounts.items()):
+                fetched = int(acct.get('fetched_at') or 0)
+                if fetched == 0 or (now_ts - fetched) >= threshold:
+                    logger.info('Refreshing Nextcloud token for %s', key)
+                    refreshed = refresh_nextcloud_account(key)
+                    if refreshed:
+                        logger.info('Refreshed Nextcloud token for %s', key)
+            time.sleep(interval_seconds)
+        except Exception as exc:
+            logger.warning('Nextcloud refresh worker error: %s', exc)
+            time.sleep(60)
+
+
+def start_nextcloud_refresh_scheduler():
+    global _nextcloud_refresh_thread
+    with _nextcloud_refresh_lock:
+        if _nextcloud_refresh_thread and _nextcloud_refresh_thread.is_alive():
+            return
+        interval = int(os.getenv('NEXTCLOUD_REFRESH_INTERVAL_SECONDS', str(60*60)))
+        t = threading.Thread(target=_nextcloud_refresh_worker, args=(interval,), daemon=True)
+        t.start()
+        _nextcloud_refresh_thread = t
+
+
+# Start scheduler on app start
+try:
+    start_nextcloud_refresh_scheduler()
+except Exception as exc:
+    logger.warning('Could not start nextcloud refresh scheduler: %s', exc)
 
 
 
