@@ -11,6 +11,7 @@ export default function AdminPage() {
   const [oauthClientSecret, setOauthClientSecret] = useState('');
   const [oauthNextcloudUrl, setOauthNextcloudUrl] = useState('');
   const [oauthMessage, setOauthMessage] = useState('');
+  const [redirectUri, setRedirectUri] = useState('');
   const [loading, setLoading] = useState(true);
   const [newUser, setNewUser] = useState({ username: '', password: '', name: '' });
   const [resetUser, setResetUser] = useState({ username: '', password: '' });
@@ -41,6 +42,13 @@ export default function AdminPage() {
           setOauthClientId(data.client_id || '');
           setOauthNextcloudUrl(data.nextcloud_url || '');
         }
+      })
+      .catch(() => {});
+    // load redirect uri for OAuth app registration hint
+    fetch('/api/admin/nextcloud/redirect_uri')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.success) setRedirectUri(data.redirect_uri || '');
       })
       .catch(() => {});
   }, []);
@@ -208,6 +216,16 @@ export default function AdminPage() {
                 </div>
                 {oauthMessage ? <div className="message">{oauthMessage}</div> : null}
                 <div style={{marginTop:8, color:'#555', fontSize:13}}>{oauthCfg.client_id ? `Client ID gesetzt: ${oauthCfg.client_id}` : 'Client ID nicht gesetzt'} — {oauthCfg.has_secret ? 'Secret gesetzt' : 'Secret nicht gesetzt'}</div>
+                {redirectUri ? (
+                  <div style={{marginTop:10, fontSize:13}}>
+                    <div style={{fontWeight:600}}>OAuth Redirect-URI</div>
+                    <div style={{display:'flex', gap:8, alignItems:'center', marginTop:6}}>
+                      <code style={{padding:6, background:'#f6f6f6', borderRadius:6}}>{redirectUri}</code>
+                      <button className="btn" onClick={() => { navigator.clipboard.writeText(redirectUri); }}>Kopieren</button>
+                    </div>
+                    <div style={{color:'#666', marginTop:6, fontSize:12}}>Füge diese URI bei der Registrierung der Nextcloud-OAuth-App als Redirect-URI hinzu.</div>
+                  </div>
+                ) : null}
               </form>
             </div>
 

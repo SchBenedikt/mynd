@@ -866,18 +866,58 @@ def api_admin_rotate_nextcloud_key():
         return jsonify({'success': True})
 
 
+    def _load_oauth_config():
+        cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
+        if not os.path.exists(cfg_file):
+            return {}
+        try:
+            raw = open(cfg_file, 'rb').read()
+            key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
+            if not key:
+                digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
+                key = base64.urlsafe_b64encode(digest)
+            if isinstance(key, str):
+                key = key.encode('utf-8')
+            f = Fernet(key)
+            try:
+                dec = f.decrypt(raw)
+                return json.loads(dec.decode('utf-8')) or {}
+            except InvalidToken:
+                try:
+                    return json.loads(raw.decode('utf-8')) or {}
+                except Exception:
+                    return {}
+        except Exception:
+            return {}
+
+    def _save_oauth_config(cfg: dict) -> bool:
+        cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
+        try:
+            payload = json.dumps(cfg, ensure_ascii=False, indent=2).encode('utf-8')
+            key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
+            if not key:
+                digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
+                key = base64.urlsafe_b64encode(digest)
+            if isinstance(key, str):
+                key = key.encode('utf-8')
+            f = Fernet(key)
+            enc = f.encrypt(payload)
+            with open(cfg_file, 'wb') as fh:
+                fh.write(enc)
+            try:
+                os.chmod(cfg_file, 0o600)
+            except Exception:
+                logger.debug('Could not set restrictive file permissions on oauth_config.json')
+            return True
+        except Exception as exc:
+            logger.warning('Could not persist oauth config: %s', exc)
+            return False
+
+
     @app.route('/api/admin/nextcloud/config', methods=['GET'])
     @require_admin
     def api_admin_get_nextcloud_config():
-        cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
-        cfg = {}
-        if os.path.exists(cfg_file):
-            try:
-                with open(cfg_file, 'r', encoding='utf-8') as f:
-                    cfg = json.load(f) or {}
-            except Exception:
-                cfg = {}
-        # Do not return the secret value; only indicate whether it's set
+        cfg = _load_oauth_config()
         has_secret = bool(cfg.get('client_secret'))
         return jsonify({'success': True, 'client_id': cfg.get('client_id') or None, 'has_secret': has_secret, 'nextcloud_url': cfg.get('nextcloud_url') or None})
 
@@ -891,27 +931,22 @@ def api_admin_rotate_nextcloud_key():
         nextcloud_url = (data.get('nextcloud_url') or '').strip() or None
         if not client_id or not client_secret:
             return jsonify({'success': False, 'error': 'Missing client_id or client_secret'}), 400
-        cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
         cfg = {'client_id': client_id, 'client_secret': client_secret, 'nextcloud_url': nextcloud_url}
-        try:
-            with open(cfg_file, 'w', encoding='utf-8') as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-            try:
-                os.chmod(cfg_file, 0o600)
-            except Exception:
-                logger.debug('Could not set restrictive file permissions on oauth_config.json')
-            # set runtime env so new values are used without restart
-            os.environ['NEXTCLOUD_OAUTH_CLIENT_ID'] = client_id
-            os.environ['NEXTCLOUD_OAUTH_CLIENT_SECRET'] = client_secret
-            if nextcloud_url:
-                os.environ['NEXTCLOUD_URL'] = nextcloud_url
-            return jsonify({'success': True})
-        except Exception as exc:
-            logger.warning('Could not persist oauth config: %s', exc)
+        ok = _save_oauth_config(cfg)
+        if not ok:
             return jsonify({'success': False, 'error': 'Could not persist config'}), 500
-    except Exception as exc:
-        logger.warning('Key rotation failed: %s', exc)
-        return jsonify({'success': False, 'error': 'Rotation failed'}), 500
+        # set runtime env so new values are used without restart
+        os.environ['NEXTCLOUD_OAUTH_CLIENT_ID'] = client_id
+        os.environ['NEXTCLOUD_OAUTH_CLIENT_SECRET'] = client_secret
+        if nextcloud_url:
+            os.environ['NEXTCLOUD_URL'] = nextcloud_url
+        return jsonify({'success': True})
+
+    @app.route('/api/admin/nextcloud/redirect_uri', methods=['GET'])
+    @require_admin
+    def api_admin_nextcloud_redirect_uri():
+        callback = urljoin(request.url_root, url_for('api_auth_nextcloud_callback'))
+        return jsonify({'success': True, 'redirect_uri': callback})
 
 
 # --- Nextcloud refresh scheduler ------------------------------------------------------
