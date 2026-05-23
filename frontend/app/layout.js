@@ -30,14 +30,9 @@ export default function RootLayout({ children }) {
       </head>
       <body className={`${spaceGrotesk.variable} ${ibmPlexMono.variable}`}>
         <AuthGate>
-          <div className="topbar">
-            <div className="topbar-left" />
-            <div className="topbar-right">
-              <StatusPill />
-              <UserBar />
-            </div>
-          </div>
+          <UserBar />
           {children}
+          <StatusPill />
         </AuthGate>
       </body>
     </html>
