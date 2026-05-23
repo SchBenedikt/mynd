@@ -864,6 +864,51 @@ def api_admin_rotate_nextcloud_key():
         else:
             os.environ['NEXTCLOUD_ACCOUNTS_KEY'] = old
         return jsonify({'success': True})
+
+
+    @app.route('/api/admin/nextcloud/config', methods=['GET'])
+    @require_admin
+    def api_admin_get_nextcloud_config():
+        cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
+        cfg = {}
+        if os.path.exists(cfg_file):
+            try:
+                with open(cfg_file, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f) or {}
+            except Exception:
+                cfg = {}
+        # Do not return the secret value; only indicate whether it's set
+        has_secret = bool(cfg.get('client_secret'))
+        return jsonify({'success': True, 'client_id': cfg.get('client_id') or None, 'has_secret': has_secret, 'nextcloud_url': cfg.get('nextcloud_url') or None})
+
+
+    @app.route('/api/admin/nextcloud/config', methods=['POST'])
+    @require_admin
+    def api_admin_set_nextcloud_config():
+        data = request.get_json(force=True, silent=True) or {}
+        client_id = (data.get('client_id') or '').strip() or None
+        client_secret = (data.get('client_secret') or '').strip() or None
+        nextcloud_url = (data.get('nextcloud_url') or '').strip() or None
+        if not client_id or not client_secret:
+            return jsonify({'success': False, 'error': 'Missing client_id or client_secret'}), 400
+        cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
+        cfg = {'client_id': client_id, 'client_secret': client_secret, 'nextcloud_url': nextcloud_url}
+        try:
+            with open(cfg_file, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            try:
+                os.chmod(cfg_file, 0o600)
+            except Exception:
+                logger.debug('Could not set restrictive file permissions on oauth_config.json')
+            # set runtime env so new values are used without restart
+            os.environ['NEXTCLOUD_OAUTH_CLIENT_ID'] = client_id
+            os.environ['NEXTCLOUD_OAUTH_CLIENT_SECRET'] = client_secret
+            if nextcloud_url:
+                os.environ['NEXTCLOUD_URL'] = nextcloud_url
+            return jsonify({'success': True})
+        except Exception as exc:
+            logger.warning('Could not persist oauth config: %s', exc)
+            return jsonify({'success': False, 'error': 'Could not persist config'}), 500
     except Exception as exc:
         logger.warning('Key rotation failed: %s', exc)
         return jsonify({'success': False, 'error': 'Rotation failed'}), 500

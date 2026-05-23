@@ -6,6 +6,11 @@ import { useEffect, useState } from 'react';
 export default function AdminPage() {
   const [users, setUsers] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [oauthCfg, setOauthCfg] = useState({ client_id: null, has_secret: false, nextcloud_url: '' });
+  const [oauthClientId, setOauthClientId] = useState('');
+  const [oauthClientSecret, setOauthClientSecret] = useState('');
+  const [oauthNextcloudUrl, setOauthNextcloudUrl] = useState('');
+  const [oauthMessage, setOauthMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [newUser, setNewUser] = useState({ username: '', password: '', name: '' });
   const [resetUser, setResetUser] = useState({ username: '', password: '' });
@@ -25,6 +30,17 @@ export default function AdminPage() {
       .then((r) => r.json())
       .then((data) => {
         if (data && data.success) setAccounts(data.accounts || []);
+      })
+      .catch(() => {});
+    // load oauth config
+    fetch('/api/admin/nextcloud/config')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.success) {
+          setOauthCfg({ client_id: data.client_id || null, has_secret: !!data.has_secret, nextcloud_url: data.nextcloud_url || '' });
+          setOauthClientId(data.client_id || '');
+          setOauthNextcloudUrl(data.nextcloud_url || '');
+        }
       })
       .catch(() => {});
   }, []);
@@ -98,6 +114,24 @@ export default function AdminPage() {
     } catch (err) { setMessage('Netzwerkfehler'); }
   };
 
+  const saveOauthConfig = async (e) => {
+    e.preventDefault();
+    setOauthMessage('');
+    try {
+      const res = await fetch('/api/admin/nextcloud/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: oauthClientId, client_secret: oauthClientSecret, nextcloud_url: oauthNextcloudUrl }) });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setOauthMessage('OAuth-Konfiguration gespeichert');
+        setOauthClientSecret('');
+        setOauthCfg((s) => ({ ...s, client_id: oauthClientId, has_secret: true, nextcloud_url: oauthNextcloudUrl }));
+      } else {
+        setOauthMessage(data.error || 'Fehler');
+      }
+    } catch (err) {
+      setOauthMessage('Netzwerkfehler');
+    }
+  };
+
   return (
     <div className="admin-container">
       <h2 className="admin-title">Admin: Benutzerverwaltung</h2>
@@ -154,12 +188,28 @@ export default function AdminPage() {
                 ))}
               </ul>
             </div>
-
-            <form onSubmit={rotateKey} className="rotate-form">
-              <input placeholder="Neue NEXTCLOUD_ACCOUNTS_KEY (Base64)" value={rotateKeyValue} onChange={(e) => setRotateKeyValue(e.target.value)} />
-              <button type="submit" className="btn btn-primary">Key rotieren</button>
-            </form>
+              <form onSubmit={rotateKey} className="rotate-form">
+                <input placeholder="Neue NEXTCLOUD_ACCOUNTS_KEY (Base64)" value={rotateKeyValue} onChange={(e) => setRotateKeyValue(e.target.value)} />
+                <button type="submit" className="btn btn-primary">Key rotieren</button>
+              </form>
           </div>
+
+            <div className="card">
+              <h3>Nextcloud OAuth Konfiguration</h3>
+              <form onSubmit={saveOauthConfig} className="form-vertical">
+                <label className="label">Client ID</label>
+                <input placeholder="Client ID" value={oauthClientId} onChange={(e) => setOauthClientId(e.target.value)} />
+                <label className="label">Client Secret</label>
+                <input placeholder="Client Secret" value={oauthClientSecret} onChange={(e) => setOauthClientSecret(e.target.value)} />
+                <label className="label">Default Nextcloud URL</label>
+                <input placeholder="https://cloud.example.org" value={oauthNextcloudUrl} onChange={(e) => setOauthNextcloudUrl(e.target.value)} />
+                <div className="form-actions">
+                  <button type="submit" className="btn btn-primary">Speichern</button>
+                </div>
+                {oauthMessage ? <div className="message">{oauthMessage}</div> : null}
+                <div style={{marginTop:8, color:'#555', fontSize:13}}>{oauthCfg.client_id ? `Client ID gesetzt: ${oauthCfg.client_id}` : 'Client ID nicht gesetzt'} — {oauthCfg.has_secret ? 'Secret gesetzt' : 'Secret nicht gesetzt'}</div>
+              </form>
+            </div>
 
           <div className="card">
             <h3>Sicherheit & Hinweise</h3>
