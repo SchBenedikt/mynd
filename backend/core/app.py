@@ -486,6 +486,16 @@ def api_auth_logout():
     resp.set_cookie('mynd_token', '', expires=0)
     return resp
 
+
+# Quick health/check endpoint for Nextcloud OAuth configuration
+@app.route('/api/auth/nextcloud/check')
+def api_auth_nextcloud_check():
+    client_id = os.getenv('NEXTCLOUD_OAUTH_CLIENT_ID')
+    client_secret = os.getenv('NEXTCLOUD_OAUTH_CLIENT_SECRET')
+    if not client_id or not client_secret:
+        return jsonify({'success': False, 'error': 'Nextcloud OAuth client_id/secret not configured'}), 400
+    return jsonify({'success': True})
+
 # Nextcloud OAuth login start
 @app.route('/api/auth/nextcloud/login')
 def api_auth_nextcloud_login():

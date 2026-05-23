@@ -90,8 +90,21 @@ export default function AuthGate({ children }) {
 
   const startNextcloudFlow = (domain) => {
     const redirect = window.location.origin + window.location.pathname;
-    const url = `/api/auth/nextcloud/login?nextcloud_url=${encodeURIComponent(domain)}&redirect_to=${encodeURIComponent(redirect)}`;
-    window.location.assign(url);
+    const loginUrl = `/api/auth/nextcloud/login?nextcloud_url=${encodeURIComponent(domain)}&redirect_to=${encodeURIComponent(redirect)}`;
+    const checkUrl = `/api/auth/nextcloud/check?nextcloud_url=${encodeURIComponent(domain)}`;
+    // verify backend config first
+    fetch(checkUrl).then(async (r) => {
+      try {
+        const j = await r.json();
+        if (r.ok && j && j.success) {
+          window.location.assign(loginUrl);
+        } else {
+          setLoginError(j && j.error ? String(j.error) : 'Nextcloud OAuth nicht konfiguriert');
+        }
+      } catch (err) {
+        setLoginError('Fehler beim Prüfen der Nextcloud-Konfiguration');
+      }
+    }).catch(() => setLoginError('Fehler beim Prüfen der Nextcloud-Konfiguration'));
   };
 
   const onNcSubmit = (ev) => {
@@ -151,7 +164,7 @@ export default function AuthGate({ children }) {
         </div>
 
         <div className="auth-footer">
-          <small>Hinweis: Dies ist eine einfache lokale Anmeldung. Für echten Mehrbenutzer-Betrieb sollte ein Backend-gestütztes Authentifizierungsverfahren (z. B. OAuth, NextAuth oder JWT) eingerichtet werden.</small>
+          <small>Das Backend unterstützt serverseitige Authentifizierung (JWT + Nextcloud OAuth). Verwende "Login" oder "Mit Nextcloud anmelden"; Admin-Einstellungen findest du in der Admin-UI.</small>
         </div>
       </div>
     </div>
