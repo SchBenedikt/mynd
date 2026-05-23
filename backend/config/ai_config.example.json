@@ -2,6 +2,7 @@
   "provider": "ollama",
   "base_url": "http://127.0.0.1:11434",
   "model": "gemma2:latest",
+  "embedding_model": "nomic-embed-text",
   "immich_url_default": "",
   "immich_api_key_default": "",
   "vector_db_enabled": true,

@@ -1435,6 +1435,53 @@ Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-
 
         return sorted(set(models))
 
+    def embed(self, texts, model: str = None, timeout: int = 30):
+        """Request embeddings from Ollama embedding endpoint as a fallback.
+
+        Returns a list of embedding vectors (lists of floats) or raises on error.
+        """
+        if not texts:
+            return []
+
+        model_to_use = (model or self.model) or os.getenv('MYND_EMBEDDING_MODEL')
+        if not model_to_use:
+            raise ValueError('No embedding model specified for Ollama embed call')
+
+        url = f"{self.base_url}/api/embed"
+        payload = {
+            'model': model_to_use,
+            'input': texts
+        }
+
+        try:
+            resp = requests.post(url, json=payload, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Expecting either {'embeddings': [...]} or {'embedding': [...]} depending on endpoint/version.
+            if isinstance(data, dict) and 'embeddings' in data:
+                return data['embeddings']
+
+            if isinstance(data, dict) and 'embedding' in data and isinstance(data['embedding'], list):
+                return [data['embedding']] if texts else []
+
+            if isinstance(data, dict) and 'data' in data and isinstance(data['data'], list):
+                out = []
+                for item in data['data']:
+                    if isinstance(item, dict) and 'embedding' in item:
+                        out.append(item['embedding'])
+                    elif isinstance(item, (list, tuple)):
+                        out.append(list(item))
+                return out
+
+            # Last resort: try to interpret top-level list
+            if isinstance(data, list):
+                return data
+
+            raise RuntimeError('Unexpected embeddings response format from Ollama')
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f'Ollama embed request failed: {e}')
+
 def load_ai_config() -> dict:
     """Lädt AI-Konfiguration aus Datei (oder Defaults) und wendet sie an."""
     config = {
@@ -1442,7 +1489,7 @@ def load_ai_config() -> dict:
         # Keep example default short to avoid accidental secret-detection across diffs
         'base_url': os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1').rstrip('/'),
         'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest'),
-        'embedding_model': os.getenv('MYND_EMBEDDING_MODEL', 'all-MiniLM-L6-v2'),
+        'embedding_model': os.getenv('MYND_EMBEDDING_MODEL', 'nomic-embed-text'),
         'immich_url_default': '',
         'immich_api_key_default': '',
         'vector_db_enabled': True,
@@ -1512,7 +1559,7 @@ def load_ai_config() -> dict:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
 
     ollama_client.update_config(config['base_url'], config['model'])
-    os.environ['MYND_EMBEDDING_MODEL'] = str(config.get('embedding_model', 'all-MiniLM-L6-v2')).strip() or 'all-MiniLM-L6-v2'
+    os.environ['MYND_EMBEDDING_MODEL'] = str(config.get('embedding_model', 'nomic-embed-text')).strip() or 'nomic-embed-text'
     kb = globals().get('knowledge_base')
     if kb and getattr(kb, 'search_engine', None):
         try:
@@ -1538,7 +1585,7 @@ def save_ai_config(base_url: str, model: str, **overrides: Any) -> None:
     config['base_url'] = base_url.rstrip('/')
     config['model'] = model
     if 'embedding_model' in overrides:
-        config['embedding_model'] = str(overrides['embedding_model']).strip() or 'all-MiniLM-L6-v2'
+        config['embedding_model'] = str(overrides['embedding_model']).strip() or 'nomic-embed-text'
 
     allowed_overrides = {
         'tts_provider',
@@ -1560,7 +1607,7 @@ def save_ai_config(base_url: str, model: str, **overrides: Any) -> None:
     with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
 
-    os.environ['MYND_EMBEDDING_MODEL'] = str(config.get('embedding_model', 'all-MiniLM-L6-v2')).strip() or 'all-MiniLM-L6-v2'
+    os.environ['MYND_EMBEDDING_MODEL'] = str(config.get('embedding_model', 'nomic-embed-text')).strip() or 'nomic-embed-text'
     kb = globals().get('knowledge_base')
     if kb and getattr(kb, 'search_engine', None):
         try:
@@ -4247,10 +4294,15 @@ def knowledge_status():
     try:
         if knowledge_base.search_engine:
             stats = knowledge_base.search_engine.get_stats()
+            embedding_coverage = stats.get('embedding_coverage', {})
             return jsonify({
                 'chunks_loaded': stats.get('chunks', 0),
                 'documents_count': stats.get('documents', 0),
                 'embeddings_count': stats.get('embeddings', 0),
+                'generated_embeddings': embedding_coverage.get('generated_embeddings', stats.get('embeddings', 0)),
+                'missing_embeddings': embedding_coverage.get('missing_embeddings', 0),
+                'completion_percentage': embedding_coverage.get('completion_percentage', 0),
+                'embeddings_complete': embedding_coverage.get('complete', False),
                 'index_size': stats.get('index_size', 0),
                 'total_words': stats.get('total_words', 0),
                 'file_types': stats.get('file_types', {}),
@@ -4529,7 +4581,7 @@ def update_embeddings():
         if not knowledge_base.search_engine:
             return jsonify({'error': 'Semantic search not available'}), 400
         
-        knowledge_base.search_engine.update_missing_embeddings()
+        knowledge_base.search_engine.rebuild_index()
         
         return jsonify({
             'status': 'success',
@@ -4624,7 +4676,7 @@ def ai_config():
                 'provider': 'ollama',
                 'base_url': ollama_client.base_url,
                 'model': ollama_client.model,
-                'embedding_model': persisted.get('embedding_model', 'all-MiniLM-L6-v2'),
+                'embedding_model': persisted.get('embedding_model', 'nomic-embed-text'),
                 'connected': ollama_client.check_connection(),
                 'tts_provider': persisted.get('tts_provider', 'browser'),
                 'browser_tts_voice_uri': persisted.get('browser_tts_voice_uri', ''),
@@ -4665,7 +4717,7 @@ def ai_config():
         gemini_tts_audio_encoding = str(data.get('gemini_tts_audio_encoding', existing.get('gemini_tts_audio_encoding', 'MP3'))).strip().upper() or 'MP3'
         gemini_live_model = str(data.get('gemini_live_model', existing.get('gemini_live_model', 'gemini-3.1-flash-live-preview'))).strip() or 'gemini-3.1-flash-live-preview'
         gemini_live_voice = str(data.get('gemini_live_voice', existing.get('gemini_live_voice', 'Zephyr'))).strip() or 'Zephyr'
-        embedding_model = str(data.get('embedding_model', existing.get('embedding_model', 'all-MiniLM-L6-v2'))).strip() or 'all-MiniLM-L6-v2'
+        embedding_model = str(data.get('embedding_model', existing.get('embedding_model', 'nomic-embed-text'))).strip() or 'nomic-embed-text'
 
         ollama_client.update_config(base_url, model)
         save_ai_config(

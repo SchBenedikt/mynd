@@ -15,15 +15,30 @@ class SimpleSearchEngine:
 
     def __init__(self, db_path: str = "knowledge_base.db"):
         self.db = KnowledgeDatabase(db_path)
-        self.embedding_model_name = os.getenv('MYND_EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
+        self.embedding_model_name = os.getenv('MYND_EMBEDDING_MODEL', 'nomic-embed-text')
         self.embedding_model = None
         self._embedding_model_loaded = False
+        self._use_ollama = False
         logger.info("Simple search engine initialized")
 
     def _ensure_embedding_model_loaded(self) -> bool:
         """Lazy-load the embedding model and keep startup cheap if it is unavailable."""
         if self._embedding_model_loaded:
             return self.embedding_model is not None
+        # First check if Ollama is available and prefer it as a remote embedder.
+        try:
+            from backend.core import app as core_app
+            ollama = getattr(core_app, 'ollama_client', None)
+            if ollama and ollama.check_connection():
+                # Use Ollama as embedding provider (no local model loaded)
+                self._use_ollama = True
+                self.embedding_model = None
+                self._embedding_model_loaded = True
+                logger.info("Using Ollama as embedding provider: %s", ollama.base_url)
+                return True
+        except Exception:
+            # ignore and fall back to local model attempt
+            pass
 
         self._embedding_model_loaded = True
         try:
@@ -43,6 +58,22 @@ class SimpleSearchEngine:
             return np.empty((0, 0), dtype='float32')
 
         if not self._ensure_embedding_model_loaded():
+            # Try to use Ollama as a remote embedding provider if available
+            try:
+                # import here to avoid circular imports at module load time
+                from backend.core import app as core_app
+                ollama = getattr(core_app, 'ollama_client', None)
+                if ollama and ollama.check_connection():
+                    embeddings = ollama.embed(texts, model=self.embedding_model_name)
+                    arr = np.asarray(embeddings, dtype='float32')
+                    if arr.size == 0:
+                        return np.empty((0, 0), dtype='float32')
+                    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+                    arr = arr / np.clip(norms, 1e-12, None)
+                    return arr
+            except Exception as exc:
+                logger.warning("Ollama embedding fallback failed: %s", exc)
+
             return np.empty((0, 0), dtype='float32')
 
         embeddings = self.embedding_model.encode(texts, batch_size=16, show_progress_bar=False)
@@ -233,11 +264,13 @@ class SimpleSearchEngine:
     def get_stats(self) -> Dict:
         """Get search statistics"""
         stats = self.db.get_document_stats()
+        embedding_coverage = self.db.get_embedding_coverage(self.embedding_model_name)
         stats.update({
             'index_size': stats.get('chunks', 0),
             'model_name': self.embedding_model_name,
             'dimension': 384,
             'model_loaded': self.embedding_model is not None,
-            'search_type': 'hybrid' if self.embedding_model is not None else 'fulltext'
+            'search_type': 'hybrid' if self.embedding_model is not None else 'fulltext',
+            'embedding_coverage': embedding_coverage,
         })
         return stats

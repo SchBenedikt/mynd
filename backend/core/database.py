@@ -403,6 +403,46 @@ class KnowledgeDatabase:
         
         return stats
 
+    def get_embedding_coverage(self, model_name: str) -> Dict:
+        """Get embedding coverage for the active model."""
+        cursor = self.connection.cursor()
+
+        cursor.execute("SELECT COUNT(*) as count FROM chunks")
+        total_chunks = cursor.fetchone()['count']
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) as count
+            FROM chunks c
+            JOIN embeddings e ON c.embedding_id = e.id
+            WHERE e.model_name = ?
+            """,
+            (model_name,)
+        )
+        embeddings_count = cursor.fetchone()['count']
+
+        cursor.execute(
+            """
+            SELECT COUNT(*) as count
+            FROM chunks c
+            LEFT JOIN embeddings e ON c.embedding_id = e.id
+            WHERE e.id IS NULL OR e.model_name != ?
+            """,
+            (model_name,)
+        )
+        missing_count = cursor.fetchone()['count']
+
+        percentage = round((embeddings_count / total_chunks) * 100, 2) if total_chunks else 0
+
+        return {
+            'model_name': model_name,
+            'total_chunks': total_chunks,
+            'generated_embeddings': embeddings_count,
+            'missing_embeddings': missing_count,
+            'completion_percentage': percentage,
+            'complete': total_chunks > 0 and missing_count == 0,
+        }
+
     def record_index_run(self, started_at: float, ended_at: float, documents_count: int, chunks_count: int, errors: str = None, scope: str = None) -> int:
         """Record an indexing run with basic statistics."""
         cursor = self.connection.cursor()

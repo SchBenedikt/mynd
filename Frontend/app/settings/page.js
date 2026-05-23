@@ -47,6 +47,55 @@ const shellArg = (value, fallback = '') => {
   return resolved || fallback;
 };
 
+const EMBEDDING_MODEL_HINTS = [
+  'embed',
+  'embedding',
+  'all-minilm',
+  'bge',
+  'mxbai',
+  'snowflake-arctic-embed',
+  'nomic-embed',
+  'gte',
+  'e5',
+  'jina-embeddings',
+  'paraphrase-multilingual'
+];
+
+const normalizeModelName = (model) => String(model || '').trim();
+
+const getModelBaseName = (model) => normalizeModelName(model).toLowerCase().split(':')[0];
+
+const resolveModelOption = (models, preferredModel) => {
+  const uniqueModels = uniqueSortedModels(models);
+  const preferredName = normalizeModelName(preferredModel);
+  if (!preferredName) return '';
+
+  const exactMatch = uniqueModels.find((model) => model === preferredName);
+  if (exactMatch) return exactMatch;
+
+  const preferredBase = getModelBaseName(preferredName);
+  const baseMatch = uniqueModels.find((model) => getModelBaseName(model) === preferredBase);
+  return baseMatch || preferredName;
+};
+
+const isEmbeddingModel = (model) => {
+  const normalized = normalizeModelName(model).toLowerCase();
+  return EMBEDDING_MODEL_HINTS.some((hint) => normalized.includes(hint));
+};
+
+const uniqueSortedModels = (models) => {
+  return Array.from(new Set((models || []).map(normalizeModelName).filter(Boolean)))
+    .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+};
+
+const splitModelOptions = (models) => {
+  const uniqueModels = uniqueSortedModels(models);
+  return {
+    chatModels: uniqueModels.filter((model) => !isEmbeddingModel(model)),
+    embeddingModels: uniqueModels.filter((model) => isEmbeddingModel(model))
+  };
+};
+
 const buildTalkWebhookRequest = async ({ roomId, botId, secret, language }) => {
   const normalizedRoomId = String(roomId || 'mychannel').trim() || 'mychannel';
   const normalizedBotId = String(botId || 'Mynd Bot').trim() || 'Mynd Bot';
@@ -176,7 +225,8 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('config');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [source, setSource] = useState('auto');
-  const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
+  const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown', embeddings: 'unknown' });
+  const [embeddingCoverage, setEmbeddingCoverage] = useState(null);
   const [displayName, setDisplayName] = useState('');
   const [speechSynthesisSupported, setSpeechSynthesisSupported] = useState(false);
   const [availableVoices, setAvailableVoices] = useState([]);
@@ -195,7 +245,7 @@ export default function SettingsPage() {
   const [aiPort, setAiPort] = useState('11434');
   const [aiModel, setAiModel] = useState('');
   const [aiModels, setAiModels] = useState([]);
-  const [embeddingModel, setEmbeddingModel] = useState('all-MiniLM-L6-v2');
+  const [embeddingModel, setEmbeddingModel] = useState('nomic-embed-text');
   const [aiStatus, setAiStatus] = useState('');
   const [immichUrlDefault, setImmichUrlDefault] = useState('');
   const [immichApiKeyDefault, setImmichApiKeyDefault] = useState('');
@@ -396,6 +446,18 @@ export default function SettingsPage() {
   const visibleVoices = language === 'de'
     ? availableVoices.filter((voice) => String(voice.lang || '').toLowerCase().startsWith('de'))
     : availableVoices;
+  const { chatModels: aiModelOptions, embeddingModels: embeddingModelOptions } = splitModelOptions(aiModels);
+  const embeddingCoverageLabel = embeddingCoverage
+    ? `${embeddingCoverage.generated_embeddings || 0}/${embeddingCoverage.total_chunks || 0}`
+    : '';
+  const embeddingCoverageDetail = embeddingCoverage
+    ? embeddingCoverage.complete
+      ? tr('Alle Embeddings sind generiert.', 'All embeddings are generated.')
+      : tr(
+          `${embeddingCoverage.missing_embeddings || 0} Embeddings fehlen noch.`,
+          `${embeddingCoverage.missing_embeddings || 0} embeddings are still missing.`
+        )
+    : tr('Embeddings-Status wird geladen...', 'Loading embedding status...');
   const geminiVoices = [
     'Achernar', 'Achird', 'Algenib', 'Algieba', 'Alnilam', 'Aoede', 'Autonoe', 'Callirrhoe', 'Charon', 'Despina',
     'Enceladus', 'Erinome', 'Fenrir', 'Gacrux', 'Iapetus', 'Kore', 'Laomedeia', 'Leda', 'Orus', 'Pulcherrima',
@@ -429,6 +491,13 @@ export default function SettingsPage() {
       clearInterval(statsInterval);
     };
   }, []);
+
+  useEffect(() => {
+    if (!aiModels.length) return;
+
+    setAiModel((currentValue) => resolveModelOption(aiModelOptions, currentValue));
+    setEmbeddingModel((currentValue) => resolveModelOption(embeddingModelOptions, currentValue));
+  }, [aiModels]);
 
   useEffect(() => {
     try {
@@ -708,7 +777,7 @@ export default function SettingsPage() {
       setAiHost(url.hostname);
       setAiPort(url.port || '11434');
       setAiModel(config.model);
-      setEmbeddingModel(String(config.embedding_model || 'all-MiniLM-L6-v2'));
+      setEmbeddingModel(String(config.embedding_model || 'nomic-embed-text'));
 
       const hasServerTtsProvider = Object.prototype.hasOwnProperty.call(config, 'tts_provider');
       const storedTtsProvider = typeof window !== 'undefined'
@@ -741,7 +810,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch(`${API_BASE}/api/ollama/models`);
       const data = await res.json();
-      setAiModels(data.models || []);
+      setAiModels(Array.isArray(data.models) ? data.models : []);
     } catch (err) {
       console.error('Error loading models:', err);
     }
@@ -1076,12 +1145,26 @@ export default function SettingsPage() {
       ]);
       const ollama = await ollamaRes.json();
       const kb = await kbRes.json();
+      const totalChunks = Number(kb.chunks_loaded || 0);
+      const generatedEmbeddings = Number(kb.generated_embeddings ?? kb.embeddings_count ?? 0);
+      const missingEmbeddings = Number(kb.missing_embeddings ?? Math.max(totalChunks - generatedEmbeddings, 0));
+      const embeddingsComplete = Boolean(kb.embeddings_complete ?? (totalChunks > 0 && missingEmbeddings === 0));
       setHealth({
         ollama: ollama.connected ? 'ok' : 'error',
-        kb: kb.chunks_loaded > 0 ? 'ok' : 'error'
+        kb: kb.chunks_loaded > 0 ? 'ok' : 'error',
+        embeddings: kb.semantic_search_available ? (embeddingsComplete ? 'ok' : 'loading') : 'error'
+      });
+      setEmbeddingCoverage({
+        model: kb.model_name || '',
+        total_chunks: totalChunks,
+        generated_embeddings: generatedEmbeddings,
+        missing_embeddings: missingEmbeddings,
+        completion_percentage: Number(kb.completion_percentage || (totalChunks ? Math.round((generatedEmbeddings / totalChunks) * 100) : 0)),
+        complete: embeddingsComplete
       });
     } catch (err) {
-      setHealth({ ollama: 'error', kb: 'error' });
+      setHealth({ ollama: 'error', kb: 'error', embeddings: 'error' });
+      setEmbeddingCoverage(null);
     }
   };
 
@@ -1787,6 +1870,17 @@ export default function SettingsPage() {
                 <span className="status-value">{health.kb === 'ok' ? 'Verbunden' : 'Offline'}</span>
               </div>
             </div>
+            <div className={`status-badge ${health.embeddings}`}>
+              <div className={`status-dot ${health.embeddings}`}></div>
+              <div className="status-meta">
+                <span className="status-label">Embeddings</span>
+                <span className="status-value">
+                  {embeddingCoverage
+                    ? `${embeddingCoverageLabel}${embeddingCoverage.complete ? ' · komplett' : ' · offen'}`
+                    : 'Unbekannt'}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1807,6 +1901,12 @@ export default function SettingsPage() {
               <div className="settings-panel">
                 <div className="panel-section">
                   <div className="section-title">{t('aiModel')}</div>
+                  <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1rem 0'}}>
+                    {tr(
+                      'Das KI-Modell beantwortet Fragen und schreibt Text. Das Embedding-Modell erzeugt Vektoren für semantische Suche und Ähnlichkeit.',
+                      'The chat model answers questions and writes text. The embedding model creates vectors for semantic search and similarity.'
+                    )}
+                  </p>
                   <div className="input-group">
                     <label>{t('protocol')}</label>
                     <select value={aiProtocol} onChange={(e) => setAiProtocol(e.target.value)}>
@@ -1823,20 +1923,29 @@ export default function SettingsPage() {
                     <input type="text" value={aiPort} onChange={(e) => setAiPort(e.target.value)} />
                   </div>
                   <div className="input-group">
-                    <label>{t('model')}</label>
+                    <label>{tr('Chat-/KI-Modell', 'Chat / AI model')}</label>
                     <select value={aiModel} onChange={(e) => setAiModel(e.target.value)}>
                       <option value="">{t('selectModel')}</option>
-                      {aiModels.map(model => <option key={model} value={model}>{model}</option>)}
+                      {aiModelOptions.map(model => <option key={model} value={model}>{model}</option>)}
                     </select>
                   </div>
                   <div className="input-group">
-                    <label>Embedding-Modell</label>
-                    <input
-                      type="text"
-                      value={embeddingModel}
-                      onChange={(e) => setEmbeddingModel(e.target.value)}
-                      placeholder="all-MiniLM-L6-v2"
-                    />
+                    <label>{tr('Embedding-Modell', 'Embedding model')}</label>
+                    <select value={embeddingModel} onChange={(e) => setEmbeddingModel(e.target.value)}>
+                      <option value="">{tr('Embedding-Modell auswählen...', 'Select embedding model...')}</option>
+                      {embeddingModelOptions.map(model => <option key={model} value={model}>{model}</option>)}
+                    </select>
+                    <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.25rem'}}>
+                      {tr(
+                        'Für semantische Suche und Ähnlichkeit. In der Regel ist das ein separates Modell vom Chat-Modell.',
+                        'Used for semantic search and similarity. This is usually a separate model from the chat model.'
+                      )}
+                    </small>
+                    <small style={{color: 'var(--muted)', display: 'block', marginTop: '0.35rem'}}>
+                      {embeddingCoverage
+                        ? `${embeddingCoverageDetail} ${embeddingCoverage.model ? tr('Aktives Modell: ', 'Active model: ') + embeddingCoverage.model : ''}`
+                        : tr('Der Status wird nach dem Laden der Konfiguration angezeigt.', 'The status is shown after the configuration is loaded.')}
+                    </small>
                   </div>
                   <div className="button-group">
                     <button className="btn primary" onClick={saveAIConfig}>{t('save')}</button>
