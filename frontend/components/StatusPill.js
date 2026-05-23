@@ -39,11 +39,20 @@ export default function StatusPill() {
     return 'var(--status-red, #ef4444)';
   };
 
+  const isOnline = (s) => {
+    if (!s) return false;
+    const st = String(s).toLowerCase();
+    return ['online', 'ready', 'ok', 'connected'].includes(st);
+  };
+
   const logout = async () => {
     try { await fetch('/api/auth/logout', { method: 'POST' }); } catch(e) {}
     try { localStorage.removeItem('mynd_user_v1'); localStorage.removeItem('mynd_token_v1'); } catch(e){}
     window.location.reload();
   };
+
+  // If both services are offline (or unknown) and no user is logged in, hide the panel entirely
+  if (!isOnline(status.ollama) && !isOnline(status.kb) && !user) return null;
 
   return (
     <div className="status-widget" aria-hidden>
