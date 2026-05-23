@@ -195,6 +195,7 @@ export default function SettingsPage() {
   const [aiPort, setAiPort] = useState('11434');
   const [aiModel, setAiModel] = useState('');
   const [aiModels, setAiModels] = useState([]);
+  const [embeddingModel, setEmbeddingModel] = useState('all-MiniLM-L6-v2');
   const [aiStatus, setAiStatus] = useState('');
   const [immichUrlDefault, setImmichUrlDefault] = useState('');
   const [immichApiKeyDefault, setImmichApiKeyDefault] = useState('');
@@ -707,6 +708,7 @@ export default function SettingsPage() {
       setAiHost(url.hostname);
       setAiPort(url.port || '11434');
       setAiModel(config.model);
+      setEmbeddingModel(String(config.embedding_model || 'all-MiniLM-L6-v2'));
 
       const hasServerTtsProvider = Object.prototype.hasOwnProperty.call(config, 'tts_provider');
       const storedTtsProvider = typeof window !== 'undefined'
@@ -920,6 +922,7 @@ export default function SettingsPage() {
       const payload = {
         base_url: baseUrl,
         model: aiModel,
+        embedding_model: embeddingModel,
         tts_provider: ttsProvider,
         browser_tts_voice_uri: selectedVoiceUri,
         gemini_tts_model: geminiTtsModel,
@@ -950,6 +953,24 @@ export default function SettingsPage() {
         updateStatus();
       } else {
         setAiStatus(`Error: ${data?.error || tr('Fehler beim Speichern', 'Error saving')}`);
+      }
+    } catch (err) {
+      setAiStatus('Error: ' + err.message);
+    }
+  };
+
+  const updateEmbeddings = async () => {
+    try {
+      setAiStatus(tr('Embeddings werden aktualisiert...', 'Updating embeddings...'));
+      const res = await fetch(`${API_BASE}/api/knowledge/update-embeddings`, {
+        method: 'POST'
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data?.status === 'success') {
+        setAiStatus(tr('Embeddings erfolgreich aktualisiert', 'Embeddings updated successfully'));
+      } else {
+        setAiStatus(`Error: ${data?.error || tr('Embeddings konnten nicht aktualisiert werden', 'Could not update embeddings')}`);
       }
     } catch (err) {
       setAiStatus('Error: ' + err.message);
@@ -1808,8 +1829,18 @@ export default function SettingsPage() {
                       {aiModels.map(model => <option key={model} value={model}>{model}</option>)}
                     </select>
                   </div>
+                  <div className="input-group">
+                    <label>Embedding-Modell</label>
+                    <input
+                      type="text"
+                      value={embeddingModel}
+                      onChange={(e) => setEmbeddingModel(e.target.value)}
+                      placeholder="all-MiniLM-L6-v2"
+                    />
+                  </div>
                   <div className="button-group">
                     <button className="btn primary" onClick={saveAIConfig}>{t('save')}</button>
+                    <button className="btn secondary" onClick={updateEmbeddings}>Embeddings aktualisieren</button>
                   </div>
                   {aiStatus && <div className="status-text">{aiStatus}</div>}
                 </div>

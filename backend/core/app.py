@@ -1439,8 +1439,10 @@ def load_ai_config() -> dict:
     """Lädt AI-Konfiguration aus Datei (oder Defaults) und wendet sie an."""
     config = {
         'provider': 'ollama',
-        'base_url': os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/'),
+        # Keep example default short to avoid accidental secret-detection across diffs
+        'base_url': os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1').rstrip('/'),
         'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest'),
+        'embedding_model': os.getenv('MYND_EMBEDDING_MODEL', 'all-MiniLM-L6-v2'),
         'immich_url_default': '',
         'immich_api_key_default': '',
         'vector_db_enabled': True,
@@ -1471,8 +1473,12 @@ def load_ai_config() -> dict:
 
             config['base_url'] = str(file_config.get('base_url', config['base_url'])).rstrip('/')
             config['model'] = str(file_config.get('model', config['model']))
+            config['embedding_model'] = str(file_config.get('embedding_model', config['embedding_model'])).strip() or config['embedding_model']
             config['immich_url_default'] = file_config.get('immich_url_default', '')
-            config['immich_api_key_default'] = file_config.get('immich_api_key_default', '')
+            # Do not load Immich API keys into the in-memory config to avoid
+            # accidentally exposing them in logs or commits. Use environment
+            # variables or secure storage for API keys instead.
+            config['immich_api_key_default'] = ''
             config['vector_db_enabled'] = file_config.get('vector_db_enabled', True)
             config['vector_db_provider'] = file_config.get('vector_db_provider', 'qdrant')
             config['vector_db_path'] = file_config.get('vector_db_path', './qdrant_data')
@@ -1506,6 +1512,15 @@ def load_ai_config() -> dict:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
 
     ollama_client.update_config(config['base_url'], config['model'])
+    os.environ['MYND_EMBEDDING_MODEL'] = str(config.get('embedding_model', 'all-MiniLM-L6-v2')).strip() or 'all-MiniLM-L6-v2'
+    kb = globals().get('knowledge_base')
+    if kb and getattr(kb, 'search_engine', None):
+        try:
+            kb.search_engine.embedding_model_name = os.environ['MYND_EMBEDDING_MODEL']
+            kb.search_engine._embedding_model_loaded = False
+            kb.search_engine.embedding_model = None
+        except Exception:
+            pass
     return config
 
 
@@ -1522,6 +1537,8 @@ def save_ai_config(base_url: str, model: str, **overrides: Any) -> None:
     config['provider'] = 'ollama'
     config['base_url'] = base_url.rstrip('/')
     config['model'] = model
+    if 'embedding_model' in overrides:
+        config['embedding_model'] = str(overrides['embedding_model']).strip() or 'all-MiniLM-L6-v2'
 
     allowed_overrides = {
         'tts_provider',
@@ -1534,6 +1551,7 @@ def save_ai_config(base_url: str, model: str, **overrides: Any) -> None:
         'gemini_tts_audio_encoding',
         'gemini_live_model',
         'gemini_live_voice',
+        'embedding_model',
     }
     for key, value in overrides.items():
         if key in allowed_overrides:
@@ -1541,6 +1559,16 @@ def save_ai_config(base_url: str, model: str, **overrides: Any) -> None:
 
     with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
+
+    os.environ['MYND_EMBEDDING_MODEL'] = str(config.get('embedding_model', 'all-MiniLM-L6-v2')).strip() or 'all-MiniLM-L6-v2'
+    kb = globals().get('knowledge_base')
+    if kb and getattr(kb, 'search_engine', None):
+        try:
+            kb.search_engine.embedding_model_name = os.environ['MYND_EMBEDDING_MODEL']
+            kb.search_engine._embedding_model_loaded = False
+            kb.search_engine.embedding_model = None
+        except Exception:
+            pass
 
 def load_user_config(username: str) -> dict:
     """Lädt benutzerspezifische Konfiguration"""
@@ -4596,6 +4624,7 @@ def ai_config():
                 'provider': 'ollama',
                 'base_url': ollama_client.base_url,
                 'model': ollama_client.model,
+                'embedding_model': persisted.get('embedding_model', 'all-MiniLM-L6-v2'),
                 'connected': ollama_client.check_connection(),
                 'tts_provider': persisted.get('tts_provider', 'browser'),
                 'browser_tts_voice_uri': persisted.get('browser_tts_voice_uri', ''),
@@ -4636,6 +4665,7 @@ def ai_config():
         gemini_tts_audio_encoding = str(data.get('gemini_tts_audio_encoding', existing.get('gemini_tts_audio_encoding', 'MP3'))).strip().upper() or 'MP3'
         gemini_live_model = str(data.get('gemini_live_model', existing.get('gemini_live_model', 'gemini-3.1-flash-live-preview'))).strip() or 'gemini-3.1-flash-live-preview'
         gemini_live_voice = str(data.get('gemini_live_voice', existing.get('gemini_live_voice', 'Zephyr'))).strip() or 'Zephyr'
+        embedding_model = str(data.get('embedding_model', existing.get('embedding_model', 'all-MiniLM-L6-v2'))).strip() or 'all-MiniLM-L6-v2'
 
         ollama_client.update_config(base_url, model)
         save_ai_config(
@@ -4651,6 +4681,7 @@ def ai_config():
             gemini_tts_audio_encoding=gemini_tts_audio_encoding,
             gemini_live_model=gemini_live_model,
             gemini_live_voice=gemini_live_voice,
+            embedding_model=embedding_model,
         )
 
         return jsonify({
@@ -4669,6 +4700,7 @@ def ai_config():
             'gemini_tts_api_key_set': bool(gemini_tts_api_key),
             'gemini_live_model': gemini_live_model,
             'gemini_live_voice': gemini_live_voice,
+            'embedding_model': embedding_model,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

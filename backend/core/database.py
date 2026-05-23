@@ -358,6 +358,21 @@ class KnowledgeDatabase:
         
         result = cursor.fetchone()
         return dict(result) if result else None
+
+    def get_chunks_with_documents(self, limit: int = 100) -> List[Dict]:
+        """Return recent chunks with document metadata for semantic fallback searches."""
+        cursor = self.connection.cursor()
+
+        cursor.execute("""
+            SELECT c.id, c.content, c.chunk_index, c.embedding_id,
+                   d.name as doc_name, d.path as doc_path, d.file_type
+            FROM chunks c
+            JOIN documents d ON c.document_id = d.id
+            ORDER BY c.created_at DESC
+            LIMIT ?
+        """, (limit,))
+
+        return [dict(row) for row in cursor.fetchall()]
     
     def get_document_stats(self) -> Dict:
         """Get database statistics"""
