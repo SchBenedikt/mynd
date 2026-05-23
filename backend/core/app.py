@@ -18,6 +18,10 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from typing import Optional, List, Dict, Any
 import hmac
 import hashlib
+import base64
+import json as _json
+from flask import make_response
+from passlib.hash import bcrypt
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -272,6 +276,388 @@ def _requested_briefing_kind(prompt: str) -> str:
     return 'daily'
 
 
+def _format_briefing_for_chat(item: Dict[str, Any]) -> str:
+    """Return a more readable, chat-friendly version of a briefing payload."""
+    title = str(item.get('title') or 'Briefing').strip()
+    kind = str(item.get('kind') or 'daily').strip().lower()
+    content = str(item.get('content') or '').strip()
+
+    header = '🌅' if kind == 'daily' else '🗓️'
+    section_map = {
+        'Kurzüberblick:': '📌 Kurzüberblick',
+        'Wichtige Aufgaben:': '✅ Wichtige Aufgaben',
+        'Termine heute:': '📅 Termine heute',
+        'Relevante E-Mails:': '✉️ Relevante E-Mails',
+        'Empfehlung für den Start:': '🧭 Empfehlung für den Start',
+        'Wochenüberblick:': '📊 Wochenüberblick',
+        'Fokus-Aufgaben für diese Woche:': '✅ Fokus-Aufgaben für diese Woche',
+        'Wichtige Termine der Woche:': '📅 Wichtige Termine der Woche',
+        'Vorschlag für die Wochenplanung:': '🧭 Vorschlag für die Wochenplanung',
+    }
+
+    lines: List[str] = [f"{header} {title}", '']
+    for raw_line in content.splitlines():
+        line = str(raw_line or '').rstrip()
+        stripped = line.strip()
+
+        if not stripped:
+            if lines and lines[-1] != '':
+                lines.append('')
+            continue
+
+        if stripped in section_map:
+            if lines and lines[-1] != '':
+                lines.append('')
+            lines.append(section_map[stripped])
+            continue
+
+        if stripped.startswith('• '):
+            bullet_body = stripped[2:].strip()
+            if bullet_body.lower().startswith('wetter:'):
+                lines.append(f'🌤️ {bullet_body}')
+            elif bullet_body.lower().startswith('sicherheitslage:'):
+                lines.append(f'🛡️ {bullet_body}')
+            else:
+                lines.append(f'• {bullet_body}')
+            continue
+
+        if re.match(r'^\d+\.', stripped):
+            lines.append(f'  {stripped}')
+            continue
+
+        if stripped.startswith('Guten Morgen. Heute ist'):
+            lines.append(stripped.replace('Guten Morgen. Heute ist', 'Guten Morgen! Heute ist'))
+            continue
+
+        if stripped.startswith('Wochenstart-Briefing für'):
+            lines.append(stripped.replace('Wochenstart-Briefing für', 'Wochenstart-Briefing für'))
+            continue
+
+        lines.append(stripped)
+
+    return '\n'.join(lines).strip()
+
+
+# --- Simple JWT helpers (no external dependency) -------------------------------------------------
+JWT_SECRET = os.getenv('JWT_SECRET') or app.secret_key
+JWT_ALGO = 'HS256'
+
+def _b64u(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+def _b64u_decode(data: str) -> bytes:
+    pad = '=' * (-len(data) % 4)
+    return base64.urlsafe_b64decode(data + pad)
+
+def create_jwt(payload: Dict[str, Any], expires_in: int = 60*60*24) -> str:
+    header = {'alg': JWT_ALGO, 'typ': 'JWT'}
+    payload = dict(payload)
+    payload['exp'] = int(time.time()) + int(expires_in)
+    header_b = _b64u(json.dumps(header, separators=(',', ':')).encode('utf-8'))
+    payload_b = _b64u(json.dumps(payload, separators=(',', ':')).encode('utf-8'))
+    signing_input = f"{header_b}.{payload_b}".encode('ascii')
+    sig = hmac.new(JWT_SECRET.encode('utf-8'), signing_input, hashlib.sha256).digest()
+    sig_b = _b64u(sig)
+    return f"{header_b}.{payload_b}.{sig_b}"
+
+def verify_jwt(token: str) -> Optional[Dict[str, Any]]:
+    try:
+        parts = token.split('.')
+        if len(parts) != 3:
+            return None
+        header_b, payload_b, sig_b = parts
+        signing_input = f"{header_b}.{payload_b}".encode('ascii')
+        expected_sig = hmac.new(JWT_SECRET.encode('utf-8'), signing_input, hashlib.sha256).digest()
+        if not hmac.compare_digest(_b64u(expected_sig), sig_b):
+            return None
+        payload_json = _b64u_decode(payload_b)
+        payload = _json.loads(payload_json)
+        if 'exp' in payload and int(payload['exp']) < int(time.time()):
+            return None
+        return payload
+    except Exception:
+        return None
+
+# --- Simple local user store --------------------------------------------------------------------
+USERS_FILE = os.path.join(CONFIG_DIR, 'users.json')
+
+def _load_users() -> Dict[str, Any]:
+    users = {}
+    migrated = False
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                users = data
+        except Exception:
+            users = {}
+
+    # If no users configured, use env vars or default demo user
+    if not users:
+        user = os.getenv('ADMIN_USER', 'admin')
+        pwd = os.getenv('ADMIN_PASS', 'admin')
+        users = {user: {'password': bcrypt.hash(pwd), 'name': user}}
+        try:
+            os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+            with open(USERS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(users, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return users
+
+    # Migrate plaintext passwords to hashed variants if needed
+    for username, entry in list(users.items()):
+        pw = entry.get('password')
+        if not pw:
+            continue
+        # Detect bcrypt hashed format ($2b$)
+        if isinstance(pw, str) and pw.startswith('$2'):
+            continue
+        # Otherwise treat as plaintext and hash it
+        try:
+            users[username]['password'] = bcrypt.hash(str(pw))
+            migrated = True
+        except Exception:
+            continue
+
+    if migrated:
+        try:
+            with open(USERS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(users, f, ensure_ascii=False, indent=2)
+        except Exception:
+            logger.warning('Could not write migrated users file')
+
+    return users
+
+def _verify_local_credentials(username: str, password: str) -> Optional[Dict[str, Any]]:
+    users = _load_users()
+    entry = users.get(username)
+    if not entry or 'password' not in entry:
+        return None
+    stored = entry.get('password')
+    try:
+        if not bcrypt.verify(str(password), stored):
+            return None
+    except Exception:
+        # fallback to timing-safe plain comparison (shouldn't happen)
+        if not hmac.compare_digest(str(stored), str(password)):
+            return None
+    return {'username': username, 'name': entry.get('name') or username}
+
+# --- Auth API endpoints -------------------------------------------------------------------------
+@app.route('/api/auth/login', methods=['POST'])
+def api_auth_login():
+    data = request.get_json(force=True, silent=True) or {}
+    username = str(data.get('username') or '').strip()
+    password = str(data.get('password') or '')
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Missing username or password'}), 400
+    user = _verify_local_credentials(username, password)
+    if not user:
+        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
+    token = create_jwt({'sub': user['username'], 'name': user.get('name') or user['username']})
+    resp = make_response(jsonify({'success': True, 'token': token, 'user': {'username': user['username'], 'name': user.get('name')}}))
+    secure_cookie = os.getenv('AUTH_COOKIE_SECURE', 'false').lower() in ('1', 'true', 'yes')
+    resp.set_cookie('mynd_token', token, httponly=True, secure=secure_cookie, samesite='Lax', max_age=60*60*24)
+    return resp
+
+@app.route('/api/auth/me', methods=['GET'])
+def api_auth_me():
+    # try Authorization header first
+    auth = request.headers.get('Authorization', '')
+    token = None
+    if auth.lower().startswith('bearer '):
+        token = auth.split(None, 1)[1]
+    else:
+        token = request.args.get('token') or request.cookies.get('mynd_token')
+    if not token:
+        return jsonify({'authenticated': False}), 401
+    payload = verify_jwt(token)
+    if not payload:
+        return jsonify({'authenticated': False}), 401
+    return jsonify({'authenticated': True, 'user': {'username': payload.get('sub'), 'name': payload.get('name')}})
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_auth_logout():
+    # Client should remove token; we can also clear cookie if set
+    resp = make_response(jsonify({'success': True}))
+    resp.set_cookie('mynd_token', '', expires=0)
+    return resp
+
+# Nextcloud OAuth login start
+@app.route('/api/auth/nextcloud/login')
+def api_auth_nextcloud_login():
+    # Accept nextcloud_url as query parameter to allow dynamic domain input from frontend
+    requested = request.args.get('nextcloud_url') or request.args.get('domain') or ''
+    nextcloud_url_env = os.getenv('NEXTCLOUD_URL')
+    nextcloud_url = requested.rstrip('/') if requested else (nextcloud_url_env.rstrip('/') if nextcloud_url_env else '')
+    client_id = os.getenv('NEXTCLOUD_OAUTH_CLIENT_ID')
+    client_secret = os.getenv('NEXTCLOUD_OAUTH_CLIENT_SECRET')
+    frontend_redirect = request.args.get('redirect_to') or request.args.get('next') or request.referrer or '/'
+    if not nextcloud_url:
+        return jsonify({'success': False, 'error': 'Nextcloud domain missing'}), 400
+    if not client_id or not client_secret:
+        return jsonify({'success': False, 'error': 'Nextcloud OAuth client_id/secret not configured'}), 400
+    from requests_oauthlib import OAuth2Session
+    callback = urljoin(request.url_root, url_for('api_auth_nextcloud_callback'))
+    oauth = OAuth2Session(client_id=client_id, redirect_uri=callback)
+    auth_url, state = oauth.authorization_url(urljoin(nextcloud_url, OAuth2NextcloudProvider.OAUTH2_AUTHORIZE_ENDPOINT))
+    # save state and desired redirect and domain in session
+    session['oauth_state'] = state
+    session['oauth_next'] = frontend_redirect
+    session['oauth_nextcloud_url'] = nextcloud_url
+    return redirect(auth_url)
+
+@app.route('/api/auth/nextcloud/callback')
+def api_auth_nextcloud_callback():
+    nextcloud_url = os.getenv('NEXTCLOUD_URL')
+    client_id = os.getenv('NEXTCLOUD_OAUTH_CLIENT_ID')
+    client_secret = os.getenv('NEXTCLOUD_OAUTH_CLIENT_SECRET')
+    if not nextcloud_url or not client_id or not client_secret:
+        return jsonify({'success': False, 'error': 'Nextcloud OAuth not configured'}), 400
+    from requests_oauthlib import OAuth2Session
+    callback = urljoin(request.url_root, url_for('api_auth_nextcloud_callback'))
+    oauth = OAuth2Session(client_id=client_id, redirect_uri=callback, state=session.get('oauth_state'))
+    try:
+        # use the domain saved in session if present
+        session_domain = session.get('oauth_nextcloud_url')
+        if session_domain:
+            nextcloud_url = session_domain
+        token = oauth.fetch_token(urljoin(nextcloud_url, OAuth2NextcloudProvider.OAUTH2_TOKEN_ENDPOINT), client_secret=client_secret, authorization_response=request.url)
+    except Exception as exc:
+        logger.warning('Nextcloud token exchange failed: %s', exc)
+        return jsonify({'success': False, 'error': 'Token exchange failed'}), 500
+
+    access_token = token.get('access_token')
+    if not access_token:
+        return jsonify({'success': False, 'error': 'No access token received'}), 500
+
+    # fetch user info
+    try:
+        headers = {'Authorization': f'Bearer {access_token}'}
+        resp = requests.get(urljoin(nextcloud_url, '/ocs/v2.php/apps/provisioning_api/api/v1/users/me'), headers=headers, params={'format': 'json'}, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            userinfo = data.get('ocs', {}).get('data', {}) or {}
+            username = userinfo.get('id') or userinfo.get('uid') or userinfo.get('displayname') or 'nextcloud_user'
+            name = userinfo.get('displayname') or username
+        else:
+            username = 'nextcloud_user'
+            name = 'Nextcloud User'
+    except Exception:
+        username = 'nextcloud_user'
+        name = 'Nextcloud User'
+
+    token = create_jwt({'sub': username, 'name': name})
+    # persist nextcloud tokens for this account
+    try:
+        account = {
+            'domain': nextcloud_url,
+            'username': username,
+            'display_name': name,
+            'access_token': token.get('access_token') if isinstance(token, dict) else token,
+            'raw_token_response': token if isinstance(token, dict) else {}
+        }
+    except Exception:
+        account = {'domain': nextcloud_url, 'username': username, 'display_name': name}
+
+    try:
+        # save minimal account info to disk
+        accounts_file = os.path.join(CONFIG_DIR, 'nextcloud_accounts.json')
+        accounts = {}
+        if os.path.exists(accounts_file):
+            try:
+                with open(accounts_file, 'r', encoding='utf-8') as f:
+                    accounts = json.load(f) or {}
+            except Exception:
+                accounts = {}
+        key = f"{nextcloud_url}::{username}"
+        accounts[key] = {
+            'domain': nextcloud_url,
+            'username': username,
+            'display_name': name,
+            'access_token': token if isinstance(token, str) else (token.get('access_token') if isinstance(token, dict) else ''),
+            'refresh_token': (token.get('refresh_token') if isinstance(token, dict) else None) or session.get('oauth_refresh_token'),
+            'fetched_at': int(time.time())
+        }
+        try:
+            with open(accounts_file, 'w', encoding='utf-8') as f:
+                json.dump(accounts, f, ensure_ascii=False, indent=2)
+        except Exception:
+            logger.warning('Could not persist nextcloud account info')
+    except Exception:
+        logger.debug('Error while persisting nextcloud account info')
+
+    frontend_next = session.pop('oauth_next', '/')
+    resp = redirect(frontend_next)
+    secure_cookie = os.getenv('AUTH_COOKIE_SECURE', 'false').lower() in ('1', 'true', 'yes')
+    resp.set_cookie('mynd_token', token, httponly=True, secure=secure_cookie, samesite='Lax', max_age=60*60*24)
+    return resp
+
+
+def _load_nextcloud_accounts() -> Dict[str, Any]:
+    accounts_file = os.path.join(CONFIG_DIR, 'nextcloud_accounts.json')
+    if os.path.exists(accounts_file):
+        try:
+            with open(accounts_file, 'r', encoding='utf-8') as f:
+                return json.load(f) or {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_nextcloud_accounts(accounts: Dict[str, Any]) -> None:
+    accounts_file = os.path.join(CONFIG_DIR, 'nextcloud_accounts.json')
+    try:
+        with open(accounts_file, 'w', encoding='utf-8') as f:
+            json.dump(accounts, f, ensure_ascii=False, indent=2)
+    except Exception:
+        logger.warning('Could not write nextcloud accounts file')
+
+
+def refresh_nextcloud_account(key: str) -> Optional[Dict[str, Any]]:
+    accounts = _load_nextcloud_accounts()
+    acct = accounts.get(key)
+    if not acct:
+        return None
+    refresh_token = acct.get('refresh_token')
+    if not refresh_token:
+        return None
+    nextcloud_url = acct.get('domain')
+    client_id = os.getenv('NEXTCLOUD_OAUTH_CLIENT_ID')
+    client_secret = os.getenv('NEXTCLOUD_OAUTH_CLIENT_SECRET')
+    if not nextcloud_url or not client_id or not client_secret:
+        return None
+    token_url = urljoin(nextcloud_url, OAuth2NextcloudProvider.OAUTH2_TOKEN_ENDPOINT)
+    try:
+        from requests_oauthlib import OAuth2Session
+        oauth = OAuth2Session(client_id=client_id)
+        new_token = oauth.refresh_token(token_url, client_id=client_id, client_secret=client_secret, refresh_token=refresh_token)
+        acct['access_token'] = new_token.get('access_token')
+        acct['refresh_token'] = new_token.get('refresh_token') or refresh_token
+        acct['fetched_at'] = int(time.time())
+        accounts[key] = acct
+        _save_nextcloud_accounts(accounts)
+        return acct
+    except Exception as exc:
+        logger.warning('Could not refresh nextcloud token for %s: %s', key, exc)
+        return None
+
+
+@app.route('/api/auth/nextcloud/refresh', methods=['POST'])
+def api_auth_nextcloud_refresh():
+    data = request.get_json(force=True, silent=True) or {}
+    key = data.get('key')
+    if not key:
+        return jsonify({'success': False, 'error': 'Missing key'}), 400
+    acct = refresh_nextcloud_account(key)
+    if not acct:
+        return jsonify({'success': False, 'error': 'Could not refresh or not found'}), 404
+    return jsonify({'success': True, 'account': acct})
+
+
+
 def _briefing_top_tasks(tasks: List[Dict[str, Any]], today: date, limit: int = 3) -> List[Dict[str, Any]]:
     """Rank tasks for briefing output: overdue first, then due today, then due soon."""
     ranked = []
@@ -497,7 +883,12 @@ def generate_proactive_briefing(kind: str = 'daily', force: bool = False) -> Dic
         items = store.setdefault('items', {})
         existing = items.get(key)
         if existing and not force:
-            return existing
+            if normalized_kind == 'daily':
+                existing_content = str(existing.get('content') or '')
+                if 'Wetter:' not in existing_content:
+                    existing = None
+            if existing:
+                return existing
 
         built = _build_weekly_briefing() if normalized_kind == 'weekly' else _build_daily_briefing()
         item = {
@@ -8294,7 +8685,7 @@ def agent_query():
             force_refresh = True
 
             item = generate_proactive_briefing(kind=kind, force=force_refresh)
-            response_text = item.get('content') or 'Ich konnte gerade kein Briefing erstellen.'
+            response_text = _format_briefing_for_chat(item) if item else 'Ich konnte gerade kein Briefing erstellen.'
 
             return jsonify({
                 'success': True,

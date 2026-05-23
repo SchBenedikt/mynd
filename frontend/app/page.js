@@ -166,6 +166,32 @@ const buildFriendlyChatErrorMessage = (response, data, fallbackMessage = '') => 
   return 'Die Anfrage konnte gerade nicht verarbeitet werden. Bitte versuche es erneut.';
 };
 
+const analyzeBackendError = (response, data) => {
+  const status = response?.status || 0;
+  const body = JSON.stringify(data || {});
+  const parts = [];
+  parts.push(`Fehleranalyse:`);
+  parts.push(`- Endpoint antwortete mit Status ${status}.`);
+  if (body) parts.push(`- Antwort vom Server: ${body}`);
+
+  if (status >= 500) {
+    parts.push('- Mögliche Ursachen: interner Serverfehler, Ausnahme im Backend, fehlende Abhängigkeiten oder defekte Datenbankverbindung.');
+    parts.push('- Nächste Schritte: prüfe die Backend-Logs (run_app.py stdout), suche nach Tracebacks oder Exceptions, prüfe Datenbank- und Index-Verbindungen und API-Keys.');
+  } else if (status === 401 || status === 403) {
+    parts.push('- Mögliche Ursachen: nicht authentifiziert oder unzureichende Berechtigungen. Überprüfe Login/Token/Session.');
+    parts.push('- Nächste Schritte: melde dich ab und wieder an, überprüfe OAuth-Credentials oder Admin-Benutzer-Konfiguration.');
+  } else if (status === 429) {
+    parts.push('- Mögliche Ursachen: Rate-Limiting vom Backend oder externen APIs.');
+    parts.push('- Nächste Schritte: warte kurz oder prüfe Backend-Rate-Limits und API-Quoten.');
+  } else {
+    parts.push('- Mögliche Ursachen: fehlerhafte Anfrage oder Validierungsfehler.');
+    parts.push('- Nächste Schritte: überprüfe die Anfrageparameter in den Einstellungen oder die Backend-Validierungen.');
+  }
+
+  parts.push('Wenn du möchtest, kann ich versuchen, die Backend-Fehlermeldung detaillierter zu interpretieren.');
+  return parts.join('\n');
+};
+
 const getTodayDateTimeForInputs = () => {
   const today = new Date();
   const year = String(today.getFullYear());
@@ -929,9 +955,12 @@ export default function HomePage() {
     }
   };
 
-  const loadProactiveBriefings = async () => {
+  const loadProactiveBriefings = async (force = false) => {
     try {
-      const res = await fetch(`${API_BASE}/api/assistant/briefing/current`);
+      const briefingUrl = force
+        ? `${API_BASE}/api/assistant/briefing/current?force=true`
+        : `${API_BASE}/api/assistant/briefing/current`;
+      const res = await fetch(briefingUrl);
       const data = await safeReadJson(res);
       if (!res.ok || data?.success === false) {
         return;
@@ -1143,6 +1172,17 @@ export default function HomePage() {
           content: errorMessage,
           id: createMessageId()
         });
+        // append a diagnostic analysis from the assistant
+        try {
+          const analysis = analyzeBackendError(res, data);
+          insertMessageAfter(targetChatId, userMessageId, {
+            role: 'assistant',
+            content: analysis,
+            id: createMessageId()
+          });
+        } catch (err) {
+          // ignore analysis errors
+        }
         return;
       }
 
@@ -2686,7 +2726,7 @@ export default function HomePage() {
               <button
                 type="button"
                 className="security-refresh"
-                onClick={() => loadProactiveBriefings()}
+                onClick={() => loadProactiveBriefings(true)}
                 title="Briefing aktualisieren"
               >
                 Aktualisieren
