@@ -266,6 +266,7 @@ export default function HomePage() {
   const [inputValue, setInputValue] = useState('');
   const [source, setSource] = useState('auto');
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown' });
+  const [user, setUser] = useState(null);
   const [securityStatus, setSecurityStatus] = useState(null);
   const [securityLoading, setSecurityLoading] = useState(false);
   const [proactiveBriefings, setProactiveBriefings] = useState([]);
@@ -925,6 +926,15 @@ export default function HomePage() {
         ollama: ollama.connected ? 'ok' : 'error',
         kb: kb.chunks_loaded > 0 ? 'ok' : 'error'
       });
+      // also fetch current user (if any) to display in sidebar
+      try {
+        const meRes = await fetch(`${API_BASE}/api/auth/me`);
+        const me = await safeReadJson(meRes);
+        if (meRes.ok && me && me.authenticated) setUser(me.user);
+        else setUser(null);
+      } catch (err) {
+        setUser(null);
+      }
     } catch (err) {
       setHealth({ ollama: 'error', kb: 'error' });
     }
@@ -2681,6 +2691,12 @@ export default function HomePage() {
               </div>
             </div>
           </div>
+          {user ? (
+            <div className="sidebar-user" style={{marginTop: '0.6rem', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+              <div style={{fontSize:12, color:'var(--muted)'}}>{user.name || user.username}</div>
+              <div style={{fontSize:11, color:'var(--muted)'}}>@{user.username}</div>
+            </div>
+          ) : null}
         </div>
       </div>
 

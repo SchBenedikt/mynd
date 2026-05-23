@@ -863,8 +863,9 @@ body {
 }
 
 .status-badges {
-  display: grid;
+  display: flex;
   gap: 0.5rem;
+  align-items: center;
 }
 
 .sidebar-footer .settings-btn {
