@@ -363,6 +363,36 @@ body {
   transition: grid-template-columns 0.2s ease;
 }
 
+/* Topbar */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  backdrop-filter: blur(6px) saturate(1.05);
+  background: linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.35));
+  border-bottom: 1px solid var(--line);
+}
+.topbar-right { display:flex; gap:10px; align-items:center; }
+
+/* Status pill */
+.status-pill { display:flex; gap:8px; align-items:center; margin-right:6px; }
+.status-chip { display:flex; gap:6px; align-items:center; padding:4px 8px; border-radius:999px; background: var(--chip-bg); border:1px solid var(--line); font-size:11px; color:var(--muted); opacity:0.9 }
+.status-dot { width:9px; height:9px; border-radius:50%; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.status-label { font-weight:600; font-size:11px; color:var(--muted); }
+
+/* Userbar */
+.userbar { display:flex; align-items:center; }
+.userbar-inner { display:flex; gap:8px; align-items:center; padding:6px 8px; border-radius:999px; background: var(--chip-bg); border:1px solid var(--line); box-shadow: var(--shadow-sm); }
+.user-avatar { width:28px; height:28px; border-radius:8px; background:var(--brand); color:white; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px }
+.user-name { font-size:13px; color:var(--ink); font-weight:600 }
+.logout-btn { background: transparent; border: 1px solid transparent; padding:4px 8px; border-radius:8px; font-size:12px; color:var(--muted); cursor:pointer }
+.logout-btn:hover { background: var(--chip-hover); color:var(--ink); }
+
+
 .composer.is-thinking {
   opacity: 0.75;
 }

@@ -46,10 +46,13 @@ export default function UserBar() {
   if (!user) return null;
 
   return (
-    <div style={{position: 'fixed', right: 12, top: 12, zIndex: 9998}}>
-      <div style={{background: 'rgba(255,255,255,0.9)', borderRadius: 8, padding: '6px 10px', display: 'flex', gap: 8, alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.08)'}}>
-        <div style={{fontSize: 13, color: '#222'}}>{user.name || user.username}</div>
-        <button onClick={logout} style={{padding: '6px 8px', borderRadius: 6, border: 'none', background: '#ef4444', color: 'white', fontSize: 12}}>Logout</button>
+    <div className="userbar">
+      <div className="userbar-inner">
+        <div className="user-avatar" aria-hidden>{(user.name || user.username || '').slice(0,1).toUpperCase()}</div>
+        <div className="user-info">
+          <div className="user-name">{user.name || user.username}</div>
+        </div>
+        <button className="btn btn-ghost logout-btn" onClick={logout} title="Abmelden">Logout</button>
       </div>
     </div>
   );
