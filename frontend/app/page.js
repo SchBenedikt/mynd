@@ -2681,11 +2681,24 @@ export default function HomePage() {
             {!isSidebarCollapsed && 'Wissensgraph'}
           </button>
           {isSidebarCollapsed ? (
-            <div className="status-badges">
-              <div className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error'}`}>
-                <div className={`status-dot`} />
+            <>
+              <div className="status-badges">
+                <div className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error'}`}>
+                  <div className={`status-dot ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error'}`} />
+                </div>
               </div>
-            </div>
+              <div className="sidebar-user-collapsed" style={{marginTop:8, display:'flex', gap:8, alignItems:'center', justifyContent:'center'}}>
+                {user ? (
+                  <button className="new-chat-btn compact" onClick={logout} title="Abmelden">
+                    <i className="fas fa-right-from-bracket"></i>
+                  </button>
+                ) : (
+                  <button className="new-chat-btn compact" onClick={() => setIsSidebarCollapsed(false)} title="Anmelden">
+                    <i className="fas fa-right-to-bracket"></i>
+                  </button>
+                )}
+              </div>
+            </>
           ) : (
             <>
               <div className="status-badges">
