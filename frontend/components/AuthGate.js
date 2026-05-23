@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import './AuthGate.css';
 
 const STORAGE_KEY = 'mynd_user_v1';
 const TOKEN_KEY = 'mynd_token_v1';
@@ -12,25 +13,30 @@ export default function AuthGate({ children }) {
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [showNcForm, setShowNcForm] = useState(false);
+  const [ncDomain, setNcDomain] = useState('');
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) setUser(JSON.parse(raw));
-      // Try server-side cookie-based session first
+      fetch('/api/auth/me')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data && data.authenticated && data.user) {
+            setUser({ name: data.user.name, username: data.user.username });
+          }
+        })
+        .catch(() => {});
+
+      // handle OAuth error in query params
       try {
-        fetch('/api/auth/me')
-          .then((r) => r.json())
-          .then((data) => {
-            if (data && data.authenticated && data.user) {
-              setUser({ name: data.user.name, username: data.user.username });
-            }
-          })
-          .catch(() => {});
-      } catch (err) {
-        // ignore
-      }
-      // If redirected back from OAuth with token in fragment (#token=...), capture it
+        const params = new URLSearchParams(window.location.search);
+        const err = params.get('error') || params.get('auth_error');
+        if (err) setLoginError(decodeURIComponent(err));
+      } catch (e) {}
+
+      // fragment token handling
       try {
         if (typeof window !== 'undefined' && window.location && window.location.hash) {
           const hash = window.location.hash.replace(/^#/, '');
@@ -38,11 +44,7 @@ export default function AuthGate({ children }) {
           const fragToken = parts.get('token') || parts.get('access_token');
           if (fragToken) {
             localStorage.setItem(TOKEN_KEY, fragToken);
-            // clean fragment
-            try {
-              window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
-            } catch (err) {}
-            // validate and set user
+            try { window.history.replaceState({}, document.title, window.location.pathname + window.location.search); } catch (err) {}
             fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${fragToken}` } })
               .then((r) => r.json())
               .then((data) => {
@@ -53,30 +55,19 @@ export default function AuthGate({ children }) {
               .catch(() => {});
           }
         }
-      } catch (err) {
-        // ignore fragment parsing errors
-      }
-    } catch (err) {
-      // ignore
-    }
+      } catch (err) {}
+    } catch (err) {}
     setReady(true);
   }, []);
 
   if (!ready) return null;
-
-  if (user) {
-    return children;
-  }
+  if (user) return children;
 
   const submit = (ev) => {
     ev.preventDefault();
     const finalName = (String(name || '').trim()) || 'Gast';
     const payload = { name: finalName, createdAt: Date.now() };
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch (err) {
-      console.error('Could not persist user:', err);
-    }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch (err) {}
     setUser(payload);
   };
 
@@ -87,65 +78,80 @@ export default function AuthGate({ children }) {
       const resp = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: loginUser, password: loginPass }) });
       const data = await resp.json();
       if (resp.ok) {
-        // server sets HttpOnly cookie; fetch /api/auth/me to get user
         try {
           const me = await fetch('/api/auth/me');
           const meData = await me.json();
-          if (me.ok && meData.authenticated) {
-            setUser({ name: meData.user.name, username: meData.user.username });
-            return;
-          }
-        } catch (err) {
-          // fallback to returned user info
-          setUser({ name: data.user?.name || loginUser, username: data.user?.username || loginUser });
-          return;
-        }
+          if (me.ok && meData.authenticated) { setUser({ name: meData.user.name, username: meData.user.username }); return; }
+        } catch (err) { setUser({ name: data.user?.name || loginUser, username: data.user?.username || loginUser }); return; }
       }
       setLoginError((data && data.error) ? String(data.error) : 'Login fehlgeschlagen');
-    } catch (err) {
-      setLoginError('Netzwerkfehler');
-    }
+    } catch (err) { setLoginError('Netzwerkfehler'); }
   };
 
-  const loginNextcloud = () => {
-    // ask for domain like indexing flow, then redirect to backend OAuth start
-    const domain = window.prompt('Nextcloud-Domain (inkl. https://), z.B. https://cloud.example.org');
-    if (!domain) return;
+  const startNextcloudFlow = (domain) => {
     const redirect = window.location.origin + window.location.pathname;
     const url = `/api/auth/nextcloud/login?nextcloud_url=${encodeURIComponent(domain)}&redirect_to=${encodeURIComponent(redirect)}`;
     window.location.assign(url);
   };
 
+  const onNcSubmit = (ev) => {
+    ev.preventDefault();
+    setLoginError('');
+    const domain = String(ncDomain || '').trim();
+    if (!domain) { setLoginError('Bitte eine Nextcloud-Domain angeben.'); return; }
+    // basic validation
+    if (!/^https?:\/\//.test(domain)) { setLoginError('Domain muss mit https:// oder http:// beginnen.'); return; }
+    startNextcloudFlow(domain);
+  };
+
   return (
-    <div style={{position: 'fixed', inset: 0, background: 'rgba(10,10,10,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999}}>
-      <div style={{width: 'min(720px, 94%)', background: 'white', borderRadius: 12, padding: 28, boxShadow: '0 10px 30px rgba(0,0,0,0.25)'}}>
-        <h1 style={{margin: '0 0 8px 0'}}>Willkommen bei MYND</h1>
-        <p style={{marginTop: 0, color: '#444'}}>Um Mynd gemeinsam zu nutzen, gib bitte deinen Namen ein oder melde dich an.</p>
+    <div className="auth-overlay">
+      <div className="auth-card">
+        <div className="auth-header">
+          <div>
+            <h1 className="auth-title">Willkommen bei MYND</h1>
+            <p className="auth-sub">Um Mynd gemeinsam zu nutzen, gib bitte deinen Namen ein oder melde dich an.</p>
+          </div>
+        </div>
 
-        <div style={{display: 'flex', gap: 12, marginTop: 16}}>
-          <form onSubmit={submit} style={{display: 'flex', gap: 8, flex: 1}}>
-            <input aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dein Name (Gast)" style={{flex: 1, padding: '10px 12px', borderRadius: 8, border: '1px solid #ddd'}} />
-            <button type="submit" style={{padding: '10px 14px', borderRadius: 8, border: 'none', background: '#2f63ff', color: 'white'}}>Als Gast</button>
-          </form>
+        <div className="auth-body">
+          <div className="guest-col">
+            <form onSubmit={submit} className="guest-form">
+              <label className="label">Als Gast</label>
+              <input aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dein Name (Gast)" />
+              <button type="submit" className="btn btn-primary">Weiter als Gast</button>
+            </form>
+          </div>
 
-          <div style={{width: 1, background: '#eee'}} />
+          <div className="divider-vertical" />
 
-          <div style={{width: 300}}>
-            <form onSubmit={submitCredentials} style={{display: 'flex', flexDirection: 'column', gap: 8}}>
-              <input aria-label="Benutzer" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} placeholder="Benutzername" style={{padding: '8px 10px', borderRadius: 6, border: '1px solid #ddd'}} />
-              <input aria-label="Passwort" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="Passwort" type="password" style={{padding: '8px 10px', borderRadius: 6, border: '1px solid #ddd'}} />
-              <button type="submit" style={{padding: '8px 10px', borderRadius: 6, border: 'none', background: '#16a34a', color: 'white'}}>Login</button>
-              {loginError ? <div style={{color: 'crimson', fontSize: 13}}>{loginError}</div> : null}
+          <div className="login-col">
+            <form onSubmit={submitCredentials} className="login-form">
+              <label className="label">Login</label>
+              <input aria-label="Benutzer" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} placeholder="Benutzername" />
+              <input aria-label="Passwort" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="Passwort" type="password" />
+              <button type="submit" className="btn btn-success">Login</button>
+              {loginError ? <div className="error">{loginError}</div> : null}
             </form>
 
-            <div style={{display: 'flex', marginTop: 10}}>
-              <button onClick={loginNextcloud} style={{flex: 1, padding: '8px 10px', borderRadius: 6, border: 'none', background: '#0b6abf', color: 'white'}}>Mit Nextcloud anmelden</button>
+            <div className="nc-block">
+              {!showNcForm ? (
+                <button className="btn btn-nc" onClick={() => setShowNcForm(true)}>Mit Nextcloud anmelden</button>
+              ) : (
+                <form onSubmit={onNcSubmit} className="nc-form">
+                  <input aria-label="Nextcloud-Domain" value={ncDomain} onChange={(e) => setNcDomain(e.target.value)} placeholder="https://cloud.example.org" />
+                  <div style={{display:'flex',gap:8}}>
+                    <button type="submit" className="btn btn-nc">Weiter</button>
+                    <button type="button" className="btn" onClick={() => setShowNcForm(false)}>Abbrechen</button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         </div>
 
-        <div style={{marginTop: 16, fontSize: 13, color: '#666'}}>
-          <p style={{margin: 0}}>Hinweis: Dies ist eine einfache lokale Anmeldung. Für echten Mehrbenutzer-Betrieb sollte ein Backend-gestütztes Authentifizierungsverfahren (z. B. OAuth, NextAuth oder JWT) eingerichtet werden.</p>
+        <div className="auth-footer">
+          <small>Hinweis: Dies ist eine einfache lokale Anmeldung. Für echten Mehrbenutzer-Betrieb sollte ein Backend-gestütztes Authentifizierungsverfahren (z. B. OAuth, NextAuth oder JWT) eingerichtet werden.</small>
         </div>
       </div>
     </div>
