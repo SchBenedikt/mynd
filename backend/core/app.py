@@ -761,6 +761,104 @@ def api_admin_reset_password():
     return jsonify({'success': True})
 
 
+@app.route('/api/admin/users/delete', methods=['POST'])
+@require_admin
+def api_admin_delete_user():
+    data = request.get_json(force=True, silent=True) or {}
+    username = str(data.get('username') or '').strip()
+    if not username:
+        return jsonify({'success': False, 'error': 'Missing username'}), 400
+    users = _load_users()
+    if username not in users:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    users.pop(username, None)
+    try:
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(users, f, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        logger.warning('Could not persist delete user: %s', exc)
+        return jsonify({'success': False, 'error': 'Could not persist'}), 500
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/nextcloud/accounts', methods=['GET'])
+@require_admin
+def api_admin_list_nextcloud_accounts():
+    accounts = _load_nextcloud_accounts()
+    # return sanitized list
+    out = []
+    for key, acct in accounts.items():
+        out.append({
+            'key': key,
+            'domain': acct.get('domain'),
+            'username': acct.get('username'),
+            'display_name': acct.get('display_name'),
+            'fetched_at': acct.get('fetched_at')
+        })
+    return jsonify({'success': True, 'accounts': out})
+
+
+@app.route('/api/admin/nextcloud/delete', methods=['POST'])
+@require_admin
+def api_admin_delete_nextcloud_account():
+    data = request.get_json(force=True, silent=True) or {}
+    key = data.get('key')
+    if not key:
+        return jsonify({'success': False, 'error': 'Missing key'}), 400
+    accounts = _load_nextcloud_accounts()
+    if key not in accounts:
+        return jsonify({'success': False, 'error': 'Not found'}), 404
+    accounts.pop(key, None)
+    _save_nextcloud_accounts(accounts)
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/nextcloud/export', methods=['GET'])
+@require_admin
+def api_admin_export_nextcloud_accounts():
+    # Return decrypted accounts JSON (admin only)
+    accounts = _load_nextcloud_accounts()
+    return jsonify({'success': True, 'accounts': accounts})
+
+
+@app.route('/api/admin/nextcloud/import', methods=['POST'])
+@require_admin
+def api_admin_import_nextcloud_accounts():
+    data = request.get_json(force=True, silent=True) or {}
+    accounts = data.get('accounts')
+    if not isinstance(accounts, dict):
+        return jsonify({'success': False, 'error': 'Invalid payload'}), 400
+    _save_nextcloud_accounts(accounts)
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/nextcloud/rotate_key', methods=['POST'])
+@require_admin
+def api_admin_rotate_nextcloud_key():
+    data = request.get_json(force=True, silent=True) or {}
+    new_key = data.get('new_key')
+    if not new_key:
+        return jsonify({'success': False, 'error': 'Missing new_key'}), 400
+    # load accounts with old key
+    accounts = _load_nextcloud_accounts()
+    if accounts is None:
+        return jsonify({'success': False, 'error': 'Could not load accounts'}), 500
+    # try to save with new key by temporarily setting env
+    try:
+        old = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
+        os.environ['NEXTCLOUD_ACCOUNTS_KEY'] = new_key
+        _save_nextcloud_accounts(accounts)
+        # restore env to previous state
+        if old is None:
+            os.environ.pop('NEXTCLOUD_ACCOUNTS_KEY', None)
+        else:
+            os.environ['NEXTCLOUD_ACCOUNTS_KEY'] = old
+        return jsonify({'success': True})
+    except Exception as exc:
+        logger.warning('Key rotation failed: %s', exc)
+        return jsonify({'success': False, 'error': 'Rotation failed'}), 500
+
+
 # --- Nextcloud refresh scheduler ------------------------------------------------------
 _nextcloud_refresh_thread = None
 _nextcloud_refresh_lock = threading.Lock()
@@ -774,6 +872,9 @@ def _nextcloud_refresh_worker(interval_seconds=60*60):
             now_ts = int(time.time())
             threshold = int(os.getenv('NEXTCLOUD_REFRESH_THRESHOLD_SECONDS', str(24*60*60)))
             for key, acct in list(accounts.items()):
+                # only attempt refresh if a refresh_token is present
+                if not acct.get('refresh_token'):
+                    continue
                 fetched = int(acct.get('fetched_at') or 0)
                 if fetched == 0 or (now_ts - fetched) >= threshold:
                     logger.info('Refreshing Nextcloud token for %s', key)
