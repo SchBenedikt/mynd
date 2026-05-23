@@ -2680,44 +2680,37 @@ export default function HomePage() {
             <i className="fas fa-project-diagram"></i>
             {!isSidebarCollapsed && 'Wissensgraph'}
           </button>
-          <div className="status-badges">
-            <div className={`status-badge ${health.ollama}`}>
-              <div className={`status-dot ${health.ollama}`}></div>
-              <div className="status-meta">
-                <span className="status-label">Ollama</span>
-                <span className="status-value">{health.ollama === 'ok' ? 'Online' : 'Offline'}</span>
-              </div>
-            </div>
-            <div className={`status-badge ${health.kb}`}>
-              <div className={`status-dot ${health.kb}`}></div>
-              <div className="status-meta">
-                <span className="status-label">KB</span>
-                <span className="status-value">{health.kb === 'ok' ? 'Verbunden' : 'Offline'}</span>
-              </div>
-            </div>
-          </div>
           {isSidebarCollapsed ? (
-            <div className="sidebar-user-collapsed">
-              <button className="status-badge combined" title={`Ollama: ${health.ollama}, KB: ${health.kb}`} onClick={() => setIsSidebarCollapsed(false)}>
-                <div className={`status-dot ${ (health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error' }`} />
-              </button>
-              {user ? (
-                <button className="new-chat-btn compact" onClick={logout} title="Abmelden">
-                  <i className="fas fa-right-from-bracket"></i>
-                </button>
-              ) : (
-                <button className="new-chat-btn compact" onClick={() => setIsSidebarCollapsed(false)} title="Anmelden">
-                  <i className="fas fa-user"></i>
-                </button>
-              )}
+            <div className="status-badges">
+              <div className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error'}`}>
+                <div className={`status-dot`} />
+              </div>
             </div>
           ) : (
-            user ? (
-              <div className="sidebar-user" style={{marginTop: '0.6rem', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
-                <div style={{fontSize:12, color:'var(--muted)'}}>{user.name || user.username}</div>
-                <div style={{fontSize:11, color:'var(--muted)'}}>@{user.username}</div>
+            <>
+              <div className="status-badges">
+                <div className={`status-badge ${health.ollama}`}>
+                  <div className={`status-dot ${health.ollama}`}></div>
+                  <div className="status-meta">
+                    <span className="status-label">Ollama</span>
+                    <span className="status-value">{health.ollama === 'ok' ? 'Online' : 'Offline'}</span>
+                  </div>
+                </div>
+                <div className={`status-badge ${health.kb}`}>
+                  <div className={`status-dot ${health.kb}`}></div>
+                  <div className="status-meta">
+                    <span className="status-label">KB</span>
+                    <span className="status-value">{health.kb === 'ok' ? 'Verbunden' : 'Offline'}</span>
+                  </div>
+                </div>
               </div>
-            ) : null
+              {user ? (
+                <div className="sidebar-user" style={{marginTop: '0.6rem', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+                  <div style={{fontSize:12, color:'var(--muted)'}}>{user.name || user.username}</div>
+                  <div style={{fontSize:11, color:'var(--muted)'}}>@{user.username}</div>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
       </div>
