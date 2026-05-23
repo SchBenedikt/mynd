@@ -302,6 +302,11 @@ export default function HomePage() {
     lastIndexingEnd: 0,
     lastIndexingDuration: 0
   });
+  const logout = async () => {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+    try { localStorage.removeItem('mynd_user_v1'); localStorage.removeItem('mynd_token_v1'); } catch (e) {}
+    window.location.reload();
+  };
   const [calendarForm, setCalendarForm] = useState({
     visible: false,
     missingInfo: [],
@@ -2691,12 +2696,29 @@ export default function HomePage() {
               </div>
             </div>
           </div>
-          {user ? (
-            <div className="sidebar-user" style={{marginTop: '0.6rem', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
-              <div style={{fontSize:12, color:'var(--muted)'}}>{user.name || user.username}</div>
-              <div style={{fontSize:11, color:'var(--muted)'}}>@{user.username}</div>
+          {isSidebarCollapsed ? (
+            <div className="sidebar-user-collapsed">
+              <button className="status-badge combined" title={`Ollama: ${health.ollama}, KB: ${health.kb}`} onClick={() => setIsSidebarCollapsed(false)}>
+                <div className={`status-dot ${ (health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error' }`} />
+              </button>
+              {user ? (
+                <button className="new-chat-btn compact" onClick={logout} title="Abmelden">
+                  <i className="fas fa-right-from-bracket"></i>
+                </button>
+              ) : (
+                <button className="new-chat-btn compact" onClick={() => setIsSidebarCollapsed(false)} title="Anmelden">
+                  <i className="fas fa-user"></i>
+                </button>
+              )}
             </div>
-          ) : null}
+          ) : (
+            user ? (
+              <div className="sidebar-user" style={{marginTop: '0.6rem', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+                <div style={{fontSize:12, color:'var(--muted)'}}>{user.name || user.username}</div>
+                <div style={{fontSize:11, color:'var(--muted)'}}>@{user.username}</div>
+              </div>
+            ) : null
+          )}
         </div>
       </div>
 

@@ -868,6 +868,10 @@ body {
   align-items: center;
 }
 
+.status-badge.combined { padding:0.3rem; width:40px; height:40px; display:flex; align-items:center; justify-content:center }
+.sidebar-user-collapsed { margin-top:0.6rem; display:flex; gap:8px; align-items:center; justify-content:center }
+.sidebar-user-collapsed .new-chat-btn.compact { width:36px; height:36px; padding:6px }
+
 .sidebar-footer .settings-btn {
   margin-bottom: 0.75rem;
 }
