@@ -11,12 +11,12 @@ export default function AuthGate({ children }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
+  const [authMode, setAuthMode] = useState('local');
+  const [nextcloudUrl, setNextcloudUrl] = useState('');
   const [user, setUser] = useState(null);
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [loginError, setLoginError] = useState('');
-  const [showNcForm, setShowNcForm] = useState(false);
-  const [ncDomain, setNcDomain] = useState('');
   const [forceOpen, setForceOpen] = useState(false);
 
   useEffect(() => {
@@ -66,7 +66,10 @@ export default function AuthGate({ children }) {
           .then((data) => {
             if (cancelled) return;
             const needsSetup = Boolean(data && data.success && data.needs_setup);
+              const oauthConfigured = Boolean(data && data.success && data.oauth_configured && data.nextcloud_url);
             setSetupRequired(needsSetup);
+              setAuthMode(oauthConfigured ? 'nextcloud' : 'local');
+              setNextcloudUrl(String(data && data.nextcloud_url ? data.nextcloud_url : '').trim());
             if (needsSetup && pathname !== '/setup') {
               router.replace('/setup');
             }
@@ -84,10 +87,9 @@ export default function AuthGate({ children }) {
     const openHandler = () => {
       try {
         setForceOpen(true);
-        setShowNcForm(false);
         setLoginError('');
         setTimeout(() => {
-          const el = document.querySelector('.auth-card input[aria-label="Name"]') || document.querySelector('.auth-card input[aria-label="Benutzer"]');
+          const el = document.querySelector('.auth-card input[aria-label="Benutzer"]') || document.querySelector('.auth-card button.btn-success');
           if (el && typeof el.focus === 'function') el.focus();
         }, 50);
       } catch (e) {}
@@ -118,33 +120,10 @@ export default function AuthGate({ children }) {
     } catch (err) { setLoginError('Netzwerkfehler'); }
   };
 
-  const startNextcloudFlow = (domain) => {
+  const startNextcloudFlow = () => {
     const redirect = window.location.origin + window.location.pathname;
-    const loginUrl = `/api/auth/nextcloud/login?nextcloud_url=${encodeURIComponent(domain)}&redirect_to=${encodeURIComponent(redirect)}`;
-    const checkUrl = `/api/auth/nextcloud/check?nextcloud_url=${encodeURIComponent(domain)}`;
-    // verify backend config first
-    fetch(checkUrl).then(async (r) => {
-      try {
-        const j = await r.json();
-        if (r.ok && j && j.success) {
-          window.location.assign(loginUrl);
-        } else {
-          setLoginError(j && j.error ? String(j.error) : 'Nextcloud OAuth nicht konfiguriert');
-        }
-      } catch (err) {
-        setLoginError('Fehler beim Prüfen der Nextcloud-Konfiguration');
-      }
-    }).catch(() => setLoginError('Fehler beim Prüfen der Nextcloud-Konfiguration'));
-  };
-
-  const onNcSubmit = (ev) => {
-    ev.preventDefault();
-    setLoginError('');
-    const domain = String(ncDomain || '').trim();
-    if (!domain) { setLoginError('Bitte eine Nextcloud-Domain angeben.'); return; }
-    // basic validation
-    if (!/^https?:\/\//.test(domain)) { setLoginError('Domain muss mit https:// oder http:// beginnen.'); return; }
-    startNextcloudFlow(domain);
+    const loginUrl = `/api/auth/nextcloud/login?redirect_to=${encodeURIComponent(redirect)}`;
+    window.location.assign(loginUrl);
   };
 
   return (
@@ -154,39 +133,33 @@ export default function AuthGate({ children }) {
           <div className="auth-header-copy">
             <div className="auth-kicker">MYND</div>
             <h1 className="auth-title">Willkommen zurück</h1>
-            <p className="auth-sub">Melde dich mit deinem lokalen Konto oder über Nextcloud an.</p>
+            <p className="auth-sub">{authMode === 'nextcloud' ? 'Melde dich mit deinem Nextcloud-Konto an.' : 'Melde dich mit deinem lokalen Konto an.'}</p>
           </div>
         </div>
 
         <div className="auth-body auth-body-grid auth-body-single">
           <div className="auth-panel auth-panel-accent auth-panel-login">
             <div className="panel-badge">Login</div>
-            <form onSubmit={submitCredentials} className="panel-form">
-              <label className="label">Mit Benutzerkonto anmelden</label>
-              <input aria-label="Benutzer" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} placeholder="Benutzername" />
-              <input aria-label="Passwort" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="Passwort" type="password" />
-              <button type="submit" className="btn btn-success">Anmelden</button>
-              {loginError ? <div className="error">{loginError}</div> : null}
-            </form>
-
-            <div className="nc-block">
-              {!showNcForm ? (
-                <button className="btn btn-nc" onClick={() => setShowNcForm(true)}>Mit Nextcloud anmelden</button>
-              ) : (
-                <form onSubmit={onNcSubmit} className="nc-form">
-                  <input aria-label="Nextcloud-Domain" value={ncDomain} onChange={(e) => setNcDomain(e.target.value)} placeholder="https://cloud.example.org" />
-                  <div style={{display:'flex',gap:8}}>
-                    <button type="submit" className="btn btn-nc">Weiter</button>
-                    <button type="button" className="btn" onClick={() => setShowNcForm(false)}>Abbrechen</button>
-                  </div>
-                </form>
-              )}
-            </div>
+            {authMode === 'nextcloud' ? (
+              <div className="panel-form">
+                <div className="login-mode-chip">Nextcloud{nextcloudUrl ? ` · ${nextcloudUrl}` : ''}</div>
+                <p className="auth-single-copy">Die Anmeldung erfolgt über deine konfigurierte Nextcloud-Instanz.</p>
+                <button type="button" className="btn btn-nc" onClick={startNextcloudFlow}>Mit Nextcloud anmelden</button>
+              </div>
+            ) : (
+              <form onSubmit={submitCredentials} className="panel-form">
+                <label className="label">Mit Benutzerkonto anmelden</label>
+                <input aria-label="Benutzer" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} placeholder="Benutzername" />
+                <input aria-label="Passwort" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="Passwort" type="password" />
+                <button type="submit" className="btn btn-success">Anmelden</button>
+              </form>
+            )}
+            {loginError ? <div className="error">{loginError}</div> : null}
           </div>
         </div>
 
         <div className="auth-footer">
-          <small>Die Anmeldung erfolgt lokal oder über Nextcloud.</small>
+          <small>{authMode === 'nextcloud' ? 'Die Anmeldung erfolgt über Nextcloud.' : 'Die Anmeldung erfolgt über dein lokales Benutzerkonto.'}</small>
         </div>
       </div>
     </div>

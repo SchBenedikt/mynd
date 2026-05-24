@@ -68,6 +68,8 @@ input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; outline: 
 .auth-panel-login{ width:min(560px, 100%); }
 .panel-badge{ display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; background:#e2e8f0; color:#334155; font-size:12px; font-weight:700; margin-bottom:12px; }
 .panel-form{ display:flex; flex-direction:column; gap:10px; }
+.login-mode-chip{ display:inline-flex; width:max-content; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#eff6ff; color:#1d4ed8; font-size:12px; font-weight:700; border:1px solid #dbeafe; }
+.auth-single-copy{ margin:0; color:#475569; line-height:1.5; font-size:13px; }
 .guest-form, .login-form, .nc-form{ display:flex; flex-direction:column; gap:8px; }
 .label{ font-weight:700; color:#334155; }
 input{ padding:12px 14px; border-radius:12px; border:1px solid #d7e0eb; background:#fff; color:#0f172a; }
@@ -90,6 +92,7 @@ input:focus{ outline:none; box-shadow:0 0 0 4px rgba(47,99,255,0.12); border-col
   .auth-feature-grid{ grid-template-columns:1fr; }
   .auth-panels{ gap:12px; }
   .auth-panel-login{ width:100%; }
+  .login-mode-chip{ width:100%; justify-content:center; }
 }
 
 .setup-panel{ margin:0; padding:18px; border:1px solid #dbe4f0; border-radius:18px; background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%); box-shadow:0 12px 30px rgba(15,23,42,0.06); }
