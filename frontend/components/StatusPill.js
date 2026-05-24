@@ -20,7 +20,14 @@ export default function StatusPill() {
         const me = meRes && meRes.ok ? await meRes.json() : null;
         if (!mounted) return;
         setStatus({ ollama: o && o.status ? o.status : 'offline', kb: k && (k.status || k.connected) ? (k.status || 'connected') : 'offline' });
-        if (me && me.authenticated && me.user) setUser(me.user);
+        if (me && me.authenticated && me.user) {
+          setUser(me.user);
+        } else {
+          try {
+            const raw = localStorage.getItem('mynd_user_v1');
+            if (raw) setUser(JSON.parse(raw));
+          } catch (e) {}
+        }
       } catch (err) {
         if (!mounted) return;
         setStatus({ ollama: 'offline', kb: 'offline' });
@@ -55,7 +62,7 @@ export default function StatusPill() {
   if (!isOnline(status.ollama) && !isOnline(status.kb) && !user) return null;
 
   return (
-    <div className="status-widget" aria-hidden>
+    <div className="status-widget">
       <div className="status-panel">
         <div className="status-row">
           <div className="status-chip" title={`Ollama: ${status.ollama}`}>
