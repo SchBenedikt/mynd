@@ -1,3 +1,45 @@
+/* Minimal styles for AuthGate overlay and forms */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 10, 0.45);
+  z-index: 9999;
+}
+.auth-card {
+  width: min(900px, 96%);
+  background: #fff;
+  color: #111;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  overflow: hidden;
+}
+.auth-header {
+  padding: 18px 22px;
+  border-bottom: 1px solid #eee;
+}
+.auth-title { margin: 0; font-size: 20px; }
+.auth-sub { margin: 4px 0 0; color: #555; font-size: 13px; }
+.auth-body { display: flex; gap: 16px; padding: 18px; }
+.guest-col, .login-col { flex: 1; }
+.guest-form, .login-form, .nc-form { display:flex; flex-direction: column; gap:8px; }
+.label { font-weight: 600; margin-bottom: 6px; }
+input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; outline: none; }
+.btn { padding: 8px 12px; border-radius: 6px; border: none; cursor: pointer; background: #f0f0f0; }
+.btn-primary { background: #2f63ff; color: #fff; }
+.btn-success { background: #16a34a; color: #fff; }
+.btn-nc { background: #0078d4; color: #fff; }
+.divider-vertical { width: 1px; background: #eee; }
+.nc-block { margin-top: 12px; }
+.auth-footer { padding: 12px 18px; border-top: 1px solid #f2f2f2; font-size: 12px; color: #666; }
+.error { margin-top: 8px; color: #b91c1c; font-weight: 600; }
+
+@media (max-width: 720px) {
+  .auth-body { flex-direction: column; }
+  .divider-vertical { display: none; }
+}
 .auth-overlay{ position:fixed; inset:0; background:rgba(10,10,10,0.6); display:flex; align-items:center; justify-content:center; z-index:9999; }
 .auth-card{ width:min(820px,94%); background:white; border-radius:12px; padding:20px; box-shadow:0 12px 40px rgba(2,6,23,0.25); }
 .auth-header{ display:flex; align-items:center; gap:14px; }
