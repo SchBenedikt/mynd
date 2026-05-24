@@ -12,6 +12,7 @@ export default function SetupWizard() {
   const [setupSubmitting, setSetupSubmitting] = useState(false);
   const [setupMessage, setSetupMessage] = useState('');
   const [setupError, setSetupError] = useState('');
+  const [setupComplete, setSetupComplete] = useState(false);
   const [setupForm, setSetupForm] = useState({
     adminName: '',
     adminPassword: '',
@@ -49,6 +50,7 @@ export default function SetupWizard() {
     ev.preventDefault();
     setSetupError('');
     setSetupMessage('');
+    setSetupComplete(false);
     setSetupSubmitting(true);
     try {
       const payload = {
@@ -73,9 +75,11 @@ export default function SetupWizard() {
       if (data.admin_created) {
         setSetupMessage('Admin wurde angelegt. Jetzt kannst du dich mit dem lokalen Login anmelden.');
         setSetupMode('');
+        setSetupComplete(true);
       } else if (data.oauth_configured) {
         setSetupMessage('Nextcloud OAuth wurde gespeichert. Du kannst jetzt die Nextcloud-Anmeldung nutzen.');
         setSetupMode('');
+        setSetupComplete(true);
       }
 
       try {
@@ -84,7 +88,7 @@ export default function SetupWizard() {
         if (statusData && statusData.success) setSetupStatus(statusData);
       } catch (err) {}
     } catch (err) {
-      setSetupError('Netzwerkfehler');
+      setSetupError('Das Setup konnte gerade nicht gespeichert werden. Bitte prüfe die Verbindung oder versuche es noch einmal.');
     } finally {
       setSetupSubmitting(false);
     }
@@ -101,6 +105,7 @@ export default function SetupWizard() {
   ];
 
   const setupPanelVisible = Boolean(setupStatus?.needs_setup) || setupMode === 'admin' || setupMode === 'nextcloud';
+  const currentStepLabel = setupMode === 'nextcloud' ? 'Schritt 2 von 2' : 'Schritt 1 von 2';
 
   return (
     <div className="setup-page">
@@ -109,23 +114,22 @@ export default function SetupWizard() {
           <div>
             <div className="setup-page-kicker">Einrichtung</div>
             <h1>MYND konfigurieren</h1>
-            <p>Wähle einen Pfad und richte MYND entweder mit einem lokalen Admin-Konto oder direkt mit Nextcloud OAuth ein. Danach ist die Anmeldung im normalen Overlay verfügbar.</p>
-          </div>
-          <div className="setup-page-actions">
-            <button type="button" className={`btn ${setupMode === 'admin' ? 'btn-primary' : ''}`} onClick={() => setSetupMode('admin')} disabled={!setupStatus?.needs_setup}>Admin-Konto</button>
-            <button type="button" className={`btn ${setupMode === 'nextcloud' ? 'btn-primary' : ''}`} onClick={() => setSetupMode('nextcloud')}>Nextcloud OAuth</button>
-            <button type="button" className="btn" onClick={() => router.push('/')}>Zur Anmeldung</button>
+            <p>Wähle einen Weg. Erst richtest du MYND ein, danach erscheint die normale Anmeldung als nächste Station.</p>
+            <div className="setup-stepline" aria-label="Einrichtungsstatus">
+              <span className={`setup-stepchip ${setupMode !== 'nextcloud' ? 'active' : ''}`}>1 Einrichtung</span>
+              <span className={`setup-stepchip ${setupMode === 'nextcloud' ? 'active' : ''}`}>2 Anmeldung</span>
+            </div>
           </div>
         </div>
 
         <div className="setup-choice-grid">
-          <button type="button" className="setup-choice-card" onClick={() => setSetupMode('admin')} disabled={!setupStatus?.needs_setup}>
+          <button type="button" className={`setup-choice-card ${setupMode === 'admin' ? 'selected' : ''}`} onClick={() => setSetupMode('admin')} disabled={!setupStatus?.needs_setup}>
             <div className="setup-choice-title">1. Lokales Admin-Konto</div>
-            <p>Empfohlen für den ersten Start, wenn noch kein Administrator existiert. Danach kannst du die Admin-Seite und Systemeinstellungen nutzen.</p>
+            <p>Für den ersten Start: einmal einen lokalen Administrator anlegen und direkt danach normal anmelden.</p>
           </button>
-          <button type="button" className="setup-choice-card" onClick={() => setSetupMode('nextcloud')}>
+          <button type="button" className={`setup-choice-card ${setupMode === 'nextcloud' ? 'selected' : ''}`} onClick={() => setSetupMode('nextcloud')}>
             <div className="setup-choice-title">2. Nextcloud OAuth</div>
-            <p>Wenn Nextcloud dein Einstieg sein soll: Client ID und Secret hier speichern und die Redirect-URI direkt aus der Seite kopieren.</p>
+            <p>Wenn Nextcloud dein Einstieg sein soll: verbinden, speichern und dann mit derselben Anmeldefläche weiterarbeiten.</p>
           </button>
         </div>
 
@@ -133,8 +137,8 @@ export default function SetupWizard() {
           <div className="setup-panel setup-panel-standalone">
             <div className="setup-panel-head">
               <div>
-                <h2 className="setup-title">Ersteinrichtung</h2>
-                <p className="setup-subtitle">Lege zuerst das Admin-Konto an oder speichere direkt die Nextcloud-OAuth-Daten.</p>
+                <h2 className="setup-title">{setupMode === 'nextcloud' ? 'Nextcloud verbinden' : 'Lokales Admin-Konto anlegen'}</h2>
+                <p className="setup-subtitle">{currentStepLabel} · {setupMode === 'nextcloud' ? 'Client-ID, Secret und URL eintragen' : 'Benutzername ist bereits vorbereitet'}</p>
               </div>
             </div>
 
@@ -197,12 +201,13 @@ export default function SetupWizard() {
 
             {setupMessage ? <div className="setup-message success">{setupMessage}</div> : null}
             {setupError ? <div className="setup-message error">{setupError}</div> : null}
+            {setupComplete ? (
+              <div className="setup-complete-cta">
+                <button type="button" className="btn btn-primary" onClick={() => router.push('/')}>Zur Anmeldung weiter</button>
+              </div>
+            ) : null}
           </div>
         ) : null}
-
-        <div className="setup-page-footer-note">
-          Tipp: Wenn du nur die Nextcloud-Anmeldung nachrüsten willst, musst du das Admin-Konto nicht noch einmal anlegen.
-        </div>
       </div>
     </div>
   );
