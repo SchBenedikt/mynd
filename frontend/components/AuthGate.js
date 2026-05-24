@@ -15,6 +15,7 @@ export default function AuthGate({ children }) {
   const [loginError, setLoginError] = useState('');
   const [showNcForm, setShowNcForm] = useState(false);
   const [ncDomain, setNcDomain] = useState('');
+  const [forceOpen, setForceOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -50,6 +51,7 @@ export default function AuthGate({ children }) {
               .then((data) => {
                 if (data && data.authenticated && data.user) {
                   setUser({ name: data.user.name, username: data.user.username, token: fragToken });
+                  setForceOpen(false);
                 }
               })
               .catch(() => {});
@@ -60,8 +62,24 @@ export default function AuthGate({ children }) {
     setReady(true);
   }, []);
 
+  useEffect(() => {
+    const openHandler = () => {
+      try {
+        setForceOpen(true);
+        setShowNcForm(false);
+        setLoginError('');
+        setTimeout(() => {
+          const el = document.querySelector('.auth-card input[aria-label="Name"]') || document.querySelector('.auth-card input[aria-label="Benutzer"]');
+          if (el && typeof el.focus === 'function') el.focus();
+        }, 50);
+      } catch (e) {}
+    };
+    window.addEventListener('open-auth', openHandler);
+    return () => window.removeEventListener('open-auth', openHandler);
+  }, []);
+
   if (!ready) return null;
-  if (user) return children;
+  if (user && !forceOpen) return children;
 
   const submit = (ev) => {
     ev.preventDefault();
@@ -69,6 +87,7 @@ export default function AuthGate({ children }) {
     const payload = { name: finalName, createdAt: Date.now() };
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch (err) {}
     setUser(payload);
+    setForceOpen(false);
   };
 
   const submitCredentials = async (ev) => {
@@ -81,8 +100,8 @@ export default function AuthGate({ children }) {
         try {
           const me = await fetch('/api/auth/me');
           const meData = await me.json();
-          if (me.ok && meData.authenticated) { setUser({ name: meData.user.name, username: meData.user.username }); return; }
-        } catch (err) { setUser({ name: data.user?.name || loginUser, username: data.user?.username || loginUser }); return; }
+          if (me.ok && meData.authenticated) { setUser({ name: meData.user.name, username: meData.user.username }); setForceOpen(false); return; }
+        } catch (err) { setUser({ name: data.user?.name || loginUser, username: data.user?.username || loginUser }); setForceOpen(false); return; }
       }
       setLoginError((data && data.error) ? String(data.error) : 'Login fehlgeschlagen');
     } catch (err) { setLoginError('Netzwerkfehler'); }

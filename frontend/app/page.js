@@ -2693,7 +2693,11 @@ export default function HomePage() {
                     <i className="fas fa-right-from-bracket"></i>
                   </button>
                 ) : (
-                  <button className="new-chat-btn compact" onClick={() => setIsSidebarCollapsed(false)} title="Anmelden">
+                  <button
+                    className="new-chat-btn compact"
+                    onClick={() => { try { window.dispatchEvent(new CustomEvent('open-auth')); } catch (e) {} setIsSidebarCollapsed(false); }}
+                    title="Anmelden"
+                  >
                     <i className="fas fa-right-to-bracket"></i>
                   </button>
                 )}
