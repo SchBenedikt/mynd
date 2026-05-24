@@ -19,6 +19,7 @@ from typing import Optional, List, Dict, Any
 import hmac
 import hashlib
 import base64
+import secrets
 import json as _json
 from flask import make_response
 from passlib.hash import bcrypt
@@ -394,6 +395,40 @@ def _read_users_file() -> Dict[str, Any]:
         return {}
 
 
+PASSWORD_SCHEME_PREFIX = 'pbkdf2_sha256'
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    iterations = 390000
+    digest = hashlib.pbkdf2_hmac('sha256', str(password).encode('utf-8'), salt, iterations)
+    salt_b64 = base64.urlsafe_b64encode(salt).decode('ascii').rstrip('=')
+    digest_b64 = base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')
+    return f'{PASSWORD_SCHEME_PREFIX}${iterations}${salt_b64}${digest_b64}'
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    stored = str(stored or '')
+    if stored.startswith(f'{PASSWORD_SCHEME_PREFIX}$'):
+        try:
+            _, iterations_str, salt_b64, digest_b64 = stored.split('$', 3)
+            iterations = int(iterations_str)
+            salt = base64.urlsafe_b64decode(salt_b64 + '=' * (-len(salt_b64) % 4))
+            expected = base64.urlsafe_b64decode(digest_b64 + '=' * (-len(digest_b64) % 4))
+            actual = hashlib.pbkdf2_hmac('sha256', str(password).encode('utf-8'), salt, iterations)
+            return hmac.compare_digest(actual, expected)
+        except Exception:
+            return False
+
+    if stored.startswith('$2'):
+        try:
+            return bool(bcrypt.verify(str(password), stored))
+        except Exception:
+            return False
+
+    return hmac.compare_digest(str(password), stored)
+
+
 def _is_placeholder_user_store(users: Dict[str, Any]) -> bool:
     if not isinstance(users, dict) or len(users) != 1:
         return False
@@ -414,10 +449,7 @@ def _is_placeholder_user_store(users: Dict[str, Any]) -> bool:
     if not stored_password:
         return True
 
-    try:
-        return bool(bcrypt.verify(str(admin_pass), stored_password))
-    except Exception:
-        return stored_password == str(admin_pass)
+    return _verify_password(str(admin_pass), stored_password)
 
 
 def _users_setup_needed() -> bool:
@@ -437,15 +469,10 @@ def _load_users() -> Dict[str, Any]:
         pw = entry.get('password')
         if not pw:
             continue
-        # Detect bcrypt hashed format ($2b$)
-        if isinstance(pw, str) and pw.startswith('$2'):
+        if isinstance(pw, str) and (pw.startswith(f'{PASSWORD_SCHEME_PREFIX}$') or pw.startswith('$2')):
             continue
-        # Otherwise treat as plaintext and hash it
-        try:
-            users[username]['password'] = bcrypt.hash(str(pw))
-            migrated = True
-        except Exception:
-            continue
+        users[username]['password'] = _hash_password(str(pw))
+        migrated = True
 
     if migrated:
         try:
@@ -462,13 +489,8 @@ def _verify_local_credentials(username: str, password: str) -> Optional[Dict[str
     if not entry or 'password' not in entry:
         return None
     stored = entry.get('password')
-    try:
-        if not bcrypt.verify(str(password), stored):
-            return None
-    except Exception:
-        # fallback to timing-safe plain comparison (shouldn't happen)
-        if not hmac.compare_digest(str(stored), str(password)):
-            return None
+    if not _verify_password(str(password), stored):
+        return None
     return {'username': username, 'name': entry.get('name') or username}
 
 # --- Auth API endpoints -------------------------------------------------------------------------
@@ -543,7 +565,7 @@ def api_setup_bootstrap():
 
         users = {
             admin_user: {
-                'password': bcrypt.hash(admin_password),
+                'password': _hash_password(admin_password),
                 'name': admin_name,
             }
         }
@@ -838,7 +860,7 @@ def api_admin_create_user():
     users = _load_users()
     if username in users:
         return jsonify({'success': False, 'error': 'User exists'}), 409
-    users[username] = {'password': bcrypt.hash(password), 'name': name}
+    users[username] = {'password': _hash_password(password), 'name': name}
     try:
         with open(USERS_FILE, 'w', encoding='utf-8') as f:
             json.dump(users, f, ensure_ascii=False, indent=2)
@@ -859,7 +881,7 @@ def api_admin_reset_password():
     users = _load_users()
     if username not in users:
         return jsonify({'success': False, 'error': 'Not found'}), 404
-    users[username]['password'] = bcrypt.hash(new_password)
+    users[username]['password'] = _hash_password(new_password)
     try:
         with open(USERS_FILE, 'w', encoding='utf-8') as f:
             json.dump(users, f, ensure_ascii=False, indent=2)
