@@ -2720,7 +2720,12 @@ export default function HomePage() {
               {user ? (
                 <div className="sidebar-user" style={{marginTop: '0.6rem', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
                   <div style={{fontSize:12, color:'var(--muted)'}}>{user.name || user.username}</div>
-                  <div style={{fontSize:11, color:'var(--muted)'}}>@{user.username}</div>
+                  <div style={{display:'flex', alignItems:'center', gap:8}}>
+                    <div style={{fontSize:11, color:'var(--muted)'}}>@{user.username}</div>
+                    <button className="new-chat-btn compact" onClick={logout} title="Abmelden">
+                      <i className="fas fa-right-from-bracket"></i>
+                    </button>
+                  </div>
                 </div>
               ) : null}
             </>
