@@ -84,7 +84,28 @@ input:focus{ outline:none; box-shadow:0 0 0 3px rgba(47,99,255,0.08); border-col
 .setup-redirect-label{ font-weight:600; color:#374151; font-size:13px; }
 .setup-redirect-code{ padding:10px 12px; border-radius:10px; background:#0f172a; color:#e2e8f0; overflow-x:auto; }
 
+.setup-page{ min-height:100vh; padding:32px 16px; background:
+  radial-gradient(circle at top left, rgba(47,99,255,0.12), transparent 28%),
+  radial-gradient(circle at right 20%, rgba(22,163,74,0.10), transparent 26%),
+  linear-gradient(180deg, #f3f7ff 0%, #f8fafc 100%); }
+.setup-page-shell{ width:min(1120px, 100%); margin:0 auto; }
+.setup-page-hero{ display:flex; justify-content:space-between; gap:20px; align-items:flex-start; margin-bottom:18px; padding:22px 24px; border-radius:18px; background: rgba(255,255,255,0.82); box-shadow:0 20px 60px rgba(15,23,42,0.08); backdrop-filter: blur(14px); }
+.setup-page-hero h1{ margin:6px 0 8px; font-size:clamp(28px, 4vw, 42px); line-height:1.05; }
+.setup-page-hero p{ margin:0; max-width:56ch; color:#4b5563; }
+.setup-page-kicker{ display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; background:#0b6abf; color:white; font-size:12px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; }
+.setup-page-actions{ display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+.setup-panel-standalone{ margin:0 0 18px; }
+.setup-choice-grid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; }
+.setup-choice-card{ text-align:left; padding:18px; border:1px solid #dbe4f0; border-radius:16px; background: rgba(255,255,255,0.86); box-shadow:0 16px 40px rgba(15,23,42,0.06); cursor:pointer; transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease; }
+.setup-choice-card:hover:not(:disabled){ transform: translateY(-2px); box-shadow:0 20px 48px rgba(15,23,42,0.10); border-color:#9cc2ff; }
+.setup-choice-card:disabled{ opacity:0.58; cursor:not-allowed; }
+.setup-choice-title{ font-size:16px; font-weight:700; margin-bottom:8px; color:#0f172a; }
+.setup-choice-card p{ margin:0; color:#475569; line-height:1.45; }
+
 @media (max-width:900px){
   .setup-panel-head{ flex-direction:column; }
   .setup-grid{ grid-template-columns:1fr; }
+  .setup-page-hero{ flex-direction:column; }
+  .setup-page-actions{ justify-content:flex-start; }
+  .setup-choice-grid{ grid-template-columns:1fr; }
 }
