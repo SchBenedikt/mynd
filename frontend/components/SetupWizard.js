@@ -109,13 +109,24 @@ export default function SetupWizard() {
           <div>
             <div className="setup-page-kicker">Einrichtung</div>
             <h1>MYND konfigurieren</h1>
-            <p>Wähle einen Pfad und richte MYND entweder mit einem lokalen Admin-Konto oder direkt mit Nextcloud OAuth ein.</p>
+            <p>Wähle einen Pfad und richte MYND entweder mit einem lokalen Admin-Konto oder direkt mit Nextcloud OAuth ein. Danach ist die Anmeldung im normalen Overlay verfügbar.</p>
           </div>
           <div className="setup-page-actions">
             <button type="button" className={`btn ${setupMode === 'admin' ? 'btn-primary' : ''}`} onClick={() => setSetupMode('admin')} disabled={!setupStatus?.needs_setup}>Admin-Konto</button>
             <button type="button" className={`btn ${setupMode === 'nextcloud' ? 'btn-primary' : ''}`} onClick={() => setSetupMode('nextcloud')}>Nextcloud OAuth</button>
             <button type="button" className="btn" onClick={() => router.push('/')}>Zur Anmeldung</button>
           </div>
+        </div>
+
+        <div className="setup-choice-grid">
+          <button type="button" className="setup-choice-card" onClick={() => setSetupMode('admin')} disabled={!setupStatus?.needs_setup}>
+            <div className="setup-choice-title">1. Lokales Admin-Konto</div>
+            <p>Empfohlen für den ersten Start, wenn noch kein Administrator existiert. Danach kannst du die Admin-Seite und Systemeinstellungen nutzen.</p>
+          </button>
+          <button type="button" className="setup-choice-card" onClick={() => setSetupMode('nextcloud')}>
+            <div className="setup-choice-title">2. Nextcloud OAuth</div>
+            <p>Wenn Nextcloud dein Einstieg sein soll: Client ID und Secret hier speichern und die Redirect-URI direkt aus der Seite kopieren.</p>
+          </button>
         </div>
 
         {setupPanelVisible ? (
@@ -189,15 +200,8 @@ export default function SetupWizard() {
           </div>
         ) : null}
 
-        <div className="setup-choice-grid">
-          <button type="button" className="setup-choice-card" onClick={() => setSetupMode('admin')} disabled={!setupStatus?.needs_setup}>
-            <div className="setup-choice-title">Lokales Admin-Konto</div>
-            <p>Einmalig einen lokalen Administrator anlegen, damit die Admin-Seite und systemweite Einstellungen zugänglich werden.</p>
-          </button>
-          <button type="button" className="setup-choice-card" onClick={() => setSetupMode('nextcloud')}>
-            <div className="setup-choice-title">Nextcloud OAuth</div>
-            <p>Client ID und Secret in MYND speichern und die Redirect-URI für die Nextcloud-App übernehmen.</p>
-          </button>
+        <div className="setup-page-footer-note">
+          Tipp: Wenn du nur die Nextcloud-Anmeldung nachrüsten willst, musst du das Admin-Konto nicht noch einmal anlegen.
         </div>
       </div>
     </div>

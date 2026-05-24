@@ -144,53 +144,87 @@ export default function AuthGate({ children }) {
     <div className="auth-overlay">
       <div className="auth-card">
         <div className="auth-header">
-          <div>
-            <h1 className="auth-title">Willkommen bei MYND</h1>
-            <p className="auth-sub">Um Mynd gemeinsam zu nutzen, gib bitte deinen Namen ein oder melde dich an.</p>
+          <div className="auth-header-copy">
+            <div className="auth-kicker">MYND</div>
+            <h1 className="auth-title">Willkommen zurück</h1>
+            <p className="auth-sub">Nutze MYND als Gast, mit lokalem Login oder richte die Instanz direkt neu ein.</p>
+          </div>
+          <div className="auth-header-actions">
+            <button type="button" className="btn btn-nc" onClick={() => router.push('/setup?mode=nextcloud')}>Setup öffnen</button>
+            <button type="button" className="btn" onClick={() => router.push('/setup')}>Einrichtungsseite</button>
           </div>
         </div>
 
-        <div className="auth-body">
-          <div className="guest-col">
-            <form onSubmit={submit} className="guest-form">
-              <label className="label">Als Gast</label>
-              <input aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dein Name (Gast)" />
-              <button type="submit" className="btn btn-primary">Weiter als Gast</button>
-            </form>
+        <div className="auth-body auth-body-grid">
+          <div className="auth-intro">
+            <div className="auth-spotlight">
+              <div className="auth-spotlight-title">Wähle deinen Einstieg</div>
+              <div className="auth-spotlight-text">Gastzugang ist schnell, lokales Login ist dauerhaft, Nextcloud verbindet MYND mit deiner bestehenden Umgebung.</div>
+            </div>
+
+            <div className="auth-feature-grid">
+              <div className="auth-feature-card">
+                <div className="auth-feature-title">Gast</div>
+                <p>Direkt loslegen ohne Konto.</p>
+              </div>
+              <div className="auth-feature-card">
+                <div className="auth-feature-title">Login</div>
+                <p>Für persönliche Daten und Rechte.</p>
+              </div>
+              <div className="auth-feature-card">
+                <div className="auth-feature-title">Nextcloud</div>
+                <p>OAuth und bestehende Infrastruktur nutzen.</p>
+              </div>
+            </div>
+
+            <div className="auth-callout">
+              <div className="auth-callout-title">Erste Installation?</div>
+              <p>Öffne die Setup-Seite und richte zuerst Admin oder Nextcloud ein. Danach kehrst du hierher zurück.</p>
+            </div>
           </div>
 
-          <div className="divider-vertical" />
+          <div className="auth-panels">
+            <div className="auth-panel">
+              <div className="panel-badge">Gast</div>
+              <form onSubmit={submit} className="panel-form">
+                <label className="label">Als Gast starten</label>
+                <input aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Dein Name" />
+                <button type="submit" className="btn btn-primary">Weiter als Gast</button>
+              </form>
+            </div>
 
-          <div className="login-col">
-            <form onSubmit={submitCredentials} className="login-form">
-              <label className="label">Login</label>
-              <input aria-label="Benutzer" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} placeholder="Benutzername" />
-              <input aria-label="Passwort" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="Passwort" type="password" />
-              <button type="submit" className="btn btn-success">Login</button>
-              {loginError ? <div className="error">{loginError}</div> : null}
-            </form>
+            <div className="auth-panel auth-panel-accent">
+              <div className="panel-badge">Login</div>
+              <form onSubmit={submitCredentials} className="panel-form">
+                <label className="label">Mit Benutzerkonto anmelden</label>
+                <input aria-label="Benutzer" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} placeholder="Benutzername" />
+                <input aria-label="Passwort" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} placeholder="Passwort" type="password" />
+                <button type="submit" className="btn btn-success">Anmelden</button>
+                {loginError ? <div className="error">{loginError}</div> : null}
+              </form>
 
-            <div className="nc-block">
-              {!showNcForm ? (
-                <button className="btn btn-nc" onClick={() => setShowNcForm(true)}>Mit Nextcloud anmelden</button>
-              ) : (
-                <form onSubmit={onNcSubmit} className="nc-form">
-                  <input aria-label="Nextcloud-Domain" value={ncDomain} onChange={(e) => setNcDomain(e.target.value)} placeholder="https://cloud.example.org" />
-                  <div style={{display:'flex',gap:8}}>
-                    <button type="submit" className="btn btn-nc">Weiter</button>
-                    <button type="button" className="btn" onClick={() => setShowNcForm(false)}>Abbrechen</button>
-                  </div>
-                </form>
-              )}
+              <div className="nc-block">
+                {!showNcForm ? (
+                  <button className="btn btn-nc" onClick={() => setShowNcForm(true)}>Mit Nextcloud anmelden</button>
+                ) : (
+                  <form onSubmit={onNcSubmit} className="nc-form">
+                    <input aria-label="Nextcloud-Domain" value={ncDomain} onChange={(e) => setNcDomain(e.target.value)} placeholder="https://cloud.example.org" />
+                    <div style={{display:'flex',gap:8}}>
+                      <button type="submit" className="btn btn-nc">Weiter</button>
+                      <button type="button" className="btn" onClick={() => setShowNcForm(false)}>Abbrechen</button>
+                    </div>
+                  </form>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
         <div className="auth-footer">
-          <small>Das Backend unterstützt serverseitige Authentifizierung (JWT + Nextcloud OAuth). Verwende "Login" oder "Mit Nextcloud anmelden"; Admin-Einstellungen findest du in der Admin-UI.</small>
+          <small>Für die Ersteinrichtung nutze die Setup-Seite. Danach kannst du hier zwischen Gast, Login und Nextcloud wechseln.</small>
           <div style={{marginTop:10, display:'flex', gap:8, flexWrap:'wrap'}}>
             <button type="button" className="btn btn-nc" onClick={() => router.push('/setup?mode=nextcloud')}>Nextcloud OAuth einrichten</button>
-            <button type="button" className="btn" onClick={() => router.push('/setup?mode=admin')}>Setup-Seite öffnen</button>
+            <button type="button" className="btn" onClick={() => router.push('/setup?mode=admin')}>Admin einrichten</button>
           </div>
         </div>
       </div>
