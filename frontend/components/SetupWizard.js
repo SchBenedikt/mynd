@@ -48,6 +48,8 @@ export default function SetupWizard() {
     }
   }, [searchParams]);
 
+  const setupAlreadyFinished = Boolean(setupStatus && !setupStatus.needs_setup);
+
   useEffect(() => {
     if (setupComplete || setupAlreadyFinished) {
       router.replace('/');
@@ -112,7 +114,6 @@ export default function SetupWizard() {
     'Danach Client ID und Client Secret hier eintragen und speichern.'
   ];
 
-  const setupAlreadyFinished = Boolean(setupStatus && !setupStatus.needs_setup);
   const setupPanelVisible = !setupAlreadyFinished && (Boolean(setupStatus?.needs_setup) || setupMode === 'admin' || setupMode === 'nextcloud');
   const currentStepLabel = setupMode === 'nextcloud' ? 'Schritt 2 von 2' : 'Schritt 1 von 2';
 
