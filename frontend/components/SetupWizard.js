@@ -104,7 +104,8 @@ export default function SetupWizard() {
     'Danach Client ID und Client Secret hier eintragen und speichern.'
   ];
 
-  const setupPanelVisible = Boolean(setupStatus?.needs_setup) || setupMode === 'admin' || setupMode === 'nextcloud';
+  const setupAlreadyFinished = Boolean(setupStatus && !setupStatus.needs_setup);
+  const setupPanelVisible = !setupAlreadyFinished && (Boolean(setupStatus?.needs_setup) || setupMode === 'admin' || setupMode === 'nextcloud');
   const currentStepLabel = setupMode === 'nextcloud' ? 'Schritt 2 von 2' : 'Schritt 1 von 2';
 
   return (
@@ -122,18 +123,33 @@ export default function SetupWizard() {
           </div>
         </div>
 
-        <div className="setup-choice-grid">
-          <button type="button" className={`setup-choice-card ${setupMode === 'admin' ? 'selected' : ''}`} onClick={() => setSetupMode('admin')} disabled={!setupStatus?.needs_setup}>
-            <div className="setup-choice-title">1. Lokales Admin-Konto</div>
-            <p>Für den ersten Start: einmal einen lokalen Administrator anlegen und direkt danach normal anmelden.</p>
-          </button>
-          <button type="button" className={`setup-choice-card ${setupMode === 'nextcloud' ? 'selected' : ''}`} onClick={() => setSetupMode('nextcloud')}>
-            <div className="setup-choice-title">2. Nextcloud OAuth</div>
-            <p>Wenn Nextcloud dein Einstieg sein soll: verbinden, speichern und dann mit derselben Anmeldefläche weiterarbeiten.</p>
-          </button>
-        </div>
+        {!setupAlreadyFinished ? (
+          <div className="setup-choice-grid">
+            <button type="button" className={`setup-choice-card ${setupMode === 'admin' ? 'selected' : ''}`} onClick={() => setSetupMode('admin')} disabled={!setupStatus?.needs_setup}>
+              <div className="setup-choice-title">1. Lokales Admin-Konto</div>
+              <p>Für den ersten Start: einmal einen lokalen Administrator anlegen und direkt danach normal anmelden.</p>
+            </button>
+            <button type="button" className={`setup-choice-card ${setupMode === 'nextcloud' ? 'selected' : ''}`} onClick={() => setSetupMode('nextcloud')}>
+              <div className="setup-choice-title">2. Nextcloud OAuth</div>
+              <p>Wenn Nextcloud dein Einstieg sein soll: verbinden, speichern und dann mit derselben Anmeldefläche weiterarbeiten.</p>
+            </button>
+          </div>
+        ) : null}
 
-        {setupPanelVisible ? (
+        {setupAlreadyFinished ? (
+          <div className="setup-panel setup-panel-standalone setup-completed-panel">
+            <div className="setup-panel-head">
+              <div>
+                <h2 className="setup-title">Setup abgeschlossen</h2>
+                <p className="setup-subtitle">MYND ist eingerichtet. Diese Seite wird im Normalfall nicht mehr gebraucht.</p>
+              </div>
+            </div>
+            <div className="setup-note">Wechsle jetzt zur Anmeldung und nutze dein lokales Konto oder die konfigurierte Nextcloud-Anmeldung.</div>
+            <div className="setup-complete-cta">
+              <button type="button" className="btn btn-primary" onClick={() => router.push('/')}>Zur Anmeldung weiter</button>
+            </div>
+          </div>
+        ) : setupPanelVisible ? (
           <div className="setup-panel setup-panel-standalone">
             <div className="setup-panel-head">
               <div>
