@@ -16,6 +16,18 @@ export default function AuthGate({ children }) {
   const [showNcForm, setShowNcForm] = useState(false);
   const [ncDomain, setNcDomain] = useState('');
   const [forceOpen, setForceOpen] = useState(false);
+  const [setupStatus, setSetupStatus] = useState(null);
+  const [setupMode, setSetupMode] = useState('');
+  const [setupSubmitting, setSetupSubmitting] = useState(false);
+  const [setupMessage, setSetupMessage] = useState('');
+  const [setupError, setSetupError] = useState('');
+  const [setupForm, setSetupForm] = useState({
+    adminName: '',
+    adminPassword: '',
+    clientId: '',
+    clientSecret: '',
+    nextcloudUrl: ''
+  });
 
   useEffect(() => {
     try {
@@ -63,6 +75,25 @@ export default function AuthGate({ children }) {
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
+    fetch('/api/setup/status')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.success) {
+          setSetupStatus(data);
+          if (data.needs_setup) {
+            setSetupMode((current) => current || 'admin');
+            setSetupForm((current) => ({
+              ...current,
+              adminName: current.adminName || data.admin_user || 'admin'
+            }));
+          }
+        }
+      })
+      .catch(() => {});
+  }, [ready]);
+
+  useEffect(() => {
     const openHandler = () => {
       try {
         setForceOpen(true);
@@ -107,6 +138,53 @@ export default function AuthGate({ children }) {
     } catch (err) { setLoginError('Netzwerkfehler'); }
   };
 
+  const submitBootstrap = async (ev) => {
+    ev.preventDefault();
+    setSetupError('');
+    setSetupMessage('');
+    setSetupSubmitting(true);
+    try {
+      const payload = {
+        mode: setupMode,
+        admin_name: setupForm.adminName,
+        admin_password: setupForm.adminPassword,
+        client_id: setupForm.clientId,
+        client_secret: setupForm.clientSecret,
+        nextcloud_url: setupForm.nextcloudUrl
+      };
+      const resp = await fetch('/api/setup/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        setSetupError((data && data.error) ? String(data.error) : 'Setup fehlgeschlagen');
+        return;
+      }
+
+      if (data.admin_created) {
+        setSetupMessage('Admin wurde angelegt. Danach bitte mit dem lokalen Login anmelden.');
+        setLoginUser(setupStatus?.admin_user || 'admin');
+        setSetupMode('');
+      } else if (data.oauth_configured) {
+        setSetupMessage('Nextcloud OAuth wurde gespeichert. Du kannst jetzt die Nextcloud-Anmeldung benutzen.');
+        setShowNcForm(true);
+        setSetupMode('');
+      }
+
+      try {
+        const statusResp = await fetch('/api/setup/status');
+        const statusData = await statusResp.json();
+        if (statusData && statusData.success) setSetupStatus(statusData);
+      } catch (err) {}
+    } catch (err) {
+      setSetupError('Netzwerkfehler');
+    } finally {
+      setSetupSubmitting(false);
+    }
+  };
+
   const startNextcloudFlow = (domain) => {
     const redirect = window.location.origin + window.location.pathname;
     const loginUrl = `/api/auth/nextcloud/login?nextcloud_url=${encodeURIComponent(domain)}&redirect_to=${encodeURIComponent(redirect)}`;
@@ -136,6 +214,17 @@ export default function AuthGate({ children }) {
     startNextcloudFlow(domain);
   };
 
+  const redirectUri = typeof window !== 'undefined'
+    ? `${window.location.origin}/api/auth/nextcloud/callback`
+    : '/api/auth/nextcloud/callback';
+
+  const nextcloudHint = [
+    'In Nextcloud als Admin eine OAuth2-App anlegen oder die vorhandene OAuth2-Funktion nutzen.',
+    'Die Callback-URL in der Nextcloud-App muss exakt auf die unten angezeigte Redirect-URI zeigen.',
+    'Danach Client ID und Client Secret hier eintragen und speichern.'
+  ];
+  const setupPanelVisible = Boolean(setupStatus?.needs_setup) || setupMode === 'admin' || setupMode === 'nextcloud';
+
   return (
     <div className="auth-overlay">
       <div className="auth-card">
@@ -145,6 +234,82 @@ export default function AuthGate({ children }) {
             <p className="auth-sub">Um Mynd gemeinsam zu nutzen, gib bitte deinen Namen ein oder melde dich an.</p>
           </div>
         </div>
+
+        {setupPanelVisible ? (
+          <div className="setup-panel">
+            <div className="setup-panel-head">
+              <div>
+                <h2 className="setup-title">Ersteinrichtung</h2>
+                <p className="setup-subtitle">Wähle zuerst, ob du das lokale Admin-Konto initialisieren oder Nextcloud OAuth konfigurieren willst.</p>
+              </div>
+              <div className="setup-actions">
+                {setupStatus?.needs_setup ? <button type="button" className={`btn ${setupMode === 'admin' ? 'btn-primary' : ''}`} onClick={() => setSetupMode('admin')}>Admin-Konto</button> : null}
+                <button type="button" className={`btn ${setupMode === 'nextcloud' ? 'btn-primary' : ''}`} onClick={() => setSetupMode('nextcloud')}>Nextcloud OAuth</button>
+                {!setupStatus?.needs_setup ? <button type="button" className="btn" onClick={() => setSetupMode('')}>Schließen</button> : null}
+              </div>
+            </div>
+
+            {setupMode === 'admin' ? (
+              <form onSubmit={submitBootstrap} className="setup-form">
+                <div className="setup-grid">
+                  <label className="setup-field">
+                    <span>Admin-Benutzer</span>
+                    <input value={setupStatus?.admin_user || 'admin'} disabled />
+                  </label>
+                  <label className="setup-field">
+                    <span>Admin-Passwort</span>
+                    <input type="password" value={setupForm.adminPassword} onChange={(e) => setSetupForm((current) => ({ ...current, adminPassword: e.target.value }))} placeholder="Neues Admin-Passwort" />
+                  </label>
+                  <label className="setup-field setup-wide">
+                    <span>Anzeigename</span>
+                    <input value={setupForm.adminName} onChange={(e) => setSetupForm((current) => ({ ...current, adminName: e.target.value }))} placeholder="z. B. Systemadmin" />
+                  </label>
+                </div>
+                <div className="setup-note">Dieses Konto wird als erster lokaler Administrator angelegt. Danach kannst du dich normal im Login anmelden.</div>
+                <div className="setup-footer">
+                  <button type="submit" className="btn btn-success" disabled={setupSubmitting}>Admin anlegen</button>
+                </div>
+              </form>
+            ) : null}
+
+            {setupMode === 'nextcloud' ? (
+              <form onSubmit={submitBootstrap} className="setup-form">
+                <div className="setup-grid">
+                  <label className="setup-field setup-wide">
+                    <span>Nextcloud URL</span>
+                    <input value={setupForm.nextcloudUrl} onChange={(e) => setSetupForm((current) => ({ ...current, nextcloudUrl: e.target.value }))} placeholder="https://cloud.example.org" />
+                  </label>
+                  <label className="setup-field">
+                    <span>Client ID</span>
+                    <input value={setupForm.clientId} onChange={(e) => setSetupForm((current) => ({ ...current, clientId: e.target.value }))} placeholder="Client ID" />
+                  </label>
+                  <label className="setup-field">
+                    <span>Client Secret</span>
+                    <input value={setupForm.clientSecret} onChange={(e) => setSetupForm((current) => ({ ...current, clientSecret: e.target.value }))} placeholder="Client Secret" />
+                  </label>
+                </div>
+
+                <div className="setup-hints">
+                  {nextcloudHint.map((item) => <div key={item} className="setup-hint-item">{item}</div>)}
+                </div>
+
+                <div className="setup-redirect">
+                  <span className="setup-redirect-label">Redirect-URI</span>
+                  <code className="setup-redirect-code">{redirectUri}</code>
+                </div>
+
+                <div className="setup-note">Speichern aktiviert die Nextcloud-Anmeldung direkt im Webinterface. Falls du zusätzlich einen lokalen Admin brauchst, richte zuerst das Admin-Konto ein.</div>
+
+                <div className="setup-footer">
+                  <button type="submit" className="btn btn-nc" disabled={setupSubmitting}>Nextcloud speichern</button>
+                </div>
+              </form>
+            ) : null}
+
+            {setupMessage ? <div className="setup-message success">{setupMessage}</div> : null}
+            {setupError ? <div className="setup-message error">{setupError}</div> : null}
+          </div>
+        ) : null}
 
         <div className="auth-body">
           <div className="guest-col">
@@ -184,6 +349,10 @@ export default function AuthGate({ children }) {
 
         <div className="auth-footer">
           <small>Das Backend unterstützt serverseitige Authentifizierung (JWT + Nextcloud OAuth). Verwende "Login" oder "Mit Nextcloud anmelden"; Admin-Einstellungen findest du in der Admin-UI.</small>
+          <div style={{marginTop:10, display:'flex', gap:8, flexWrap:'wrap'}}>
+            <button type="button" className="btn btn-nc" onClick={() => setSetupMode('nextcloud')}>Nextcloud OAuth einrichten</button>
+            {setupStatus?.needs_setup ? <button type="button" className="btn" onClick={() => setSetupMode('admin')}>Lokales Admin-Konto initialisieren</button> : null}
+          </div>
         </div>
       </div>
     </div>

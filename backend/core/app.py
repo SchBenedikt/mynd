@@ -382,17 +382,24 @@ def verify_jwt(token: str) -> Optional[Dict[str, Any]]:
 # --- Simple local user store --------------------------------------------------------------------
 USERS_FILE = os.path.join(CONFIG_DIR, 'users.json')
 
+
+def _read_users_file() -> Dict[str, Any]:
+    if not os.path.exists(USERS_FILE):
+        return {}
+    try:
+        with open(USERS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _users_setup_needed() -> bool:
+    return len(_read_users_file()) == 0
+
 def _load_users() -> Dict[str, Any]:
-    users = {}
+    users = _read_users_file()
     migrated = False
-    if os.path.exists(USERS_FILE):
-        try:
-            with open(USERS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                users = data
-        except Exception:
-            users = {}
 
     # If no users configured, use env vars or default demo user
     if not users:
@@ -485,6 +492,79 @@ def api_auth_logout():
     resp = make_response(jsonify({'success': True}))
     resp.set_cookie('mynd_token', '', expires=0)
     return resp
+
+
+@app.route('/api/setup/status', methods=['GET'])
+def api_setup_status():
+    oauth_cfg = _load_oauth_config()
+    return jsonify({
+        'success': True,
+        'needs_setup': _users_setup_needed(),
+        'admin_user': os.getenv('ADMIN_USER', 'admin'),
+        'oauth_configured': bool(oauth_cfg.get('client_id') and oauth_cfg.get('client_secret')),
+        'nextcloud_url': oauth_cfg.get('nextcloud_url') or None,
+    })
+
+
+@app.route('/api/setup/bootstrap', methods=['POST'])
+def api_setup_bootstrap():
+    data = request.get_json(force=True, silent=True) or {}
+    mode = str(data.get('mode') or '').strip().lower()
+
+    did_admin = False
+    did_oauth = False
+
+    if mode in {'admin', 'both'}:
+        if not _users_setup_needed():
+            return jsonify({'success': False, 'error': 'Admin setup already completed'}), 409
+        admin_user = os.getenv('ADMIN_USER', 'admin')
+        admin_password = str(data.get('admin_password') or '').strip()
+        admin_name = str(data.get('admin_name') or admin_user).strip() or admin_user
+        if not admin_password:
+            return jsonify({'success': False, 'error': 'Missing admin password'}), 400
+
+        users = {
+            admin_user: {
+                'password': bcrypt.hash(admin_password),
+                'name': admin_name,
+            }
+        }
+        try:
+            os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+            with open(USERS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(users, f, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            logger.warning('Could not persist bootstrap admin user: %s', exc)
+            return jsonify({'success': False, 'error': 'Could not persist admin user'}), 500
+
+        os.environ['ADMIN_USER'] = admin_user
+        did_admin = True
+
+    if mode in {'nextcloud', 'both'}:
+        client_id = str(data.get('client_id') or '').strip()
+        client_secret = str(data.get('client_secret') or '').strip()
+        nextcloud_url = str(data.get('nextcloud_url') or '').strip()
+        if not client_id or not client_secret:
+            return jsonify({'success': False, 'error': 'Missing client_id or client_secret'}), 400
+
+        ok = _save_oauth_config({
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'nextcloud_url': nextcloud_url or None,
+        })
+        if not ok:
+            return jsonify({'success': False, 'error': 'Could not persist Nextcloud OAuth config'}), 500
+
+        os.environ['NEXTCLOUD_OAUTH_CLIENT_ID'] = client_id
+        os.environ['NEXTCLOUD_OAUTH_CLIENT_SECRET'] = client_secret
+        if nextcloud_url:
+            os.environ['NEXTCLOUD_URL'] = nextcloud_url
+        did_oauth = True
+
+    if not did_admin and not did_oauth:
+        return jsonify({'success': False, 'error': 'Missing setup mode'}), 400
+
+    return jsonify({'success': True, 'admin_created': did_admin, 'oauth_configured': did_oauth})
 
 
 # Quick health/check endpoint for Nextcloud OAuth configuration
