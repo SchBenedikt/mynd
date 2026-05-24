@@ -283,3 +283,14 @@ For questions or issues:
 ---
 
 **This PR transforms MYND into a truly autonomous research assistant that knows your files, knows about you, and independently investigates to provide comprehensive answers.** 🚀
+
+---
+
+## Merge-Log: UI-Fix — Status-Widget entfernt
+
+- **Datum:** 24. Mai 2026
+- **Branch:** fix/remove-floating-status
+- **Beschreibung:** Das schwebende Status-Widget in der unteren linken Ecke (`StatusPill`) wurde aus dem globalen Root-Layout entfernt und die Status- sowie Logout-UI in die ausklappbare linke Seitenleiste integriert. Dadurch gibt es keine doppelte Anzeige mehr und die Abmelde-Schaltfläche ist konsistent erreichbar.
+- **Dateien:** `frontend/app/layout.js` (Entfernen der globalen Einbindung), Sidebar-UI bereits vorhanden in `frontend/app/page.js`.
+- **Status:** Gemerged in `main` und Remote-Feature-Branch gelöscht.
+
