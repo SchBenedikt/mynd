@@ -394,25 +394,43 @@ def _read_users_file() -> Dict[str, Any]:
         return {}
 
 
+def _is_placeholder_user_store(users: Dict[str, Any]) -> bool:
+    if not isinstance(users, dict) or len(users) != 1:
+        return False
+
+    admin_user = os.getenv('ADMIN_USER', 'admin')
+    admin_pass = os.getenv('ADMIN_PASS', 'admin')
+    username, entry = next(iter(users.items()))
+    if str(username).strip() != str(admin_user).strip():
+        return False
+    if not isinstance(entry, dict):
+        return False
+
+    name = str(entry.get('name') or '').strip().lower()
+    if name not in {'', 'admin', 'administrator'}:
+        return False
+
+    stored_password = str(entry.get('password') or '')
+    if not stored_password:
+        return True
+
+    try:
+        return bool(bcrypt.verify(str(admin_pass), stored_password))
+    except Exception:
+        return stored_password == str(admin_pass)
+
+
 def _users_setup_needed() -> bool:
-    return len(_read_users_file()) == 0
+    users = _read_users_file()
+    return not users or _is_placeholder_user_store(users)
 
 def _load_users() -> Dict[str, Any]:
     users = _read_users_file()
     migrated = False
 
-    # If no users configured, use env vars or default demo user
+    # If no users configured yet, keep the store empty so first run can go through setup.
     if not users:
-        user = os.getenv('ADMIN_USER', 'admin')
-        pwd = os.getenv('ADMIN_PASS', 'admin')
-        users = {user: {'password': bcrypt.hash(pwd), 'name': user}}
-        try:
-            os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-            with open(USERS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(users, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-        return users
+        return {}
 
     # Migrate plaintext passwords to hashed variants if needed
     for username, entry in list(users.items()):
