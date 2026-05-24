@@ -50,6 +50,7 @@ input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; outline: 
 .auth-header-actions{ display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
 .auth-body{ display:flex; gap:18px; padding:22px 28px 28px; }
 .auth-body-grid{ align-items:stretch; }
+.auth-body-single{ justify-content:center; }
 .auth-intro{ flex:1.05; display:flex; flex-direction:column; gap:16px; }
 .auth-panels{ flex:0.95; display:grid; gap:16px; }
 .auth-spotlight{ padding:18px; border-radius:18px; background:linear-gradient(180deg, #eff6ff 0%, #ffffff 100%); border:1px solid #dbeafe; box-shadow:0 14px 34px rgba(59,130,246,0.10); }
@@ -64,6 +65,7 @@ input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; outline: 
 .auth-callout p{ margin:0; color:#cbd5e1; line-height:1.5; }
 .auth-panel{ padding:18px; border-radius:18px; background:#fff; border:1px solid #e5e7eb; box-shadow:0 12px 30px rgba(15,23,42,0.06); }
 .auth-panel-accent{ border-color:#cfe0ff; background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); }
+.auth-panel-login{ width:min(560px, 100%); }
 .panel-badge{ display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; background:#e2e8f0; color:#334155; font-size:12px; font-weight:700; margin-bottom:12px; }
 .panel-form{ display:flex; flex-direction:column; gap:10px; }
 .guest-form, .login-form, .nc-form{ display:flex; flex-direction:column; gap:8px; }
@@ -87,6 +89,7 @@ input:focus{ outline:none; box-shadow:0 0 0 4px rgba(47,99,255,0.12); border-col
   .auth-header-actions{ justify-content:flex-start; }
   .auth-feature-grid{ grid-template-columns:1fr; }
   .auth-panels{ gap:12px; }
+  .auth-panel-login{ width:100%; }
 }
 
 .setup-panel{ margin:0; padding:18px; border:1px solid #dbe4f0; border-radius:18px; background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%); box-shadow:0 12px 30px rgba(15,23,42,0.06); }
