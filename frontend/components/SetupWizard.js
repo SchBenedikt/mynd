@@ -33,6 +33,8 @@ export default function SetupWizard() {
               ...current,
               adminName: current.adminName || data.admin_user || 'admin'
             }));
+          } else {
+            setSetupComplete(true);
           }
         }
       })
@@ -45,6 +47,12 @@ export default function SetupWizard() {
       setSetupMode(mode);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (setupComplete || setupAlreadyFinished) {
+      router.replace('/');
+    }
+  }, [setupComplete, setupAlreadyFinished, router]);
 
   const submitBootstrap = async (ev) => {
     ev.preventDefault();
@@ -136,20 +144,7 @@ export default function SetupWizard() {
           </div>
         ) : null}
 
-        {setupAlreadyFinished ? (
-          <div className="setup-panel setup-panel-standalone setup-completed-panel">
-            <div className="setup-panel-head">
-              <div>
-                <h2 className="setup-title">Setup abgeschlossen</h2>
-                <p className="setup-subtitle">MYND ist eingerichtet. Diese Seite wird im Normalfall nicht mehr gebraucht.</p>
-              </div>
-            </div>
-            <div className="setup-note">Wechsle jetzt zur Anmeldung und nutze dein lokales Konto oder die konfigurierte Nextcloud-Anmeldung.</div>
-            <div className="setup-complete-cta">
-              <button type="button" className="btn btn-primary" onClick={() => router.push('/')}>Zur Anmeldung weiter</button>
-            </div>
-          </div>
-        ) : setupPanelVisible ? (
+        {setupPanelVisible ? (
           <div className="setup-panel setup-panel-standalone">
             <div className="setup-panel-head">
               <div>
@@ -217,11 +212,6 @@ export default function SetupWizard() {
 
             {setupMessage ? <div className="setup-message success">{setupMessage}</div> : null}
             {setupError ? <div className="setup-message error">{setupError}</div> : null}
-            {setupComplete ? (
-              <div className="setup-complete-cta">
-                <button type="button" className="btn btn-primary" onClick={() => router.push('/')}>Zur Anmeldung weiter</button>
-              </div>
-            ) : null}
           </div>
         ) : null}
       </div>

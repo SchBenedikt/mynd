@@ -140,8 +140,6 @@ input:focus{ outline:none; box-shadow:0 0 0 4px rgba(47,99,255,0.12); border-col
 .setup-page .setup-panel{ border-color:rgba(147,197,253,0.55); }
 .setup-page .setup-hint-item{ background:#eff6ff; color:#1d4ed8; border:1px solid #dbeafe; }
 .setup-page .setup-note{ color:#334155; }
-.setup-complete-cta{ display:flex; justify-content:flex-end; margin-top:12px; }
-.setup-completed-panel{ max-width:720px; margin:24px auto 0; }
 
 @media (max-width:900px){
   .setup-panel-head{ flex-direction:column; }
@@ -149,7 +147,4 @@ input:focus{ outline:none; box-shadow:0 0 0 4px rgba(47,99,255,0.12); border-col
   .setup-page-hero{ flex-direction:column; }
   .setup-stepline{ width:100%; }
   .setup-choice-grid{ grid-template-columns:1fr; }
-  .setup-complete-cta{ justify-content:stretch; }
-  .setup-complete-cta .btn{ width:100%; }
-  .setup-completed-panel{ margin-top:18px; }
 }
