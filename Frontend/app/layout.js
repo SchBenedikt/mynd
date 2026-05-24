@@ -1,7 +1,7 @@
 import { Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import AuthGate from '../components/AuthGate';
-import UserBar from '../components/UserBar';
+import StatusPill from '../components/StatusPill';
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -29,8 +29,8 @@ export default function RootLayout({ children }) {
       </head>
       <body className={`${spaceGrotesk.variable} ${ibmPlexMono.variable}`}>
         <AuthGate>
-          <UserBar />
           {children}
+          <StatusPill />
         </AuthGate>
       </body>
     </html>

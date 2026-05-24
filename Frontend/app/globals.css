@@ -363,6 +363,28 @@ body {
   transition: grid-template-columns 0.2s ease;
 }
 
+/* Status widget (bottom-left) */
+.status-widget { position: fixed; left: 12px; bottom: 12px; z-index: 9999; }
+.status-widget .status-collapse { background: transparent; border: none; padding: 6px; border-radius: 999px; display:flex; align-items:center; justify-content:center; box-shadow: var(--shadow-sm); backdrop-filter: blur(6px); }
+.status-aggregated-dot { width:14px; height:14px; border-radius:50%; box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+.status-widget.expanded .status-panel { display:block }
+.status-widget.collapsed .status-panel { display:none }
+.status-panel { background: rgba(255,255,255,0.9); border-radius: 10px; padding:8px; box-shadow: var(--shadow-md); border:1px solid var(--line); display:block; }
+.status-row { display:flex; gap:8px; align-items:center }
+.status-chip { display:flex; gap:6px; align-items:center; padding:6px 10px; border-radius:999px; background: var(--chip-bg); border:1px solid var(--line); font-size:12px; color:var(--muted); }
+.status-dot { width:10px; height:10px; border-radius:50%; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.status-label { font-weight:600; font-size:12px; color:var(--muted); }
+.status-actions { margin-top:8px; display:flex; justify-content:flex-end }
+
+/* Userbar */
+.userbar { display:flex; align-items:center; position: absolute; right: 14px; top: 12px; }
+.userbar-inner { display:flex; gap:8px; align-items:center; padding:6px 8px; border-radius:999px; background: var(--chip-bg); border:1px solid var(--line); box-shadow: var(--shadow-sm); }
+.user-avatar { width:28px; height:28px; border-radius:8px; background:var(--brand); color:white; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px }
+.user-name { font-size:13px; color:var(--ink); font-weight:600 }
+.logout-btn { background: transparent; border: 1px solid transparent; padding:4px 8px; border-radius:8px; font-size:12px; color:var(--muted); cursor:pointer }
+.logout-btn:hover { background: var(--chip-hover); color:var(--ink); }
+
+
 .composer.is-thinking {
   opacity: 0.75;
 }
@@ -841,9 +863,20 @@ body {
 }
 
 .status-badges {
-  display: grid;
+  display: flex;
   gap: 0.5rem;
+  align-items: center;
 }
+
+.status-badge.combined { padding:0.3rem; width:40px; height:40px; display:flex; align-items:center; justify-content:center }
+.sidebar-user-collapsed { margin-top:0.6rem; display:flex; gap:8px; align-items:center; justify-content:center }
+.sidebar-user-collapsed .new-chat-btn.compact { width:36px; height:36px; padding:6px }
+.status-badge.combined.ok { border-color: rgba(34, 197, 94, 0.35); background: color-mix(in srgb, #22c55e 8%, var(--chip-bg)); }
+.status-badge.combined.loading { border-color: rgba(245, 158, 11, 0.35); background: color-mix(in srgb, #f59e0b 8%, var(--chip-bg)); }
+.status-badge.combined.error { border-color: rgba(239, 68, 68, 0.4); background: color-mix(in srgb, #ef4444 8%, var(--chip-bg)); }
+.status-badge.combined .status-dot.ok { background: #22c55e }
+.status-badge.combined .status-dot.loading { background: #f59e0b }
+.status-badge.combined .status-dot.error { background: #ef4444 }
 
 .sidebar-footer .settings-btn {
   margin-bottom: 0.75rem;

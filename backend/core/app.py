@@ -858,15 +858,16 @@ def api_admin_rotate_nextcloud_key():
         old = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
         os.environ['NEXTCLOUD_ACCOUNTS_KEY'] = new_key
         _save_nextcloud_accounts(accounts)
+    finally:
         # restore env to previous state
         if old is None:
             os.environ.pop('NEXTCLOUD_ACCOUNTS_KEY', None)
         else:
             os.environ['NEXTCLOUD_ACCOUNTS_KEY'] = old
-        return jsonify({'success': True})
+    return jsonify({'success': True})
 
 
-    def _load_oauth_config():
+def _load_oauth_config():
         cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
         if not os.path.exists(cfg_file):
             return {}
@@ -890,28 +891,28 @@ def api_admin_rotate_nextcloud_key():
         except Exception:
             return {}
 
-    def _save_oauth_config(cfg: dict) -> bool:
-        cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
+def _save_oauth_config(cfg: dict) -> bool:
+    cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
+    try:
+        payload = json.dumps(cfg, ensure_ascii=False, indent=2).encode('utf-8')
+        key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
+        if not key:
+            digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
+            key = base64.urlsafe_b64encode(digest)
+        if isinstance(key, str):
+            key = key.encode('utf-8')
+        f = Fernet(key)
+        enc = f.encrypt(payload)
+        with open(cfg_file, 'wb') as fh:
+            fh.write(enc)
         try:
-            payload = json.dumps(cfg, ensure_ascii=False, indent=2).encode('utf-8')
-            key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
-            if not key:
-                digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
-                key = base64.urlsafe_b64encode(digest)
-            if isinstance(key, str):
-                key = key.encode('utf-8')
-            f = Fernet(key)
-            enc = f.encrypt(payload)
-            with open(cfg_file, 'wb') as fh:
-                fh.write(enc)
-            try:
-                os.chmod(cfg_file, 0o600)
-            except Exception:
-                logger.debug('Could not set restrictive file permissions on oauth_config.json')
-            return True
-        except Exception as exc:
-            logger.warning('Could not persist oauth config: %s', exc)
-            return False
+            os.chmod(cfg_file, 0o600)
+        except Exception:
+            logger.debug('Could not set restrictive file permissions on oauth_config.json')
+        return True
+    except Exception as exc:
+        logger.warning('Could not persist oauth config: %s', exc)
+        return False
 
 
     @app.route('/api/admin/nextcloud/config', methods=['GET'])
