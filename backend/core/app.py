@@ -588,6 +588,15 @@ def api_setup_bootstrap():
     data = request.get_json(force=True, silent=True) or {}
     mode = str(data.get('mode') or '').strip().lower()
 
+    def _as_bool(value: Any, default: Optional[bool] = False) -> Optional[bool]:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
     did_admin = False
     did_oauth = False
     did_system = False
@@ -639,13 +648,36 @@ def api_setup_bootstrap():
             os.environ['NEXTCLOUD_URL'] = nextcloud_url
         did_oauth = True
 
+    enable_ollama = _as_bool(data.get('enable_ollama'), None if ('enable_ollama' not in data) else False)
+    enable_immich = _as_bool(data.get('enable_immich'), None if ('enable_immich' not in data) else False)
+    if enable_ollama is None:
+        enable_ollama = any(key in data for key in ('base_url', 'model', 'embedding_model'))
+    if enable_immich is None:
+        enable_immich = any(key in data for key in ('immich_url_default', 'immich_api_key_default'))
+
     system_overrides = {}
+    if enable_ollama:
+        base_url = str(data.get('base_url') or '').strip().rstrip('/')
+        model = str(data.get('model') or '').strip()
+        if not base_url or not model:
+            return jsonify({'success': False, 'error': 'base_url und model sind erforderlich'}), 400
+        if not (base_url.startswith('http://') or base_url.startswith('https://')):
+            return jsonify({'success': False, 'error': 'base_url muss mit http:// oder https:// beginnen'}), 400
+        system_overrides['base_url'] = base_url
+        system_overrides['model'] = model
+        embedding_model = str(data.get('embedding_model') or '').strip()
+        if embedding_model:
+            system_overrides['embedding_model'] = embedding_model
+
+    if enable_immich:
+        immich_url_default = str(data.get('immich_url_default') or '').strip()
+        immich_api_key_default = str(data.get('immich_api_key_default') or '').strip()
+        if not immich_url_default or not immich_api_key_default:
+            return jsonify({'success': False, 'error': 'Immich URL und API-Key sind erforderlich'}), 400
+        system_overrides['immich_url_default'] = immich_url_default
+        system_overrides['immich_api_key_default'] = immich_api_key_default
+
     for key in [
-        'base_url',
-        'model',
-        'embedding_model',
-        'immich_url_default',
-        'immich_api_key_default',
         'vector_db_enabled',
         'vector_db_provider',
         'vector_db_path',
