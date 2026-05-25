@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import './AuthGate.css';
 
 const TOKEN_KEY = 'mynd_token_v1';
+const SETUP_FLOW_KEY = 'mynd_setup_flow_v1';
 
 export default function AuthGate({ children }) {
   const pathname = usePathname();
@@ -18,6 +19,7 @@ export default function AuthGate({ children }) {
   const [loginPass, setLoginPass] = useState('');
   const [loginError, setLoginError] = useState('');
   const [forceOpen, setForceOpen] = useState(false);
+  const [setupFlowActive, setSetupFlowActive] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +72,11 @@ export default function AuthGate({ children }) {
             setSetupRequired(needsSetup);
               setAuthMode(oauthConfigured ? 'nextcloud' : 'local');
               setNextcloudUrl(String(data && data.nextcloud_url ? data.nextcloud_url : '').trim());
+              try {
+                setSetupFlowActive(Boolean(sessionStorage.getItem(SETUP_FLOW_KEY)));
+              } catch (err) {
+                setSetupFlowActive(false);
+              }
             if (needsSetup && pathname !== '/setup') {
               router.replace('/setup');
             }
@@ -89,10 +96,10 @@ export default function AuthGate({ children }) {
       router.replace('/setup');
       return;
     }
-    if (!setupRequired && pathname?.startsWith('/setup')) {
+    if (!setupRequired && pathname?.startsWith('/setup') && !setupFlowActive) {
       router.replace('/');
     }
-  }, [ready, pathname, router, setupRequired]);
+  }, [ready, pathname, router, setupRequired, setupFlowActive]);
 
   useEffect(() => {
     const openHandler = () => {
@@ -111,7 +118,7 @@ export default function AuthGate({ children }) {
 
   if (!ready) return null;
   if (setupRequired && pathname !== '/setup') return null;
-  if (pathname?.startsWith('/setup') && !setupRequired) return null;
+  if (pathname?.startsWith('/setup') && !setupRequired && !setupFlowActive) return null;
   if (pathname?.startsWith('/setup')) return children;
   if (user && !forceOpen) return children;
 

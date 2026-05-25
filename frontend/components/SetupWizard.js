@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import './AuthGate.css';
 
+const SETUP_FLOW_KEY = 'mynd_setup_flow_v1';
+
 const EMBEDDING_MODEL_HINTS = [
   'embed',
   'embedding',
@@ -55,6 +57,7 @@ export default function SetupWizard() {
   const router = useRouter();
   const [setupStatus, setSetupStatus] = useState(null);
   const [setupMode, setSetupMode] = useState('choose');
+  const [setupPath, setSetupPath] = useState('');
   const [setupSubmitting, setSetupSubmitting] = useState(false);
   const [setupMessage, setSetupMessage] = useState('');
   const [setupError, setSetupError] = useState('');
@@ -94,6 +97,9 @@ export default function SetupWizard() {
           setSetupStatus(data);
           if (data.needs_setup) {
             setSetupFlowStarted(true);
+            try {
+              setSetupPath(sessionStorage.getItem(SETUP_FLOW_KEY) || '');
+            } catch (err) {}
             setSetupForm((current) => ({
               ...current,
               adminName: current.adminName || data.admin_user || 'admin'
@@ -190,6 +196,19 @@ export default function SetupWizard() {
     return null;
   };
 
+  const finishSetupFlow = async (message) => {
+    if (message) {
+      setSetupMessage(message);
+    }
+    setSetupComplete(true);
+    setSetupMode('choose');
+    setSetupPath('');
+    try {
+      sessionStorage.removeItem(SETUP_FLOW_KEY);
+    } catch (err) {}
+    await refreshSetupStatus();
+  };
+
   const submitAdmin = async (ev) => {
     ev.preventDefault();
     setSetupError('');
@@ -203,6 +222,7 @@ export default function SetupWizard() {
       });
       setSetupMessage('Benutzer wurde angelegt. Als Nächstes kommen die optionalen globalen Werte.');
       setSetupMode('system');
+      setSetupPath('local');
       setSystemConfigLoaded(false);
       await refreshSetupStatus();
     } catch (err) {
@@ -219,9 +239,7 @@ export default function SetupWizard() {
     setSetupSubmitting(true);
     try {
       if (!configureOllama && !configureImmich) {
-        setSetupMessage('Keine globale Konfiguration ausgewählt. Du kannst diesen Schritt auch überspringen.');
-        setSetupMode('nextcloud');
-        setNextcloudConfigLoaded(false);
+        await finishSetupFlow('Keine globale Konfiguration ausgewählt. Setup ist abgeschlossen.');
         return;
       }
 
@@ -239,9 +257,7 @@ export default function SetupWizard() {
           immich_api_key_default: systemForm.immichApiKeyDefault
         } : {})
       });
-      setSetupMessage('Globale KI- und Immich-Werte wurden gespeichert. Weiter geht es mit Nextcloud.');
-      setSetupMode('nextcloud');
-      setNextcloudConfigLoaded(false);
+      await finishSetupFlow('Globale KI- und Immich-Werte wurden gespeichert. Setup ist abgeschlossen.');
       await refreshSetupStatus();
     } catch (err) {
       setSetupError(err.message || 'Das Setup konnte gerade nicht gespeichert werden. Bitte prüfe die Verbindung oder versuche es noch einmal.');
@@ -262,8 +278,10 @@ export default function SetupWizard() {
         client_secret: nextcloudForm.clientSecret,
         nextcloud_url: nextcloudForm.nextcloudUrl
       });
-      setSetupMessage('Nextcloud OAuth wurde gespeichert. Die Einrichtung ist damit abgeschlossen.');
-      setSetupComplete(true);
+      setSetupMessage('Nextcloud OAuth wurde gespeichert. Als Nächstes kannst du die globalen KI- und Immich-Werte konfigurieren.');
+      setSetupMode('system');
+      setSetupPath('nextcloud');
+      setSystemConfigLoaded(false);
       await refreshSetupStatus();
     } catch (err) {
       setSetupError(err.message || 'Das Setup konnte gerade nicht gespeichert werden. Bitte prüfe die Verbindung oder versuche es noch einmal.');
@@ -274,42 +292,28 @@ export default function SetupWizard() {
 
   const skipSystemStep = async () => {
     setSetupError('');
-    setSetupMessage('Globale KI- und Immich-Werte werden später konfiguriert.');
-    setSetupMode('nextcloud');
-    setNextcloudConfigLoaded(false);
-    await refreshSetupStatus();
+    setSetupSubmitting(true);
+    try {
+      await finishSetupFlow('Globale KI- und Immich-Werte werden später konfiguriert.');
+    } finally {
+      setSetupSubmitting(false);
+    }
   };
 
   const startLocalFlow = () => {
     setSetupError('');
     setSetupMessage('');
+    setSetupPath('local');
+    try { sessionStorage.setItem(SETUP_FLOW_KEY, 'local'); } catch (err) {}
     setSetupMode('admin');
   };
 
   const startNextcloudFlow = () => {
     setSetupError('');
     setSetupMessage('');
+    setSetupPath('nextcloud');
+    try { sessionStorage.setItem(SETUP_FLOW_KEY, 'nextcloud'); } catch (err) {}
     setSetupMode('nextcloud');
-  };
-
-  const skipNextcloudStep = () => {
-    setSetupError('');
-    setSetupMessage('');
-    setSetupSubmitting(true);
-    refreshSetupStatus()
-      .then((statusData) => {
-        if (statusData && !statusData.needs_setup) {
-          setSetupMessage('Setup abgeschlossen. Du wirst jetzt zur Startseite weitergeleitet.');
-          setSetupComplete(true);
-          router.replace('/');
-          return;
-        }
-
-        setSetupError('Die Einrichtung ist noch nicht abgeschlossen. Bitte lege zuerst einen lokalen Benutzer an oder richte Nextcloud ein.');
-      })
-      .finally(() => {
-        setSetupSubmitting(false);
-      });
   };
 
   const { chatModels: aiModelOptions, embeddingModels: embeddingModelOptions } = splitModelOptions(aiModels);
@@ -355,7 +359,7 @@ export default function SetupWizard() {
           <div>
             <div className="setup-page-kicker">Einrichtung</div>
             <h1>MYND konfigurieren</h1>
-            <p>Die Einrichtung läuft in einer festen Reihenfolge. Du kannst aber beim Start wählen, ob du zuerst einen lokalen Benutzer anlegst oder direkt Nextcloud als Login verwendest.</p>
+            <p>{setupPath === 'local' ? 'Du hast den lokalen Startweg gewählt. Danach kommen die globalen KI- und Fotoeinstellungen.' : setupPath === 'nextcloud' ? 'Du hast Nextcloud als Startweg gewählt. Danach kommen die globalen KI- und Fotoeinstellungen.' : 'Die Einrichtung läuft in zwei Wegen. Du kannst entweder mit einem lokalen Benutzer starten oder direkt Nextcloud als Login einrichten. In beiden Fällen kannst du danach noch die globalen KI- und Fotoeinstellungen konfigurieren.'}</p>
             <div className="setup-stepline" aria-label="Einrichtungsstatus">
               <span className={`setup-stepchip ${setupMode === 'choose' ? 'active' : ''}`}>Start</span>
               <span className={`setup-stepchip ${setupMode === 'admin' ? 'active' : ''}`}>Benutzer</span>
@@ -381,7 +385,7 @@ export default function SetupWizard() {
             <div className="setup-panel-head">
               <div>
                 <h2 className="setup-title">{stepTitles[setupMode] || 'Einrichtung'}</h2>
-                <p className="setup-subtitle">{stepLabels[setupMode] || 'Schritt'} · {setupMode === 'choose' ? 'Wähle den gewünschten Startweg' : setupMode === 'admin' ? 'Benutzername ist bereits vorbereitet' : setupMode === 'system' ? 'Optionale globale Werte' : 'Client-ID, Secret und URL eintragen'}</p>
+                <p className="setup-subtitle">{stepLabels[setupMode] || 'Schritt'} · {setupMode === 'choose' ? 'Wähle den gewünschten Startweg' : setupMode === 'admin' ? 'Benutzername ist bereits vorbereitet' : setupMode === 'system' ? 'Globale KI- und Fotoeinstellungen' : 'Client-ID, Secret und URL eintragen'}</p>
               </div>
             </div>
 
@@ -537,7 +541,7 @@ export default function SetupWizard() {
                 <div className="setup-note">Speichern aktiviert die Nextcloud-Anmeldung direkt im Webinterface. Das ist die globale Login-Verbindung, nicht die persönliche Benutzer-Verbindung.</div>
 
                 <div className="setup-footer">
-                  <button type="button" className="btn" onClick={skipNextcloudStep} disabled={setupSubmitting}>Ohne Nextcloud fortfahren</button>
+                  <button type="button" className="btn" onClick={startLocalFlow} disabled={setupSubmitting}>Ohne Nextcloud fortfahren</button>
                   <button type="submit" className="btn btn-nc" disabled={setupSubmitting}>Nextcloud speichern</button>
                 </div>
               </form>
