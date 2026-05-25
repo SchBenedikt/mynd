@@ -160,10 +160,10 @@ export default function SetupWizard() {
   const setupAlreadyFinished = Boolean(setupStatus && !setupStatus.needs_setup && !setupFlowStarted);
 
   useEffect(() => {
-    if (setupComplete || setupAlreadyFinished) {
+    if (setupAlreadyFinished) {
       router.replace('/');
     }
-  }, [setupComplete, setupAlreadyFinished, router]);
+  }, [setupAlreadyFinished, router]);
 
   const postSetup = async (payload) => {
     const resp = await fetch('/api/setup/bootstrap', {
@@ -328,7 +328,7 @@ export default function SetupWizard() {
     nextcloud: 'Nextcloud OAuth'
   };
 
-  const setupPanelVisible = !setupAlreadyFinished && Boolean(setupMode);
+  const setupPanelVisible = !setupAlreadyFinished && !setupComplete && Boolean(setupMode);
 
   return (
     <div className="setup-page">
@@ -347,7 +347,19 @@ export default function SetupWizard() {
           </div>
         </div>
 
-        {setupPanelVisible ? (
+        {setupComplete ? (
+          <div className="setup-panel setup-panel-standalone setup-complete-panel">
+            <div className="setup-complete-badge">Abgeschlossen</div>
+            <h2 className="setup-title">MYND ist jetzt eingerichtet</h2>
+            <p className="setup-subtitle">Du kannst jetzt die Startseite öffnen. Falls dort noch keine Inhalte sichtbar sind, lade die Seite einmal neu oder melde dich über den Login an.</p>
+            <div className="setup-complete-actions">
+              <button type="button" className="btn btn-primary" onClick={() => router.replace('/')}>Zur Startseite</button>
+              <button type="button" className="btn" onClick={() => window.location.reload()}>Setup-Seite neu laden</button>
+            </div>
+            {setupMessage ? <div className="setup-message success">{setupMessage}</div> : null}
+            {setupError ? <div className="setup-message error">{setupError}</div> : null}
+          </div>
+        ) : setupPanelVisible ? (
           <div className="setup-panel setup-panel-standalone">
             <div className="setup-panel-head">
               <div>
@@ -394,94 +406,82 @@ export default function SetupWizard() {
 
             {setupMode === 'system' ? (
               <form onSubmit={submitSystem} className="setup-form">
-                <div className="setup-global-layout">
+                <div className="setup-global-stack">
                   <div className="setup-global-summary">
                     <div className="setup-section-eyebrow">Schritt 2 von 3</div>
                     <h3>Globale Dienste</h3>
-                    <p>Hier kannst du die globale KI und die Fotointegration getrennt voneinander aktivieren. Beide Teile sind optional und können später im Einstellungsbereich angepasst werden.</p>
-                    <div className="setup-summary-grid">
-                      <div className={`setup-summary-card ${configureOllama ? 'active' : ''}`}>
-                        <div className="setup-summary-card-title">KI / Ollama</div>
-                        <p>Antworten, Zusammenfassungen und Embeddings für die Suche.</p>
-                      </div>
-                      <div className={`setup-summary-card ${configureImmich ? 'active' : ''}`}>
-                        <div className="setup-summary-card-title">Immich</div>
-                        <p>Fotosuche und Zugriff auf die globale Immich-Instanz.</p>
-                      </div>
-                    </div>
+                    <p>Hier richtest du die globale KI und die Fotointegration nacheinander ein. Alles bleibt optional und kann später im Einstellungsbereich geändert werden.</p>
                     <div className="setup-summary-tip">
-                      <strong>Hinweis:</strong> Wenn du heute noch keinen globalen Dienst einrichten willst, kannst du den Schritt einfach überspringen.
+                      Wenn du heute nichts global konfigurieren willst, kannst du den Schritt einfach überspringen.
                     </div>
                   </div>
 
-                  <div className="setup-global-cards">
-                    <section className={`setup-config-card ${configureOllama ? 'active' : ''}`}>
-                      <label className="setup-card-toggle">
-                        <input type="checkbox" checked={configureOllama} onChange={(e) => setConfigureOllama(e.target.checked)} />
-                        <span>
-                          <strong>KI konfigurieren</strong>
-                          <small>Ollama, Chat-Modell und Embedding-Modell</small>
-                        </span>
-                      </label>
+                  <section className={`setup-config-card ${configureOllama ? 'active' : ''}`}>
+                    <label className="setup-card-toggle">
+                      <input type="checkbox" checked={configureOllama} onChange={(e) => setConfigureOllama(e.target.checked)} />
+                      <span>
+                        <strong>KI konfigurieren</strong>
+                        <small>Ollama, Chat-Modell und Embedding-Modell</small>
+                      </span>
+                    </label>
 
-                      {configureOllama ? (
-                        <div className="setup-card-body">
-                          <div className="setup-grid">
-                            <label className="setup-field setup-wide">
-                              <span>Ollama Base URL</span>
-                              <input value={systemForm.baseUrl} onChange={(e) => setSystemForm((current) => ({ ...current, baseUrl: e.target.value }))} placeholder="http://127.0.0.1" />
-                            </label>
-                            <label className="setup-field">
-                              <span>KI-Modell</span>
-                              <select value={selectedChatModel || ''} onChange={(e) => setSystemForm((current) => ({ ...current, model: e.target.value }))}>
-                                <option value="">Bitte auswählen…</option>
-                                {chatModelChoices.map((model) => <option key={model} value={model}>{model}</option>)}
-                              </select>
-                            </label>
-                            <label className="setup-field">
-                              <span>Embedding-Modell</span>
-                              <select value={selectedEmbeddingModel || ''} onChange={(e) => setSystemForm((current) => ({ ...current, embeddingModel: e.target.value }))}>
-                                <option value="">Bitte auswählen…</option>
-                                {embeddingModelChoices.map((model) => <option key={model} value={model}>{model}</option>)}
-                              </select>
-                            </label>
-                          </div>
-                          <div className="setup-mini-help">
-                            <div><strong>KI-Modell:</strong> beantwortet Fragen und generiert Text.</div>
-                            <div><strong>Embedding-Modell:</strong> erstellt Vektoren für semantische Suche.</div>
-                          </div>
+                    {configureOllama ? (
+                      <div className="setup-card-body">
+                        <div className="setup-grid">
+                          <label className="setup-field setup-wide">
+                            <span>Ollama Base URL</span>
+                            <input value={systemForm.baseUrl} onChange={(e) => setSystemForm((current) => ({ ...current, baseUrl: e.target.value }))} placeholder="http://127.0.0.1" />
+                          </label>
+                          <label className="setup-field">
+                            <span>KI-Modell</span>
+                            <select value={selectedChatModel || ''} onChange={(e) => setSystemForm((current) => ({ ...current, model: e.target.value }))}>
+                              <option value="">Bitte auswählen…</option>
+                              {chatModelChoices.map((model) => <option key={model} value={model}>{model}</option>)}
+                            </select>
+                          </label>
+                          <label className="setup-field">
+                            <span>Embedding-Modell</span>
+                            <select value={selectedEmbeddingModel || ''} onChange={(e) => setSystemForm((current) => ({ ...current, embeddingModel: e.target.value }))}>
+                              <option value="">Bitte auswählen…</option>
+                              {embeddingModelChoices.map((model) => <option key={model} value={model}>{model}</option>)}
+                            </select>
+                          </label>
                         </div>
-                      ) : null}
-                    </section>
-
-                    <section className={`setup-config-card ${configureImmich ? 'active' : ''}`}>
-                      <label className="setup-card-toggle">
-                        <input type="checkbox" checked={configureImmich} onChange={(e) => setConfigureImmich(e.target.checked)} />
-                        <span>
-                          <strong>Immich konfigurieren</strong>
-                          <small>Globale Fotoanbindung und API-Key</small>
-                        </span>
-                      </label>
-
-                      {configureImmich ? (
-                        <div className="setup-card-body">
-                          <div className="setup-grid">
-                            <label className="setup-field setup-wide">
-                              <span>Immich URL</span>
-                              <input value={systemForm.immichUrlDefault} onChange={(e) => setSystemForm((current) => ({ ...current, immichUrlDefault: e.target.value }))} placeholder="https://immich.example.org" />
-                            </label>
-                            <label className="setup-field setup-wide">
-                              <span>Immich API-Key</span>
-                              <input type="password" value={systemForm.immichApiKeyDefault} onChange={(e) => setSystemForm((current) => ({ ...current, immichApiKeyDefault: e.target.value }))} placeholder="Immich API-Key" />
-                            </label>
-                          </div>
-                          <div className="setup-mini-help setup-mini-help-muted">
-                            Der API-Key erlaubt MYND, auf deine Immich-Instanz zuzugreifen. Du findest ihn in Immich unter dem Benutzerprofil oder in den API-Key-Einstellungen.
-                          </div>
+                        <div className="setup-mini-help">
+                          <div><strong>KI-Modell:</strong> beantwortet Fragen und schreibt Text.</div>
+                          <div><strong>Embedding-Modell:</strong> erstellt Vektoren für semantische Suche.</div>
                         </div>
-                      ) : null}
-                    </section>
-                  </div>
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className={`setup-config-card ${configureImmich ? 'active' : ''}`}>
+                    <label className="setup-card-toggle">
+                      <input type="checkbox" checked={configureImmich} onChange={(e) => setConfigureImmich(e.target.checked)} />
+                      <span>
+                        <strong>Immich konfigurieren</strong>
+                        <small>Globale Fotoanbindung und API-Key</small>
+                      </span>
+                    </label>
+
+                    {configureImmich ? (
+                      <div className="setup-card-body">
+                        <div className="setup-grid">
+                          <label className="setup-field setup-wide">
+                            <span>Immich URL</span>
+                            <input value={systemForm.immichUrlDefault} onChange={(e) => setSystemForm((current) => ({ ...current, immichUrlDefault: e.target.value }))} placeholder="https://immich.example.org" />
+                          </label>
+                          <label className="setup-field setup-wide">
+                            <span>Immich API-Key</span>
+                            <input type="password" value={systemForm.immichApiKeyDefault} onChange={(e) => setSystemForm((current) => ({ ...current, immichApiKeyDefault: e.target.value }))} placeholder="Immich API-Key" />
+                          </label>
+                        </div>
+                        <div className="setup-mini-help setup-mini-help-muted">
+                          Den API-Key findest du in Immich unter deinem Benutzerprofil oder im API-Keys-Bereich.
+                        </div>
+                      </div>
+                    ) : null}
+                  </section>
                 </div>
 
                 <div className="setup-footer">
