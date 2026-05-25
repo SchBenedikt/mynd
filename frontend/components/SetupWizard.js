@@ -351,10 +351,9 @@ export default function SetupWizard() {
           <div className="setup-panel setup-panel-standalone setup-complete-panel">
             <div className="setup-complete-badge">Abgeschlossen</div>
             <h2 className="setup-title">MYND ist jetzt eingerichtet</h2>
-            <p className="setup-subtitle">Du kannst jetzt die Startseite öffnen. Falls dort noch keine Inhalte sichtbar sind, lade die Seite einmal neu oder melde dich über den Login an.</p>
+            <p className="setup-subtitle">Öffne jetzt die Startseite. Dort solltest du entweder die Login-Ansicht oder die normale Oberfläche sehen, je nachdem ob du bereits angemeldet bist.</p>
             <div className="setup-complete-actions">
-              <button type="button" className="btn btn-primary" onClick={() => router.replace('/')}>Zur Startseite</button>
-              <button type="button" className="btn" onClick={() => window.location.reload()}>Setup-Seite neu laden</button>
+              <button type="button" className="btn btn-primary" onClick={() => router.replace('/')}>Startseite öffnen</button>
             </div>
             {setupMessage ? <div className="setup-message success">{setupMessage}</div> : null}
             {setupError ? <div className="setup-message error">{setupError}</div> : null}
