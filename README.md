@@ -76,6 +76,30 @@ Frontend läuft auf `http://localhost:3000`.
 
 Hinweis: In der Dev-Konfiguration werden `/api/*`-Requests aus Next.js per Rewrite auf das Flask-Backend weitergeleitet.
 
+## Docker-Setup für Produktion
+
+Für einen reproduzierbaren Betrieb ist Docker hier sinnvoll. Das kapselt die Python- und Node-Abhängigkeiten, und die gemeinsamen Volumes halten Konfiguration und SQLite-Datenbank persistent.
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Danach erreichst du:
+
+- Frontend: http://localhost:3001
+- Backend: http://localhost:5001
+
+Dabei muss Ollama extern laufen und über `OLLAMA_BASE_URL` erreichbar sein. Auf macOS ist als Default `http://host.docker.internal:11434` gesetzt; in einer echten Server-Umgebung solltest du den Wert explizit setzen.
+
+Persistiert werden:
+
+- `data/` inkl. `knowledge_base.db`
+- `backend/config/`
+
+Wenn du ein eigenes Secret-Set nutzen willst, setze vor dem Start mindestens `FLASK_SECRET_KEY` und optional `JWT_SECRET` bzw. `NEXTCLOUD_ACCOUNTS_KEY` als Umgebungsvariablen.
+
+Wenn du stattdessen ein vollständiges Lokalsystem mit mitgeliefertem Ollama willst, nutze weiter [docker-compose.yml](docker-compose.yml).
+
 ## Konfiguration
 
 ### Wichtige Dateien

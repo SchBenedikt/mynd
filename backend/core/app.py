@@ -82,7 +82,7 @@ CONFIG_DIR = os.path.join(BASE_DIR, 'backend', 'config')
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 BACKEND_DIR = os.path.join(BASE_DIR, 'backend')
 TEMPLATES_DIR = os.path.join(BACKEND_DIR, 'templates')
-DB_PATH = os.path.join(BASE_DIR, 'knowledge_base.db')
+DB_PATH = os.getenv('KNOWLEDGE_DB_PATH', os.path.join(DATA_DIR, 'knowledge_base.db'))
 BRIEFING_STORE_FILE = os.path.join(DATA_DIR, 'assistant_briefings.json')
 BRIEFING_MORNING_HOUR = int(os.getenv('BRIEFING_MORNING_HOUR', '7'))
 BRIEFING_DAILY_ENABLED_DEFAULT = os.getenv('BRIEFING_DAILY_ENABLED', 'true').lower() in ('true', '1', 'yes')
@@ -446,10 +446,7 @@ def _is_placeholder_user_store(users: Dict[str, Any]) -> bool:
         return False
 
     stored_password = str(entry.get('password') or '')
-    if not stored_password:
-        return True
-
-    return _verify_password(str(admin_pass), stored_password)
+    return not bool(stored_password)
 
 
 def _users_setup_needed() -> bool:
@@ -3598,6 +3595,9 @@ def create_calendar_event(title: str, start_time: str, end_time: str = None,
         # Parse Zeiten
         start_dt = parse_datetime_string(start_time)
         end_dt = parse_datetime_string(end_time) if end_time else start_dt + timedelta(hours=1)
+
+        location_line = f'LOCATION:{location}\n' if location else ''
+        description_line = f'DESCRIPTION:{description}\n' if description else ''
         
         ical_data = f'''BEGIN:VCALENDAR
 VERSION:2.0
@@ -3608,7 +3608,7 @@ DTSTART:{start_dt.strftime('%Y%m%dT%H%M%SZ')}
 DTEND:{end_dt.strftime('%Y%m%dT%H%M%SZ')}
 DTSTAMP:{now}
 SUMMARY:{title}
-{'LOCATION:' + location + '\n' if location else ''}{'DESCRIPTION:' + description + '\n' if description else ''}END:VEVENT
+{location_line}{description_line}END:VEVENT
 END:VCALENDAR'''
         
         # Sende PUT request um Ereignis zu erstellen

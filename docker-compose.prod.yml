@@ -1,0 +1,41 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-change-me-in-production}
+      JWT_SECRET: ${JWT_SECRET:-}
+      KNOWLEDGE_DB_PATH: /app/data/knowledge_base.db
+      NEXTCLOUD_ACCOUNTS_KEY: ${NEXTCLOUD_ACCOUNTS_KEY:-}
+      AUTH_COOKIE_SECURE: "true"
+      MYND_DEBUG: "0"
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    volumes:
+      - mynd-data:/app/data
+      - mynd-backend-config:/app/backend/config
+    ports:
+      - "5001:5001"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_BACKEND_URL: http://backend:5001
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_BACKEND_URL: http://backend:5001
+      MYND_BACKEND_TTS_URL: http://backend:5001/api/tts/synthesize
+    volumes:
+      - mynd-data:/app/data
+      - mynd-backend-config:/app/backend/config
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend
+
+volumes:
+  mynd-data:
+  mynd-backend-config:

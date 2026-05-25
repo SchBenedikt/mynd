@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const backendOrigin = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:5001').replace(/\/$/, '');
+
 const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: ['127.0.2.2', '127.0.0.1', '192.168.178.50'],
@@ -6,7 +8,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://127.0.0.1:5001/api/:path*',
+        destination: `${backendOrigin}/api/:path*`,
       },
     ];
   },
