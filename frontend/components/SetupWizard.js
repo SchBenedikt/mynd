@@ -25,9 +25,12 @@ export default function SetupWizard() {
   const [systemForm, setSystemForm] = useState({
     baseUrl: 'http://127.0.0.1',
     model: 'gemma3:latest',
+    embeddingModel: 'nomic-embed-text',
     immichUrlDefault: '',
     immichApiKeyDefault: ''
   });
+  const [configureOllama, setConfigureOllama] = useState(true);
+  const [configureImmich, setConfigureImmich] = useState(false);
   const [nextcloudForm, setNextcloudForm] = useState({
     clientId: '',
     clientSecret: '',
@@ -68,6 +71,7 @@ export default function SetupWizard() {
               ...current,
               baseUrl: data.config.base_url || current.baseUrl,
               model: data.config.model || current.model,
+              embeddingModel: data.config.embedding_model || current.embeddingModel,
               immichUrlDefault: data.config.immich_url_default || '',
               immichApiKeyDefault: data.config.immich_api_key_default || ''
             }));
@@ -153,8 +157,11 @@ export default function SetupWizard() {
     try {
       await postSetup({
         mode: 'system',
+        enable_ollama: configureOllama,
         base_url: systemForm.baseUrl,
         model: systemForm.model,
+        embedding_model: systemForm.embeddingModel,
+        enable_immich: configureImmich,
         immich_url_default: systemForm.immichUrlDefault,
         immich_api_key_default: systemForm.immichApiKeyDefault
       });
@@ -309,23 +316,54 @@ export default function SetupWizard() {
               <form onSubmit={submitSystem} className="setup-form">
                 <div className="setup-grid">
                   <label className="setup-field setup-wide">
-                    <span>Ollama Base URL</span>
-                    <input value={systemForm.baseUrl} onChange={(e) => setSystemForm((current) => ({ ...current, baseUrl: e.target.value }))} placeholder="http://127.0.0.1" />
+                    <input type="checkbox" checked={configureOllama} onChange={(e) => setConfigureOllama(e.target.checked)} />{' '}
+                    <span style={{ marginLeft: 8 }}>KI (Ollama) konfigurieren</span>
                   </label>
-                  <label className="setup-field">
-                    <span>Ollama Modell</span>
-                    <input value={systemForm.model} onChange={(e) => setSystemForm((current) => ({ ...current, model: e.target.value }))} placeholder="gemma3:latest" />
-                  </label>
-                  <label className="setup-field">
-                    <span>Immich URL</span>
-                    <input value={systemForm.immichUrlDefault} onChange={(e) => setSystemForm((current) => ({ ...current, immichUrlDefault: e.target.value }))} placeholder="https://immich.example.org" />
-                  </label>
+                  {configureOllama ? (
+                    <>
+                      <label className="setup-field setup-wide">
+                        <span>Ollama Base URL</span>
+                        <input value={systemForm.baseUrl} onChange={(e) => setSystemForm((current) => ({ ...current, baseUrl: e.target.value }))} placeholder="http://127.0.0.1" />
+                      </label>
+                      <label className="setup-field">
+                        <span>KI-Modell</span>
+                        <select value={systemForm.model} onChange={(e) => setSystemForm((current) => ({ ...current, model: e.target.value }))}>
+                          <option value="gemma3:latest">gemma3:latest</option>
+                          <option value="gemma2:latest">gemma2:latest</option>
+                          <option value="custom">Custom</option>
+                        </select>
+                      </label>
+                      <label className="setup-field">
+                        <span>Embedding-Modell</span>
+                        <input value={systemForm.embeddingModel} onChange={(e) => setSystemForm((current) => ({ ...current, embeddingModel: e.target.value }))} placeholder="nomic-embed-text" />
+                      </label>
+                    </>
+                  ) : null}
+
                   <label className="setup-field setup-wide">
-                    <span>Immich API-Key</span>
-                    <input value={systemForm.immichApiKeyDefault} onChange={(e) => setSystemForm((current) => ({ ...current, immichApiKeyDefault: e.target.value }))} placeholder="Immich API-Key" />
+                    <input type="checkbox" checked={configureImmich} onChange={(e) => setConfigureImmich(e.target.checked)} />{' '}
+                    <span style={{ marginLeft: 8 }}>Immich Integration konfigurieren</span>
                   </label>
+                  {configureImmich ? (
+                    <>
+                      <label className="setup-field">
+                        <span>Immich URL</span>
+                        <input value={systemForm.immichUrlDefault} onChange={(e) => setSystemForm((current) => ({ ...current, immichUrlDefault: e.target.value }))} placeholder="https://immich.example.org" />
+                      </label>
+                      <label className="setup-field setup-wide">
+                        <span>Immich API-Key</span>
+                        <input value={systemForm.immichApiKeyDefault} onChange={(e) => setSystemForm((current) => ({ ...current, immichApiKeyDefault: e.target.value }))} placeholder="Immich API-Key" />
+                      </label>
+                    </>
+                  ) : null}
                 </div>
                 <div className="setup-note">Das ist optional. Wenn du jetzt nichts einträgst, kannst du alles später im normalen Einstellungsbereich setzen.</div>
+                <div className="setup-note">Kurz erklärt:
+                  <ul>
+                    <li><strong>KI-Modell:</strong> Das Modell wird für die Antwortgenerierung verwendet. Wähle hier das Inferenz-Modell (z. B. gemma3). Das <em>Embedding-Modell</em> wird für semantische Suche und Vektoren genutzt.</li>
+                    <li><strong>Immich API-Key:</strong> Der Schlüssel erlaubt MYND, auf deine Immich-Instanz zuzugreifen. Du findest den API-Key in den Immich-Einstellungen unter "API Keys" oder generierst ihn im Nutzerbereich der Immich-Anwendung.</li>
+                  </ul>
+                </div>
                 <div className="setup-footer">
                   <button type="button" className="btn" onClick={skipSystemStep} disabled={setupSubmitting}>Überspringen</button>
                   <button type="submit" className="btn btn-primary" disabled={setupSubmitting}>Speichern und weiter</button>
