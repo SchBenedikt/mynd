@@ -84,6 +84,17 @@ export default function AuthGate({ children }) {
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
+    if (setupRequired && pathname !== '/setup') {
+      router.replace('/setup');
+      return;
+    }
+    if (!setupRequired && pathname?.startsWith('/setup')) {
+      router.replace('/');
+    }
+  }, [ready, pathname, router, setupRequired]);
+
+  useEffect(() => {
     const openHandler = () => {
       try {
         setForceOpen(true);
@@ -100,6 +111,7 @@ export default function AuthGate({ children }) {
 
   if (!ready) return null;
   if (setupRequired && pathname !== '/setup') return null;
+  if (pathname?.startsWith('/setup') && !setupRequired) return null;
   if (pathname?.startsWith('/setup')) return children;
   if (user && !forceOpen) return children;
 
