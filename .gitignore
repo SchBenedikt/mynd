@@ -345,3 +345,13 @@ backup_*
 
 # Added by ggshield
 .cache_ggshield
+
+# Local config secrets
+backend/config/ai_config.json
+backend/config/nextcloud_config.json
+backend/config/email_config.json
+backend/config/email_indexing_config.json
+backend/config/indexing_config.json
+backend/config/nina_config.json
+backend/config/openweather_config.json
+backend/config/users.json
