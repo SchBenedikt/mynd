@@ -1903,8 +1903,8 @@ export default function SettingsPage() {
                   <div className="section-title">{t('aiModel')}</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1rem 0'}}>
                     {tr(
-                      'Das KI-Modell beantwortet Fragen und schreibt Text. Das Embedding-Modell erzeugt Vektoren für semantische Suche und Ähnlichkeit.',
-                      'The chat model answers questions and writes text. The embedding model creates vectors for semantic search and similarity.'
+                      'Das Chat-Modell beantwortet Fragen und schreibt Text. Das Embedding-Modell erzeugt Vektoren für semantische Suche, Ähnlichkeit und Fotosuche.',
+                      'The chat model answers questions and writes text. The embedding model creates vectors for semantic search, similarity, and photo search.'
                     )}
                   </p>
                   <div className="input-group">
@@ -2339,6 +2339,12 @@ export default function SettingsPage() {
                             <div style={{marginBottom: '1.5rem'}}>
                               <div style={{fontSize: '0.9rem', color: 'var(--muted)', marginBottom: '0.9rem'}}>
                                 {tr('Globale Immich-Standards für die Fotosuche konfigurieren.', 'Configure global Immich defaults for photo search.')}
+                              </div>
+                              <div style={{fontSize: '0.9rem', color: 'var(--muted)', marginBottom: '0.9rem', lineHeight: 1.5}}>
+                                {tr(
+                                  'Den Immich-API-Key findest du in Immich unter deinem Benutzerprofil oder im Bereich für API-Keys. Dort legst du einen Schlüssel an, mit dem MYND auf deine Fotos zugreifen darf.',
+                                  'You can find the Immich API key in Immich under your user profile or in the API keys section. Create a key there so MYND can access your photos.'
+                                )}
                               </div>
                               <div className="input-group">
                                 <label>Immich URL</label>
