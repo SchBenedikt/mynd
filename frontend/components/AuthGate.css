@@ -116,7 +116,7 @@ input:focus{ outline:none; box-shadow:0 0 0 4px rgba(47,99,255,0.12); border-col
 .setup-redirect-label{ font-weight:600; color:#374151; font-size:13px; }
 .setup-redirect-code{ padding:10px 12px; border-radius:10px; background:#0f172a; color:#e2e8f0; overflow-x:auto; }
 
-.setup-page{ min-height:100vh; padding:32px 16px; background:
+.setup-page{ height:100vh; min-height:100vh; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:32px 16px 48px; background:
   radial-gradient(circle at top left, rgba(47,99,255,0.12), transparent 28%),
   radial-gradient(circle at right 20%, rgba(22,163,74,0.10), transparent 26%),
   linear-gradient(180deg, #f3f7ff 0%, #f8fafc 100%); }
