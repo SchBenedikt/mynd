@@ -182,8 +182,12 @@ export default function SetupWizard() {
     try {
       const statusResp = await fetch('/api/setup/status');
       const statusData = await statusResp.json();
-      if (statusData && statusData.success) setSetupStatus(statusData);
+      if (statusData && statusData.success) {
+        setSetupStatus(statusData);
+        return statusData;
+      }
     } catch (err) {}
+    return null;
   };
 
   const submitAdmin = async (ev) => {
@@ -290,8 +294,22 @@ export default function SetupWizard() {
 
   const skipNextcloudStep = () => {
     setSetupError('');
-    setSetupMessage('Nextcloud OAuth wird später eingerichtet.');
-    setSetupComplete(true);
+    setSetupMessage('');
+    setSetupSubmitting(true);
+    refreshSetupStatus()
+      .then((statusData) => {
+        if (statusData && !statusData.needs_setup) {
+          setSetupMessage('Setup abgeschlossen. Du wirst jetzt zur Startseite weitergeleitet.');
+          setSetupComplete(true);
+          router.replace('/');
+          return;
+        }
+
+        setSetupError('Die Einrichtung ist noch nicht abgeschlossen. Bitte lege zuerst einen lokalen Benutzer an oder richte Nextcloud ein.');
+      })
+      .finally(() => {
+        setSetupSubmitting(false);
+      });
   };
 
   const { chatModels: aiModelOptions, embeddingModels: embeddingModelOptions } = splitModelOptions(aiModels);
