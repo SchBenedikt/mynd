@@ -454,7 +454,14 @@ def _is_placeholder_user_store(users: Dict[str, Any]) -> bool:
 
 def _users_setup_needed() -> bool:
     users = _read_users_file()
-    return not users or _is_placeholder_user_store(users)
+    users_needed = not users or _is_placeholder_user_store(users)
+    if not users_needed:
+        return False
+
+    # OAuth-only setups are valid: no local users required when Nextcloud login is configured.
+    oauth_cfg = _load_oauth_config()
+    oauth_ready = bool(oauth_cfg.get('client_id') and oauth_cfg.get('client_secret'))
+    return not oauth_ready
 
 def _load_users() -> Dict[str, Any]:
     users = _read_users_file()
@@ -526,6 +533,36 @@ def api_auth_me():
         return jsonify({'authenticated': False}), 401
     return jsonify({'authenticated': True, 'user': {'username': payload.get('sub'), 'name': payload.get('name')}})
 
+
+def _get_request_username() -> Optional[str]:
+    """Resolve the currently authenticated username from the active request."""
+    try:
+        auth = request.headers.get('Authorization', '')
+        token = None
+        if auth.lower().startswith('bearer '):
+            token = auth.split(None, 1)[1]
+        else:
+            token = request.cookies.get('mynd_token')
+
+        if token:
+            payload = verify_jwt(token)
+            if payload and payload.get('sub'):
+                return str(payload.get('sub')).strip() or None
+
+        username = request.args.get('username')
+        if username:
+            return str(username).strip() or None
+
+        data = request.get_json(silent=True) or {}
+        if isinstance(data, dict):
+            username = data.get('username')
+            if username:
+                return str(username).strip() or None
+    except Exception:
+        return None
+
+    return None
+
 @app.route('/api/auth/logout', methods=['POST'])
 def api_auth_logout():
     # Client should remove token; we can also clear cookie if set
@@ -553,6 +590,7 @@ def api_setup_bootstrap():
 
     did_admin = False
     did_oauth = False
+    did_system = False
 
     if mode in {'admin', 'both'}:
         if not _users_setup_needed():
@@ -601,10 +639,55 @@ def api_setup_bootstrap():
             os.environ['NEXTCLOUD_URL'] = nextcloud_url
         did_oauth = True
 
-    if not did_admin and not did_oauth:
+    system_overrides = {}
+    for key in [
+        'base_url',
+        'model',
+        'embedding_model',
+        'immich_url_default',
+        'immich_api_key_default',
+        'vector_db_enabled',
+        'vector_db_provider',
+        'vector_db_path',
+        'briefing_daily_enabled',
+        'briefing_weekly_enabled',
+        'briefing_morning_hour',
+        'briefing_send_daily',
+        'briefing_send_weekly',
+        'briefing_send_recipients',
+        'briefing_send_account_id',
+        'briefing_send_talk',
+        'briefing_talk_room_id',
+        'briefing_talk_webhook_secret',
+        'tts_provider',
+        'browser_tts_voice_uri',
+        'gemini_tts_api_key',
+        'gemini_tts_model',
+        'gemini_tts_voice',
+        'gemini_tts_language_code',
+        'gemini_tts_style_prompt',
+        'gemini_tts_audio_encoding',
+        'gemini_live_model',
+        'gemini_live_voice',
+    ]:
+        if key in data:
+            system_overrides[key] = data.get(key)
+
+    if mode in {'system', 'global', 'both'} and system_overrides:
+        current_config = load_ai_config()
+        base_url = str(system_overrides.pop('base_url', current_config.get('base_url', 'http://127.0.0.1')) or current_config.get('base_url', 'http://127.0.0.1'))
+        model = str(system_overrides.pop('model', current_config.get('model', 'gemma3:latest')) or current_config.get('model', 'gemma3:latest'))
+        save_ai_config(
+            base_url,
+            model,
+            **system_overrides,
+        )
+        did_system = True
+
+    if not did_admin and not did_oauth and not did_system:
         return jsonify({'success': False, 'error': 'Missing setup mode'}), 400
 
-    return jsonify({'success': True, 'admin_created': did_admin, 'oauth_configured': did_oauth})
+    return jsonify({'success': True, 'admin_created': did_admin, 'oauth_configured': did_oauth, 'system_configured': did_system})
 
 
 # Quick health/check endpoint for Nextcloud OAuth configuration
@@ -1786,11 +1869,21 @@ AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
 CALENDAR_CONFIG_FILE = os.path.join(CONFIG_DIR, "calendar_config.json")
 
 
-def load_calendar_config() -> Dict:
-    """Lädt Kalender-Konfiguration (z.B. Standard-Kalender) aus Datei."""
+def load_calendar_config(username: Optional[str] = None) -> Dict:
+    """Lädt Kalender-Konfiguration (z.B. Standard-Kalender) aus Datei oder User-Store."""
     config = {
         'default_calendar_name': ''
     }
+
+    active_username = str(username or _get_request_username() or '').strip()
+    if active_username:
+        try:
+            user_config = load_user_config(active_username)
+            if isinstance(user_config, dict):
+                config['default_calendar_name'] = str(user_config.get('default_calendar_name', '')).strip()
+                return config
+        except Exception as e:
+            logger.warning(f"Konnte User-Kalender-Konfiguration nicht laden: {str(e)}")
 
     if os.path.exists(CALENDAR_CONFIG_FILE):
         try:
@@ -1804,11 +1897,18 @@ def load_calendar_config() -> Dict:
     return config
 
 
-def save_calendar_config(default_calendar_name: str) -> None:
-    """Speichert Kalender-Konfiguration persistent in einer lokalen JSON-Datei."""
+def save_calendar_config(default_calendar_name: str, username: Optional[str] = None) -> None:
+    """Speichert Kalender-Konfiguration persistent in der User- oder lokalen JSON-Datei."""
     config = {
         'default_calendar_name': str(default_calendar_name or '').strip()
     }
+
+    active_username = str(username or _get_request_username() or '').strip()
+    if active_username:
+        user_config = load_user_config(active_username)
+        user_config['default_calendar_name'] = config['default_calendar_name']
+        save_user_config(active_username, user_config)
+        return
 
     with open(CALENDAR_CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
@@ -2438,6 +2538,25 @@ def save_ai_config(base_url: str, model: str, **overrides: Any) -> None:
         config['embedding_model'] = str(overrides['embedding_model']).strip() or 'nomic-embed-text'
 
     allowed_overrides = {
+        'provider',
+        'immich_url_default',
+        'immich_api_key_default',
+        'vector_db_enabled',
+        'vector_db_provider',
+        'vector_db_path',
+        'calendar_auto_reindex_hours',
+        'calendar_auto_reindex_past_days',
+        'calendar_auto_reindex_future_days',
+        'briefing_daily_enabled',
+        'briefing_weekly_enabled',
+        'briefing_morning_hour',
+        'briefing_send_daily',
+        'briefing_send_weekly',
+        'briefing_send_recipients',
+        'briefing_send_account_id',
+        'briefing_send_talk',
+        'briefing_talk_room_id',
+        'briefing_talk_webhook_secret',
         'tts_provider',
         'browser_tts_voice_uri',
         'gemini_tts_api_key',
@@ -2513,19 +2632,30 @@ simple_calendar_manager = create_simple_calendar_manager()
 calendar_enabled = os.getenv('CALENDAR_ENABLED', 'False').lower() == 'true'
 
 
-def refresh_simple_calendar_manager() -> bool:
+def refresh_simple_calendar_manager(username: Optional[str] = None) -> bool:
     """Initialisiert den einfachen Kalender-Manager mit aktueller Nextcloud-Konfiguration neu."""
     global simple_calendar_manager
 
     try:
+        active_username = str(username or _get_request_username() or '').strip()
+        if active_username:
+            user_config = load_user_config(active_username)
+            url = str(user_config.get('nextcloud_url') or user_config.get('caldav_url') or '').strip()
+            user_name = str(user_config.get('nextcloud_username') or user_config.get('caldav_username') or '').strip()
+            password = str(user_config.get('nextcloud_password') or user_config.get('caldav_password') or '').strip()
+
+            if url and user_name and password:
+                simple_calendar_manager = create_simple_calendar_manager(url, user_name, password)
+                return simple_calendar_manager is not None
+
         indexing_manager.load_nextcloud_config()
         config = indexing_manager.get_config(mask_password=False) or {}
         url = str(config.get('url', '')).strip()
-        username = str(config.get('username', '')).strip()
+        cal_username = str(config.get('username', '')).strip()
         password = str(config.get('password', '')).strip()
 
-        if url and username and password:
-            simple_calendar_manager = create_simple_calendar_manager(url, username, password)
+        if url and cal_username and password:
+            simple_calendar_manager = create_simple_calendar_manager(url, cal_username, password)
         else:
             simple_calendar_manager = create_simple_calendar_manager()
 
@@ -2867,6 +2997,23 @@ def get_todo_context(message: str) -> str:
 
 def get_nextcloud_runtime_config() -> Dict:
     """Lädt Nextcloud-Zugangsdaten aus mehreren Quellen in stabiler Reihenfolge."""
+    active_username = _get_request_username()
+
+    if active_username:
+        try:
+            user_config = load_user_config(active_username)
+            nextcloud_url = user_config.get('nextcloud_url') or user_config.get('caldav_url')
+            nextcloud_username = user_config.get('nextcloud_username') or user_config.get('caldav_username')
+            nextcloud_password = user_config.get('nextcloud_password') or user_config.get('caldav_password')
+            if all([nextcloud_url, nextcloud_username, nextcloud_password]):
+                return {
+                    'url': nextcloud_url,
+                    'username': nextcloud_username,
+                    'password': nextcloud_password
+                }
+        except Exception as e:
+            logger.debug(f"load_user_config for Nextcloud failed: {e}")
+
     config = {}
 
     # 1) Bereits geladene Laufzeit-Konfiguration
@@ -4581,9 +4728,12 @@ def nextcloud_loginflow_start():
     try:
         data = request.json or {}
         nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
+        username = _get_request_username()
 
         if not nextcloud_url:
             return jsonify({'error': 'nextcloud_url parameter required'}), 400
+        if not username:
+            return jsonify({'error': 'Authentication required'}), 401
 
         # Basic URL validation against Nextcloud status endpoint.
         status_url = f"{nextcloud_url}/status.php"
@@ -4613,6 +4763,7 @@ def nextcloud_loginflow_start():
         session['loginflow_nextcloud_url'] = nextcloud_url
         session['loginflow_poll_token'] = poll_token
         session['loginflow_poll_endpoint'] = poll_endpoint
+        session['loginflow_username'] = username
         session.permanent = True
 
         logger.info(f"Nextcloud Login Flow v2 started for {nextcloud_url}")
@@ -4629,8 +4780,13 @@ def nextcloud_loginflow_poll():
         nextcloud_url = session.get('loginflow_nextcloud_url')
         poll_token = session.get('loginflow_poll_token')
         poll_endpoint = session.get('loginflow_poll_endpoint')
+        app_username = session.get('loginflow_username')
 
-        if not all([nextcloud_url, poll_token, poll_endpoint]):
+        if not all([nextcloud_url, poll_token, poll_endpoint, app_username]):
+            return jsonify({'error': 'No active login flow', 'status': 'idle'}), 400
+
+        app_username = str(app_username).strip()
+        if not app_username:
             return jsonify({'error': 'No active login flow', 'status': 'idle'}), 400
 
         poll_res = requests.post(
@@ -4646,38 +4802,46 @@ def nextcloud_loginflow_poll():
         poll_res.raise_for_status()
         poll_data = poll_res.json()
 
-        username = poll_data.get('loginName')
+        nextcloud_username = poll_data.get('loginName')
         app_password = poll_data.get('appPassword')
         server = (poll_data.get('server') or nextcloud_url).rstrip('/')
 
-        if not all([username, app_password]):
+        if not all([nextcloud_username, app_password]):
             return jsonify({'status': 'pending'})
 
         nextcloud_config = {
             'nextcloud_url': server,
-            'username': username,
+            'username': nextcloud_username,
             'password': app_password,
             'auth_type': 'login_flow_v2',
-            'display_name': username
+            'display_name': nextcloud_username
         }
 
-        config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
-        with open(config_file, 'w') as f:
-            json.dump(nextcloud_config, f, indent=2)
+        user_config = load_user_config(app_username)
+        user_config.update({
+            'nextcloud_url': server,
+            'nextcloud_username': nextcloud_username,
+            'nextcloud_password': app_password,
+            'nextcloud_auth_type': 'login_flow_v2',
+            'nextcloud_display_name': nextcloud_username,
+        })
+        save_user_config(app_username, user_config)
 
-        indexing_manager.save_nextcloud_config(server, username, app_password, '/')
+        indexing_manager.save_nextcloud_config(server, nextcloud_username, app_password, '/')
+        save_calendar_config('', username=app_username)
         refresh_simple_calendar_manager()
         initialize_tasks_from_config()
 
         session.pop('loginflow_nextcloud_url', None)
         session.pop('loginflow_poll_token', None)
         session.pop('loginflow_poll_endpoint', None)
+        session.pop('loginflow_username', None)
 
-        logger.info(f"Nextcloud Login Flow v2 successful for {username}@{server}")
+        logger.info(f"Nextcloud Login Flow v2 successful for app user {app_username} via {nextcloud_username}@{server}")
         return jsonify({
             'status': 'connected',
-            'username': username,
-            'display_name': username,
+            'username': nextcloud_username,
+            'display_name': nextcloud_username,
             'nextcloud_url': server
         })
     except Exception as e:
@@ -4731,9 +4895,16 @@ def nextcloud_direct_login():
             'display_name': user_info.get('displayName', username)
         }
 
-        config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
-        with open(config_file, 'w') as f:
-            json.dump(nextcloud_config, f, indent=2)
+        request_username = _get_request_username() or username
+        user_config = load_user_config(request_username)
+        user_config.update({
+            'nextcloud_url': nextcloud_url,
+            'nextcloud_username': username,
+            'nextcloud_password': password,
+            'nextcloud_auth_type': 'direct',
+            'nextcloud_display_name': user_info.get('displayName', username),
+        })
+        save_user_config(request_username, user_config)
 
         # Speichere auch die Basis-Konfiguration für Indexing
         indexing_manager.save_nextcloud_config(
@@ -4742,6 +4913,7 @@ def nextcloud_direct_login():
             password,
             '/'
         )
+        save_calendar_config('', username=request_username)
         refresh_simple_calendar_manager()
         initialize_tasks_from_config()
 
@@ -4764,12 +4936,23 @@ def nextcloud_config_get():
     Gibt die aktuelle Nextcloud Konfiguration zurück (ohne Passwort!)
     """
     try:
+        username = _get_request_username()
+        if username:
+            config = load_user_config(username)
+            safe_config = {
+                'nextcloud_url': config.get('nextcloud_url', '') or config.get('caldav_url', ''),
+                'username': config.get('nextcloud_username', '') or config.get('caldav_username', ''),
+                'display_name': config.get('nextcloud_display_name', '') or config.get('display_name', ''),
+                'auth_type': config.get('nextcloud_auth_type', '') or config.get('auth_type', ''),
+                'configured': bool(config.get('nextcloud_url') or config.get('caldav_url'))
+            }
+            return jsonify(safe_config)
+
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
-        
         if os.path.exists(config_file):
             with open(config_file, 'r') as f:
                 config = json.load(f)
-            
+
             # Entferne Passwort
             safe_config = {
                 'nextcloud_url': config.get('nextcloud_url', ''),
@@ -4793,6 +4976,28 @@ def nextcloud_disconnect():
     global simple_calendar_manager, tasks_enabled
     try:
         removed_files = []
+
+        username = _get_request_username()
+        if username:
+            user_config = load_user_config(username)
+            for key in [
+                'nextcloud_url',
+                'nextcloud_username',
+                'nextcloud_password',
+                'nextcloud_display_name',
+                'nextcloud_auth_type',
+                'default_calendar_name',
+                'caldav_url',
+                'caldav_username',
+                'caldav_password'
+            ]:
+                user_config.pop(key, None)
+            save_user_config(username, user_config)
+            save_calendar_config('', username=username)
+            simple_calendar_manager = None
+            task_manager.tasks_client = None
+            tasks_enabled = False
+            return jsonify({'success': True, 'removed_files': ['user_config']})
 
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
         if os.path.exists(config_file):
@@ -6313,7 +6518,7 @@ def build_immich_thumbnail_proxy_url(asset_id: str, username: str = None, size: 
     return f"{request.host_url.rstrip('/')}/api/immich/thumbnail/{asset_id}?{urlencode(params)}"
 
 
-def get_nextcloud_search_client(username: str = None) -> Optional[NextcloudSearchClient]:
+def get_nextcloud_search_client(username: Optional[str] = None) -> Optional[NextcloudSearchClient]:
     """Get Nextcloud Search API client with credentials"""
     try:
         if username:
@@ -6345,7 +6550,7 @@ def get_nextcloud_search_client(username: str = None) -> Optional[NextcloudSearc
         return None
 
 
-def get_nextcloud_client(username: str = None) -> Optional[NextcloudClient]:
+def get_nextcloud_client(username: Optional[str] = None) -> Optional[NextcloudClient]:
     """Get Nextcloud WebDAV client with credentials"""
     try:
         if username:
@@ -8209,7 +8414,7 @@ def ui_runtime_config():
 def ui_profile_config():
     """User-specific profile configuration"""
     try:
-        username = request.args.get('username') if request.method == 'GET' else request.get_json().get('username')
+        username = _get_request_username()
 
         if not username:
             return jsonify({'success': False, 'error': 'Username required'}), 400
