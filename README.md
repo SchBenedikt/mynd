@@ -1,54 +1,37 @@
+
 # MYND
 
-MYND ist eine lokale, integrationsstarke KI-Assistenz mit Chat-UI. Das System kombiniert ein Flask-Backend, eine Next.js-Frontend-Anwendung und mehrere Datenquellen wie Nextcloud, Kalender, Tasks, Immich-Fotos sowie externe APIs (z. B. OpenWeather, NINA, Home Assistant, Uptime Kuma).
+MYND ist eine lokal betreibbare, integrationsstarke KI-Assistenz mit Chat-UI. Sie kombiniert ein Flask-Backend, ein Next.js-Frontend und mehrere Integrationen (Nextcloud, Kalender, Tasks, Immich, Home Assistant, OpenWeather u. a.).
 
-Die ausführliche Entwicklerdokumentation befindet sich in [docs/technical_documentation.md](docs/technical_documentation.md).
+Kurz: MYND hilft, lokale Daten (Dokumente, Termine, Fotos, Tasks) per natürlicher Sprache zu durchsuchen und zu verknüpfen.
 
-## Projektüberblick
+Weitere technische Details und Architektur findest du in der Entwicklerdokumentation: [docs/technical_documentation.md](docs/technical_documentation.md).
 
-### Was das Projekt macht
-MYND beantwortet natürlichsprachige Anfragen und zieht dafür je nach Intention Informationen aus:
-- lokaler Wissensbasis (dokumentenbasiert, inkl. Chunking und Suche)
-- Nextcloud (Dateien, Aktivitäten, Benachrichtigungen, Tasks)
-- Kalenderdaten
-- Immich-Fotobibliothek
-- Zusatzintegrationen (Home Assistant, Uptime Kuma, OpenWeather, NINA, Autobahn, Dashboard Deutschland, Deutschland Atlas)
+## Inhalt
+- **Projekt:** kurzer Überblick und Hauptfunktionalitäten
+- **Schnellstart:** lokal entwickeln und testen
+- **Produktion:** Docker-Setup
+- **Konfiguration:** wichtige Dateien & Umgebungsvariablen
+- **APIs & Beispiele:** typische Requests
+- **Tests & Beitrag:** wie du mitarbeitest
 
-### Hauptzweck und Use Cases
-- Persönlicher Assistent für Dokumente, Termine und Aufgaben
-- Foto-Suche per natürlicher Sprache
-- Lokale Sicherheits-/Wetterübersicht mit Standortbezug
-- Einheitliches Interface für mehrere APIs
+## Hauptfunktionen
+- Unified Chat-API: `POST /api/agent/query`
+- Quellen-orientierte Antworten (Fotos, Dateien, Kalender, Tasks, Wetter, Sicherheit)
+- Hintergrund-Indexierung (Nextcloud)
+- Lokale Persistenz: SQLite (FTS5)
+- Konfigurierbare Integrationen über `backend/config/`
+- Web-UI (Next.js) zum Konfigurieren und Interagieren
 
-### Zielgruppen
-- Entwickler, die lokale KI-Assistenz erweitern möchten
-- Power User mit selbst gehosteter Infrastruktur (Nextcloud, Immich, Home Assistant, Uptime Kuma)
+## Schnellstart (lokale Entwicklung)
 
-## Kernfunktionen
-
-- Unified Chat-Endpunkt: `POST /api/agent/query`
-- Intent-basierte Quellenauswahl (Fotos, Dateien, Kalender, Tasks, Sicherheit, Wetter)
-- Hintergrund-Indexierung von Dokumenten aus Nextcloud
-- SQLite-basierte Wissens- und Task-Persistenz
-- API Registry für konfigurierbare Integrationen
-- Settings-UI für Konfiguration und Verbindungschecks
-
-## Architektur auf einen Blick
-
-- Backend: Flask-App in `backend/core/app.py`
-- Frontend: Next.js in `frontend/`
-- Persistenz: `knowledge_base.db` (SQLite, FTS5, WAL)
-- Konfiguration: JSON-Dateien unter `backend/config/`
-- Integrationen: `backend/features/integration/`
-
-## Setup und Installation
-
-### Voraussetzungen
+Voraussetzungen
 - Python 3.10+ (empfohlen)
 - Node.js 18+ und npm
-- Ollama (laufend erreichbar)
+- Optional: Ollama (für lokale LLM-Hosts)
 
-### 1. Repository vorbereiten
+Repository einrichten
+
 ```bash
 cd .//MYND/mynd
 python3 -m venv .venv
@@ -56,15 +39,17 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
-### 2. Backend starten
+Backend starten (Entwicklung)
+
 ```bash
 source .venv/bin/activate
 python run_app.py
 ```
 
-Backend läuft standardmäßig auf `http://127.0.0.1:5001`.
+Standard-URL: `http://127.0.0.1:5001`
 
-### 3. Frontend starten
+Frontend starten
+
 ```bash
 cd frontend
 npm install
@@ -72,111 +57,116 @@ cp .env.local.example .env.local
 npm run dev
 ```
 
-Frontend läuft auf `http://localhost:3000`.
+Frontend: `http://localhost:3000`
 
-Hinweis: In der Dev-Konfiguration werden `/api/*`-Requests aus Next.js per Rewrite auf das Flask-Backend weitergeleitet.
+Hinweis: In der Dev-Umgebung leitet Next.js ` /api/*`-Anfragen an das Backend weiter.
 
-## Docker-Setup für Produktion
+## Produktion mit Docker
 
-Für einen reproduzierbaren Betrieb ist Docker hier sinnvoll. Das kapselt die Python- und Node-Abhängigkeiten, und die gemeinsamen Volumes halten Konfiguration und SQLite-Datenbank persistent.
+Führe im Projekt-Root aus:
 
 ```bash
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Danach erreichst du:
+Typische Endpunkte nach Start:
+- Frontend: `http://localhost:3001`
+- Backend: `http://localhost:5001`
 
-- Frontend: http://localhost:3001
-- Backend: http://localhost:5001
+Wichtig: Ollama muss erreichbar sein; auf macOS ist `http://host.docker.internal:11434` ein üblicher Default. Setze `OLLAMA_BASE_URL` passend.
 
-Dabei muss Ollama extern laufen und über `OLLAMA_BASE_URL` erreichbar sein. Auf macOS ist als Default `http://host.docker.internal:11434` gesetzt; in einer echten Server-Umgebung solltest du den Wert explizit setzen.
-
-Persistiert werden:
-
-- `data/` inkl. `knowledge_base.db`
+Persistente Pfade
+- `data/` (z. B. `knowledge_base.db`)
 - `backend/config/`
-
-Wenn du ein eigenes Secret-Set nutzen willst, setze vor dem Start mindestens `FLASK_SECRET_KEY` und optional `JWT_SECRET` bzw. `NEXTCLOUD_ACCOUNTS_KEY` als Umgebungsvariablen.
-
-Wenn du stattdessen ein vollständiges Lokalsystem mit mitgeliefertem Ollama willst, nutze weiter [docker-compose.yml](docker-compose.yml).
 
 ## Konfiguration
 
-### Wichtige Dateien
-- `backend/config/ai_config.json`: Modell-/Systemkonfiguration, Immich-Defaults
-- `backend/config/nextcloud_config.json`: gespeicherte Nextcloud-Credentials
-- `backend/config/calendar_config.json`: Standardkalender
-- `backend/config/indexing_config.json`: Nextcloud-Indexing-Konfiguration
+Wichtige Konfigurationsdateien
+- `backend/config/ai_config.json` — Modell- und Systemkonfiguration
+- `backend/config/nextcloud_config.json` — Nextcloud-Zugangsdaten
+- `backend/config/indexing_config.json` — Indexierungsregeln
 
-### Relevante Umgebungsvariablen
-- `FLASK_SECRET_KEY`
-- `OLLAMA_BASE_URL`
-- `OLLAMA_MODEL`
-- `CALENDAR_ENABLED`
-- `TASKS_AUTO_SYNC_ENABLED`
-- `TASKS_AUTO_SYNC_INTERVAL_SECONDS`
-- `TASKS_AUTO_SYNC_LIST_NAME`
-- optional/fallback: `NEXTCLOUD_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_PASSWORD`
-- Frontend: `NEXT_PUBLIC_BACKEND_URL`
+Wichtige Umgebungsvariablen
+- `FLASK_SECRET_KEY` — zwingend für produktiven Betrieb
+- `OLLAMA_BASE_URL` — URL zu Ollama
+- `OLLAMA_MODEL` — Modellname
+- `NEXT_PUBLIC_BACKEND_URL` — URL, die das Frontend für API-Requests nutzt
 
-## Nutzung
+Optional / Feature-Flags
+- `CALENDAR_ENABLED`, `TASKS_AUTO_SYNC_ENABLED`, `TASKS_AUTO_SYNC_INTERVAL_SECONDS`
 
-### Chat-Anfrage (Unified)
+Sensible Daten
+- Versioniere niemals echte Secrets. Nutze `.env` oder ein Secret-Manager.
+
+## API-Beispiele
+
+Unified Chat-Request
+
 ```bash
 curl -X POST http://127.0.0.1:5001/api/agent/query \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "Zeig mir Fotos vom letzten Urlaub",
-    "username": "username",
+    "username": "alice",
     "language": "de",
     "preferred_source": "auto"
   }'
 ```
 
-### API-Status prüfen
+Status-Endpoints
+
 ```bash
 curl http://127.0.0.1:5001/api/ollama/status
 curl http://127.0.0.1:5001/api/knowledge/status
 ```
 
-### Nextcloud Login Flow starten
+Nextcloud Login Flow (Beispiel)
+
 ```bash
 curl -X POST http://127.0.0.1:5001/api/nextcloud/loginflow/start \
   -H "Content-Type: application/json" \
   -d '{"nextcloud_url":"https://cloud.example.com"}'
 ```
 
-## Testing
+Weitere Endpunkte und Details: siehe `backend/core/routes` und die Entwicklerdokumentation.
 
-Im Projekt sind primär scriptbasierte Tests vorhanden (`test_*.py`).
+## Tests
 
-Beispiele:
+Projekt-spezifische Tests sind im Root als Scripts vorhanden. Beispiel:
+
 ```bash
 source .venv/bin/activate
 python test_auth_unit.py
-python test_additional_apis.py
 python test_chat_with_todos.py
 ```
 
-## Sicherheitshinweise
+Für CI: Tests in ein `pytest`-Setup überführen und GitHub Actions ergänzen (auf Wunsch erstelle ich ein Template).
 
-- Aktuelle Konfigurationsdateien im Repository enthalten sensible Werte. Für produktive Nutzung:
-  - Secrets rotieren
-  - keine echten Tokens/Passwörter versionieren
-  - Secret-Management nutzen
-- Session- und API-Secrets ausschließlich über sichere Kanäle bereitstellen.
+## Sicherheit & Datenschutz
 
-## Einschränkungen (Kurzfassung)
+- Sensible Konfiguration nicht in Git speichern
+- Verwende HTTPS in Produktivumgebungen
+- Rollen- und Berechtigungsmodell ist begrenzt — produktive Multi-User-Setups benötigen Anpassungen
 
-- Kein feingranulares Multi-User-/RBAC-Modell im Backend
-- Große `backend/core/app.py` als monolithischer Einstiegspunkt
-- Teilweise Legacy-/Fallback-Pfade (z. B. parallel bestehende Auth-Flows)
-- Abhängigkeit von externen Diensten (Ollama, Nextcloud, Immich, APIs)
+## Beitragen
 
-## Weitere Informationen
+Beiträge sind willkommen. Vorschlag:
 
-- Detaildokumentation: [docs/technical_documentation.md](docs/technical_documentation.md)
-- Zusatzdokus:
-  - [docs/IMMICH_INTEGRATION.md](docs/IMMICH_INTEGRATION.md)
-  - [docs/NEXTCLOUD_AUTH_PLUGIN.md](docs/NEXTCLOUD_AUTH_PLUGIN.md)
-  - [docs/CALENDAR_IMPROVEMENTS.md](docs/CALENDAR_IMPROVEMENTS.md)
+1. Issue erstellen oder Diskussion starten
+2. Branch vom `main` anlegen
+3. Kleinen, gut dokumentierten Pull-Request senden
+
+Siehe auch: [CONTRIBUTING.md] (falls vorhanden)
+
+## Weiterführende Dokumentation
+- [docs/technical_documentation.md](docs/technical_documentation.md)
+- [docs/IMMICH_INTEGRATION.md](docs/IMMICH_INTEGRATION.md)
+- [docs/NEXTCLOUD_AUTH_PLUGIN.md](docs/NEXTCLOUD_AUTH_PLUGIN.md)
+
+## Lizenz
+
+Siehe LICENSE im Repository.
+
+---
+
+README aktualisiert. Wenn du möchtest, kann ich zusätzlich ein kurzes `CONTRIBUTING.md`-Template oder ein GitHub Actions CI-Workflow anlegen.

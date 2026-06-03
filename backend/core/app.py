@@ -3013,7 +3013,7 @@ def get_todo_data(message: str) -> Dict:
     except Exception as e:
         logger.error(f"Error getting todo data: {str(e)}")
         return {
-            'enabled': True,
+            'enabled': False,
             'tasks': [],
             'filtered_tasks': [],
             'context': ''
