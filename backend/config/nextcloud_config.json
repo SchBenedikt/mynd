@@ -1,0 +1,7 @@
+{
+  "nextcloud_url": "https://cloud.example.com",
+  "username": "__REDACTED__",
+  "password": "__REDACTED__",
+  "auth_type": "login_flow_v2",
+  "display_name": "__REDACTED__"
+}

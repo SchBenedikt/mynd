@@ -3,3 +3,4 @@ literal:redacted-user==>redacted-user
 literal:REDACTED==>REDACTED
 literal:"username"==>"username"
 literal:user==>user
+literal:__REDACTED_SECRET__==>__REDACTED_SECRET__
