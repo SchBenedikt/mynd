@@ -1,0 +1,13 @@
+{
+  "provider": "ollama",
+  "base_url": "http://localhost:11434",
+  "model": "gemma2:latest",
+  "immich_url_default": "https://immich.example.com",
+  "immich_api_key_default": "SET_VIA_ENV_IMMICH_API_KEY",
+  "vector_db_enabled": true,
+  "vector_db_provider": "qdrant",
+  "vector_db_path": "./qdrant_data",
+  "calendar_auto_reindex_hours": 6,
+  "calendar_auto_reindex_past_days": 730,
+  "calendar_auto_reindex_future_days": 365
+}

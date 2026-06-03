@@ -1,0 +1,6 @@
+{
+  "enabled": false,
+  "api_url": "https://nina.api.url",
+  "region_id": "SET_VIA_ENV",
+  "cache_hours": 6
+}

@@ -1,0 +1,5 @@
+{
+  "api_key": "SET_VIA_ENV_OPENWEATHER_API_KEY",
+  "base_url": "https://api.openweathermap.org",
+  "cache_hours": 1
+}

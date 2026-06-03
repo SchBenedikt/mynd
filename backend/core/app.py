@@ -1,11 +1,10 @@
 import os
 import json
 import sys
-import html
 import requests
 import numpy as np
-import threading
-from flask import Flask, request, jsonify, redirect, url_for, session, Response
+from flask import Flask, request, jsonify, redirect, url_for, session, Response, make_response
+from flask_cors import CORS
 from dotenv import load_dotenv
 import re
 import logging
@@ -14,38 +13,21 @@ import time
 import secrets
 from urllib.parse import urljoin
 from urllib.parse import urlencode
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from typing import Optional, List, Dict, Any
-import hmac
-import hashlib
-import base64
-import secrets
-import json as _json
-from flask import make_response
-from passlib.hash import bcrypt
-from cryptography.fernet import Fernet, InvalidToken
+from urllib.parse import urlparse
+from typing import Optional, List, Dict
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-# Import package side effects to register all API clients in APIRegistry.
 
 from backend.features.documents.parser import DocumentParser
 from backend.features.integration.nextcloud_client import NextcloudClient
 from backend.features.integration.activity_client import NextcloudActivityClient
 from backend.features.integration.notifications_client import NextcloudNotificationsClient
-from backend.features.integration.search_client import NextcloudSearchClient
-from backend.features.integration.talk_client import NextcloudTalkClient
-
 from backend.features.integration.auth_manager import get_auth_manager, AuthManager
 from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
-from backend.features.integration.api_registry import get_api_registry
-from backend.features.integration.carddav_client import NextcloudCardDAVClient
-from backend.features.integration.homeassistant_client import HomeAssistantClient
-from backend.features.integration.uptimekuma_client import UptimeKumaClient
-from backend.features.integration.email_client import EmailClient
+from backend.features.integration.loginflow_state import loginflow_state
 from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
-from backend.features.knowledge.email_indexing import email_indexing_manager, EmailIndexingProgress
 # from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
 class SemanticSearchEngine:
@@ -54,22 +36,18 @@ class SemanticSearchEngine:
 from backend.features.knowledge.search import SimpleSearchEngine
 from backend.features.training.manager import TrainingManager
 from backend.features.knowledge.metadata import MetadataExtractor
-from backend.features.knowledge.graph import get_knowledge_graph
+from backend.core.security_utils import (
+    sanitize_username,
+    mask_secret,
+    validate_service_url,
+    clamp_int,
+)
 # from backend.features.calendar.manager import create_calendar_manager
 # Temporär deaktiviert wegen caldav Problemen
 def create_calendar_manager():
     return None
 from backend.features.calendar.simple import create_simple_calendar_manager
 from backend.features.tasks.manager import task_manager, set_database
-from backend.core.context.gatherers import (
-    gather_photo_context, gather_file_context, gather_weather_context,
-    gather_security_context, gather_activity_context, gather_calendar_context,
-    gather_todo_context, gather_nextcloud_search_context, gather_email_context,
-    _build_email_query_profile,
-    combine_contexts,
-    build_system_message as build_agent_system_message
-)
-from backend.core.autonomous.agent import AutonomousAgent
 import xml.etree.ElementTree as ET
 
 load_dotenv()
@@ -82,11 +60,7 @@ CONFIG_DIR = os.path.join(BASE_DIR, 'backend', 'config')
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 BACKEND_DIR = os.path.join(BASE_DIR, 'backend')
 TEMPLATES_DIR = os.path.join(BACKEND_DIR, 'templates')
-DB_PATH = os.getenv('KNOWLEDGE_DB_PATH', os.path.join(DATA_DIR, 'knowledge_base.db'))
-BRIEFING_STORE_FILE = os.path.join(DATA_DIR, 'assistant_briefings.json')
-BRIEFING_MORNING_HOUR = int(os.getenv('BRIEFING_MORNING_HOUR', '7'))
-BRIEFING_DAILY_ENABLED_DEFAULT = os.getenv('BRIEFING_DAILY_ENABLED', 'true').lower() in ('true', '1', 'yes')
-BRIEFING_WEEKLY_ENABLED_DEFAULT = os.getenv('BRIEFING_WEEKLY_ENABLED', 'true').lower() in ('true', '1', 'yes')
+DB_PATH = os.path.join(BASE_DIR, 'knowledge_base.db')
 
 # Setup directories
 os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -95,1852 +69,89 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # Create Flask app with correct template folder
 app = Flask(__name__, template_folder=TEMPLATES_DIR)
 
+# Configure CORS with credentials support
+cors_origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
+cors_origins = [origin.strip() for origin in cors_origins]
+CORS(app, 
+     origins=cors_origins,
+     supports_credentials=True,
+     allow_headers=['Content-Type', 'Authorization'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+
 # Konfiguriere Session für OAuth2 State Management
 app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'true').lower() == 'true'
 
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-_briefing_lock = threading.Lock()
-_briefing_scheduler_started = False
-
-# Knowledge Graph globals
-_knowledge_graph = None
-_knowledge_graph_lock = threading.Lock()
-_knowledge_graph_scheduler_started = False
-_knowledge_graph_refresh_in_progress = False
-_knowledge_graph_refresh_lock = threading.Lock()
-KNOWLEDGE_GRAPH_FILE = os.path.join(DATA_DIR, 'knowledge_graph.json')
-
-
-def _load_briefing_store() -> Dict[str, Any]:
-    """Load persisted briefing items from disk."""
-    try:
-        if not os.path.exists(BRIEFING_STORE_FILE):
-            return {'items': {}}
-        with open(BRIEFING_STORE_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        if not isinstance(data, dict):
-            return {'items': {}}
-        items = data.get('items')
-        if not isinstance(items, dict):
-            data['items'] = {}
-        return data
-    except Exception as exc:
-        logger.warning('Could not load briefing store: %s', exc)
-        return {'items': {}}
-
-
-def _save_briefing_store(store: Dict[str, Any]) -> None:
-    """Persist briefing items to disk."""
-    try:
-        os.makedirs(os.path.dirname(BRIEFING_STORE_FILE), exist_ok=True)
-        with open(BRIEFING_STORE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(store, f, ensure_ascii=False, indent=2)
-    except Exception as exc:
-        logger.warning('Could not save briefing store: %s', exc)
-
-
-def _get_briefing_settings() -> Dict[str, Any]:
-    """Load briefing settings from ai_config with env-based defaults."""
-    settings = {
-        'daily_enabled': BRIEFING_DAILY_ENABLED_DEFAULT,
-        'weekly_enabled': BRIEFING_WEEKLY_ENABLED_DEFAULT,
-        'morning_hour': int(BRIEFING_MORNING_HOUR),
-        # email send defaults
-        'send_daily': False,
-        'send_weekly': False,
-        'send_recipients': [],
-        'send_account_id': None,
-    }
-
-    try:
-        if os.path.exists(AI_CONFIG_FILE):
-            with open(AI_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-            settings['daily_enabled'] = bool(cfg.get('briefing_daily_enabled', settings['daily_enabled']))
-            settings['weekly_enabled'] = bool(cfg.get('briefing_weekly_enabled', settings['weekly_enabled']))
-            settings['morning_hour'] = int(cfg.get('briefing_morning_hour', settings['morning_hour']))
-            # optional automatic email sending settings
-            settings['send_daily'] = bool(cfg.get('briefing_send_daily', settings.get('send_daily', False)))
-            settings['send_weekly'] = bool(cfg.get('briefing_send_weekly', settings.get('send_weekly', False)))
-            # recipients may be a list or comma-separated string
-            recipients = cfg.get('briefing_send_recipients', settings.get('send_recipients', []))
-            if isinstance(recipients, str):
-                recipients = [r.strip() for r in re.split(r'[;,]', recipients) if r.strip()]
-            settings['send_recipients'] = recipients or []
-            settings['send_account_id'] = cfg.get('briefing_send_account_id') or None
-            # Nextcloud Talk delivery options
-            settings['send_talk'] = bool(cfg.get('briefing_send_talk', False))
-            settings['talk_room_id'] = str(cfg.get('briefing_talk_room_id') or '').strip() or None
-    except Exception as exc:
-        logger.debug('Could not load briefing settings from config: %s', exc)
-
-    settings['morning_hour'] = max(0, min(23, int(settings['morning_hour'])))
-    return settings
-
-
-def _send_briefing_via_email(item: Dict[str, Any], recipients: List[str], account_id: Optional[str] = None) -> bool:
-    """Send a generated briefing `item` as email to `recipients` using configured EmailClient.
-
-    Returns True on success, False otherwise (errors are logged).
-    """
-    if not recipients:
-        logger.debug('No recipients provided for briefing email.')
-        return False
-
-    try:
-        client = get_email_client(account_id=account_id) if account_id else get_email_client()
-        if not client:
-            logger.warning('No email client available to send briefing.')
-            return False
-
-        to_str = ', '.join(recipients)
-        subject = item.get('title', 'Briefing')
-        body = item.get('content', '')
-
-        try:
-            client.send_email(
-                to=to_str,
-                subject=subject,
-                body=body,
-            )
-            logger.info('Briefing emailed to %s (kind=%s)', to_str, item.get('kind'))
-            return True
-        except Exception as exc:
-            logger.warning('Failed to send briefing email: %s', exc)
-            return False
-    except Exception as exc:
-        logger.debug('Error preparing email client for briefing: %s', exc)
-        return False
-
-
-def _calendar_events_for_today(limit: int = 8) -> List[Dict[str, Any]]:
-    """Fetch today's calendar events in a robust way."""
-    if not simple_calendar_manager:
-        refresh_simple_calendar_manager()
-    if not simple_calendar_manager:
-        return []
-
-    try:
-        if hasattr(simple_calendar_manager, 'get_events_today'):
-            events = simple_calendar_manager.get_events_today() or []
-        else:
-            events = []
-        return [event for event in events if isinstance(event, dict)][:limit]
-    except Exception as exc:
-        logger.debug('Could not load today events for briefing: %s', exc)
-        return []
-
-
-def _calendar_events_for_week(limit: int = 12) -> List[Dict[str, Any]]:
-    """Fetch current week calendar events in a robust way."""
-    if not simple_calendar_manager:
-        refresh_simple_calendar_manager()
-    if not simple_calendar_manager:
-        return []
-
-    try:
-        if hasattr(simple_calendar_manager, 'get_events_this_week'):
-            events = simple_calendar_manager.get_events_this_week() or []
-        else:
-            events = []
-        return [event for event in events if isinstance(event, dict)][:limit]
-    except Exception as exc:
-        logger.debug('Could not load week events for briefing: %s', exc)
-        return []
-
-
-def _is_manual_briefing_query(prompt: str) -> bool:
-    """Detect if user asks explicitly for a manual day/week briefing."""
-    text = str(prompt or '').strip().lower()
-    if not text:
-        return False
-
-    briefing_keywords = [
-        'briefing', 'tagesbriefing', 'morgenbriefing', 'wochenbriefing', 'wochenstart',
-        'tageszusammenfassung', 'wochenzusammenfassung', 'status update',
-        'was steht heute an', 'was ist heute wichtig', 'gib mir ein update',
-        'daily summary', 'weekly summary', 'morning update'
-    ]
-    return any(keyword in text for keyword in briefing_keywords)
-
-
-def _requested_briefing_kind(prompt: str) -> str:
-    """Infer requested briefing kind from prompt."""
-    text = str(prompt or '').strip().lower()
-    weekly_markers = ['woche', 'wochen', 'wochenstart', 'weekly', 'kw']
-    if any(marker in text for marker in weekly_markers):
-        return 'weekly'
-    return 'daily'
-
-
-def _format_briefing_for_chat(item: Dict[str, Any]) -> str:
-    """Return a more readable, chat-friendly version of a briefing payload."""
-    title = str(item.get('title') or 'Briefing').strip()
-    kind = str(item.get('kind') or 'daily').strip().lower()
-    content = str(item.get('content') or '').strip()
-
-    header = '🌅' if kind == 'daily' else '🗓️'
-    section_map = {
-        'Kurzüberblick:': '📌 Kurzüberblick',
-        'Wichtige Aufgaben:': '✅ Wichtige Aufgaben',
-        'Termine heute:': '📅 Termine heute',
-        'Relevante E-Mails:': '✉️ Relevante E-Mails',
-        'Empfehlung für den Start:': '🧭 Empfehlung für den Start',
-        'Wochenüberblick:': '📊 Wochenüberblick',
-        'Fokus-Aufgaben für diese Woche:': '✅ Fokus-Aufgaben für diese Woche',
-        'Wichtige Termine der Woche:': '📅 Wichtige Termine der Woche',
-        'Vorschlag für die Wochenplanung:': '🧭 Vorschlag für die Wochenplanung',
-    }
-
-    lines: List[str] = [f"{header} {title}", '']
-    for raw_line in content.splitlines():
-        line = str(raw_line or '').rstrip()
-        stripped = line.strip()
-
-        if not stripped:
-            if lines and lines[-1] != '':
-                lines.append('')
-            continue
-
-        if stripped in section_map:
-            if lines and lines[-1] != '':
-                lines.append('')
-            lines.append(section_map[stripped])
-            continue
-
-        if stripped.startswith('• '):
-            bullet_body = stripped[2:].strip()
-            if bullet_body.lower().startswith('wetter:'):
-                lines.append(f'🌤️ {bullet_body}')
-            elif bullet_body.lower().startswith('sicherheitslage:'):
-                lines.append(f'🛡️ {bullet_body}')
-            else:
-                lines.append(f'• {bullet_body}')
-            continue
-
-        if re.match(r'^\d+\.', stripped):
-            lines.append(f'  {stripped}')
-            continue
-
-        if stripped.startswith('Guten Morgen. Heute ist'):
-            lines.append(stripped.replace('Guten Morgen. Heute ist', 'Guten Morgen! Heute ist'))
-            continue
-
-        if stripped.startswith('Wochenstart-Briefing für'):
-            lines.append(stripped.replace('Wochenstart-Briefing für', 'Wochenstart-Briefing für'))
-            continue
-
-        lines.append(stripped)
-
-    return '\n'.join(lines).strip()
-
-
-# --- Simple JWT helpers (no external dependency) -------------------------------------------------
-JWT_SECRET = os.getenv('JWT_SECRET') or app.secret_key
-JWT_ALGO = 'HS256'
-
-def _b64u(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
-
-def _b64u_decode(data: str) -> bytes:
-    pad = '=' * (-len(data) % 4)
-    return base64.urlsafe_b64decode(data + pad)
-
-def create_jwt(payload: Dict[str, Any], expires_in: int = 60*60*24) -> str:
-    header = {'alg': JWT_ALGO, 'typ': 'JWT'}
-    payload = dict(payload)
-    payload['exp'] = int(time.time()) + int(expires_in)
-    header_b = _b64u(json.dumps(header, separators=(',', ':')).encode('utf-8'))
-    payload_b = _b64u(json.dumps(payload, separators=(',', ':')).encode('utf-8'))
-    signing_input = f"{header_b}.{payload_b}".encode('ascii')
-    sig = hmac.new(JWT_SECRET.encode('utf-8'), signing_input, hashlib.sha256).digest()
-    sig_b = _b64u(sig)
-    return f"{header_b}.{payload_b}.{sig_b}"
-
-def verify_jwt(token: str) -> Optional[Dict[str, Any]]:
-    try:
-        parts = token.split('.')
-        if len(parts) != 3:
-            return None
-        header_b, payload_b, sig_b = parts
-        signing_input = f"{header_b}.{payload_b}".encode('ascii')
-        expected_sig = hmac.new(JWT_SECRET.encode('utf-8'), signing_input, hashlib.sha256).digest()
-        if not hmac.compare_digest(_b64u(expected_sig), sig_b):
-            return None
-        payload_json = _b64u_decode(payload_b)
-        payload = _json.loads(payload_json)
-        if 'exp' in payload and int(payload['exp']) < int(time.time()):
-            return None
-        return payload
-    except Exception:
-        return None
-
-# --- Simple local user store --------------------------------------------------------------------
-USERS_FILE = os.path.join(CONFIG_DIR, 'users.json')
-
-
-def _read_users_file() -> Dict[str, Any]:
-    if not os.path.exists(USERS_FILE):
-        return {}
-    try:
-        with open(USERS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-PASSWORD_SCHEME_PREFIX = 'pbkdf2_sha256'
-
-
-def _hash_password(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    iterations = 390000
-    digest = hashlib.pbkdf2_hmac('sha256', str(password).encode('utf-8'), salt, iterations)
-    salt_b64 = base64.urlsafe_b64encode(salt).decode('ascii').rstrip('=')
-    digest_b64 = base64.urlsafe_b64encode(digest).decode('ascii').rstrip('=')
-    return f'{PASSWORD_SCHEME_PREFIX}${iterations}${salt_b64}${digest_b64}'
-
-
-def _verify_password(password: str, stored: str) -> bool:
-    stored = str(stored or '')
-    if stored.startswith(f'{PASSWORD_SCHEME_PREFIX}$'):
-        try:
-            _, iterations_str, salt_b64, digest_b64 = stored.split('$', 3)
-            iterations = int(iterations_str)
-            salt = base64.urlsafe_b64decode(salt_b64 + '=' * (-len(salt_b64) % 4))
-            expected = base64.urlsafe_b64decode(digest_b64 + '=' * (-len(digest_b64) % 4))
-            actual = hashlib.pbkdf2_hmac('sha256', str(password).encode('utf-8'), salt, iterations)
-            return hmac.compare_digest(actual, expected)
-        except Exception:
-            return False
-
-    if stored.startswith('$2'):
-        try:
-            return bool(bcrypt.verify(str(password), stored))
-        except Exception:
-            return False
-
-    return hmac.compare_digest(str(password), stored)
-
-
-def _is_placeholder_user_store(users: Dict[str, Any]) -> bool:
-    if not isinstance(users, dict) or len(users) != 1:
-        return False
-
-    admin_user = os.getenv('ADMIN_USER', 'admin')
-    admin_pass = os.getenv('ADMIN_PASS', 'admin')
-    username, entry = next(iter(users.items()))
-    if str(username).strip() != str(admin_user).strip():
-        return False
-    if not isinstance(entry, dict):
-        return False
-
-    name = str(entry.get('name') or '').strip().lower()
-    if name not in {'', 'admin', 'administrator'}:
-        return False
-
-    stored_password = str(entry.get('password') or '')
-    return not bool(stored_password)
-
-
-def _users_setup_needed() -> bool:
-    users = _read_users_file()
-    users_needed = not users or _is_placeholder_user_store(users)
-    if not users_needed:
-        return False
-
-    # OAuth-only setups are valid: no local users required when Nextcloud login is configured.
-    oauth_cfg = _load_oauth_config()
-    oauth_ready = bool(oauth_cfg.get('client_id') and oauth_cfg.get('client_secret'))
-    return not oauth_ready
-
-def _load_users() -> Dict[str, Any]:
-    users = _read_users_file()
-    migrated = False
-
-    # If no users configured yet, keep the store empty so first run can go through setup.
-    if not users:
-        return {}
-
-    # Migrate plaintext passwords to hashed variants if needed
-    for username, entry in list(users.items()):
-        pw = entry.get('password')
-        if not pw:
-            continue
-        if isinstance(pw, str) and (pw.startswith(f'{PASSWORD_SCHEME_PREFIX}$') or pw.startswith('$2')):
-            continue
-        users[username]['password'] = _hash_password(str(pw))
-        migrated = True
-
-    if migrated:
-        try:
-            with open(USERS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(users, f, ensure_ascii=False, indent=2)
-        except Exception:
-            logger.warning('Could not write migrated users file')
-
-    return users
-
-def _verify_local_credentials(username: str, password: str) -> Optional[Dict[str, Any]]:
-    users = _load_users()
-    entry = users.get(username)
-    if not entry or 'password' not in entry:
-        return None
-    stored = entry.get('password')
-    if not _verify_password(str(password), stored):
-        return None
-    return {'username': username, 'name': entry.get('name') or username}
-
-# --- Auth API endpoints -------------------------------------------------------------------------
-@app.route('/api/auth/login', methods=['POST'])
-def api_auth_login():
-    data = request.get_json(force=True, silent=True) or {}
-    username = str(data.get('username') or '').strip()
-    password = str(data.get('password') or '')
-    if not username or not password:
-        return jsonify({'success': False, 'error': 'Missing username or password'}), 400
-    user = _verify_local_credentials(username, password)
-    if not user:
-        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
-    token = create_jwt({'sub': user['username'], 'name': user.get('name') or user['username']})
-    resp = make_response(jsonify({'success': True, 'token': token, 'user': {'username': user['username'], 'name': user.get('name')}}))
-    secure_cookie = os.getenv('AUTH_COOKIE_SECURE', 'false').lower() in ('1', 'true', 'yes')
-    resp.set_cookie('mynd_token', token, httponly=True, secure=secure_cookie, samesite='Lax', max_age=60*60*24)
-    return resp
-
-@app.route('/api/auth/me', methods=['GET'])
-def api_auth_me():
-    # try Authorization header first
-    auth = request.headers.get('Authorization', '')
-    token = None
-    if auth.lower().startswith('bearer '):
-        token = auth.split(None, 1)[1]
-    else:
-        token = request.args.get('token') or request.cookies.get('mynd_token')
-    if not token:
-        return jsonify({'authenticated': False}), 401
-    payload = verify_jwt(token)
-    if not payload:
-        return jsonify({'authenticated': False}), 401
-    return jsonify({'authenticated': True, 'user': {'username': payload.get('sub'), 'name': payload.get('name')}})
-
-
-def _get_request_username() -> Optional[str]:
-    """Resolve the currently authenticated username from the active request."""
-    try:
-        auth = request.headers.get('Authorization', '')
-        token = None
-        if auth.lower().startswith('bearer '):
-            token = auth.split(None, 1)[1]
-        else:
-            token = request.cookies.get('mynd_token')
-
-        if token:
-            payload = verify_jwt(token)
-            if payload and payload.get('sub'):
-                return str(payload.get('sub')).strip() or None
-
-        username = request.args.get('username')
-        if username:
-            return str(username).strip() or None
-
-        data = request.get_json(silent=True) or {}
-        if isinstance(data, dict):
-            username = data.get('username')
-            if username:
-                return str(username).strip() or None
-    except Exception:
-        return None
-
-    return None
-
-@app.route('/api/auth/logout', methods=['POST'])
-def api_auth_logout():
-    # Client should remove token; we can also clear cookie if set
-    resp = make_response(jsonify({'success': True}))
-    resp.set_cookie('mynd_token', '', expires=0)
-    return resp
-
-
-@app.route('/api/setup/status', methods=['GET'])
-def api_setup_status():
-    oauth_cfg = _load_oauth_config()
+# ==============================
+# HEALTH CHECK ENDPOINT
+# ==============================
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for monitoring and diagnostics"""
     return jsonify({
-        'success': True,
-        'needs_setup': _users_setup_needed(),
-        'admin_user': os.getenv('ADMIN_USER', 'admin'),
-        'oauth_configured': bool(oauth_cfg.get('client_id') and oauth_cfg.get('client_secret')),
-        'nextcloud_url': oauth_cfg.get('nextcloud_url') or None,
-    })
-
-
-@app.route('/api/setup/bootstrap', methods=['POST'])
-def api_setup_bootstrap():
-    data = request.get_json(force=True, silent=True) or {}
-    mode = str(data.get('mode') or '').strip().lower()
-
-    def _as_bool(value: Any, default: Optional[bool] = False) -> Optional[bool]:
-        if value is None:
-            return default
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return bool(value)
-        return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
-
-    did_admin = False
-    did_oauth = False
-    did_system = False
-
-    if mode in {'admin', 'both'}:
-        if not _users_setup_needed():
-            return jsonify({'success': False, 'error': 'Admin setup already completed'}), 409
-        admin_user = os.getenv('ADMIN_USER', 'admin')
-        admin_password = str(data.get('admin_password') or '').strip()
-        admin_name = str(data.get('admin_name') or admin_user).strip() or admin_user
-        if not admin_password:
-            return jsonify({'success': False, 'error': 'Missing admin password'}), 400
-
-        users = {
-            admin_user: {
-                'password': _hash_password(admin_password),
-                'name': admin_name,
-            }
-        }
-        try:
-            os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-            with open(USERS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(users, f, ensure_ascii=False, indent=2)
-        except Exception as exc:
-            logger.warning('Could not persist bootstrap admin user: %s', exc)
-            return jsonify({'success': False, 'error': 'Could not persist admin user'}), 500
-
-        os.environ['ADMIN_USER'] = admin_user
-        did_admin = True
-
-    if mode in {'nextcloud', 'both'}:
-        client_id = str(data.get('client_id') or '').strip()
-        client_secret = str(data.get('client_secret') or '').strip()
-        nextcloud_url = str(data.get('nextcloud_url') or '').strip()
-        if not client_id or not client_secret:
-            return jsonify({'success': False, 'error': 'Missing client_id or client_secret'}), 400
-
-        ok = _save_oauth_config({
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'nextcloud_url': nextcloud_url or None,
-        })
-        if not ok:
-            return jsonify({'success': False, 'error': 'Could not persist Nextcloud OAuth config'}), 500
-
-        os.environ['NEXTCLOUD_OAUTH_CLIENT_ID'] = client_id
-        os.environ['NEXTCLOUD_OAUTH_CLIENT_SECRET'] = client_secret
-        if nextcloud_url:
-            os.environ['NEXTCLOUD_URL'] = nextcloud_url
-        did_oauth = True
-
-    enable_ollama = _as_bool(data.get('enable_ollama'), None if ('enable_ollama' not in data) else False)
-    enable_immich = _as_bool(data.get('enable_immich'), None if ('enable_immich' not in data) else False)
-    if enable_ollama is None:
-        enable_ollama = any(key in data for key in ('base_url', 'model', 'embedding_model'))
-    if enable_immich is None:
-        enable_immich = any(key in data for key in ('immich_url_default', 'immich_api_key_default'))
-
-    system_overrides = {}
-    if enable_ollama:
-        base_url = str(data.get('base_url') or '').strip().rstrip('/')
-        model = str(data.get('model') or '').strip()
-        if not base_url or not model:
-            return jsonify({'success': False, 'error': 'base_url und model sind erforderlich'}), 400
-        if not (base_url.startswith('http://') or base_url.startswith('https://')):
-            return jsonify({'success': False, 'error': 'base_url muss mit http:// oder https:// beginnen'}), 400
-        system_overrides['base_url'] = base_url
-        system_overrides['model'] = model
-        embedding_model = str(data.get('embedding_model') or '').strip()
-        if embedding_model:
-            system_overrides['embedding_model'] = embedding_model
-
-    if enable_immich:
-        immich_url_default = str(data.get('immich_url_default') or '').strip()
-        immich_api_key_default = str(data.get('immich_api_key_default') or '').strip()
-        if not immich_url_default or not immich_api_key_default:
-            return jsonify({'success': False, 'error': 'Immich URL und API-Key sind erforderlich'}), 400
-        system_overrides['immich_url_default'] = immich_url_default
-        system_overrides['immich_api_key_default'] = immich_api_key_default
-
-    for key in [
-        'vector_db_enabled',
-        'vector_db_provider',
-        'vector_db_path',
-        'briefing_daily_enabled',
-        'briefing_weekly_enabled',
-        'briefing_morning_hour',
-        'briefing_send_daily',
-        'briefing_send_weekly',
-        'briefing_send_recipients',
-        'briefing_send_account_id',
-        'briefing_send_talk',
-        'briefing_talk_room_id',
-        'briefing_talk_webhook_secret',
-        'tts_provider',
-        'browser_tts_voice_uri',
-        'gemini_tts_api_key',
-        'gemini_tts_model',
-        'gemini_tts_voice',
-        'gemini_tts_language_code',
-        'gemini_tts_style_prompt',
-        'gemini_tts_audio_encoding',
-        'gemini_live_model',
-        'gemini_live_voice',
-    ]:
-        if key in data:
-            system_overrides[key] = data.get(key)
-
-    if mode in {'system', 'global', 'both'} and system_overrides:
-        current_config = load_ai_config()
-        base_url = str(system_overrides.pop('base_url', current_config.get('base_url', 'http://127.0.0.1')) or current_config.get('base_url', 'http://127.0.0.1'))
-        model = str(system_overrides.pop('model', current_config.get('model', 'gemma3:latest')) or current_config.get('model', 'gemma3:latest'))
-        save_ai_config(
-            base_url,
-            model,
-            **system_overrides,
-        )
-        did_system = True
-
-    if not did_admin and not did_oauth and not did_system:
-        return jsonify({'success': False, 'error': 'Missing setup mode'}), 400
-
-    return jsonify({'success': True, 'admin_created': did_admin, 'oauth_configured': did_oauth, 'system_configured': did_system})
-
-
-# Quick health/check endpoint for Nextcloud OAuth configuration
-@app.route('/api/auth/nextcloud/check')
-def api_auth_nextcloud_check():
-    client_id = os.getenv('NEXTCLOUD_OAUTH_CLIENT_ID')
-    client_secret = os.getenv('NEXTCLOUD_OAUTH_CLIENT_SECRET')
-    if not client_id or not client_secret:
-        return jsonify({'success': False, 'error': 'Nextcloud OAuth client_id/secret not configured'}), 400
-    return jsonify({'success': True})
-
-# Nextcloud OAuth login start
-@app.route('/api/auth/nextcloud/login')
-def api_auth_nextcloud_login():
-    # Accept nextcloud_url as query parameter to allow dynamic domain input from frontend
-    requested = request.args.get('nextcloud_url') or request.args.get('domain') or ''
-    nextcloud_url_env = os.getenv('NEXTCLOUD_URL')
-    nextcloud_url = requested.rstrip('/') if requested else (nextcloud_url_env.rstrip('/') if nextcloud_url_env else '')
-    client_id = os.getenv('NEXTCLOUD_OAUTH_CLIENT_ID')
-    client_secret = os.getenv('NEXTCLOUD_OAUTH_CLIENT_SECRET')
-    frontend_redirect = request.args.get('redirect_to') or request.args.get('next') or request.referrer or '/'
-    if not nextcloud_url:
-        return jsonify({'success': False, 'error': 'Nextcloud domain missing'}), 400
-    if not client_id or not client_secret:
-        return jsonify({'success': False, 'error': 'Nextcloud OAuth client_id/secret not configured'}), 400
-    from requests_oauthlib import OAuth2Session
-    callback = urljoin(request.url_root, url_for('api_auth_nextcloud_callback'))
-    oauth = OAuth2Session(client_id=client_id, redirect_uri=callback)
-    auth_url, state = oauth.authorization_url(urljoin(nextcloud_url, OAuth2NextcloudProvider.OAUTH2_AUTHORIZE_ENDPOINT))
-    # save state and desired redirect and domain in session
-    session['oauth_state'] = state
-    session['oauth_next'] = frontend_redirect
-    session['oauth_nextcloud_url'] = nextcloud_url
-    return redirect(auth_url)
-
-@app.route('/api/auth/nextcloud/callback')
-def api_auth_nextcloud_callback():
-    nextcloud_url = os.getenv('NEXTCLOUD_URL')
-    client_id = os.getenv('NEXTCLOUD_OAUTH_CLIENT_ID')
-    client_secret = os.getenv('NEXTCLOUD_OAUTH_CLIENT_SECRET')
-    if not nextcloud_url or not client_id or not client_secret:
-        return jsonify({'success': False, 'error': 'Nextcloud OAuth not configured'}), 400
-    from requests_oauthlib import OAuth2Session
-    callback = urljoin(request.url_root, url_for('api_auth_nextcloud_callback'))
-    oauth = OAuth2Session(client_id=client_id, redirect_uri=callback, state=session.get('oauth_state'))
-    try:
-        # use the domain saved in session if present
-        session_domain = session.get('oauth_nextcloud_url')
-        if session_domain:
-            nextcloud_url = session_domain
-        token = oauth.fetch_token(urljoin(nextcloud_url, OAuth2NextcloudProvider.OAUTH2_TOKEN_ENDPOINT), client_secret=client_secret, authorization_response=request.url)
-    except Exception as exc:
-        logger.warning('Nextcloud token exchange failed: %s', exc)
-        return jsonify({'success': False, 'error': 'Token exchange failed'}), 500
-
-    access_token = token.get('access_token')
-    if not access_token:
-        return jsonify({'success': False, 'error': 'No access token received'}), 500
-
-    # fetch user info
-    try:
-        headers = {'Authorization': f'Bearer {access_token}'}
-        resp = requests.get(urljoin(nextcloud_url, '/ocs/v2.php/apps/provisioning_api/api/v1/users/me'), headers=headers, params={'format': 'json'}, timeout=30)
-        if resp.status_code == 200:
-            data = resp.json()
-            userinfo = data.get('ocs', {}).get('data', {}) or {}
-            username = userinfo.get('id') or userinfo.get('uid') or userinfo.get('displayname') or 'nextcloud_user'
-            name = userinfo.get('displayname') or username
-        else:
-            username = 'nextcloud_user'
-            name = 'Nextcloud User'
-    except Exception:
-        username = 'nextcloud_user'
-        name = 'Nextcloud User'
-
-    token = create_jwt({'sub': username, 'name': name})
-    # persist nextcloud tokens for this account
-    try:
-        account = {
-            'domain': nextcloud_url,
-            'username': username,
-            'display_name': name,
-            'access_token': token.get('access_token') if isinstance(token, dict) else token,
-            'raw_token_response': token if isinstance(token, dict) else {}
-        }
-    except Exception:
-        account = {'domain': nextcloud_url, 'username': username, 'display_name': name}
-
-    try:
-        # save minimal account info to disk
-        accounts_file = os.path.join(CONFIG_DIR, 'nextcloud_accounts.json')
-        accounts = {}
-        if os.path.exists(accounts_file):
-            try:
-                with open(accounts_file, 'r', encoding='utf-8') as f:
-                    accounts = json.load(f) or {}
-            except Exception:
-                accounts = {}
-        key = f"{nextcloud_url}::{username}"
-        accounts[key] = {
-            'domain': nextcloud_url,
-            'username': username,
-            'display_name': name,
-            'access_token': token if isinstance(token, str) else (token.get('access_token') if isinstance(token, dict) else ''),
-            'refresh_token': (token.get('refresh_token') if isinstance(token, dict) else None) or session.get('oauth_refresh_token'),
-            'fetched_at': int(time.time())
-        }
-        try:
-            with open(accounts_file, 'w', encoding='utf-8') as f:
-                json.dump(accounts, f, ensure_ascii=False, indent=2)
-        except Exception:
-            logger.warning('Could not persist nextcloud account info')
-    except Exception:
-        logger.debug('Error while persisting nextcloud account info')
-
-    frontend_next = session.pop('oauth_next', '/')
-    resp = redirect(frontend_next)
-    secure_cookie = os.getenv('AUTH_COOKIE_SECURE', 'false').lower() in ('1', 'true', 'yes')
-    resp.set_cookie('mynd_token', token, httponly=True, secure=secure_cookie, samesite='Lax', max_age=60*60*24)
-    return resp
-
-
-def _load_nextcloud_accounts() -> Dict[str, Any]:
-    accounts_file = os.path.join(CONFIG_DIR, 'nextcloud_accounts.json')
-    if not os.path.exists(accounts_file):
-        return {}
-    try:
-        raw = open(accounts_file, 'rb').read()
-        key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
-        if not key:
-            # derive key from JWT_SECRET
-            digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
-            key = base64.urlsafe_b64encode(digest)
-        if isinstance(key, str):
-            key = key.encode('utf-8')
-        f = Fernet(key)
-        try:
-            dec = f.decrypt(raw)
-            return json.loads(dec.decode('utf-8')) or {}
-        except InvalidToken:
-            # try without decryption (legacy)
-            try:
-                return json.loads(raw.decode('utf-8')) or {}
-            except Exception:
-                return {}
-    except Exception:
-        return {}
-
-
-def _save_nextcloud_accounts(accounts: Dict[str, Any]) -> None:
-    accounts_file = os.path.join(CONFIG_DIR, 'nextcloud_accounts.json')
-    try:
-        payload = json.dumps(accounts, ensure_ascii=False, indent=2).encode('utf-8')
-        key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
-        if not key:
-            digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
-            key = base64.urlsafe_b64encode(digest)
-        if isinstance(key, str):
-            key = key.encode('utf-8')
-        f = Fernet(key)
-        enc = f.encrypt(payload)
-        with open(accounts_file, 'wb') as fh:
-            fh.write(enc)
-    except Exception:
-        logger.warning('Could not write nextcloud accounts file')
-
-
-def refresh_nextcloud_account(key: str) -> Optional[Dict[str, Any]]:
-    accounts = _load_nextcloud_accounts()
-    acct = accounts.get(key)
-    if not acct:
-        return None
-    refresh_token = acct.get('refresh_token')
-    if not refresh_token:
-        return None
-    nextcloud_url = acct.get('domain')
-    client_id = os.getenv('NEXTCLOUD_OAUTH_CLIENT_ID')
-    client_secret = os.getenv('NEXTCLOUD_OAUTH_CLIENT_SECRET')
-    if not nextcloud_url or not client_id or not client_secret:
-        return None
-    token_url = urljoin(nextcloud_url, OAuth2NextcloudProvider.OAUTH2_TOKEN_ENDPOINT)
-    try:
-        from requests_oauthlib import OAuth2Session
-        oauth = OAuth2Session(client_id=client_id)
-        new_token = oauth.refresh_token(token_url, client_id=client_id, client_secret=client_secret, refresh_token=refresh_token)
-        acct['access_token'] = new_token.get('access_token')
-        acct['refresh_token'] = new_token.get('refresh_token') or refresh_token
-        acct['fetched_at'] = int(time.time())
-        accounts[key] = acct
-        _save_nextcloud_accounts(accounts)
-        return acct
-    except Exception as exc:
-        logger.warning('Could not refresh nextcloud token for %s: %s', key, exc)
-        return None
-
-
-@app.route('/api/auth/nextcloud/refresh', methods=['POST'])
-def api_auth_nextcloud_refresh():
-    data = request.get_json(force=True, silent=True) or {}
-    key = data.get('key')
-    if not key:
-        return jsonify({'success': False, 'error': 'Missing key'}), 400
-    acct = refresh_nextcloud_account(key)
-    if not acct:
-        return jsonify({'success': False, 'error': 'Could not refresh or not found'}), 404
-    return jsonify({'success': True, 'account': acct})
-
-
-# --- Admin helpers & endpoints ------------------------------------------------------------
-def _require_admin_payload():
-    # check cookie or Authorization header
-    auth = request.headers.get('Authorization', '')
-    token = None
-    if auth.lower().startswith('bearer '):
-        token = auth.split(None, 1)[1]
-    else:
-        token = request.cookies.get('mynd_token')
-    if not token:
-        return None
-    payload = verify_jwt(token)
-    return payload
-
-def require_admin(fn):
-    def wrapper(*args, **kwargs):
-        payload = _require_admin_payload()
-        admin_user = os.getenv('ADMIN_USER', 'admin')
-        if not payload or payload.get('sub') != admin_user:
-            return jsonify({'success': False, 'error': 'Forbidden'}), 403
-        return fn(*args, **kwargs)
-    wrapper.__name__ = fn.__name__
-    return wrapper
-
-
-@app.route('/api/admin/users', methods=['GET'])
-@require_admin
-def api_admin_list_users():
-    users = _load_users()
-    out = []
-    for username, entry in users.items():
-        out.append({'username': username, 'name': entry.get('name')})
-    return jsonify({'success': True, 'users': out})
-
-
-@app.route('/api/admin/users/create', methods=['POST'])
-@require_admin
-def api_admin_create_user():
-    data = request.get_json(force=True, silent=True) or {}
-    username = str(data.get('username') or '').strip()
-    password = str(data.get('password') or '')
-    name = str(data.get('name') or username)
-    if not username or not password:
-        return jsonify({'success': False, 'error': 'Missing username or password'}), 400
-    users = _load_users()
-    if username in users:
-        return jsonify({'success': False, 'error': 'User exists'}), 409
-    users[username] = {'password': _hash_password(password), 'name': name}
-    try:
-        with open(USERS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(users, f, ensure_ascii=False, indent=2)
-    except Exception as exc:
-        logger.warning('Could not persist new user: %s', exc)
-        return jsonify({'success': False, 'error': 'Could not persist user'}), 500
-    return jsonify({'success': True, 'user': {'username': username, 'name': name}})
-
-
-@app.route('/api/admin/users/reset', methods=['POST'])
-@require_admin
-def api_admin_reset_password():
-    data = request.get_json(force=True, silent=True) or {}
-    username = str(data.get('username') or '').strip()
-    new_password = str(data.get('password') or '')
-    if not username or not new_password:
-        return jsonify({'success': False, 'error': 'Missing username or password'}), 400
-    users = _load_users()
-    if username not in users:
-        return jsonify({'success': False, 'error': 'Not found'}), 404
-    users[username]['password'] = _hash_password(new_password)
-    try:
-        with open(USERS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(users, f, ensure_ascii=False, indent=2)
-    except Exception as exc:
-        logger.warning('Could not persist reset password: %s', exc)
-        return jsonify({'success': False, 'error': 'Could not persist'}), 500
-    return jsonify({'success': True})
-
-
-@app.route('/api/admin/users/delete', methods=['POST'])
-@require_admin
-def api_admin_delete_user():
-    data = request.get_json(force=True, silent=True) or {}
-    username = str(data.get('username') or '').strip()
-    if not username:
-        return jsonify({'success': False, 'error': 'Missing username'}), 400
-    users = _load_users()
-    if username not in users:
-        return jsonify({'success': False, 'error': 'Not found'}), 404
-    users.pop(username, None)
-    try:
-        with open(USERS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(users, f, ensure_ascii=False, indent=2)
-    except Exception as exc:
-        logger.warning('Could not persist delete user: %s', exc)
-        return jsonify({'success': False, 'error': 'Could not persist'}), 500
-    return jsonify({'success': True})
-
-
-@app.route('/api/admin/nextcloud/accounts', methods=['GET'])
-@require_admin
-def api_admin_list_nextcloud_accounts():
-    accounts = _load_nextcloud_accounts()
-    # return sanitized list
-    out = []
-    for key, acct in accounts.items():
-        out.append({
-            'key': key,
-            'domain': acct.get('domain'),
-            'username': acct.get('username'),
-            'display_name': acct.get('display_name'),
-            'fetched_at': acct.get('fetched_at')
-        })
-    return jsonify({'success': True, 'accounts': out})
-
-
-@app.route('/api/admin/nextcloud/delete', methods=['POST'])
-@require_admin
-def api_admin_delete_nextcloud_account():
-    data = request.get_json(force=True, silent=True) or {}
-    key = data.get('key')
-    if not key:
-        return jsonify({'success': False, 'error': 'Missing key'}), 400
-    accounts = _load_nextcloud_accounts()
-    if key not in accounts:
-        return jsonify({'success': False, 'error': 'Not found'}), 404
-    accounts.pop(key, None)
-    _save_nextcloud_accounts(accounts)
-    return jsonify({'success': True})
-
-
-@app.route('/api/admin/nextcloud/export', methods=['GET'])
-@require_admin
-def api_admin_export_nextcloud_accounts():
-    # Return decrypted accounts JSON (admin only)
-    accounts = _load_nextcloud_accounts()
-    return jsonify({'success': True, 'accounts': accounts})
-
-
-@app.route('/api/admin/nextcloud/import', methods=['POST'])
-@require_admin
-def api_admin_import_nextcloud_accounts():
-    data = request.get_json(force=True, silent=True) or {}
-    accounts = data.get('accounts')
-    if not isinstance(accounts, dict):
-        return jsonify({'success': False, 'error': 'Invalid payload'}), 400
-    _save_nextcloud_accounts(accounts)
-    return jsonify({'success': True})
-
-
-@app.route('/api/admin/nextcloud/rotate_key', methods=['POST'])
-@require_admin
-def api_admin_rotate_nextcloud_key():
-    data = request.get_json(force=True, silent=True) or {}
-    new_key = data.get('new_key')
-    if not new_key:
-        return jsonify({'success': False, 'error': 'Missing new_key'}), 400
-    # load accounts with old key
-    accounts = _load_nextcloud_accounts()
-    if accounts is None:
-        return jsonify({'success': False, 'error': 'Could not load accounts'}), 500
-    # try to save with new key by temporarily setting env
-    try:
-        old = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
-        os.environ['NEXTCLOUD_ACCOUNTS_KEY'] = new_key
-        _save_nextcloud_accounts(accounts)
-    finally:
-        # restore env to previous state
-        if old is None:
-            os.environ.pop('NEXTCLOUD_ACCOUNTS_KEY', None)
-        else:
-            os.environ['NEXTCLOUD_ACCOUNTS_KEY'] = old
-    return jsonify({'success': True})
-
-
-def _load_oauth_config():
-        cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
-        if not os.path.exists(cfg_file):
-            return {}
-        try:
-            raw = open(cfg_file, 'rb').read()
-            key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
-            if not key:
-                digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
-                key = base64.urlsafe_b64encode(digest)
-            if isinstance(key, str):
-                key = key.encode('utf-8')
-            f = Fernet(key)
-            try:
-                dec = f.decrypt(raw)
-                return json.loads(dec.decode('utf-8')) or {}
-            except InvalidToken:
-                try:
-                    return json.loads(raw.decode('utf-8')) or {}
-                except Exception:
-                    return {}
-        except Exception:
-            return {}
-
-def _save_oauth_config(cfg: dict) -> bool:
-    cfg_file = os.path.join(CONFIG_DIR, 'oauth_config.json')
-    try:
-        payload = json.dumps(cfg, ensure_ascii=False, indent=2).encode('utf-8')
-        key = os.getenv('NEXTCLOUD_ACCOUNTS_KEY')
-        if not key:
-            digest = hashlib.sha256(JWT_SECRET.encode('utf-8')).digest()
-            key = base64.urlsafe_b64encode(digest)
-        if isinstance(key, str):
-            key = key.encode('utf-8')
-        f = Fernet(key)
-        enc = f.encrypt(payload)
-        with open(cfg_file, 'wb') as fh:
-            fh.write(enc)
-        try:
-            os.chmod(cfg_file, 0o600)
-        except Exception:
-            logger.debug('Could not set restrictive file permissions on oauth_config.json')
-        return True
-    except Exception as exc:
-        logger.warning('Could not persist oauth config: %s', exc)
-        return False
-
-
-    @app.route('/api/admin/nextcloud/config', methods=['GET'])
-    @require_admin
-    def api_admin_get_nextcloud_config():
-        cfg = _load_oauth_config()
-        has_secret = bool(cfg.get('client_secret'))
-        return jsonify({'success': True, 'client_id': cfg.get('client_id') or None, 'has_secret': has_secret, 'nextcloud_url': cfg.get('nextcloud_url') or None})
-
-
-    @app.route('/api/admin/nextcloud/config', methods=['POST'])
-    @require_admin
-    def api_admin_set_nextcloud_config():
-        data = request.get_json(force=True, silent=True) or {}
-        client_id = (data.get('client_id') or '').strip() or None
-        client_secret = (data.get('client_secret') or '').strip() or None
-        nextcloud_url = (data.get('nextcloud_url') or '').strip() or None
-        if not client_id or not client_secret:
-            return jsonify({'success': False, 'error': 'Missing client_id or client_secret'}), 400
-        cfg = {'client_id': client_id, 'client_secret': client_secret, 'nextcloud_url': nextcloud_url}
-        ok = _save_oauth_config(cfg)
-        if not ok:
-            return jsonify({'success': False, 'error': 'Could not persist config'}), 500
-        # set runtime env so new values are used without restart
-        os.environ['NEXTCLOUD_OAUTH_CLIENT_ID'] = client_id
-        os.environ['NEXTCLOUD_OAUTH_CLIENT_SECRET'] = client_secret
-        if nextcloud_url:
-            os.environ['NEXTCLOUD_URL'] = nextcloud_url
-        return jsonify({'success': True})
-
-    @app.route('/api/admin/nextcloud/redirect_uri', methods=['GET'])
-    @require_admin
-    def api_admin_nextcloud_redirect_uri():
-        callback = urljoin(request.url_root, url_for('api_auth_nextcloud_callback'))
-        return jsonify({'success': True, 'redirect_uri': callback})
-
-
-# --- Nextcloud refresh scheduler ------------------------------------------------------
-_nextcloud_refresh_thread = None
-_nextcloud_refresh_lock = threading.Lock()
-
-def _nextcloud_refresh_worker(interval_seconds=60*60):
-    """Background worker that periodically refreshes Nextcloud tokens older than threshold."""
-    logger.info('Nextcloud refresh worker started, interval=%s', interval_seconds)
-    while True:
-        try:
-            accounts = _load_nextcloud_accounts()
-            now_ts = int(time.time())
-            threshold = int(os.getenv('NEXTCLOUD_REFRESH_THRESHOLD_SECONDS', str(24*60*60)))
-            for key, acct in list(accounts.items()):
-                # only attempt refresh if a refresh_token is present
-                if not acct.get('refresh_token'):
-                    continue
-                fetched = int(acct.get('fetched_at') or 0)
-                if fetched == 0 or (now_ts - fetched) >= threshold:
-                    logger.info('Refreshing Nextcloud token for %s', key)
-                    refreshed = refresh_nextcloud_account(key)
-                    if refreshed:
-                        logger.info('Refreshed Nextcloud token for %s', key)
-            time.sleep(interval_seconds)
-        except Exception as exc:
-            logger.warning('Nextcloud refresh worker error: %s', exc)
-            time.sleep(60)
-
-
-def start_nextcloud_refresh_scheduler():
-    global _nextcloud_refresh_thread
-    with _nextcloud_refresh_lock:
-        if _nextcloud_refresh_thread and _nextcloud_refresh_thread.is_alive():
-            return
-        interval = int(os.getenv('NEXTCLOUD_REFRESH_INTERVAL_SECONDS', str(60*60)))
-        t = threading.Thread(target=_nextcloud_refresh_worker, args=(interval,), daemon=True)
-        t.start()
-        _nextcloud_refresh_thread = t
-
-
-# Start scheduler on app start
-try:
-    start_nextcloud_refresh_scheduler()
-except Exception as exc:
-    logger.warning('Could not start nextcloud refresh scheduler: %s', exc)
-
-
-
-def _briefing_top_tasks(tasks: List[Dict[str, Any]], today: date, limit: int = 3) -> List[Dict[str, Any]]:
-    """Rank tasks for briefing output: overdue first, then due today, then due soon."""
-    ranked = []
-    for task in tasks:
-        due = _parse_task_due_date(task.get('due_date'))
-        if due is None:
-            priority_key = 3
-        elif due < today:
-            priority_key = 0
-        elif due == today:
-            priority_key = 1
-        else:
-            priority_key = 2
-        ranked.append((priority_key, due or date.max, task))
-
-    ranked.sort(key=lambda item: (item[0], item[1]))
-    return [item[2] for item in ranked[:limit]]
-
-
-def _build_daily_briefing() -> Dict[str, Any]:
-    """Build the daily morning briefing payload."""
-    today = date.today()
-    weather = get_local_weather_status()
-    security = get_local_security_status()
-    todo_data = get_todo_data('heute')
-
-    tasks = todo_data.get('tasks', []) or []
-    overdue = 0
-    due_today = 0
-    for task in tasks:
-        due = _parse_task_due_date(task.get('due_date'))
-        if not due:
-            continue
-        if due < today:
-            overdue += 1
-        elif due == today:
-            due_today += 1
-
-    calendar_events = _calendar_events_for_today(limit=6)
-
-    email_results = []
-    try:
-        email_client = get_email_client()
-        if email_client:
-            email_results = email_client.fetch_emails(
-                limit=5,
-                folder_focus='inbox',
-                since=today,
-                until=today,
-                unread=None,
-            ) or []
-    except Exception as exc:
-        logger.debug('Could not load emails for daily briefing: %s', exc)
-
-    warning_count = int(security.get('nina_warning_count') or 0)
-    top_tasks = _briefing_top_tasks(tasks, today=today, limit=3)
-
-    lines = [
-        f"Guten Morgen. Heute ist der {today.strftime('%d.%m.%Y')}.",
-        "",
-        "Kurzüberblick:",
-        f"• Du hast aktuell {len(tasks)} offene Aufgaben. Davon sind {overdue} überfällig und {due_today} heute fällig.",
-        f"• Für heute stehen {len(calendar_events)} Termine im Kalender.",
-        f"• Es gibt {len(email_results)} relevante E-Mails aus dem Posteingang.",
-        f"• Wetter: {weather.get('summary') or 'Nicht verfügbar.'}",
-        f"• Sicherheitslage: {security.get('headline') or 'Keine Daten.'}" + (f" ({warning_count} Warnungen)" if warning_count > 0 else ""),
-        "",
-    ]
-
-    if top_tasks:
-        lines.append("Wichtige Aufgaben:")
-        for idx, task in enumerate(top_tasks, 1):
-            title = str(task.get('title') or 'Aufgabe').strip()
-            due = _parse_task_due_date(task.get('due_date'))
-            if due is None:
-                due_text = 'ohne Fälligkeitsdatum'
-            elif due < today:
-                due_text = f"überfällig seit {due.strftime('%d.%m.%Y')}"
-            elif due == today:
-                due_text = "heute fällig"
-            else:
-                due_text = f"fällig am {due.strftime('%d.%m.%Y')}"
-            lines.append(f"{idx}. {title} ({due_text})")
-        lines.append("")
-
-    if calendar_events:
-        lines.append("Termine heute:")
-        for idx, event in enumerate(calendar_events[:4], 1):
-            title = str(event.get('summary') or event.get('title') or 'Termin').strip()
-            start = str(event.get('start') or '').strip()
-            location = str(event.get('location') or '').strip()
-            line = f"{idx}. {title}"
-            if start:
-                line += f" um {start}"
-            if location:
-                line += f" ({location})"
-            lines.append(line)
-        lines.append("")
-
-    if email_results:
-        lines.append("Relevante E-Mails:")
-        for idx, mail in enumerate(email_results[:4], 1):
-            subject = str(mail.get('subject') or '(kein Betreff)').strip()
-            sender = str(mail.get('sender') or '').strip()
-            date_str = str(mail.get('date') or '').strip()
-            line = f"{idx}. {subject}"
-            if sender:
-                line += f" von {sender}"
-            if date_str:
-                line += f" ({date_str})"
-            lines.append(line)
-
-    lines.extend([
-        "",
-        "Empfehlung für den Start:",
-        "Beginne mit den überfälligen Aufgaben, plane dann die heute fälligen Tasks vor dem ersten Termin ein und prüfe anschließend die wichtigsten E-Mails."
-    ])
-
-    return {
-        'kind': 'daily',
-        'title': f"Tagesbriefing • {today.strftime('%d.%m.%Y')}",
-        'content': '\n'.join(lines).strip(),
-        'stats': {
-            'tasks_open': len(tasks),
-            'tasks_overdue': overdue,
-            'tasks_today': due_today,
-            'events_today': len(calendar_events),
-            'emails_today': len(email_results),
-            'warnings': int(security.get('nina_warning_count') or 0),
-        }
-    }
-
-
-def _build_weekly_briefing() -> Dict[str, Any]:
-    """Build the Monday weekly kickoff briefing payload."""
-    today = date.today()
-    week_start = today - timedelta(days=today.weekday())
-    week_end = week_start + timedelta(days=6)
-    week_no = today.isocalendar()[1]
-
-    week_events = _calendar_events_for_week(limit=10)
-    todo_data = get_todo_data('diese woche')
-    tasks = todo_data.get('tasks', []) or []
-
-    due_this_week = 0
-    overdue = 0
-    for task in tasks:
-        due = _parse_task_due_date(task.get('due_date'))
-        if not due:
-            continue
-        if due < today:
-            overdue += 1
-        if week_start <= due <= week_end:
-            due_this_week += 1
-
-    lines = [
-        f"Wochenstart-Briefing für KW {week_no} ({week_start.strftime('%d.%m.')} bis {week_end.strftime('%d.%m.%Y')}).",
-        "",
-        "Wochenüberblick:",
-        f"• In dieser Woche sind {len(week_events)} Termine geplant.",
-        f"• {due_this_week} Aufgaben sind diese Woche fällig.",
-        f"• {overdue} Aufgaben sind bereits überfällig.",
-        "",
-    ]
-
-    if tasks:
-        top_tasks = _briefing_top_tasks(tasks, today=today, limit=5)
-        lines.append("Fokus-Aufgaben für diese Woche:")
-        for idx, task in enumerate(top_tasks, 1):
-            title = str(task.get('title') or 'Aufgabe').strip()
-            due = _parse_task_due_date(task.get('due_date'))
-            due_text = f"fällig {due.strftime('%d.%m.%Y')}" if due else "ohne Fälligkeitsdatum"
-            lines.append(f"{idx}. {title} ({due_text})")
-        lines.append("")
-
-    if week_events:
-        lines.append("Wichtige Termine der Woche:")
-        for idx, event in enumerate(week_events[:6], 1):
-            title = str(event.get('summary') or event.get('title') or 'Termin').strip()
-            start = str(event.get('start') or '').strip()
-            location = str(event.get('location') or '').strip()
-            line = f"{idx}. {title}"
-            if start:
-                line += f" ({start})"
-            if location:
-                line += f" - {location}"
-            lines.append(line)
-
-    lines.extend([
-        "",
-        "Vorschlag für die Wochenplanung:",
-        "Blocke zuerst Zeitfenster für überfällige und diese Woche fällige Aufgaben und richte deine Arbeit um die fixen Termine herum aus."
-    ])
-
-    return {
-        'kind': 'weekly',
-        'title': f"Wochenstart • KW {week_no}",
-        'content': '\n'.join(lines).strip(),
-        'stats': {
-            'events_week': len(week_events),
-            'tasks_due_week': due_this_week,
-            'tasks_overdue': overdue,
-            'week_number': week_no,
-        }
-    }
-
-
-def _get_briefing_storage_key(kind: str) -> str:
-    today = date.today()
-    if kind == 'weekly':
-        week = today.isocalendar()[1]
-        return f"weekly:{today.year}-W{week:02d}"
-    return f"daily:{today.isoformat()}"
-
-
-def generate_proactive_briefing(kind: str = 'daily', force: bool = False) -> Dict[str, Any]:
-    """Generate (or reuse) a proactive briefing payload for daily or weekly cadence."""
-    normalized_kind = 'weekly' if str(kind).lower() == 'weekly' else 'daily'
-    key = _get_briefing_storage_key(normalized_kind)
-
-    with _briefing_lock:
-        store = _load_briefing_store()
-        items = store.setdefault('items', {})
-        existing = items.get(key)
-        if existing and not force:
-            if normalized_kind == 'daily':
-                existing_content = str(existing.get('content') or '')
-                if 'Wetter:' not in existing_content:
-                    existing = None
-            if existing:
-                return existing
-
-        built = _build_weekly_briefing() if normalized_kind == 'weekly' else _build_daily_briefing()
-        item = {
-            'key': key,
-            'kind': normalized_kind,
-            'title': built.get('title', ''),
-            'content': built.get('content', ''),
-            'stats': built.get('stats', {}),
-            'generated_at': int(time.time()),
-        }
-
-        items[key] = item
-        _save_briefing_store(store)
-        return item
-
-
-def _briefing_scheduler_loop() -> None:
-    """Background loop generating morning and Monday briefings automatically."""
-    logger.info('⏰ Proactive briefing scheduler started (daily + weekly)')
-    last_sent_date = {}  # Track which days we've already sent briefings
-    while True:
-        try:
-            now = datetime.now()
-            briefing_settings = _get_briefing_settings()
-            
-            # Check if it's time for daily briefing
-            if briefing_settings.get('daily_enabled') and now.hour >= int(briefing_settings.get('morning_hour', BRIEFING_MORNING_HOUR)):
-                today_str = now.strftime('%Y-%m-%d')
-                if last_sent_date.get('daily') != today_str:
-                    item = generate_proactive_briefing('daily', force=False)
-                    
-                    # Send by email if configured
-                    try:
-                        if briefing_settings.get('send_daily') and briefing_settings.get('send_recipients'):
-                            _send_briefing_via_email(item, briefing_settings.get('send_recipients', []), briefing_settings.get('send_account_id'))
-                    except Exception:
-                        logger.debug('Error while sending daily briefing email', exc_info=True)
-                    
-                    # Send via Nextcloud Talk if configured
-                    try:
-                        if briefing_settings.get('send_talk') and briefing_settings.get('talk_room_id'):
-                            _send_briefing_via_nextcloud_talk(item, briefing_settings.get('talk_room_id'))
-                    except Exception:
-                        logger.debug('Error while sending daily briefing to Talk', exc_info=True)
-                    
-                    last_sent_date['daily'] = today_str
-
-            # Check if it's time for weekly briefing (Monday)
-            if briefing_settings.get('weekly_enabled') and now.weekday() == 0 and now.hour >= int(briefing_settings.get('morning_hour', BRIEFING_MORNING_HOUR)):
-                week_str = now.strftime('%Y-W%U')
-                if last_sent_date.get('weekly') != week_str:
-                    item_w = generate_proactive_briefing('weekly', force=False)
-                    
-                    # Send by email if configured
-                    try:
-                        if briefing_settings.get('send_weekly') and briefing_settings.get('send_recipients'):
-                            _send_briefing_via_email(item_w, briefing_settings.get('send_recipients', []), briefing_settings.get('send_account_id'))
-                    except Exception:
-                        logger.debug('Error while sending weekly briefing email', exc_info=True)
-                    
-                    # Send via Nextcloud Talk if configured
-                    try:
-                        if briefing_settings.get('send_talk') and briefing_settings.get('talk_room_id'):
-                            _send_briefing_via_nextcloud_talk(item_w, briefing_settings.get('talk_room_id'))
-                    except Exception:
-                        logger.debug('Error while sending weekly briefing to Talk', exc_info=True)
-                    
-                    last_sent_date['weekly'] = week_str
-        except Exception as exc:
-            logger.warning('Briefing scheduler loop error: %s', exc)
-        time.sleep(60)
-
-
-def start_briefing_scheduler() -> None:
-    """Start the proactive briefing scheduler once per process."""
-    global _briefing_scheduler_started
-    if _briefing_scheduler_started:
-        return
-    _briefing_scheduler_started = True
-    thread = threading.Thread(target=_briefing_scheduler_loop, daemon=True)
-    thread.start()
-
-
-# ==================== KNOWLEDGE GRAPH ====================
-
-def _collect_calendar_data() -> List[Dict[str, Any]]:
-    """Collect calendar events for knowledge graph."""
-    try:
-        # Reuse the existing robust helper path used by briefings.
-        events = _calendar_events_for_week(limit=80)
-        return [event for event in events if isinstance(event, dict)]
-    except Exception as e:
-        logger.debug(f"Error collecting calendar data: {e}")
-        return []
-
-
-def _collect_email_data() -> List[Dict[str, Any]]:
-    """Collect emails for knowledge graph."""
-    try:
-        email_client = get_email_client()
-        if not email_client:
-            return []
-
-        emails = email_client.fetch_emails(
-            folders=['INBOX'],
-            limit=50,
-            days_back=7
-        ) or []
-
-        normalized = []
-        for email in emails:
-            recipients_raw = str(email.get('recipients') or '').strip()
-            recipients = [r.strip() for r in re.split(r'[;,]', recipients_raw) if r.strip()]
-            normalized.append({
-                'from': str(email.get('sender') or '').strip(),
-                'to': recipients,
-                'subject': str(email.get('subject') or '').strip(),
-                'attachments': [],
-                'date': str(email.get('date') or '').strip()
-            })
-
-        return normalized
-    except Exception as e:
-        logger.debug(f"Error collecting email data: {e}")
-        return []
-
-
-def _collect_task_data() -> List[Dict[str, Any]]:
-    """Collect tasks/todos for knowledge graph."""
-    try:
-        all_tasks = task_manager.get_tasks(use_cache=True) or []
-        if not all_tasks:
-            # Fallback to existing task context helper.
-            todo_data = get_todo_data('diese woche')
-            all_tasks = todo_data.get('tasks', []) or []
-
-        return [
-            {
-                'title': task.get('title', ''),
-                'description': task.get('description', ''),
-                'due_date': task.get('due_date', ''),
-                'status': task.get('status', 'open'),
-                'priority': task.get('priority', 'normal'),
-                'assigned_to': task.get('assigned_to')
-            }
-            for task in (all_tasks if all_tasks else [])
-        ]
-    except Exception as e:
-        logger.debug(f"Error collecting task data: {e}")
-        return []
-
-
-def _collect_document_data() -> List[Dict[str, Any]]:
-    """Collect documents from Nextcloud for knowledge graph."""
-    try:
-        documents: List[Dict[str, Any]] = []
-        max_nextcloud_files = 200
-        seen_paths = set()
-
-        def add_document_entry(entry: Dict[str, Any]) -> None:
-            file_name = str(entry.get('name') or '').strip()
-            file_path = str(entry.get('path') or '').strip()
-            document_key = file_path or file_name
-
-            if not document_key or document_key in seen_paths:
-                return
-
-            seen_paths.add(document_key)
-            documents.append({
-                'name': file_name or os.path.basename(file_path),
-                'path': file_path,
-                'size': int(entry.get('size', 0) or 0),
-                'mime_type': str(entry.get('mime_type') or entry.get('file_type') or ''),
-                'modified': str(entry.get('modified') or ''),
-                'file_type': str(entry.get('file_type') or ''),
-                'source': str(entry.get('source') or 'documents'),
-                'chunk_count': int(entry.get('chunk_count', 0) or 0),
-            })
-
-        # 1) Local knowledge base files are always available in this app.
-        for source in getattr(knowledge_base, 'document_sources', []) or []:
-            if not isinstance(source, dict):
-                continue
-            add_document_entry({
-                'name': source.get('file') or source.get('name') or source.get('path') or '',
-                'path': source.get('path') or source.get('file') or '',
-                'size': source.get('size', 0),
-                'mime_type': source.get('type') or source.get('mime_type') or source.get('file_type') or '',
-                'modified': source.get('modified') or '',
-                'source': source.get('source') or 'knowledge_base',
-            })
-
-        # 2) Persisted documents from SQLite so the graph reflects the indexed corpus.
-        try:
-            if knowledge_base.db and getattr(knowledge_base.db, 'connection', None):
-                cursor = knowledge_base.db.connection.cursor()
-                cursor.execute("""
-                    SELECT
-                        d.name,
-                        d.path,
-                        d.size,
-                        d.file_type,
-                        d.created_at,
-                        d.updated_at,
-                        COUNT(c.id) AS chunk_count
-                    FROM documents d
-                    LEFT JOIN chunks c ON c.document_id = d.id
-                    GROUP BY d.id
-                    ORDER BY d.updated_at DESC
-                    LIMIT 1000
-                """)
-                for row in cursor.fetchall():
-                    add_document_entry({
-                        'name': row['name'],
-                        'path': row['path'],
-                        'size': row['size'],
-                        'mime_type': row['file_type'],
-                        'file_type': row['file_type'],
-                        'modified': row['updated_at'] or row['created_at'] or '',
-                        'source': 'database',
-                        'chunk_count': row['chunk_count'],
-                    })
-        except Exception as db_exc:
-            logger.debug(f"Error collecting database documents: {db_exc}")
-
-        # 3) Nextcloud files if runtime config is available and the database does not
-        # already provide a substantial document corpus. The database-backed list is
-        # far faster, so skip the expensive remote tree walk when possible.
-        if len(documents) < 100:
-            nc_cfg = get_nextcloud_runtime_config()
-            if all(nc_cfg.get(k) for k in ('url', 'username', 'password')):
-                try:
-                    nextcloud_client = NextcloudClient(
-                        nc_cfg['url'],
-                        nc_cfg['username'],
-                        nc_cfg['password']
-                    )
-                    if nextcloud_client.test_connection():
-                        files = nextcloud_client.list_files('/') or []
-                        for file_entry in files[:max_nextcloud_files]:
-                            if not isinstance(file_entry, dict):
-                                continue
-                            add_document_entry({
-                                'name': file_entry.get('name', ''),
-                                'path': file_entry.get('path', ''),
-                                'size': file_entry.get('size', 0),
-                                'mime_type': file_entry.get('mime_type', ''),
-                                'modified': file_entry.get('modified', ''),
-                                'source': 'nextcloud',
-                            })
-                except Exception as nc_exc:
-                    logger.debug(f"Error collecting nextcloud documents: {nc_exc}")
-
-        return documents
-    except Exception as e:
-        logger.debug(f"Error collecting document data: {e}")
-        return []
-
-
-def _update_knowledge_graph() -> None:
-    """Update knowledge graph with data from all sources."""
-    try:
-        graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
-
-        graph.clear()
-
-        documents = _collect_document_data()
-        if documents:
-            graph.extract_from_documents(documents)
-            graph.save_graph()
-
-        tasks = _collect_task_data()
-        if tasks:
-            graph.extract_from_tasks(tasks)
-            graph.save_graph()
-
-        calendar_events = _collect_calendar_data()
-        if calendar_events:
-            graph.extract_from_calendar(calendar_events)
-
-        emails = _collect_email_data()
-        if emails:
-            graph.extract_from_emails(emails)
-
-        if graph.nodes:
-            graph.build_co_occurrence_relationships()
-            graph.save_graph()
-
-        logger.info(f"Knowledge graph updated: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
-    except Exception as e:
-        logger.error(f"Error updating knowledge graph: {e}")
-
-
-def _trigger_knowledge_graph_refresh() -> bool:
-    """Start a background knowledge graph refresh if none is running."""
-    global _knowledge_graph_refresh_in_progress
-
-    with _knowledge_graph_refresh_lock:
-        if _knowledge_graph_refresh_in_progress:
-            return False
-        _knowledge_graph_refresh_in_progress = True
-
-    def _refresh_worker() -> None:
-        global _knowledge_graph_refresh_in_progress
-        try:
-            _update_knowledge_graph()
-        finally:
-            with _knowledge_graph_refresh_lock:
-                _knowledge_graph_refresh_in_progress = False
-
-    thread = threading.Thread(target=_refresh_worker, daemon=True)
-    thread.start()
-    return True
-
-
-def _knowledge_graph_scheduler_loop() -> None:
-    """Background loop updating knowledge graph periodically."""
-    logger.info("Knowledge graph scheduler started")
-    while True:
-        try:
-            _update_knowledge_graph()
-        except Exception as e:
-            logger.warning(f"Knowledge graph scheduler loop error: {e}")
-        time.sleep(3600)  # Update every hour
-
-
-def start_knowledge_graph_scheduler() -> None:
-    """Start the knowledge graph update scheduler once per process."""
-    global _knowledge_graph_scheduler_started
-    if _knowledge_graph_scheduler_started:
-        return
-    _knowledge_graph_scheduler_started = True
-    thread = threading.Thread(target=_knowledge_graph_scheduler_loop, daemon=True)
-    thread.start()
-
-
-@app.route('/api/knowledge/graph', methods=['GET'])
-def get_knowledge_graph_data():
-    """Return the current knowledge graph data."""
-    try:
-        force_refresh = request.args.get('refresh', 'false').lower() == 'true'
-        graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
-
-        graph_data = graph.get_graph_data()
-
-        refresh_started = False
-        if force_refresh or not graph.nodes:
-            refresh_started = _trigger_knowledge_graph_refresh()
-        
-        return jsonify({
-            'success': True,
-            'data': graph_data,
-            'refreshing': refresh_started or _knowledge_graph_refresh_in_progress,
-            'refresh_requested': force_refresh,
-        })
-    except Exception as e:
-        logger.error(f"Error fetching knowledge graph: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Wissensgraph konnte nicht geladen werden.'
-        }), 500
-
-
-@app.route('/api/knowledge/graph/node/<node_id>', methods=['GET'])
-def get_knowledge_graph_node(node_id):
-    """Get a specific node and its related nodes."""
-    try:
-        max_depth = request.args.get('depth', '2', type=int)
-        
-        graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
-        related = graph.get_related_nodes(node_id, max_depth=max_depth)
-        
-        return jsonify({
-            'success': True,
-            'data': related
-        })
-    except Exception as e:
-        logger.error(f"Error fetching graph node: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Knoten nicht gefunden.'
-        }), 404
-
-
-@app.route('/api/knowledge/graph/query', methods=['GET'])
-def query_knowledge_graph():
-    """Query knowledge graph by node type or search term."""
-    try:
-        node_type = request.args.get('type')
-        
-        graph = get_knowledge_graph(KNOWLEDGE_GRAPH_FILE)
-        
-        if node_type:
-            nodes = graph.query_by_type(node_type)
-            return jsonify({
-                'success': True,
-                'nodes': nodes,
-                'count': len(nodes)
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': 'Bitte geben Sie einen node_type an.'
-            }), 400
-    except Exception as e:
-        logger.error(f"Error querying knowledge graph: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Abfrage fehlgeschlagen.'
-        }), 500
-
-
-def get_current_proactive_briefing():
-    """Return the current daily briefing and Monday weekly briefing."""
-    try:
-        force = request.args.get('force', 'false').lower() == 'true'
-        include_weekly = request.args.get('include_weekly', 'true').lower() != 'false'
-
-        briefing_settings = _get_briefing_settings()
-        items = []
-        if briefing_settings.get('daily_enabled'):
-            items.append(generate_proactive_briefing('daily', force=force))
-        if include_weekly and briefing_settings.get('weekly_enabled') and date.today().weekday() == 0:
-            items.append(generate_proactive_briefing('weekly', force=force))
-
-        return jsonify({
-            'success': True,
-            'items': items,
-            'count': len(items)
-        })
-    except Exception as exc:
-        logger.error('Failed to build proactive briefing: %s', exc)
-        return jsonify({'success': False, 'error': 'Briefing konnte nicht geladen werden.'}), 500
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'service': 'MYND Backend',
+        'version': '1.0.0'
+    }), 200
 
 AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
 CALENDAR_CONFIG_FILE = os.path.join(CONFIG_DIR, "calendar_config.json")
+ALLOW_PRIVATE_NETWORK_TARGETS = os.getenv('ALLOW_PRIVATE_NETWORK_TARGETS', 'false').lower() == 'true'
 
 
-def load_calendar_config(username: Optional[str] = None) -> Dict:
-    """Lädt Kalender-Konfiguration (z.B. Standard-Kalender) aus Datei oder User-Store."""
+def _safe_json_dump(path: str, data: Dict) -> None:
+    """Write JSON atomically with restrictive file permissions for secrets."""
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.chmod(tmp_path, 0o600)
+    os.replace(tmp_path, path)
+
+
+def _safe_config_path_for_user(username: str) -> Optional[str]:
+    safe_username = sanitize_username(username)
+    if not safe_username:
+        return None
+    return os.path.join(CONFIG_DIR, f"user_{safe_username}.json")
+
+
+def load_calendar_config() -> Dict:
+    """Lädt Kalender-Konfiguration mit Priority: Environment Variables > Config File > Defaults."""
     config = {
-        'default_calendar_name': ''
+        'default_calendar_name': os.getenv('DEFAULT_CALENDAR_NAME', '')
     }
-
-    active_username = str(username or _get_request_username() or '').strip()
-    if active_username:
-        try:
-            user_config = load_user_config(active_username)
-            if isinstance(user_config, dict):
-                config['default_calendar_name'] = str(user_config.get('default_calendar_name', '')).strip()
-                return config
-        except Exception as e:
-            logger.warning(f"Konnte User-Kalender-Konfiguration nicht laden: {str(e)}")
 
     if os.path.exists(CALENDAR_CONFIG_FILE):
         try:
             with open(CALENDAR_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 file_config = json.load(f)
 
-            config['default_calendar_name'] = str(file_config.get('default_calendar_name', '')).strip()
+            # Only use file config if env var not explicitly set
+            if not os.getenv('DEFAULT_CALENDAR_NAME'):
+                config['default_calendar_name'] = str(file_config.get('default_calendar_name', '')).strip()
         except Exception as e:
             logger.warning(f"Konnte Kalender-Konfiguration nicht laden: {str(e)}")
 
+    logger.debug(f"Calendar config: {config['default_calendar_name'] or '(not set)'}")
     return config
 
 
-def save_calendar_config(default_calendar_name: str, username: Optional[str] = None) -> None:
-    """Speichert Kalender-Konfiguration persistent in der User- oder lokalen JSON-Datei."""
+def save_calendar_config(default_calendar_name: str) -> None:
+    """Speichert Kalender-Konfiguration persistent in einer lokalen JSON-Datei."""
     config = {
         'default_calendar_name': str(default_calendar_name or '').strip()
     }
 
-    active_username = str(username or _get_request_username() or '').strip()
-    if active_username:
-        user_config = load_user_config(active_username)
-        user_config['default_calendar_name'] = config['default_calendar_name']
-        save_user_config(active_username, user_config)
-        return
-
-    with open(CALENDAR_CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    _safe_json_dump(CALENDAR_CONFIG_FILE, config)
 
 class KnowledgeBase:
     def __init__(self, knowledge_file=None):
@@ -2146,11 +357,10 @@ class KnowledgeBase:
                     formatted_results.append({
                         'content': result['content'],
                         'distance': 1.0 - result.get('similarity_score', 0.5),  # Convert to distance
-                        'source': result.get('source') or result.get('doc_name') or 'Knowledge Base',
-                        'path': result.get('path') or result.get('doc_path', ''),
+                        'source': result.get('doc_name', 'Unknown'),
+                        'path': result.get('doc_path', ''),
                         'similarity_score': result.get('similarity_score', 0.5),
-                        'search_type': result.get('search_type', 'search'),
-                        'chunk_id': result.get('chunk_id') or result.get('id')
+                        'search_type': result.get('search_type', 'search')
                     })
                 
                 logger.info(f"Search: {len(formatted_results)} results for query: {query[:50]}...")
@@ -2232,10 +442,6 @@ class OllamaClient:
             # Erstelle verbesserten Kontext mit Training Manager
             enhanced_context = training_manager.create_enhanced_context_for_ai(user_message, context)
             
-            # Intelligente Tool-Selection
-            should_use_cal = should_use_calendar(user_message)
-            should_use_task = should_use_tasks(user_message)
-            
             # Erweiterter System-Prompt mit intelligenter Reasoning-Fähigkeit
             system_prompt = f"""Du bist ein hochintelligenter KI-Assistent mit Zugang zu einer Wissensdatenbank, einem Kalender-System und einer TODO-Liste. Du arbeitest präzise, analytisch und kontextbewusst.
 
@@ -2244,79 +450,56 @@ class OllamaClient:
 2. KONTEXTUELLES DENKEN: Verknüpfe Informationen aus verschiedenen Quellen intelligent
 3. RELEVANZFILTERUNG: Fokussiere auf die wichtigsten und relevantesten Informationen
 4. PRÄZISE KOMMUNIKATION: Antworte konkret, strukturiert und mit klaren Quellenangaben
-5. SMARTE TOOL-AUSWAHL: Entscheide professionell und intelligent welche Tools du nutzen solltest
 
-=== INFORMATIONSQUELLEN-STRATEGIE (INTELLIGENTE PRIORISIERUNG) ===
+=== INFORMATIONSQUELLEN-STRATEGIE ===
 Du hast Zugang zu drei Hauptquellen:
 • WISSENSDATENBANK: Dokumente, Notizen, technische Informationen, persönliche Daten
-• KALENDER: Termine, Events, zeitliche Planungen, Verfügbarkeiten
+• KALENDER: Termine, Events, zeitliche Planungen
 • TODO-LISTE: Aufgaben mit Fälligkeitsdaten und Prioritäten
 
-ENTSCHEIDUNGSLOGIK FÜR TOOL-NUTZUNG:
-1. Bei Fragen nach AUFGABEN/TODOS/TASKS/VERPFLICHTUNGEN {"[NUTZE TODO-TOOL]" if should_use_task else ""}:
-   → Nutze IMMER die TODO-Liste als primäre Quelle
-   → Zeige konkrete Einträge mit Status, Fälligkeit und Priorität
-   → Sortiere nach: heute > überfällig > diese Woche > später
-   → Erkenne auch indirekte Aufgaben-Anfragen ("was muss ich noch...", "was habe ich zu tun...")
+ENTSCHEIDUNGSLOGIK:
+1. Bei Fragen nach AUFGABEN/TODOS/TASKS/VERPFLICHTUNGEN:
+   → Priorisiere TODO-Liste (mit Fälligkeitsdatum!)
+   → Zeige IMMER konkrete TODO-Einträge wenn vorhanden
+   → Sortiere nach Dringlichkeit (heute > morgen > diese Woche)
 
-2. Bei Fragen nach TERMINEN/EVENTS/ZEITPLÄNEN/VERFÜGBARKEIT {"[NUTZE KALENDER-TOOL]" if should_use_cal else ""}:
+2. Bei Fragen nach TERMINEN/EVENTS/ZEITPLÄNEN:
    → Nutze primär Kalender-Kontext
-   → Berücksichtige zeitliche Nähe, Bedeutsamkeit und Überschneidungen
-   → Bei Planung: Zeige verfügbare Zeitfenster
-   → Erkenne Verfügbarkeitsfragen ("bin ich verfügbar...", "habe ich zeit...")
+   → Berücksichtige zeitliche Nähe und Wichtigkeit
 
-3. Bei KOMBINIERTEN FRAGEN (Aufgaben UND Zeitplanung):
-   → Nutze BEIDE Quellen intelligent
-   → Zeige zeitlich sortierte Übersicht von Aufgaben mit Kalender-Kontext
-   → Beispiel: "Heute noch zu tun: [Aufgabe1 um 14:00] [Aufgabe2 vor 17:00]"
-
-4. Bei Fragen nach WISSEN/FAKTEN/DOKUMENTEN:
-   → Durchsuche Wissensdatenbank mit Relevanz-Scoring
+3. Bei Fragen nach WISSEN/FAKTEN/DOKUMENTEN:
+   → Durchsuche Wissensdatenbank
+   → Wäge Relevanz-Scores und Aktualität ab
    → Kombiniere Informationen aus mehreren Quellen intelligent
-   → Gib Quellenangaben mit Relevanz-Score an
 
-5. Bei PERSÖNLICHEN FRAGEN ohne gefundene Quellen:
-    → Nutze bei öffentlich bekannten Fakten allgemeines Modellwissen
-    → Kennzeichne dies transparent mit "Nach meinem allgemeinen Wissen ..."
-    → Erfinde keine persönlichen oder nutzerspezifischen Details
-    → Frage nach zusätzlichem Kontext, wenn die Frage unklar ist
-
-=== PROFESSIONELLE TOOL-AUSWAHL-REGELN ===
-⚠ KEINE Kalender-Tool Nutzung für: allgemeine Wissens-Fragen, Konzept-Erklärungen, generelle Informationen
-✓ NUTZE Kalender-Tool für: "Wann bin ich...", "Termin erstellen", "Habe ich einen Termin zu...", "Was steht diese Woche an..."
-✓ NUTZE TODO-Tool für: "Was muss ich noch...", "Meine offenen Aufgaben", "Verbleibende Aufgaben", "Erledigung-Status"
-⚠ NICHT zufällig Tools nutzen - nur wenn wirklich relevant!
+4. Bei PERSÖNLICHEN FRAGEN ohne gefundene Quellen:
+   → Antworte ehrlich: "Ich habe dazu keine Informationen in meiner Wissensbasis."
 
 === REASONING-PROZESS ===
-Für jede Anfrage IMMER:
-1. VERSTEHEN: Was ist die echte Absicht? (nicht nur Wörter lesen)
-2. BEWERTEN: Ist eine Tool-Nutzung nötig? (oder nur Allgemeinwissen?)
-3. IDENTIFIZIEREN: Welche Informationsquelle(n) sind optimal?
-4. PRIORISIEREN: Welche Informationen sind am wichtigsten?
-5. SYNTHESTISIEREN: Wie kombiniere ich die Informationen optimal?
-6. ANTWORTEN: Präsentiere strukturiert mit Quellenangaben
+Für jede Anfrage:
+1. VERSTEHEN: Was ist die eigentliche Absicht der Frage?
+2. IDENTIFIZIEREN: Welche Informationsquelle(n) sind relevant?
+3. PRIORISIEREN: Welche Informationen sind am wichtigsten?
+4. SYNTHESTISIEREN: Wie kombiniere ich die Informationen optimal?
+5. ANTWORTEN: Präsentiere die Antwort strukturiert und präzise
 
-=== ANTWORTQUALITÄT & FORMATIERUNG ===
+=== ANTWORTQUALITÄT ===
 • Nutze klare Strukturierung (Listen, Absätze, Hervorhebungen)
-• Gib konkrete Quellenangaben, wenn Quellen im Kontext vorhanden sind
-• Wenn keine passenden Quellen vorhanden sind, antworte transparent mit allgemeinem Wissen
-• Vermeide Wiederholungen und unnötige Füllwörter
-• Bei mehreren Infos: Sortiere nach Relevanz und zeitlicher Nähe
-• Bei zeitbezogenen Fragen: Beachte Aktualität, Fälligkeitsdaten und Zeitpunkte
-• Bei Listen: Formatiere kompakt und präzise
+• Gib IMMER konkrete Quellenangaben an
+• Vermeide Wiederholungen und Füllwörter
+• Bei mehreren relevanten Informationen: Sortiere nach Relevanz
+• Bei zeitbezogenen Fragen: Beachte Aktualität und Fälligkeitsdaten
 
 === VERFÜGBARER KONTEXT ===
 {enhanced_context}
 
-=== KRITISCHE RULES FÜR BESTE QUALITÄT ===
-⚠ Bei TODO-Anfragen: Zeige IMMER die konkreten Einträge mit Fälligkeitsdatum
-⚠ Bei Kalender-Anfragen: Zeige IMMER spezifische Termine und Zeiten
-⚠ Bei fehlenden Infos: Gib dies klar zu, erfinde NICHTS
-⚠ Bei widersprüchlichen Infos: Erwähne dies und priorisiere nach Relevanz
-⚠ NICHT mit unnötigen Werkzeugen spielen - nur intelligente, gezielte Nutzung!
-⚠ Bleibe professionell und analytisch, nicht spekulativ
+=== KRITISCHE REGELN ===
+⚠ Bei TODO-Anfragen: Zeige IMMER die konkreten TODO-Einträge mit Fälligkeitsdatum
+⚠ Bei fehlenden Informationen: Gib dies klar zu, erfinde nichts
+⚠ Bei widersprüchlichen Quellen: Erwähne dies und priorisiere nach Relevanz-Score
+⚠ Sei präzise aber nicht unnötig ausschweifend
 
-Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-Auswahl."""
+Beantworte nun die Anfrage basierend auf dem verfügbaren Kontext mit maximaler Intelligenz und Präzision."""
             
             # System-Nachricht erstellen oder ersetzen
             if messages and messages[0].get('role') == 'system':
@@ -2330,13 +513,13 @@ Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": 0.3,      # Slightly higher for more natural, varied responses
+                "temperature": 0.2,      # Leicht erhöht für besseres Reasoning, aber noch faktentreu
                 "top_p": 0.85,           # Verbesserte Balance zwischen Fokus und Vielfalt
                 "top_k": 40,             # Erweiterte Token-Auswahl für präzisere Formulierungen
-                "max_tokens": 4096,      # Mehr Tokens für komplexe Antworten mit Reasoning
+                "max_tokens": 3072,      # Mehr Tokens für komplexe Antworten mit Reasoning
                 "repeat_penalty": 1.15,  # Stärkere Vermeidung von Wiederholungen
-                "num_predict": 4096,     # Maximale Antwortlänge erhöht
-                "num_ctx": 8192,         # Larger context window for richer multi-turn conversations
+                "num_predict": 3072,     # Maximale Antwortlänge erhöht
+                "num_ctx": 4096,         # Kontextfenster für besseres Verständnis
                 "mirostat": 2,           # Aktiviere Mirostat für konsistente Qualität
                 "mirostat_tau": 5.0,     # Ziel-Perplexität für kohärente Antworten
                 "mirostat_eta": 0.1      # Lernrate für Mirostat-Anpassung
@@ -2370,27 +553,6 @@ Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-
             return response.json()
         except requests.exceptions.RequestException as e:
             return {"error": f"Verbindung zu Ollama fehlgeschlagen: {str(e)}"}
-
-    def generate(self, prompt, stream=False, options=None):
-        """Generiert Text über /api/generate und liefert ein einheitliches Ergebnisformat."""
-        url = f"{self.base_url}/api/generate"
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": bool(stream),
-            "options": options or {}
-        }
-
-        try:
-            response = requests.post(url, json=payload, timeout=90)
-            response.raise_for_status()
-            data = response.json()
-            return {
-                "text": data.get("response", ""),
-                "raw": data
-            }
-        except requests.exceptions.RequestException as e:
-            return {"error": f"Verbindung zu Ollama fehlgeschlagen: {str(e)}"}
     
     def check_connection(self):
         """Prüft ob Ollama verfügbar ist"""
@@ -2414,210 +576,72 @@ Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-
 
         return sorted(set(models))
 
-    def embed(self, texts, model: str = None, timeout: int = 30):
-        """Request embeddings from Ollama embedding endpoint as a fallback.
-
-        Returns a list of embedding vectors (lists of floats) or raises on error.
-        """
-        if not texts:
-            return []
-
-        model_to_use = (model or self.model) or os.getenv('MYND_EMBEDDING_MODEL')
-        if not model_to_use:
-            raise ValueError('No embedding model specified for Ollama embed call')
-
-        url = f"{self.base_url}/api/embed"
-        payload = {
-            'model': model_to_use,
-            'input': texts
-        }
-
-        try:
-            resp = requests.post(url, json=payload, timeout=timeout)
-            resp.raise_for_status()
-            data = resp.json()
-
-            # Expecting either {'embeddings': [...]} or {'embedding': [...]} depending on endpoint/version.
-            if isinstance(data, dict) and 'embeddings' in data:
-                return data['embeddings']
-
-            if isinstance(data, dict) and 'embedding' in data and isinstance(data['embedding'], list):
-                return [data['embedding']] if texts else []
-
-            if isinstance(data, dict) and 'data' in data and isinstance(data['data'], list):
-                out = []
-                for item in data['data']:
-                    if isinstance(item, dict) and 'embedding' in item:
-                        out.append(item['embedding'])
-                    elif isinstance(item, (list, tuple)):
-                        out.append(list(item))
-                return out
-
-            # Last resort: try to interpret top-level list
-            if isinstance(data, list):
-                return data
-
-            raise RuntimeError('Unexpected embeddings response format from Ollama')
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f'Ollama embed request failed: {e}')
-
 def load_ai_config() -> dict:
-    """Lädt AI-Konfiguration aus Datei (oder Defaults) und wendet sie an."""
+    """Lädt AI-Konfiguration mit Priority: Environment Variables > Config File > Defaults."""
     config = {
         'provider': 'ollama',
-        # Keep example default short to avoid accidental secret-detection across diffs
-        'base_url': os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1').rstrip('/'),
+        'base_url': os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434').rstrip('/'),
         'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest'),
-        'embedding_model': os.getenv('MYND_EMBEDDING_MODEL', 'nomic-embed-text'),
-        'immich_url_default': '',
-        'immich_api_key_default': '',
-        'vector_db_enabled': True,
-        'vector_db_provider': 'qdrant',
-        'vector_db_path': './qdrant_data',
-        'calendar_auto_reindex_hours': 6,
-        'calendar_auto_reindex_past_days': 730,
-        'calendar_auto_reindex_future_days': 365,
-        'briefing_daily_enabled': BRIEFING_DAILY_ENABLED_DEFAULT,
-        'briefing_weekly_enabled': BRIEFING_WEEKLY_ENABLED_DEFAULT,
-        'briefing_morning_hour': int(BRIEFING_MORNING_HOUR),
-        'tts_provider': 'browser',
-        'browser_tts_voice_uri': '',
-        'gemini_tts_api_key': '',
-        'gemini_tts_model': 'gemini-2.5-flash-tts',
-        'gemini_tts_voice': 'Kore',
-        'gemini_tts_language_code': 'de-DE',
-        'gemini_tts_style_prompt': '',
-        'gemini_tts_audio_encoding': 'MP3',
-        'gemini_live_model': 'gemini-3.1-flash-live-preview',
-        'gemini_live_voice': 'Zephyr',
+        'immich_url_default': os.getenv('IMMICH_URL', ''),
+        'immich_api_key_default': os.getenv('IMMICH_API_KEY', ''),
+        'vector_db_enabled': os.getenv('VECTOR_DB_ENABLED', 'true').lower() == 'true',
+        'vector_db_provider': os.getenv('VECTOR_DB_PROVIDER', 'qdrant'),
+        'vector_db_path': os.getenv('VECTOR_DB_PATH', './qdrant_data'),
+        'calendar_auto_reindex_hours': clamp_int(os.getenv('CALENDAR_AUTO_REINDEX_HOURS', '6'), default=6, minimum=1, maximum=168),
+        'calendar_auto_reindex_past_days': clamp_int(os.getenv('CALENDAR_AUTO_REINDEX_PAST_DAYS', '730'), default=730, minimum=1, maximum=3650),
+        'calendar_auto_reindex_future_days': clamp_int(os.getenv('CALENDAR_AUTO_REINDEX_FUTURE_DAYS', '365'), default=365, minimum=1, maximum=3650)
     }
 
+    # Load from config file (ONLY if env vars not explicitly set)
     if os.path.exists(AI_CONFIG_FILE):
         try:
             with open(AI_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 file_config = json.load(f)
 
-            config['base_url'] = str(file_config.get('base_url', config['base_url'])).rstrip('/')
-            config['model'] = str(file_config.get('model', config['model']))
-            config['embedding_model'] = str(file_config.get('embedding_model', config['embedding_model'])).strip() or config['embedding_model']
-            config['immich_url_default'] = file_config.get('immich_url_default', '')
-            # Do not load Immich API keys into the in-memory config to avoid
-            # accidentally exposing them in logs or commits. Use environment
-            # variables or secure storage for API keys instead.
-            config['immich_api_key_default'] = ''
-            config['vector_db_enabled'] = file_config.get('vector_db_enabled', True)
-            config['vector_db_provider'] = file_config.get('vector_db_provider', 'qdrant')
-            config['vector_db_path'] = file_config.get('vector_db_path', './qdrant_data')
-            config['calendar_auto_reindex_hours'] = file_config.get('calendar_auto_reindex_hours', 6)
-            config['calendar_auto_reindex_past_days'] = file_config.get('calendar_auto_reindex_past_days', 730)
-            config['calendar_auto_reindex_future_days'] = file_config.get('calendar_auto_reindex_future_days', 365)
-            config['briefing_daily_enabled'] = bool(file_config.get('briefing_daily_enabled', config['briefing_daily_enabled']))
-            config['briefing_weekly_enabled'] = bool(file_config.get('briefing_weekly_enabled', config['briefing_weekly_enabled']))
-            config['briefing_morning_hour'] = max(0, min(23, int(file_config.get('briefing_morning_hour', config['briefing_morning_hour']))))
-            config['tts_provider'] = str(file_config.get('tts_provider', config['tts_provider'])).strip().lower() or 'browser'
-            if config['tts_provider'] not in ('browser', 'gemini'):
-                config['tts_provider'] = 'browser'
-            config['browser_tts_voice_uri'] = str(file_config.get('browser_tts_voice_uri', config['browser_tts_voice_uri'])).strip()
-            config['gemini_tts_api_key'] = str(file_config.get('gemini_tts_api_key', config['gemini_tts_api_key'])).strip()
-            config['gemini_tts_model'] = str(file_config.get('gemini_tts_model', config['gemini_tts_model'])).strip() or 'gemini-2.5-flash-tts'
-            config['gemini_tts_voice'] = str(file_config.get('gemini_tts_voice', config['gemini_tts_voice'])).strip() or 'Kore'
-            config['gemini_tts_language_code'] = str(file_config.get('gemini_tts_language_code', config['gemini_tts_language_code'])).strip() or 'de-DE'
-            config['gemini_tts_style_prompt'] = str(file_config.get('gemini_tts_style_prompt', config['gemini_tts_style_prompt'])).strip()
-            config['gemini_tts_audio_encoding'] = str(file_config.get('gemini_tts_audio_encoding', config['gemini_tts_audio_encoding'])).strip().upper() or 'MP3'
-            config['gemini_live_model'] = str(file_config.get('gemini_live_model', config['gemini_live_model'])).strip() or 'gemini-3.1-flash-live-preview'
-            config['gemini_live_voice'] = str(file_config.get('gemini_live_voice', config['gemini_live_voice'])).strip() or 'Zephyr'
-            # Proactive briefing / Talk settings
-            config['briefing_send_daily'] = bool(file_config.get('briefing_send_daily', config.get('briefing_send_daily', False)))
-            config['briefing_send_weekly'] = bool(file_config.get('briefing_send_weekly', config.get('briefing_send_weekly', False)))
-            config['briefing_send_recipients'] = file_config.get('briefing_send_recipients', config.get('briefing_send_recipients', ''))
-            config['briefing_send_account_id'] = file_config.get('briefing_send_account_id', config.get('briefing_send_account_id', ''))
-            config['briefing_send_talk'] = bool(file_config.get('briefing_send_talk', config.get('briefing_send_talk', False)))
-            config['briefing_talk_room_id'] = str(file_config.get('briefing_talk_room_id', config.get('briefing_talk_room_id', '')))
-            config['briefing_talk_webhook_secret'] = str(file_config.get('briefing_talk_webhook_secret', config.get('briefing_talk_webhook_secret', '')))
+            # Only use file config if env var not set
+            if not os.getenv('OLLAMA_BASE_URL'):
+                config['base_url'] = str(file_config.get('base_url', config['base_url'])).rstrip('/')
+            if not os.getenv('OLLAMA_MODEL'):
+                config['model'] = str(file_config.get('model', config['model']))
+            if not os.getenv('IMMICH_URL'):
+                config['immich_url_default'] = file_config.get('immich_url_default', '')
+            if not os.getenv('IMMICH_API_KEY'):
+                config['immich_api_key_default'] = file_config.get('immich_api_key_default', '')
+            
+            config['vector_db_enabled'] = file_config.get('vector_db_enabled', config['vector_db_enabled'])
+            config['vector_db_provider'] = file_config.get('vector_db_provider', config['vector_db_provider'])
+            config['vector_db_path'] = file_config.get('vector_db_path', config['vector_db_path'])
+            config['calendar_auto_reindex_hours'] = file_config.get('calendar_auto_reindex_hours', config['calendar_auto_reindex_hours'])
+            config['calendar_auto_reindex_past_days'] = file_config.get('calendar_auto_reindex_past_days', config['calendar_auto_reindex_past_days'])
+            config['calendar_auto_reindex_future_days'] = file_config.get('calendar_auto_reindex_future_days', config['calendar_auto_reindex_future_days'])
         except Exception as e:
             logger.warning(f"Konnte AI-Konfiguration nicht laden: {str(e)}")
 
+    # Log masked config for debugging
+    masked_config = config.copy()
+    masked_config['immich_api_key_default'] = mask_secret(config['immich_api_key_default'])
+    logger.info(f"AI Config loaded with provider={config['provider']}, model={config['model']}")
+
     ollama_client.update_config(config['base_url'], config['model'])
-    os.environ['MYND_EMBEDDING_MODEL'] = str(config.get('embedding_model', 'nomic-embed-text')).strip() or 'nomic-embed-text'
-    kb = globals().get('knowledge_base')
-    if kb and getattr(kb, 'search_engine', None):
-        try:
-            kb.search_engine.embedding_model_name = os.environ['MYND_EMBEDDING_MODEL']
-            kb.search_engine._embedding_model_loaded = False
-            kb.search_engine.embedding_model = None
-        except Exception:
-            pass
     return config
 
 
-def save_ai_config(base_url: str, model: str, **overrides: Any) -> None:
+def save_ai_config(base_url: str, model: str) -> None:
     """Speichert AI-Konfiguration persistent in einer lokalen JSON-Datei."""
-    config = {}
-    if os.path.exists(AI_CONFIG_FILE):
-        try:
-            with open(AI_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-        except Exception:
-            config = {}
-
-    config['provider'] = 'ollama'
-    config['base_url'] = base_url.rstrip('/')
-    config['model'] = model
-    if 'embedding_model' in overrides:
-        config['embedding_model'] = str(overrides['embedding_model']).strip() or 'nomic-embed-text'
-
-    allowed_overrides = {
-        'provider',
-        'immich_url_default',
-        'immich_api_key_default',
-        'vector_db_enabled',
-        'vector_db_provider',
-        'vector_db_path',
-        'calendar_auto_reindex_hours',
-        'calendar_auto_reindex_past_days',
-        'calendar_auto_reindex_future_days',
-        'briefing_daily_enabled',
-        'briefing_weekly_enabled',
-        'briefing_morning_hour',
-        'briefing_send_daily',
-        'briefing_send_weekly',
-        'briefing_send_recipients',
-        'briefing_send_account_id',
-        'briefing_send_talk',
-        'briefing_talk_room_id',
-        'briefing_talk_webhook_secret',
-        'tts_provider',
-        'browser_tts_voice_uri',
-        'gemini_tts_api_key',
-        'gemini_tts_model',
-        'gemini_tts_voice',
-        'gemini_tts_language_code',
-        'gemini_tts_style_prompt',
-        'gemini_tts_audio_encoding',
-        'gemini_live_model',
-        'gemini_live_voice',
-        'embedding_model',
+    config = {
+        'provider': 'ollama',
+        'base_url': base_url.rstrip('/'),
+        'model': model
     }
-    for key, value in overrides.items():
-        if key in allowed_overrides:
-            config[key] = value
 
-    with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
-
-    os.environ['MYND_EMBEDDING_MODEL'] = str(config.get('embedding_model', 'nomic-embed-text')).strip() or 'nomic-embed-text'
-    kb = globals().get('knowledge_base')
-    if kb and getattr(kb, 'search_engine', None):
-        try:
-            kb.search_engine.embedding_model_name = os.environ['MYND_EMBEDDING_MODEL']
-            kb.search_engine._embedding_model_loaded = False
-            kb.search_engine.embedding_model = None
-        except Exception:
-            pass
+    _safe_json_dump(AI_CONFIG_FILE, config)
 
 def load_user_config(username: str) -> dict:
     """Lädt benutzerspezifische Konfiguration"""
-    user_config_file = os.path.join(CONFIG_DIR, f"user_{username}.json")
+    user_config_file = _safe_config_path_for_user(username)
+    if not user_config_file:
+        logger.warning("Invalid username supplied for user config load")
+        return {}
     config = {}
 
     if os.path.exists(user_config_file):
@@ -2631,11 +655,12 @@ def load_user_config(username: str) -> dict:
 
 def save_user_config(username: str, config: dict) -> None:
     """Speichert benutzerspezifische Konfiguration"""
-    user_config_file = os.path.join(CONFIG_DIR, f"user_{username}.json")
+    user_config_file = _safe_config_path_for_user(username)
+    if not user_config_file:
+        raise ValueError("Invalid username")
 
     try:
-        with open(user_config_file, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        _safe_json_dump(user_config_file, config)
     except Exception as e:
         logger.error(f"Could not save user config for {username}: {str(e)}")
         raise
@@ -2660,45 +685,11 @@ calendar_manager = create_calendar_manager()
 simple_calendar_manager = create_simple_calendar_manager()
 calendar_enabled = os.getenv('CALENDAR_ENABLED', 'False').lower() == 'true'
 
-
-def refresh_simple_calendar_manager(username: Optional[str] = None) -> bool:
-    """Initialisiert den einfachen Kalender-Manager mit aktueller Nextcloud-Konfiguration neu."""
-    global simple_calendar_manager
-
-    try:
-        active_username = str(username or _get_request_username() or '').strip()
-        if active_username:
-            user_config = load_user_config(active_username)
-            url = str(user_config.get('nextcloud_url') or user_config.get('caldav_url') or '').strip()
-            user_name = str(user_config.get('nextcloud_username') or user_config.get('caldav_username') or '').strip()
-            password = str(user_config.get('nextcloud_password') or user_config.get('caldav_password') or '').strip()
-
-            if url and user_name and password:
-                simple_calendar_manager = create_simple_calendar_manager(url, user_name, password)
-                return simple_calendar_manager is not None
-
-        indexing_manager.load_nextcloud_config()
-        config = indexing_manager.get_config(mask_password=False) or {}
-        url = str(config.get('url', '')).strip()
-        cal_username = str(config.get('username', '')).strip()
-        password = str(config.get('password', '')).strip()
-
-        if url and cal_username and password:
-            simple_calendar_manager = create_simple_calendar_manager(url, cal_username, password)
-        else:
-            simple_calendar_manager = create_simple_calendar_manager()
-
-        return simple_calendar_manager is not None
-    except Exception as e:
-        logger.error(f"Failed to refresh simple calendar manager: {e}")
-        simple_calendar_manager = None
-        return False
-
 # Tasks/Todos Manager initialisieren
 tasks_enabled = False
 TASKS_AUTO_SYNC_ENABLED = os.getenv('TASKS_AUTO_SYNC_ENABLED', 'true').lower() == 'true'
 TASKS_AUTO_SYNC_INTERVAL_SECONDS = int(os.getenv('TASKS_AUTO_SYNC_INTERVAL_SECONDS', '300'))
-TASKS_AUTO_SYNC_LIST_NAME = os.getenv('TASKS_AUTO_SYNC_LIST_NAME', 'auto')
+TASKS_AUTO_SYNC_LIST_NAME = os.getenv('TASKS_AUTO_SYNC_LIST_NAME', 'todo')
 
 def initialize_tasks_from_config():
     """Initialisiert Task-Manager wenn Nextcloud-Config vorhanden"""
@@ -2733,16 +724,11 @@ def initialize_tasks_from_config():
             if success:
                 logger.info(f"✅ Tasks manager initialized: tasks_enabled={tasks_enabled}")
                 if TASKS_AUTO_SYNC_ENABLED:
-                    auto_sync_list_name = TASKS_AUTO_SYNC_LIST_NAME or 'auto'
-
                     auto_sync_started = task_manager.start_auto_sync(
-                        list_name=auto_sync_list_name,
+                        list_name=TASKS_AUTO_SYNC_LIST_NAME,
                         interval_seconds=TASKS_AUTO_SYNC_INTERVAL_SECONDS
                     )
-                    logger.info(
-                        f"🔁 Task auto-sync {'enabled' if auto_sync_started else 'not started'} "
-                        f"(list='{auto_sync_list_name}')"
-                    )
+                    logger.info(f"🔁 Task auto-sync {'enabled' if auto_sync_started else 'not started'}")
             else:
                 logger.warning(f"❌ Failed to initialize tasks manager: tasks_enabled={tasks_enabled}")
         else:
@@ -2752,33 +738,6 @@ def initialize_tasks_from_config():
         logger.warning(f"❌ Could not initialize tasks: {str(e)}")
         tasks_enabled = False
     logger.info(f"📊 Final state: tasks_enabled={tasks_enabled}")
-
-
-def start_background_services() -> None:
-    """Start background initializers without blocking app import."""
-
-    def _runner() -> None:
-        try:
-            initialize_tasks_from_config()
-        except Exception as exc:
-            logger.error(f"Error in initialize_tasks_from_config: {exc}")
-
-        try:
-            start_briefing_scheduler()
-        except Exception as exc:
-            logger.error(f"Error starting briefing scheduler: {exc}")
-
-        try:
-            start_knowledge_graph_scheduler()
-        except Exception as exc:
-            logger.error(f"Error starting knowledge graph scheduler: {exc}")
-
-        try:
-            _trigger_knowledge_graph_refresh()
-        except Exception as exc:
-            logger.error(f"Error triggering initial knowledge graph refresh: {exc}")
-
-    threading.Thread(target=_runner, daemon=True).start()
 
 # Kalender-Caching für Performance
 calendar_cache = {}
@@ -2875,12 +834,6 @@ def _filter_tasks_by_prompt(tasks: List[Dict], message: str) -> List[Dict]:
     message_lower = message.lower()
     today = date.today()
 
-    # Erinnerung = VALARM innerhalb VTODO. Falls vorhanden, nur Reminder-Tasks zeigen.
-    if any(keyword in message_lower for keyword in ['erinnerung', 'erinnerungen', 'reminder', 'reminders']):
-        alarm_tasks = [t for t in tasks if t.get('has_alarm')]
-        if alarm_tasks:
-            tasks = alarm_tasks
-
     def due_of(task: Dict) -> Optional[date]:
         return _parse_task_due_date(task.get('due_date'))
 
@@ -2921,9 +874,6 @@ def _build_direct_todo_response(tasks: List[Dict], filtered_tasks: List[Dict], m
     """Erzeugt eine direkte, verlässliche Antwort für Todo/Erinnerungsfragen."""
     today = date.today()
     message_lower = message.lower()
-    is_reminder_query = any(k in message_lower for k in ['erinnerung', 'erinnerungen', 'reminder', 'reminders'])
-
-    item_word = 'Erinnerungen' if is_reminder_query else 'Aufgaben'
 
     overdue_count = 0
     due_today_count = 0
@@ -2940,16 +890,16 @@ def _build_direct_todo_response(tasks: List[Dict], filtered_tasks: List[Dict], m
 
     if not filtered_tasks:
         if 'überfällig' in message_lower:
-            return f"Du hast aktuell keine überfälligen {item_word}."
+            return "Du hast aktuell keine überfälligen Erinnerungen."
         if 'heute' in message_lower:
-            return f"Für heute hast du keine fälligen {item_word}."
-        return f"Du hast aktuell keine offenen {item_word}."
+            return "Für heute hast du keine fälligen Erinnerungen."
+        return "Du hast aktuell keine offenen Erinnerungen."
 
     lines = []
-    lines.append(f"Du hast {len(tasks)} offene {item_word}.")
+    lines.append(f"Du hast {len(tasks)} offene Erinnerungen.")
     lines.append(f"Davon: {overdue_count} überfällig, {due_today_count} für heute, {no_due_count} ohne Datum.")
     lines.append("")
-    lines.append(f"Relevante {item_word}:")
+    lines.append("Relevante Erinnerungen:")
 
     # Sortierung: zuerst überfällig, dann heute, dann mit Datum, dann ohne Datum
     def sort_key(task: Dict):
@@ -3013,7 +963,7 @@ def get_todo_data(message: str) -> Dict:
     except Exception as e:
         logger.error(f"Error getting todo data: {str(e)}")
         return {
-            'enabled': False,
+            'enabled': True,
             'tasks': [],
             'filtered_tasks': [],
             'context': ''
@@ -3026,23 +976,6 @@ def get_todo_context(message: str) -> str:
 
 def get_nextcloud_runtime_config() -> Dict:
     """Lädt Nextcloud-Zugangsdaten aus mehreren Quellen in stabiler Reihenfolge."""
-    active_username = _get_request_username()
-
-    if active_username:
-        try:
-            user_config = load_user_config(active_username)
-            nextcloud_url = user_config.get('nextcloud_url') or user_config.get('caldav_url')
-            nextcloud_username = user_config.get('nextcloud_username') or user_config.get('caldav_username')
-            nextcloud_password = user_config.get('nextcloud_password') or user_config.get('caldav_password')
-            if all([nextcloud_url, nextcloud_username, nextcloud_password]):
-                return {
-                    'url': nextcloud_url,
-                    'username': nextcloud_username,
-                    'password': nextcloud_password
-                }
-        except Exception as e:
-            logger.debug(f"load_user_config for Nextcloud failed: {e}")
-
     config = {}
 
     # 1) Bereits geladene Laufzeit-Konfiguration
@@ -3063,10 +996,10 @@ def get_nextcloud_runtime_config() -> Dict:
     except Exception as e:
         logger.debug(f"indexing_manager.load_nextcloud_config failed: {e}")
 
-    # 3) Fallback auf bekannte Konfig-Dateien im Backend
+    # 3) Fallback auf bekannte Konfig-Dateien im Projekt
     config_candidates = [
         os.path.join(CONFIG_DIR, 'indexing_config.json'),
-        os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+        os.path.join(BASE_DIR, 'indexing_config.json')
     ]
     for config_path in config_candidates:
         try:
@@ -3098,308 +1031,12 @@ def is_activity_query(message: str) -> bool:
     ]
     return any(keyword in message_lower for keyword in activity_keywords)
 
-def should_use_calendar(message: str) -> bool:
-    """
-    Intelligente Erkennung ob Kalender verwendet werden sollte.
-    Basiert auf Schlüsselworten UND kontextuellem Verständnis.
-    """
-    message_lower = message.lower()
-    
-    # Explizite Kalender-Indikationen
-    strong_calendar_keywords = [
-        'termin', 'termine', 'erstelle', 'create', 'eintrag', 'event', 
-        'meeting', 'termin erstellen', 'im kalender', 'kalender',
-        'wann bin ich', 'habe ich einen termin', 'was steht an'
-    ]
-    
-    if any(keyword in message_lower for keyword in strong_calendar_keywords):
-        return True
-    
-    # Zeitbezogene Fragen die nach Verfügbarkeit oder Planung fragen
-    time_context_keywords = ['wann', 'zeitpunkt', 'uhrzeit', 'um', 'heute', 'morgen', 'diese woche', 'nächste woche']
-    if any(keyword in message_lower for keyword in time_context_keywords):
-        # Wenn es ohne Kontext ist, könnte es eine normale Frage sein
-        # Aber mit "habe ich", "bin ich", "steht an", etc. sollte Kalender genutzt werden
-        activity_indicators = ['habe ich', 'bin ich', 'bin die', 'steht an', 'planung', 'geplant']
-        if any(indicator in message_lower for indicator in activity_indicators):
-            return True
-    
-    return False
-
-
-def _send_briefing_via_nextcloud_talk(item: Dict[str, Any], room_id: str, username: Optional[str] = None) -> bool:
-    """Send a briefing `item` as a message to a Nextcloud Talk room specified by `room_id`.
-
-    Uses runtime Nextcloud credentials (indexing / config) or environment variables.
-    """
-    if not room_id:
-        logger.debug('No Talk room_id provided for briefing')
-        return False
-
-    try:
-        cfg = get_nextcloud_runtime_config() or {}
-        if not cfg or not all(cfg.get(k) for k in ['url', 'username', 'password']):
-            logger.warning('Nextcloud credentials missing; cannot send briefing to Talk')
-            return False
-
-        talk_client = NextcloudTalkClient(url=cfg.get('url'), username=cfg.get('username'), password=cfg.get('password'))
-        title = item.get('title') or 'Briefing'
-        content = item.get('content') or ''
-        message = f"{title}\n\n{content}"
-
-        success = talk_client.send_message(room_id, message, format='plain')
-        if success:
-            logger.info('Briefing posted to Talk room %s', room_id)
-        return success
-    except Exception as e:
-        logger.debug('Error sending briefing to Talk: %s', e)
-        return False
-
-def should_use_tasks(message: str) -> bool:
-    """
-    Intelligente Erkennung ob TODOs/Tasks verwendet werden sollten.
-    """
-    message_lower = message.lower()
-    
-    task_keywords = [
-        'aufgabe', 'aufgaben', 'todo', 'todos', 'task', 'tasks',
-        'erledigen', 'abhaken', 'fertig', 'erledigt',
-        'was muss ich', 'noch zu tun', 'to do', 'meine aufgaben'
-    ]
-    
-    if any(keyword in message_lower for keyword in task_keywords):
-        return True
-    
-    # Auch "was muss ich tun" oder "was sollte ich machen" ohne explizites task-Wort
-    action_indicators = ['was muss ich', 'was sollte ich', 'was habe ich']
-    if any(indicator in message_lower for indicator in action_indicators):
-        return True
-    
-    return False
-
 def is_calendar_create_query(message: str) -> bool:
     """Erkennt Wunsch nach Termin-Erstellung."""
     message_lower = message.lower()
     create_keywords = ['erstelle', 'anlegen', 'create', 'eintragen', 'hinzufügen']
     calendar_keywords = ['termin', 'ereignis', 'kalender', 'event', 'appointment']
     return any(k in message_lower for k in create_keywords) and any(k in message_lower for k in calendar_keywords)
-
-
-def is_task_create_query(message: str) -> bool:
-    """Erkennt Wunsch nach Aufgaben-/Erinnerungs-Erstellung."""
-    message_lower = message.lower()
-    create_keywords = ['erstelle', 'anlegen', 'create', 'hinzufügen', 'add', 'new']
-    task_keywords = ['aufgabe', 'aufgaben', 'todo', 'task', 'tasks', 'erinnerung', 'reminder']
-    return any(k in message_lower for k in create_keywords) and any(k in message_lower for k in task_keywords)
-
-
-def _normalize_task_due_date(due_value: Optional[str]) -> Optional[str]:
-    """Normalisiert verschiedene Datumsangaben auf YYYY-MM-DD."""
-    if not due_value:
-        return None
-
-    value = str(due_value).strip().lower()
-    if not value:
-        return None
-
-    if value in ['heute', 'today']:
-        return datetime.now().strftime('%Y-%m-%d')
-    if value in ['morgen', 'tomorrow']:
-        return (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-    if value in ['uebermorgen', 'übermorgen']:
-        return (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
-
-    formats = ['%Y-%m-%d', '%d.%m.%Y', '%d.%m.%y']
-    for fmt in formats:
-        try:
-            return datetime.strptime(value, fmt).strftime('%Y-%m-%d')
-        except ValueError:
-            continue
-
-    return None
-
-
-def get_available_task_lists() -> List[str]:
-    """Lädt verfügbare Nextcloud-Tasklisten."""
-    if not tasks_enabled or not task_manager.tasks_client:
-        return []
-
-    try:
-        lists = task_manager.tasks_client.get_task_lists()
-        return [name for name in lists if name]
-    except Exception as e:
-        logger.debug(f"Could not load task lists: {e}")
-        return []
-
-
-def _extract_task_priority(message: str) -> int:
-    """Leitet Priorität aus Text ab (1=hoch, 5=mittel, 9=niedrig)."""
-    text = message.lower()
-    if any(k in text for k in ['dringend', 'wichtig', 'hoch', 'high', 'urgent']):
-        return 1
-    if any(k in text for k in ['mittel', 'medium', 'normal']):
-        return 5
-    if any(k in text for k in ['niedrig', 'low', 'später', 'spaeter']):
-        return 9
-    return 0
-
-
-def extract_task_info_from_message(message: str) -> Dict[str, Any]:
-    """Extrahiert Task-/Reminder-Informationen aus natürlicher Sprache."""
-    result = {
-        'title': None,
-        'due_date': None,
-        'priority': 0,
-        'list_name': None,
-        'location': None,
-        'description': None,
-        'missing_info': []
-    }
-
-    message_clean = ' '.join((message or '').strip().split())
-    message_lower = message_clean.lower()
-    now = datetime.now()
-
-    # Datum extrahieren
-    date_patterns = [
-        r'\b(?:am|bis|fuer|für)\s+(\d{1,2}\.\d{1,2}\.\d{4})\b',
-        r'\b(\d{4}-\d{2}-\d{2})\b'
-    ]
-    for pattern in date_patterns:
-        match = re.search(pattern, message_clean, re.IGNORECASE)
-        if match:
-            normalized = _normalize_task_due_date(match.group(1))
-            if normalized:
-                result['due_date'] = normalized
-                break
-
-    if not result['due_date']:
-        if any(k in message_lower for k in ['morgen', 'tomorrow']):
-            result['due_date'] = (now + timedelta(days=1)).strftime('%Y-%m-%d')
-        elif any(k in message_lower for k in ['heute', 'today']):
-            result['due_date'] = now.strftime('%Y-%m-%d')
-
-    # Priorität extrahieren
-    result['priority'] = _extract_task_priority(message_clean)
-
-    # Taskliste extrahieren (optional)
-    list_match = re.search(r'\b(?:in\s+liste|liste)\s+([a-zA-Z0-9 _\-]+)\b', message_clean, re.IGNORECASE)
-    if list_match:
-        result['list_name'] = list_match.group(1).strip()
-
-    # Ort extrahieren (optional)
-    location_patterns = [
-        r'\b(?:ort|location)[:\s]+([^,.!?]+?)(?=\s+(?:am|bis|fuer|für|heute|morgen|today|tomorrow|in\s+liste|liste)\b|[,.!?]|$)',
-        r'\b(?:bei|in)\s+([^,.!?]+?)(?=\s+(?:am|bis|fuer|für|heute|morgen|today|tomorrow|in\s+liste|liste)\b|[,.!?]|$)'
-    ]
-    for pattern in location_patterns:
-        match = re.search(pattern, message_clean, re.IGNORECASE)
-        if match:
-            candidate = match.group(1).strip()
-            if candidate and not re.search(r'\d{1,2}\.\d{1,2}\.\d{4}|\d{4}-\d{2}-\d{2}', candidate):
-                result['location'] = candidate.title()
-                break
-
-    # Titel extrahieren
-    quoted_title = re.search(r'"([^"]+)"', message_clean)
-    if quoted_title:
-        result['title'] = quoted_title.group(1).strip()
-    else:
-        title_candidate = message_clean
-        title_candidate = re.sub(
-            r'^(?:kannst\s+du\s+)?(?:bitte\s+)?(?:erstelle|erstelle\s+mir|lege\s+an|lege|mach|add|create)\s+(?:mir\s+)?(?:eine?|neue?n?)?\s*(?:erinnerung|aufgabe|todo|task|reminder|tasks|aufgaben)?\s*',
-            '',
-            title_candidate,
-            flags=re.IGNORECASE
-        )
-        title_candidate = re.sub(r'\b(?:am|bis|fuer|für|heute|morgen|today|tomorrow|in\s+liste|liste|mit\s+prioritaet|mit\s+priorität)\b.*$', '', title_candidate, flags=re.IGNORECASE)
-        title_candidate = title_candidate.strip(' .,:;!-')
-        if title_candidate:
-            result['title'] = title_candidate
-
-    if result['title'] and result['title'].islower():
-        result['title'] = result['title'].title()
-
-    # Generische Placeholder sollen den Dialog erzwingen.
-    generic_titles = {
-        'aufgabe', 'neue aufgabe', 'todo', 'neues todo', 'task', 'new task',
-        'erinnerung', 'neue erinnerung', 'reminder', 'new reminder'
-    }
-    if (result.get('title') or '').strip().lower() in generic_titles:
-        result['title'] = None
-
-    result['description'] = message_clean
-
-    if not result['title']:
-        result['missing_info'].append('Titel')
-    if not result['due_date']:
-        result['missing_info'].append('Fälligkeitsdatum')
-
-    return result
-
-
-def create_task_reminder(title: str, description: str = '', due_date: Optional[str] = None,
-                         priority: int = 0, list_name: Optional[str] = None,
-                         location: Optional[str] = None) -> Dict[str, Any]:
-    """Erstellt eine Aufgabe/Erinnerung über den Task-Manager."""
-    if not tasks_enabled or not task_manager.tasks_client:
-        return {'success': False, 'error': 'Tasks nicht verfügbar'}
-
-    try:
-        available_lists = get_available_task_lists()
-        target_list_name = (list_name or '').strip()
-
-        if target_list_name and available_lists:
-            for candidate in available_lists:
-                if target_list_name.lower() == candidate.lower():
-                    target_list_name = candidate
-                    break
-            else:
-                for candidate in available_lists:
-                    if target_list_name.lower() in candidate.lower():
-                        target_list_name = candidate
-                        break
-
-        if not target_list_name:
-            target_list_name = available_lists[0] if available_lists else 'tasks'
-
-        normalized_due = _normalize_task_due_date(due_date)
-        parsed_priority = int(priority or 0)
-
-        final_description = (description or '').strip()
-        location_value = (location or '').strip()
-        if location_value:
-            location_line = f"Ort: {location_value}"
-            if final_description:
-                if location_line.lower() not in final_description.lower():
-                    final_description = f"{final_description}\n{location_line}"
-            else:
-                final_description = location_line
-
-        success = task_manager.create_task(
-            title=title,
-            description=final_description,
-            due_date=normalized_due,
-            priority=parsed_priority,
-            list_name=target_list_name
-        )
-
-        if success:
-            due_text = normalized_due if normalized_due else 'ohne Fälligkeitsdatum'
-            return {
-                'success': True,
-                'message': f'Aufgabe "{title}" wurde erstellt (fällig: {due_text})',
-                'title': title,
-                'due_date': normalized_due,
-                'priority': parsed_priority,
-                'list_name': target_list_name,
-                'location': location_value or None
-            }
-
-        return {'success': False, 'error': 'Fehler beim Erstellen des Tasks'}
-    except Exception as e:
-        logger.error(f"Error creating task reminder: {e}")
-        return {'success': False, 'error': f'Fehler: {str(e)}'}
 
 def get_activity_context(limit: int = 10) -> Dict:
     """Lädt aktuelle Nextcloud-Aktivitäten und formatiert sie für Chat-Kontext und Direktantworten."""
@@ -3425,13 +1062,13 @@ def get_activity_context(limit: int = 10) -> Dict:
         activities = activity_client.get_recent_activities(limit=limit)
         if not activities:
             return {
-                'context': "=== NEXTCLOUD AKTIVITÄTEN ===\nKeine neuen Aktivitäten gefunden.",
+                'context': "=== NEXTCLOUD AKTIVITAETEN ===\nKeine neuen Aktivitäten gefunden.",
                 'summary_text': "Es gibt aktuell keine neuen Aktivitäten auf deiner Nextcloud.",
                 'count': 0,
                 'error': None
             }
 
-        lines = ["=== NEXTCLOUD AKTIVITÄTEN ===", f"Anzahl: {len(activities)}", ""]
+        lines = ["=== NEXTCLOUD AKTIVITAETEN ===", f"Anzahl: {len(activities)}", ""]
         summary_lines = ["Ja, es gibt neue Aktivitäten:"]
 
         for idx, activity in enumerate(activities[:10], 1):
@@ -3558,9 +1195,6 @@ def create_calendar_event(title: str, start_time: str, end_time: str = None,
                           description: str = None) -> dict:
     """Erstellt ein neues Kalendereignis über CalDAV"""
     if not simple_calendar_manager:
-        refresh_simple_calendar_manager()
-
-    if not simple_calendar_manager:
         return {'success': False, 'error': 'Kalender nicht verfügbar'}
     
     try:
@@ -3595,9 +1229,6 @@ def create_calendar_event(title: str, start_time: str, end_time: str = None,
         # Parse Zeiten
         start_dt = parse_datetime_string(start_time)
         end_dt = parse_datetime_string(end_time) if end_time else start_dt + timedelta(hours=1)
-
-        location_line = f'LOCATION:{location}\n' if location else ''
-        description_line = f'DESCRIPTION:{description}\n' if description else ''
         
         ical_data = f'''BEGIN:VCALENDAR
 VERSION:2.0
@@ -3608,7 +1239,7 @@ DTSTART:{start_dt.strftime('%Y%m%dT%H%M%SZ')}
 DTEND:{end_dt.strftime('%Y%m%dT%H%M%SZ')}
 DTSTAMP:{now}
 SUMMARY:{title}
-{location_line}{description_line}END:VEVENT
+{'LOCATION:' + location + '\n' if location else ''}{'DESCRIPTION:' + description + '\n' if description else ''}END:VEVENT
 END:VCALENDAR'''
         
         # Sende PUT request um Ereignis zu erstellen
@@ -3776,9 +1407,6 @@ def get_calendar_context(message: str) -> str:
     """Holt Kalender-Kontext basierend auf intelligenten Analyse der Nachricht"""
     # Nutze den einfachen Kalender-Manager, der funktioniert
     if not simple_calendar_manager:
-        refresh_simple_calendar_manager()
-
-    if not simple_calendar_manager:
         return ""
     
     message_lower = message.lower()
@@ -3931,314 +1559,6 @@ def get_calendar_context(message: str) -> str:
     
     return context_text
 
-
-def _parse_iso_anchor_date(value: Optional[str]) -> date:
-    """Parse YYYY-MM-DD and fallback to today."""
-    if not value:
-        return date.today()
-    try:
-        return datetime.strptime(value, '%Y-%m-%d').date()
-    except Exception:
-        return date.today()
-
-
-def _infer_calendar_card_config(prompt: str) -> Dict:
-    """Infer default calendar card state from prompt."""
-    message = (prompt or '').lower()
-    view = 'day'
-    if 'woche' in message or 'week' in message:
-        view = 'week'
-    elif 'monat' in message or 'month' in message:
-        view = 'month'
-    elif 'liste' in message or 'list' in message:
-        view = 'list'
-
-    anchor = date.today()
-    if 'morgen' in message or 'tomorrow' in message:
-        anchor = anchor + timedelta(days=1)
-    elif 'gestern' in message or 'yesterday' in message:
-        anchor = anchor - timedelta(days=1)
-    else:
-        rel_start, _, _ = parse_relative_date(prompt)
-        if rel_start:
-            anchor = rel_start.date()
-
-    return {
-        'view': view,
-        'date': anchor.strftime('%Y-%m-%d')
-    }
-
-
-def _infer_task_card_config(prompt: str) -> Dict:
-    """Infer default task card state from prompt."""
-    message = (prompt or '').lower()
-    scope = 'all'
-    if 'überfällig' in message or 'overdue' in message:
-        scope = 'overdue'
-    elif 'heute' in message or 'today' in message:
-        scope = 'today'
-
-    anchor = date.today()
-    if 'morgen' in message or 'tomorrow' in message:
-        anchor = anchor + timedelta(days=1)
-    elif 'gestern' in message or 'yesterday' in message:
-        anchor = anchor - timedelta(days=1)
-
-    return {
-        'scope': scope,
-        'date': anchor.strftime('%Y-%m-%d')
-    }
-
-
-def _build_email_card(prompt: str, language: str = 'de') -> Dict[str, Any]:
-    """Build an interactive email compose card for the frontend."""
-    is_german = str(language or '').lower().startswith('de')
-    draft = extract_email_send_info_from_message(prompt)
-    prompt_text = _normalize_lookup_text(prompt)
-    reply_like = any(keyword in prompt_text for keyword in ['antwort', 'antworte', 'antworten', 'reply', 'antwort schreiben'])
-
-    if reply_like:
-        if not str(draft.get('subject', '')).strip():
-            draft['subject'] = 'Re: Ihre Nachricht'
-        if not str(draft.get('body', '')).strip() or str(draft.get('body', '')).strip() == str(prompt or '').strip():
-            draft['body'] = (
-                'Sehr geehrte Damen und Herren,\n\n'
-                'vielen Dank für Ihre Information. Ich werde mir die Dokumente zeitnah ansehen.\n\n'
-                'Mit freundlichen Grüßen\n'
-                'Project Contributor'
-            )
-    elif not str(draft.get('body', '')).strip() or str(draft.get('body', '')).strip() == str(prompt or '').strip():
-        draft['body'] = ''
-
-    return {
-        'type': 'email',
-        'title': 'E-Mail verfassen' if is_german else 'Compose email',
-        'subtitle': 'Vorlage erstellen, prüfen und direkt senden' if is_german else 'Draft, review, and send directly',
-        'description': (
-            'Fülle Empfänger, Betreff und Nachricht aus oder passe den Vorschlag an.'
-            if is_german else
-            'Fill in recipient, subject, and message or adjust the draft.'
-        ),
-        'to': draft.get('to', ''),
-        'subject': draft.get('subject', ''),
-        'body': draft.get('body', ''),
-        'cc': draft.get('cc', ''),
-        'bcc': draft.get('bcc', ''),
-        'requires_confirmation': True,
-        'confirmation_text': 'Bitte bestätige den Versand manuell, bevor die Nachricht gesendet wird.' if is_german else 'Please confirm the send manually before the message is sent.',
-        'draft_kind': 'reply' if reply_like else 'compose',
-        'quick_templates': [
-            {'label': 'WEB.DE', 'preset': 'web.de'},
-            {'label': 'GMX', 'preset': 'gmx.de'},
-            {'label': 'Gmail', 'preset': 'gmail.com'},
-            {'label': 'Outlook', 'preset': 'outlook.com'}
-        ]
-    }
-
-
-def _build_contact_card(prompt: str, contacts: List[Dict[str, Any]], language: str = 'de') -> Dict[str, Any]:
-    """Build an interactive contacts card for the frontend."""
-    is_german = str(language or '').lower().startswith('de')
-    contact_items = []
-
-    for contact in contacts[:6]:
-        title = str(contact.get('title', '')).strip() or str(contact.get('full_name', '')).strip() or 'Kontakt'
-        subline = str(contact.get('subline', '')).strip()
-        emails = []
-        for email_value in contact.get('email', []) or []:
-            email_value = str(email_value).strip()
-            if email_value and email_value not in emails:
-                emails.append(email_value)
-
-        if not emails:
-            for candidate in [contact.get('subline', ''), contact.get('title', '')]:
-                extracted = _extract_email_from_text(candidate)
-                if extracted and extracted not in emails:
-                    emails.append(extracted)
-
-        if isinstance(contact.get('attributes'), dict):
-            for value in contact['attributes'].values():
-                extracted = _extract_email_from_text(value)
-                if extracted and extracted not in emails:
-                    emails.append(extracted)
-
-        contact_items.append({
-            'title': title,
-            'subline': subline,
-            'emails': emails,
-            'primary_email': emails[0] if emails else '',
-            'resource_url': contact.get('resource_url', ''),
-            'icon': contact.get('icon', ''),
-            'organization': contact.get('organization', '')
-        })
-
-    return {
-        'type': 'contacts',
-        'title': 'Kontakte' if is_german else 'Contacts',
-        'subtitle': f"{len(contact_items)} Treffer" if is_german else f"{len(contact_items)} matches",
-        'description': (
-            'Wähle einen Kontakt aus, um direkt eine E-Mail zu schreiben oder die Suche zu verfeinern.'
-            if is_german else
-            'Select a contact to draft an email or refine the search.'
-        ),
-        'query': prompt,
-        'contacts': contact_items,
-        'suggested_email_prompt': 'Schreibe eine E-Mail an {email}' if is_german else 'Compose an email to {email}'
-    }
-
-
-def _build_email_source_card(
-    subject: str,
-    sender: str,
-    date_str: str,
-    folder: str,
-    body_preview: str,
-    label: str = 'E-Mail'
-) -> Dict[str, Any]:
-    """Build a source-style card for a concrete email result."""
-    return {
-        'source_type': 'email',
-        'source': sender or label,
-        'document': subject or label,
-        'path': folder or 'INBOX',
-        'chunk_id': None,
-        'matched_sentence': body_preview[:240] if body_preview else subject,
-        'content_preview': body_preview[:600] if body_preview else subject,
-        'similarity_score': 0.95,
-        'subject': subject,
-        'sender': sender,
-        'date': date_str,
-        'folder': folder or 'INBOX'
-    }
-
-
-def _build_contact_source_card(contact: Dict[str, Any], label: str = 'Kontakt') -> Dict[str, Any]:
-    """Build a source-style card for a matched contact used in email compose/reply."""
-    title = str(contact.get('title', '')).strip() or str(contact.get('full_name', '')).strip() or label
-    emails: List[str] = []
-    for value in contact.get('email', []) or []:
-        email_value = str(value or '').strip()
-        if email_value and email_value not in emails:
-            emails.append(email_value)
-
-    return {
-        'source_type': 'email',
-        'source': title,
-        'document': emails[0] if emails else title,
-        'path': str(contact.get('addressbook_name') or contact.get('organization') or label),
-        'chunk_id': None,
-        'matched_sentence': str(contact.get('subline', '')).strip() or ', '.join(emails),
-        'content_preview': ', '.join(emails) if emails else str(contact.get('subline', '')).strip(),
-        'similarity_score': 0.8,
-        'contact': contact
-    }
-
-
-def _build_ui_cards(prompt: str, intent: str, calendar_ctx: Optional[Dict], todo_ctx: Optional[Dict], photo_ctx: Optional[Dict] = None, email_ctx: Optional[Dict] = None, nextcloud_search_ctx: Optional[Dict] = None, username: str = None, language: str = 'de') -> List[Dict]:
-    """Return structured ui_cards metadata for frontend interactive cards."""
-    cards: List[Dict] = []
-
-    if calendar_ctx and not is_weather_query(prompt) and (intent in ['calendar', 'mixed'] or should_use_calendar(prompt)):
-        cfg = _infer_calendar_card_config(prompt)
-        cards.append({
-            'type': 'calendar',
-            'title': 'Calendar',
-            'default_view': cfg['view'],
-            'anchor_date': cfg['date']
-        })
-
-    if todo_ctx and not is_weather_query(prompt) and (intent in ['tasks', 'mixed'] or should_use_tasks(prompt) or is_todo_query(prompt)):
-        cfg = _infer_task_card_config(prompt)
-        cards.append({
-            'type': 'tasks',
-            'title': 'Tasks',
-            'default_scope': cfg['scope'],
-            'anchor_date': cfg['date']
-        })
-
-    if photo_ctx:
-        photo_metadata = photo_ctx.get('metadata', {}) if isinstance(photo_ctx, dict) else {}
-        photo_results = photo_metadata.get('photos', []) or []
-        if photo_results:
-            people_options: List[str] = []
-            for photo in photo_results:
-                for person in photo.get('people', []) or []:
-                    name = person if isinstance(person, str) else person.get('name', '')
-                    name = str(name).strip()
-                    if name and name not in people_options:
-                        people_options.append(name)
-
-            detected_people = [str(name).strip() for name in photo_metadata.get('detected_people', []) if str(name).strip()]
-            similar_people = [str(name).strip() for name in photo_metadata.get('similar_people', []) if str(name).strip()]
-            card_people = []
-            for name in detected_people + similar_people + people_options:
-                if name and name not in card_people:
-                    card_people.append(name)
-
-            cards.append({
-                'type': 'photos',
-                'title': 'Fotos',
-                'subtitle': f"{len(photo_results)} Treffer",
-                'query': prompt,
-                'date_phrase': photo_metadata.get('date_phrase', ''),
-                'date_from': photo_metadata.get('date_from', ''),
-                'date_to': photo_metadata.get('date_to', ''),
-                'selected_people': detected_people[:2],
-                'people_options': card_people[:6],
-                'date_options': [
-                    {'label': 'Heute', 'value': 'heute'},
-                    {'label': 'Gestern', 'value': 'gestern'},
-                    {'label': 'Letzte Woche', 'value': 'letzte Woche'},
-                    {'label': 'Diesen Monat', 'value': 'diesen Monat'}
-                ],
-                'photos': photo_results[:4]
-            })
-
-    if is_email_send_query(prompt):
-        recipient_resolution = resolve_email_contacts_for_prompt(prompt, username=username)
-        if recipient_resolution.get('has_contact_match') and recipient_resolution.get('needs_selection'):
-            contact_cards = recipient_resolution.get('contacts', [])
-            if contact_cards:
-                cards.append(_build_contact_card(prompt, contact_cards, language))
-            return cards
-
-        email_card = _build_email_card(prompt, language)
-        if recipient_resolution.get('best_email') and not email_card.get('to'):
-            email_card['to'] = recipient_resolution['best_email']
-        elif recipient_resolution.get('has_contact_match') and not email_card.get('to'):
-            contact_cards = recipient_resolution.get('contacts', [])
-            if contact_cards:
-                cards.append(_build_contact_card(prompt, contact_cards, language))
-        cards.append(email_card)
-    elif email_ctx and intent in ['email', 'mixed']:
-        cards.append(_build_email_card(prompt, language))
-
-    if nextcloud_search_ctx and (is_contact_query(prompt) or is_email_send_query(prompt)):
-        search_metadata = nextcloud_search_ctx.get('metadata', {}) if isinstance(nextcloud_search_ctx, dict) else {}
-        search_results = search_metadata.get('results', []) or []
-        contact_results = [result for result in search_results if str(result.get('provider', '')).lower() == 'contacts']
-        if contact_results and not any(card.get('type') == 'contacts' for card in cards):
-            cards.append(_build_contact_card(prompt, contact_results, language))
-
-    if is_weather_query(prompt):
-        weather = get_local_weather_status()
-        cards.append({
-            'type': 'weather',
-            'title': 'Wetter' if str(language).lower().startswith('de') else 'Weather',
-            'subtitle': weather.get('location_name') or ('Dein Standort' if str(language).lower().startswith('de') else 'Your location'),
-            'description': weather.get('description') or '',
-            'summary': weather.get('summary') or '',
-            'temperature_display': weather.get('temperature_display') or '',
-            'icon': weather.get('icon') or 'sun',
-            'hourly_preview': weather.get('hourly_preview') or '',
-            'daily_preview': weather.get('daily_preview') or '',
-            'forecast_days': weather.get('forecast_days') or [],
-            'status': weather.get('status') or 'ok',
-            'success': bool(weather.get('success'))
-        })
-
-    return cards
-
 # Try to migrate existing data on startup
 def try_migrate_existing_data():
     """Try to migrate existing JSON cache to database"""
@@ -4284,7 +1604,7 @@ def try_migrate_existing_data():
 @app.route('/api/indexing/start', methods=['POST'])
 def start_indexing():
     """Startet die Hintergrund-Indexierung"""
-    data = request.json
+    data = request.get_json(silent=True) or {}
     nextcloud_config = data.get('nextcloud_config')
     
     # Wenn keine Konfiguration übergeben, versuche die gespeicherte zu laden
@@ -4331,34 +1651,6 @@ def get_indexing_progress():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-
-@app.route('/api/indexing/stats', methods=['GET'])
-def get_indexing_stats():
-    """Gibt persistente Index-Statistiken zurück (Dokument-/Chunk-Zahlen und Run-History)"""
-    try:
-        result = {}
-        if knowledge_base and knowledge_base.db:
-            try:
-                result['db_stats'] = knowledge_base.db.get_document_stats()
-            except Exception as e:
-                result['db_stats_error'] = str(e)
-
-            try:
-                if hasattr(knowledge_base.db, 'get_indexing_runs'):
-                    result['indexing_runs'] = knowledge_base.db.get_indexing_runs(limit=10)
-            except Exception as e:
-                result['indexing_runs_error'] = str(e)
-
-        # Add current progress summary
-        try:
-            result['progress'] = indexing_manager.get_progress()
-        except Exception:
-            result['progress'] = {}
-
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/indexing/config', methods=['GET', 'POST'])
 def indexing_config():
     """Lädt oder speichert die Indexierung-Konfiguration"""
@@ -4372,17 +1664,20 @@ def indexing_config():
     
     elif request.method == 'POST':
         try:
-            data = request.json
+            data = request.get_json(silent=True) or {}
             url = data.get('url')
             username = data.get('username')
             password = data.get('password')
             remote_path = data.get('path', '/')
+
+            normalized_url = validate_service_url(url, allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS)
+            if not normalized_url:
+                return jsonify({'error': 'Ungültige oder nicht erlaubte URL'}), 400
             
             if not all([url, username, password]):
                 return jsonify({'error': 'URL, Username und Password werden benötigt'}), 400
             
-            indexing_manager.save_nextcloud_config(url, username, password, remote_path)
-            refresh_simple_calendar_manager()
+            indexing_manager.save_nextcloud_config(normalized_url, username, password, remote_path)
             
             return jsonify({
                 'status': 'saved',
@@ -4392,195 +1687,6 @@ def indexing_config():
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-@app.route('/api/indexing/path', methods=['GET', 'POST'])
-def indexing_path_config():
-    """Lädt oder speichert nur den Indexierungs-Pfad"""
-    if request.method == 'GET':
-        try:
-            config = indexing_manager.get_config(mask_password=False)
-            saved_path = config.get('path', '/') if config else '/'
-
-            # For UI convenience, represent root as empty input value.
-            return jsonify({'path': '' if saved_path == '/' else saved_path})
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
-    elif request.method == 'POST':
-        try:
-            data = request.json or {}
-            path_input = (data.get('path') or '').strip()
-            normalized_path = path_input if path_input else '/'
-
-            config = indexing_manager.get_config(mask_password=False)
-            if not config or not all([config.get('url'), config.get('username'), config.get('password')]):
-                return jsonify({'error': 'Nextcloud configuration required before saving path'}), 400
-
-            indexing_manager.save_nextcloud_config(
-                config['url'],
-                config['username'],
-                config['password'],
-                normalized_path
-            )
-            refresh_simple_calendar_manager()
-
-            return jsonify({
-                'status': 'saved',
-                'message': 'Path saved successfully',
-                'path': '' if normalized_path == '/' else normalized_path
-            })
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
-# ==================== EMAIL INDEXING ENDPOINTS ====================
-
-@app.route('/api/email-indexing/start', methods=['POST'])
-def start_email_indexing():
-    """Startet die E-Mail-Indexierung im Hintergrund"""
-    data = request.get_json(silent=True) or {}
-    account_id = str(data.get('account_id') or '').strip()
-    email_config = data.get('email_config') or data.get('config')
-    
-    # Wenn ein bestehendes Konto gewählt wurde, lade die vollständige gespeicherte Konfiguration serverseitig.
-    if account_id:
-        registry = get_api_registry()
-        saved_email_config = registry.load_config('email') or {}
-        accounts = saved_email_config.get('accounts') if isinstance(saved_email_config, dict) else []
-        if not isinstance(accounts, list) or not accounts:
-            return jsonify({'error': 'Keine gespeicherten E-Mail-Konten gefunden'}), 400
-
-        if not any(str(account.get('account_id') or account.get('id') or '').strip() == account_id for account in accounts if isinstance(account, dict)):
-            return jsonify({'error': 'Ausgewähltes E-Mail-Konto wurde nicht gefunden'}), 400
-
-        email_config = dict(saved_email_config)
-        email_config['selected_account_id'] = account_id
-        email_config['active_account_id'] = account_id
-        email_config['max_emails'] = 0
-
-        # Optionale Indexierungs-Overrides aus dem Request übernehmen.
-        for key in ('folders', 'max_emails', 'use_ssl'):
-            if key in data and data[key] not in (None, ''):
-                email_config[key] = data[key]
-
-        email_config['max_emails'] = 0
-
-    # Wenn keine explizite Auswahl übergeben wurde, die gespeicherte Indexierungs-Konfiguration verwenden.
-    if not email_config:
-        saved_config = email_indexing_manager.get_config(mask_password=False)
-        if not saved_config.get('password') and not saved_config.get('accounts'):
-            return jsonify({'error': 'Keine E-Mail-Konfiguration vorhanden'}), 400
-        email_config = saved_config
-    
-    try:
-        success = email_indexing_manager.start_indexing(email_config)
-        
-        if success:
-            return jsonify({
-                'status': 'started',
-                'message': 'E-Mail-Indexierung wurde gestartet'
-            })
-        else:
-            return jsonify({
-                'error': 'E-Mail-Indexierung läuft bereits oder Konfiguration fehlt'
-            }), 400
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/email-indexing/stop', methods=['POST'])
-def stop_email_indexing():
-    """Stoppt die aktuelle E-Mail-Indexierung"""
-    try:
-        email_indexing_manager.stop_indexing()
-        return jsonify({
-            'status': 'stopped',
-            'message': 'E-Mail-Indexierung wurde gestoppt'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/email-indexing/progress', methods=['GET'])
-def get_email_indexing_progress():
-    """Gibt den aktuellen E-Mail-Indexierungs-Fortschritt zurück"""
-    try:
-        progress = email_indexing_manager.get_progress()
-        return jsonify(progress)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/email-indexing/config', methods=['GET', 'POST'])
-def email_indexing_config():
-    """Lädt oder speichert die E-Mail-Indexierung-Konfiguration"""
-    if request.method == 'GET':
-        try:
-            config = email_indexing_manager.get_config(mask_password=True)
-            return jsonify(config)
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-    
-    elif request.method == 'POST':
-        try:
-            data = request.json
-            imap_host = data.get('imap_host')
-            username = data.get('username')
-            password = data.get('password')
-            imap_port = data.get('imap_port', 993)
-            folders = data.get('folders', 'INBOX')
-            max_emails = data.get('max_emails', 50)
-            use_ssl = data.get('use_ssl', True)
-            
-            if not all([imap_host, username, password]):
-                return jsonify({'error': 'IMAP Host, Username und Password werden benötigt'}), 400
-            
-            email_indexing_manager.save_email_config(
-                imap_host, username, password, imap_port, folders, max_emails, use_ssl
-            )
-            
-            return jsonify({
-                'status': 'saved',
-                'message': 'E-Mail-Konfiguration wurde gespeichert'
-            })
-            
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
-@app.route('/api/email-indexing/stats', methods=['GET'])
-def get_email_indexing_stats():
-    """Gibt E-Mail-Indexierungs-Statistiken zurück"""
-    try:
-        result = {}
-        
-        # Get current progress
-        try:
-            result['progress'] = email_indexing_manager.get_progress()
-        except Exception:
-            result['progress'] = {}
-        
-        # Get database stats if available
-        if knowledge_base and knowledge_base.db:
-            try:
-                # Get email-specific stats from database
-                conn = knowledge_base.db.connection
-                cursor = conn.cursor()
-                
-                cursor.execute("SELECT COUNT(*) as count FROM documents WHERE file_type = 'email'")
-                email_docs = cursor.fetchone()['count']
-                
-                cursor.execute("SELECT SUM(LENGTH(content)) as total_size FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE file_type = 'email')")
-                total_size = cursor.fetchone()['total_size'] or 0
-                
-                result['db_stats'] = {
-                    'email_documents': email_docs,
-                    'total_email_content_size': total_size
-                }
-            except Exception as e:
-                result['db_stats_error'] = str(e)
-        
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-
 @app.route('/api/nextcloud/oauth/authorize', methods=['POST'])
 def nextcloud_oauth_authorize():
     """
@@ -4588,8 +1694,11 @@ def nextcloud_oauth_authorize():
     Erwartet Nextcloud URL, Client ID und Client Secret
     """
     try:
-        data = request.json
-        nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
+        data = request.get_json(silent=True) or {}
+        nextcloud_url = validate_service_url(
+            data.get('nextcloud_url', ''),
+            allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+        )
         client_id = data.get('client_id', '')
         client_secret = data.get('client_secret', '')
 
@@ -4693,8 +1802,7 @@ def nextcloud_oauth_callback():
 
         # Speichere in Indexing Manager
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
-        with open(config_file, 'w') as f:
-            json.dump(oauth_config, f, indent=2)
+        _safe_json_dump(config_file, oauth_config)
 
         # Speichere auch die Basis-Konfiguration für Indexing
         indexing_manager.save_nextcloud_config(
@@ -4703,8 +1811,6 @@ def nextcloud_oauth_callback():
             '',  # Leeres Password, verwenden zu stattdessen OAuth2 Token
             '/'
         )
-        refresh_simple_calendar_manager()
-        initialize_tasks_from_config()
 
         # Cleanup Session
         session.pop('oauth2_state', None)
@@ -4754,20 +1860,20 @@ def nextcloud_oauth_config():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/nextcloud/loginflow/start', methods=['POST'])
+@app.route('/api/nextcloud/loginflow/start', methods=['POST', 'OPTIONS'])
 def nextcloud_loginflow_start():
-    """Startet Nextcloud Login Flow v2 ohne manuelle OAuth-Client-Registrierung."""
+    """Startet Nextcloud Login Flow v2 mit In-Memory State Management"""
     try:
-        data = request.json or {}
-        nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
-        username = _get_request_username()
+        data = request.get_json(silent=True) or {}
+        nextcloud_url = validate_service_url(
+            data.get('nextcloud_url', ''),
+            allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+        )
 
         if not nextcloud_url:
             return jsonify({'error': 'nextcloud_url parameter required'}), 400
-        if not username:
-            return jsonify({'error': 'Authentication required'}), 401
 
-        # Basic URL validation against Nextcloud status endpoint.
+        # Validate Nextcloud instance
         status_url = f"{nextcloud_url}/status.php"
         status_res = requests.get(status_url, timeout=8)
         status_res.raise_for_status()
@@ -4775,6 +1881,7 @@ def nextcloud_loginflow_start():
         if not status_data.get('installed', False):
             return jsonify({'error': 'Invalid Nextcloud instance'}), 400
 
+        # Request login flow from Nextcloud
         flow_url = f"{nextcloud_url}/index.php/login/v2"
         flow_res = requests.post(
             flow_url,
@@ -4792,14 +1899,22 @@ def nextcloud_loginflow_start():
         if not all([login_url, poll_token, poll_endpoint]):
             return jsonify({'error': 'Nextcloud login flow response incomplete'}), 502
 
-        session['loginflow_nextcloud_url'] = nextcloud_url
-        session['loginflow_poll_token'] = poll_token
-        session['loginflow_poll_endpoint'] = poll_endpoint
-        session['loginflow_username'] = username
+        # Store flow state in memory (not in Flask session)
+        session_id = loginflow_state.create_flow(nextcloud_url, poll_token, poll_endpoint)
+        
+        # Also store in Flask session as fallback
+        session['loginflow_session_id'] = session_id
         session.permanent = True
 
         logger.info(f"Nextcloud Login Flow v2 started for {nextcloud_url}")
-        return jsonify({'status': 'started', 'login_url': login_url})
+        
+        response = make_response(jsonify({
+            'status': 'started',
+            'login_url': login_url,
+            'session_id': session_id
+        }))
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return response, 200
     except Exception as e:
         logger.error(f"Error starting Nextcloud Login Flow v2: {str(e)}")
         return jsonify({'error': str(e)}), 500
@@ -4812,14 +1927,14 @@ def nextcloud_loginflow_poll():
         nextcloud_url = session.get('loginflow_nextcloud_url')
         poll_token = session.get('loginflow_poll_token')
         poll_endpoint = session.get('loginflow_poll_endpoint')
-        app_username = session.get('loginflow_username')
 
-        if not all([nextcloud_url, poll_token, poll_endpoint, app_username]):
+        if not all([nextcloud_url, poll_token, poll_endpoint]):
             return jsonify({'error': 'No active login flow', 'status': 'idle'}), 400
 
-        app_username = str(app_username).strip()
-        if not app_username:
-            return jsonify({'error': 'No active login flow', 'status': 'idle'}), 400
+        nextcloud_host = (urlparse(nextcloud_url).hostname or '').lower()
+        poll_host = (urlparse(poll_endpoint).hostname or '').lower()
+        if not nextcloud_host or not poll_host or nextcloud_host != poll_host:
+            return jsonify({'error': 'Invalid poll endpoint host', 'status': 'error'}), 400
 
         poll_res = requests.post(
             poll_endpoint,
@@ -4834,46 +1949,35 @@ def nextcloud_loginflow_poll():
         poll_res.raise_for_status()
         poll_data = poll_res.json()
 
-        nextcloud_username = poll_data.get('loginName')
+        username = poll_data.get('loginName')
         app_password = poll_data.get('appPassword')
         server = (poll_data.get('server') or nextcloud_url).rstrip('/')
 
-        if not all([nextcloud_username, app_password]):
+        if not all([username, app_password]):
             return jsonify({'status': 'pending'})
 
         nextcloud_config = {
             'nextcloud_url': server,
-            'username': nextcloud_username,
+            'username': username,
             'password': app_password,
             'auth_type': 'login_flow_v2',
-            'display_name': nextcloud_username
+            'display_name': username
         }
 
-        user_config = load_user_config(app_username)
-        user_config.update({
-            'nextcloud_url': server,
-            'nextcloud_username': nextcloud_username,
-            'nextcloud_password': app_password,
-            'nextcloud_auth_type': 'login_flow_v2',
-            'nextcloud_display_name': nextcloud_username,
-        })
-        save_user_config(app_username, user_config)
+        config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+        _safe_json_dump(config_file, nextcloud_config)
 
-        indexing_manager.save_nextcloud_config(server, nextcloud_username, app_password, '/')
-        save_calendar_config('', username=app_username)
-        refresh_simple_calendar_manager()
-        initialize_tasks_from_config()
+        indexing_manager.save_nextcloud_config(server, username, app_password, '/')
 
         session.pop('loginflow_nextcloud_url', None)
         session.pop('loginflow_poll_token', None)
         session.pop('loginflow_poll_endpoint', None)
-        session.pop('loginflow_username', None)
 
-        logger.info(f"Nextcloud Login Flow v2 successful for app user {app_username} via {nextcloud_username}@{server}")
+        logger.info(f"Nextcloud Login Flow v2 successful for {username}@{server}")
         return jsonify({
             'status': 'connected',
-            'username': nextcloud_username,
-            'display_name': nextcloud_username,
+            'username': username,
+            'display_name': username,
             'nextcloud_url': server
         })
     except Exception as e:
@@ -4889,8 +1993,11 @@ def nextcloud_direct_login():
     Keine OAuth2-App-Registration nötig!
     """
     try:
-        data = request.json
-        nextcloud_url = data.get('nextcloud_url', '').rstrip('/')
+        data = request.get_json(silent=True) or {}
+        nextcloud_url = validate_service_url(
+            data.get('nextcloud_url', ''),
+            allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+        )
         username = data.get('username', '')
         password = data.get('password', '')
 
@@ -4927,16 +2034,8 @@ def nextcloud_direct_login():
             'display_name': user_info.get('displayName', username)
         }
 
-        request_username = _get_request_username() or username
-        user_config = load_user_config(request_username)
-        user_config.update({
-            'nextcloud_url': nextcloud_url,
-            'nextcloud_username': username,
-            'nextcloud_password': password,
-            'nextcloud_auth_type': 'direct',
-            'nextcloud_display_name': user_info.get('displayName', username),
-        })
-        save_user_config(request_username, user_config)
+        config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+        _safe_json_dump(config_file, nextcloud_config)
 
         # Speichere auch die Basis-Konfiguration für Indexing
         indexing_manager.save_nextcloud_config(
@@ -4945,9 +2044,6 @@ def nextcloud_direct_login():
             password,
             '/'
         )
-        save_calendar_config('', username=request_username)
-        refresh_simple_calendar_manager()
-        initialize_tasks_from_config()
 
         return jsonify({
             'status': 'success',
@@ -4968,23 +2064,12 @@ def nextcloud_config_get():
     Gibt die aktuelle Nextcloud Konfiguration zurück (ohne Passwort!)
     """
     try:
-        username = _get_request_username()
-        if username:
-            config = load_user_config(username)
-            safe_config = {
-                'nextcloud_url': config.get('nextcloud_url', '') or config.get('caldav_url', ''),
-                'username': config.get('nextcloud_username', '') or config.get('caldav_username', ''),
-                'display_name': config.get('nextcloud_display_name', '') or config.get('display_name', ''),
-                'auth_type': config.get('nextcloud_auth_type', '') or config.get('auth_type', ''),
-                'configured': bool(config.get('nextcloud_url') or config.get('caldav_url'))
-            }
-            return jsonify(safe_config)
-
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+        
         if os.path.exists(config_file):
             with open(config_file, 'r') as f:
                 config = json.load(f)
-
+            
             # Entferne Passwort
             safe_config = {
                 'nextcloud_url': config.get('nextcloud_url', ''),
@@ -5005,31 +2090,8 @@ def nextcloud_config_get():
 @app.route('/api/nextcloud/disconnect', methods=['POST'])
 def nextcloud_disconnect():
     """Trennt die Nextcloud-Verbindung und entfernt gespeicherte Credentials."""
-    global simple_calendar_manager, tasks_enabled
     try:
         removed_files = []
-
-        username = _get_request_username()
-        if username:
-            user_config = load_user_config(username)
-            for key in [
-                'nextcloud_url',
-                'nextcloud_username',
-                'nextcloud_password',
-                'nextcloud_display_name',
-                'nextcloud_auth_type',
-                'default_calendar_name',
-                'caldav_url',
-                'caldav_username',
-                'caldav_password'
-            ]:
-                user_config.pop(key, None)
-            save_user_config(username, user_config)
-            save_calendar_config('', username=username)
-            simple_calendar_manager = None
-            task_manager.tasks_client = None
-            tasks_enabled = False
-            return jsonify({'success': True, 'removed_files': ['user_config']})
 
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
         if os.path.exists(config_file):
@@ -5043,9 +2105,6 @@ def nextcloud_disconnect():
 
         # Reset indexing credentials so indexing cannot start with stale auth data.
         indexing_manager.save_nextcloud_config('', '', '', '/')
-        simple_calendar_manager = None
-        task_manager.tasks_client = None
-        tasks_enabled = False
 
         # Cleanup potentially remaining auth session state.
         session.pop('pkce_code_verifier', None)
@@ -5070,303 +2129,6 @@ def nextcloud_disconnect():
         logger.error(f"Error disconnecting Nextcloud: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-
-@app.route('/api/nextcloud/talk/webhook', methods=['POST'])
-def nextcloud_talk_webhook():
-    """Receive incoming Talk messages (webhook) and optionally reply via the agent.
-
-    Expected JSON: { 'room_id': str, 'message': str, 'username': str (optional), 'language': 'de'|'en', 'reply': bool }
-    """
-    try:
-        # Raw body for HMAC verification and flexible parsing
-        raw_body = request.get_data() or b''
-        body_json = None
-        try:
-            body_json = json.loads(raw_body.decode('utf-8')) if raw_body else None
-        except Exception:
-            body_json = None
-
-        # Support two formats:
-        # 1) Simple API from frontend: { room_id, message, username, language, reply }
-        # 2) Nextcloud Talk ActivityStreams payload (bot webhook)
-        room_id = ''
-        incoming = ''
-        username = None
-        language = 'de'
-        do_reply = True
-
-        if isinstance(body_json, dict):
-            # Simple frontend format
-            if 'room_id' in body_json and 'message' in body_json:
-                room_id = str(body_json.get('room_id') or '').strip()
-                incoming = str(body_json.get('message') or '').strip()
-                username = body_json.get('username')
-                language = str(body_json.get('language') or 'de')
-                do_reply = bool(body_json.get('reply', True))
-                logger.debug('📬 Simple Talk webhook format: room=%s message=%s', room_id[:8] if room_id else '?', incoming[:50] if incoming else '?')
-            else:
-                # ActivityStreams format from Nextcloud Talk bot
-                event_type = str(body_json.get('type', 'Unknown')).strip()
-                logger.debug('📬 Nextcloud Talk ActivityStreams event: type=%s', event_type)
-                
-                try:
-                    actor = body_json.get('actor', {})
-                    obj = body_json.get('object', {})
-                    target = body_json.get('target', {})
-                    
-                    # Extract room token from target
-                    room_id = str(target.get('id') or '').strip()
-                    
-                    # Extract username from actor
-                    actor_name = actor.get('name', 'Unknown')
-                    
-                    # Process based on event type
-                    if event_type.lower() == 'create':
-                        # Incoming message from user
-                        content_raw = obj.get('content')
-                        if isinstance(content_raw, str):
-                            try:
-                                inner = json.loads(content_raw)
-                                incoming = str(inner.get('message') or '').strip()
-                            except Exception:
-                                incoming = str(content_raw or '').strip()
-                        else:
-                            incoming = str(content_raw or '').strip()
-                        
-                        do_reply = True
-                        logger.info('📨 Talk message from %s in room %s: %s', actor_name, room_id[:8], incoming[:80] if incoming else '(empty)')
-                        
-                    elif event_type.lower() == 'join':
-                        # Bot was added to room
-                        incoming = f'[Bot wurde zum Raum hinzugefügt von {actor_name}]'
-                        do_reply = False
-                        logger.info('🤝 Talk bot joined room %s by %s', room_id[:8], actor_name)
-                        
-                    elif event_type.lower() == 'leave':
-                        # Bot was removed from room
-                        incoming = f'[Bot wurde aus dem Raum entfernt von {actor_name}]'
-                        do_reply = False
-                        logger.info('👋 Talk bot left room %s (removed by %s)', room_id[:8], actor_name)
-                        
-                    elif event_type.lower() == 'like':
-                        # Reaction added
-                        content = obj.get('content', 'emoji')
-                        incoming = f'[Reaktion hinzugefügt: {content}]'
-                        do_reply = False
-                        logger.debug('👍 Talk reaction from %s: %s', actor_name, content)
-                        
-                    elif event_type.lower() == 'undo':
-                        # Reaction removed
-                        incoming = f'[Reaktion entfernt von {actor_name}]'
-                        do_reply = False
-                        logger.debug('🔄 Talk reaction undone by %s', actor_name)
-                    else:
-                        logger.warning('⚠️ Unknown ActivityStreams event type: %s', event_type)
-                        do_reply = False
-                        
-                except Exception as e:
-                    logger.error('❌ Error parsing ActivityStreams payload: %s', e)
-                    do_reply = False
-
-        # Validate basic fields
-        if not room_id or not incoming:
-            logger.warning('⚠️ Talk webhook validation failed: room_id=%s incoming=%s', bool(room_id), bool(incoming))
-            return jsonify({'success': False, 'error': 'room_id and message required'}), 400
-
-        # Verify HMAC signature using Nextcloud Talk bot headers if configured
-        try:
-            logger.debug('📨 Talk webhook raw body size: %d bytes', len(raw_body))
-            # Secret precedence: env var -> AI config file
-            secret = os.getenv('BRIEFING_TALK_WEBHOOK_SECRET') or ''
-            if not secret:
-                cfg = load_ai_config()
-                secret = str(cfg.get('briefing_talk_webhook_secret') or '').strip()
-
-            # Extract all possible headers
-            random_hdr = request.headers.get('X-Nextcloud-Talk-Random') or request.headers.get('HTTP_X_NEXTCLOUD_TALK_RANDOM')
-            sig_hdr = request.headers.get('X-Nextcloud-Talk-Signature') or request.headers.get('HTTP_X_NEXTCLOUD_TALK_SIGNATURE')
-            legacy_sig = request.headers.get('X-Mynd-Signature') or request.headers.get('X-Hub-Signature-256')
-            backend_hdr = request.headers.get('X-Nextcloud-Talk-Backend')
-
-            logger.debug('Talk webhook headers: Random=%s Sig=%s Legacy=%s Backend=%s', bool(random_hdr), bool(sig_hdr), bool(legacy_sig), bool(backend_hdr))
-
-            # Verify signature if secret configured
-            if secret:
-                if random_hdr and sig_hdr:
-                    # Nextcloud spec: HMAC-SHA256(RANDOM_HEADER + raw_body) per spec
-                    msg = (str(random_hdr).encode('utf-8') + raw_body)
-                    computed = hmac.new(secret.encode('utf-8'), msg, hashlib.sha256).hexdigest()
-                    sig = sig_hdr.lower()
-                    if sig.startswith('sha256='):
-                        sig = sig.split('=', 1)[1]
-                    if not hmac.compare_digest(computed, sig):
-                        logger.error('❌ Invalid Talk bot webhook signature: computed=%s header=%s (secret=%s bytes, body=%s bytes)', computed[:16], sig[:16], len(secret), len(raw_body))
-                        return jsonify({'success': False, 'error': 'Invalid signature'}), 401
-                    logger.info('✅ Talk webhook verified via Nextcloud bot signature (random=%s bytes)', len(random_hdr))
-                elif legacy_sig:
-                    # Legacy: compare HMAC over raw body only
-                    if legacy_sig.startswith('sha256='):
-                        ls = legacy_sig.split('=', 1)[1]
-                    else:
-                        ls = legacy_sig
-                    computed2 = hmac.new(secret.encode('utf-8'), raw_body, hashlib.sha256).hexdigest()
-                    if not hmac.compare_digest(computed2, ls):
-                        logger.error('❌ Invalid legacy webhook signature: computed=%s header=%s', computed2[:16], ls[:16])
-                        return jsonify({'success': False, 'error': 'Invalid signature'}), 401
-                    logger.info('✅ Talk webhook verified via legacy signature')
-                elif isinstance(body_json, dict) and 'room_id' in body_json and 'message' in body_json:
-                    # Simple frontend test format without signature - accept for development/testing
-                    logger.warning('⚠️ Talk webhook accepted without signature (simple format - development/testing)')
-                else:
-                    logger.error('❌ Talk webhook signature expected but missing (no Random/Sig headers)')
-                    return jsonify({'success': False, 'error': 'Signature expected but missing'}), 401
-            else:
-                # No secret configured - accept unsigned webhooks (development/testing)
-                logger.warning('⚠️ Talk webhook accepted without signature verification (no secret configured)')
-        except Exception as e:
-            logger.debug('Error verifying Talk webhook signature: %s', e)
-            return jsonify({'success': False, 'error': 'Signature verification error'}), 401
-
-        # Build a concise system message and gather lightweight context
-        try:
-            # Reuse some context gatherers for enriched responses where possible
-            weather_context = gather_weather_context(get_local_weather_status, is_weather_query, incoming, _safe_text)
-            security_context = gather_security_context(get_local_security_status, is_security_query, incoming)
-            activity_context = gather_activity_context(get_updates_context, is_activity_query, incoming)
-            nextcloud_search_context = None
-            try:
-                search_client = get_nextcloud_search_client(username)
-                if search_client:
-                    nextcloud_search_context = gather_nextcloud_search_context(search_client, incoming, extract_search_terms)
-            except Exception:
-                nextcloud_search_context = None
-
-            combined_context = combine_contexts(weather_context, security_context, activity_context, None, None, None, None, nextcloud_search_context)
-            system_message = build_agent_system_message(combined_context, language)
-        except Exception as e:
-            logger.debug('Error building context for Talk webhook: %s', e)
-            system_message = 'Du bist ein hilfreicher Assistent.'
-
-        messages = [
-            {'role': 'system', 'content': system_message},
-            {'role': 'user', 'content': incoming}
-        ]
-
-        try:
-            response = ollama_client.chat(messages, [])
-            if 'error' in response:
-                ai_text = f'Entschuldigung, ich konnte gerade nicht antworten.'
-            else:
-                ai_text = str(response.get('message', {}).get('content') or '').strip() or 'Keine Antwort vom Modell.'
-        except Exception as e:
-            logger.error('AI generation error for Talk webhook: %s', e)
-            ai_text = 'Entschuldigung, ich konnte gerade keine Antwort generieren.'
-
-        # Optionally post reply back to Talk
-        posted = False
-        if do_reply and room_id and incoming:
-            try:
-                cfg = get_nextcloud_runtime_config() or {}
-                if cfg and cfg.get('url'):
-                    # Initialize with bot_secret for proper Bot API usage
-                    bot_secret = os.getenv('BRIEFING_TALK_WEBHOOK_SECRET') or ''
-                    if not bot_secret:
-                        ai_cfg = load_ai_config()
-                        bot_secret = str(ai_cfg.get('briefing_talk_webhook_secret') or '').strip()
-                    
-                    talk = NextcloudTalkClient(
-                        url=cfg.get('url'),
-                        username=cfg.get('username'),
-                        password=cfg.get('password'),
-                        bot_secret=bot_secret  # <-- CRITICAL: pass bot_secret for Bot API
-                    )
-                    posted = talk.send_message(room_id, ai_text)
-                    
-                    if posted:
-                        logger.info('✅ Talk reply posted successfully to room %s (bot_secret_available=%s)', room_id, bool(bot_secret))
-                    else:
-                        logger.warning('⚠️ Talk reply failed to post to room %s', room_id)
-                else:
-                    logger.warning('❌ No Nextcloud credentials available to reply to Talk webhook')
-            except Exception as e:
-                logger.error('❌ Error posting Talk reply: %s', e)
-
-        return jsonify({'success': True, 'reply_posted': bool(posted), 'reply_text': ai_text})
-
-    except Exception as e:
-        logger.error(f"Talk webhook error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/nextcloud/talk/webhook-debug', methods=['POST'])
-def nextcloud_talk_webhook_debug():
-    """Debug endpoint: Test webhook with ActivityStreams format from Nextcloud Talk
-    
-    Expected JSON for ActivityStreams test:
-    {
-      "type": "create",
-      "actor": {"name": "testuser"},
-      "object": {"content": "Test message"},
-      "target": {"id": "mychannel"}
-    }
-    """
-    try:
-        logger.info('🧪 DEBUG: Webhook-Debug endpoint aufgerufen')
-        
-        raw_body = request.get_data() or b''
-        payload = request.get_json() or {}
-        
-        logger.info('🧪 Raw body size: %d bytes', len(raw_body))
-        logger.info('🧪 Payload: %s', payload)
-        
-        # Log all headers
-        headers_dict = dict(request.headers)
-        logger.info('🧪 Headers: %s', {k: v for k, v in headers_dict.items() if 'talk' in k.lower() or 'signature' in k.lower()})
-        
-        # Attempt to parse as ActivityStreams
-        event_type = payload.get('type', 'unknown')
-        actor = payload.get('actor', {})
-        obj = payload.get('object', {})
-        target = payload.get('target', {})
-        
-        room_id = str(target.get('id') or '').strip()
-        actor_name = actor.get('name', 'Unknown')
-        
-        logger.info('🧪 ActivityStreams Parse: type=%s actor=%s room=%s', event_type, actor_name, room_id[:8] if room_id else '?')
-        
-        if event_type.lower() == 'create':
-            content_raw = obj.get('content')
-            if isinstance(content_raw, str):
-                try:
-                    inner = json.loads(content_raw)
-                    message = str(inner.get('message') or '').strip()
-                except Exception:
-                    message = str(content_raw or '').strip()
-            else:
-                message = str(content_raw or '').strip()
-            
-            logger.info('🧪 Message from %s: %s', actor_name, message[:100] if message else '(empty)')
-            
-            return jsonify({
-                'success': True,
-                'debug': 'ActivityStreams message parsed successfully',
-                'room_id': room_id,
-                'message': message,
-                'actor': actor_name,
-                'event_type': event_type
-            })
-        
-        return jsonify({
-            'success': True,
-            'debug': f'Event type {event_type} received',
-            'event_type': event_type
-        })
-        
-    except Exception as e:
-        logger.error('🧪 DEBUG Error: %s', e)
-        return jsonify({'success': False, 'error': str(e), 'debug': 'Check backend logs'}), 500
-
-
 @app.route('/api/knowledge/sources', methods=['GET'])
 def get_knowledge_sources():
     """Gibt die Quellen der Wissensbasis zurück"""
@@ -5381,15 +2143,10 @@ def knowledge_status():
     try:
         if knowledge_base.search_engine:
             stats = knowledge_base.search_engine.get_stats()
-            embedding_coverage = stats.get('embedding_coverage', {})
             return jsonify({
                 'chunks_loaded': stats.get('chunks', 0),
                 'documents_count': stats.get('documents', 0),
                 'embeddings_count': stats.get('embeddings', 0),
-                'generated_embeddings': embedding_coverage.get('generated_embeddings', stats.get('embeddings', 0)),
-                'missing_embeddings': embedding_coverage.get('missing_embeddings', 0),
-                'completion_percentage': embedding_coverage.get('completion_percentage', 0),
-                'embeddings_complete': embedding_coverage.get('complete', False),
                 'index_size': stats.get('index_size', 0),
                 'total_words': stats.get('total_words', 0),
                 'file_types': stats.get('file_types', {}),
@@ -5409,7 +2166,7 @@ def knowledge_status():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/knowledge/graph-data', methods=['GET'])
-def get_knowledge_base_chunks():
+def get_knowledge_graph_data():
     """Gibt Daten für Knowledge Graph Visualization zurück"""
     try:
         return jsonify({
@@ -5573,11 +2330,8 @@ def create_event_with_details():
 def get_calendars():
     """Gibt verfügbare Kalender zurück"""
     try:
-        # Always refresh to ensure latest Login Flow credentials are used.
-        refresh_simple_calendar_manager()
-
         if not simple_calendar_manager:
-            return jsonify({'error': 'Kalender nicht verfügbar. Bitte zuerst Nextcloud verbinden.'}), 400
+            return jsonify({'error': 'Kalender nicht verfügbar'}), 500
         
         calendars = simple_calendar_manager.get_calendars()
         return jsonify({
@@ -5668,7 +2422,7 @@ def update_embeddings():
         if not knowledge_base.search_engine:
             return jsonify({'error': 'Semantic search not available'}), 400
         
-        knowledge_base.search_engine.rebuild_index()
+        knowledge_base.search_engine.update_missing_embeddings()
         
         return jsonify({
             'status': 'success',
@@ -5677,224 +2431,6 @@ def update_embeddings():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-TXT_UPLOAD_DIR = os.path.join(DATA_DIR, 'uploaded_txt')
-os.makedirs(TXT_UPLOAD_DIR, exist_ok=True)
-
-ALLOWED_TXT_EXTENSIONS = {'.txt'}
-TXT_MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
-
-
-def _index_txt_file(file_path: str, original_name: str) -> dict:
-    """Parse a text/WhatsApp file and add its chunks to the knowledge database."""
-    parser = DocumentParser()
-    content = parser.parse_file(file_path)
-
-    if not content or len(content.strip()) < 10:
-        return {'chunks': 0, 'warning': 'File appears empty or too short to index'}
-
-    # Split into chunks
-    chunks = knowledge_base.split_text(content)
-
-    if not chunks:
-        return {'chunks': 0, 'warning': 'No indexable chunks found'}
-
-    if knowledge_base.db:
-        # Use file path as unique document identifier so re-uploads replace old data
-        doc_id = knowledge_base.db.add_document(
-            name=original_name,
-            path=file_path,
-            file_type='.txt',
-            metadata={'source': 'uploaded_txt', 'original_name': original_name}
-        )
-
-        # Delete old chunks for this document before re-inserting
-        try:
-            knowledge_base.db.connection.execute(
-                "DELETE FROM chunks_fts WHERE document_id = ?", (doc_id,)
-            )
-            knowledge_base.db.connection.execute(
-                "DELETE FROM chunks WHERE document_id = ?", (doc_id,)
-            )
-            knowledge_base.db.connection.commit()
-        except Exception:
-            pass
-
-        knowledge_base.db.add_chunks(doc_id, chunks)
-        logger.info(f"Indexed {len(chunks)} chunks for uploaded file: {original_name}")
-        return {'chunks': len(chunks), 'doc_id': doc_id}
-    else:
-        # Fallback: extend in-memory knowledge
-        knowledge_base.knowledge_chunks.extend(chunks)
-        return {'chunks': len(chunks)}
-
-
-def _secure_txt_filename(filename: str) -> str:
-    """Return a safe filename for an uploaded .txt file."""
-    try:
-        from werkzeug.utils import secure_filename
-        safe = secure_filename(filename)
-    except Exception:
-        safe = re.sub(r'[^\w.\-]', '_', filename)
-    # Ensure it ends with .txt
-    if not safe.lower().endswith('.txt'):
-        safe = safe + '.txt'
-    # Prevent hidden files
-    if safe.startswith('.'):
-        safe = 'upload_' + safe
-    return safe or 'upload.txt'
-
-
-@app.route('/api/knowledge/upload-txt', methods=['POST'])
-def upload_txt_files():
-    """Upload one or more .txt files and index them into the knowledge base."""
-    if 'files' not in request.files:
-        return jsonify({'error': 'No files provided'}), 400
-
-    uploaded_files = request.files.getlist('files')
-    if not uploaded_files:
-        return jsonify({'error': 'No files provided'}), 400
-
-    results = []
-    errors = []
-
-    for upload in uploaded_files:
-        original_name = upload.filename or 'unknown.txt'
-        ext = os.path.splitext(original_name)[1].lower()
-
-        if ext not in ALLOWED_TXT_EXTENSIONS:
-            errors.append(f'{original_name}: Nur .txt Dateien sind erlaubt / Only .txt files are allowed')
-            continue
-
-        safe_name = _secure_txt_filename(original_name)
-        dest_path = os.path.join(TXT_UPLOAD_DIR, safe_name)
-
-        # Avoid overwriting – append a counter if needed
-        counter = 1
-        base, suffix = os.path.splitext(dest_path)
-        while os.path.exists(dest_path):
-            dest_path = f"{base}_{counter}{suffix}"
-            counter += 1
-
-        try:
-            upload.save(dest_path)
-
-            # Reject files that are too large
-            if os.path.getsize(dest_path) > TXT_MAX_SIZE_BYTES:
-                os.remove(dest_path)
-                errors.append(f'{original_name}: Datei zu groß / File too large (max. 50 MB)')
-                continue
-
-            index_result = _index_txt_file(dest_path, original_name)
-            results.append({
-                'name': original_name,
-                'saved_as': os.path.basename(dest_path),
-                'chunks': index_result.get('chunks', 0),
-                'warning': index_result.get('warning')
-            })
-        except Exception as e:
-            logger.error(f"Error uploading {original_name}: {e}")
-            errors.append(f'{original_name}: Upload fehlgeschlagen / Upload failed')
-            if os.path.exists(dest_path):
-                try:
-                    os.remove(dest_path)
-                except Exception:
-                    pass
-
-    if not results and errors:
-        return jsonify({'error': '; '.join(errors)}), 400
-
-    return jsonify({
-        'status': 'success',
-        'uploaded': results,
-        'errors': errors,
-        'total_chunks': sum(r['chunks'] for r in results)
-    })
-
-
-@app.route('/api/knowledge/txt-files', methods=['GET'])
-def list_txt_files():
-    """List all uploaded .txt files."""
-    try:
-        files = []
-        if knowledge_base.db:
-            cursor = knowledge_base.db.connection.cursor()
-            cursor.execute("""
-                SELECT d.id, d.name, d.path, d.created_at,
-                       COUNT(c.id) AS chunk_count
-                FROM documents d
-                LEFT JOIN chunks c ON c.document_id = d.id
-                WHERE json_extract(d.metadata, '$.source') = 'uploaded_txt'
-                GROUP BY d.id
-                ORDER BY d.created_at DESC
-            """)
-            for row in cursor.fetchall():
-                files.append({
-                    'id': row['id'],
-                    'name': row['name'],
-                    'created_at': row['created_at'],
-                    'chunk_count': row['chunk_count'],
-                    'file_exists': os.path.exists(row['path'])
-                })
-        else:
-            # Fallback: scan directory
-            for fname in sorted(os.listdir(TXT_UPLOAD_DIR)):
-                fpath = os.path.join(TXT_UPLOAD_DIR, fname)
-                if fname.endswith('.txt') and os.path.isfile(fpath):
-                    files.append({
-                        'id': None,
-                        'name': fname,
-                        'created_at': os.path.getctime(fpath),
-                        'chunk_count': 0,
-                        'file_exists': True
-                    })
-
-        return jsonify({'files': files})
-    except Exception as e:
-        logger.error(f"Error listing txt files: {e}")
-        return jsonify({'error': 'Could not list files'}), 500
-
-
-@app.route('/api/knowledge/txt-files/<int:doc_id>', methods=['DELETE'])
-def delete_txt_file(doc_id: int):
-    """Delete an uploaded .txt file and remove it from the knowledge base."""
-    try:
-        if not knowledge_base.db:
-            return jsonify({'error': 'Database not available'}), 500
-
-        cursor = knowledge_base.db.connection.cursor()
-        cursor.execute(
-            "SELECT id, name, path, metadata FROM documents WHERE id = ?", (doc_id,)
-        )
-        row = cursor.fetchone()
-
-        if not row:
-            return jsonify({'error': 'File not found'}), 404
-
-        metadata = json.loads(row['metadata'] or '{}')
-        if metadata.get('source') != 'uploaded_txt':
-            return jsonify({'error': 'Document is not an uploaded txt file'}), 400
-
-        file_path = row['path']
-        doc_name = row['name']
-
-        # Remove from database (CASCADE deletes chunks)
-        cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-        knowledge_base.db.connection.commit()
-
-        # Remove physical file
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                logger.warning(f"Could not delete file {file_path}: {e}")
-
-        return jsonify({'status': 'deleted', 'name': doc_name})
-
-    except Exception as e:
-        logger.error(f"Error deleting txt file {doc_id}: {e}")
-        return jsonify({'error': 'Could not delete file'}), 500
-
 
 @app.route('/api/training/stats', methods=['GET'])
 def training_stats():
@@ -5976,23 +2512,11 @@ def ai_config():
     """Liest oder speichert die AI-Konfiguration (aktuell Ollama)."""
     try:
         if request.method == 'GET':
-            persisted = load_ai_config()
             return jsonify({
                 'provider': 'ollama',
                 'base_url': ollama_client.base_url,
                 'model': ollama_client.model,
-                'embedding_model': persisted.get('embedding_model', 'nomic-embed-text'),
-                'connected': ollama_client.check_connection(),
-                'tts_provider': persisted.get('tts_provider', 'browser'),
-                'browser_tts_voice_uri': persisted.get('browser_tts_voice_uri', ''),
-                'gemini_tts_model': persisted.get('gemini_tts_model', 'gemini-2.5-flash-tts'),
-                'gemini_tts_voice': persisted.get('gemini_tts_voice', 'Kore'),
-                'gemini_tts_language_code': persisted.get('gemini_tts_language_code', 'de-DE'),
-                'gemini_tts_style_prompt': persisted.get('gemini_tts_style_prompt', ''),
-                'gemini_tts_audio_encoding': persisted.get('gemini_tts_audio_encoding', 'MP3'),
-                'gemini_live_model': persisted.get('gemini_live_model', 'gemini-3.1-flash-live-preview'),
-                'gemini_live_voice': persisted.get('gemini_live_voice', 'Zephyr'),
-                'gemini_tts_api_key_set': bool(persisted.get('gemini_tts_api_key'))
+                'connected': ollama_client.check_connection()
             })
 
         data = request.json or {}
@@ -6005,59 +2529,15 @@ def ai_config():
         if not (base_url.startswith('http://') or base_url.startswith('https://')):
             return jsonify({'error': 'base_url muss mit http:// oder https:// beginnen'}), 400
 
-        tts_provider = str(data.get('tts_provider', 'browser')).strip().lower() or 'browser'
-        if tts_provider not in ('browser', 'gemini'):
-            return jsonify({'error': 'tts_provider muss browser oder gemini sein'}), 400
-
-        existing = load_ai_config()
-        gemini_tts_api_key = str(data.get('gemini_tts_api_key', '')).strip()
-        if not gemini_tts_api_key:
-            gemini_tts_api_key = str(existing.get('gemini_tts_api_key', '')).strip()
-
-        browser_tts_voice_uri = str(data.get('browser_tts_voice_uri', '')).strip()
-        gemini_tts_model = str(data.get('gemini_tts_model', existing.get('gemini_tts_model', 'gemini-2.5-flash-tts'))).strip() or 'gemini-2.5-flash-tts'
-        gemini_tts_voice = str(data.get('gemini_tts_voice', existing.get('gemini_tts_voice', 'Kore'))).strip() or 'Kore'
-        gemini_tts_language_code = str(data.get('gemini_tts_language_code', existing.get('gemini_tts_language_code', 'de-DE'))).strip() or 'de-DE'
-        gemini_tts_style_prompt = str(data.get('gemini_tts_style_prompt', existing.get('gemini_tts_style_prompt', ''))).strip()
-        gemini_tts_audio_encoding = str(data.get('gemini_tts_audio_encoding', existing.get('gemini_tts_audio_encoding', 'MP3'))).strip().upper() or 'MP3'
-        gemini_live_model = str(data.get('gemini_live_model', existing.get('gemini_live_model', 'gemini-3.1-flash-live-preview'))).strip() or 'gemini-3.1-flash-live-preview'
-        gemini_live_voice = str(data.get('gemini_live_voice', existing.get('gemini_live_voice', 'Zephyr'))).strip() or 'Zephyr'
-        embedding_model = str(data.get('embedding_model', existing.get('embedding_model', 'nomic-embed-text'))).strip() or 'nomic-embed-text'
-
         ollama_client.update_config(base_url, model)
-        save_ai_config(
-            base_url,
-            model,
-            tts_provider=tts_provider,
-            browser_tts_voice_uri=browser_tts_voice_uri,
-            gemini_tts_api_key=gemini_tts_api_key,
-            gemini_tts_model=gemini_tts_model,
-            gemini_tts_voice=gemini_tts_voice,
-            gemini_tts_language_code=gemini_tts_language_code,
-            gemini_tts_style_prompt=gemini_tts_style_prompt,
-            gemini_tts_audio_encoding=gemini_tts_audio_encoding,
-            gemini_live_model=gemini_live_model,
-            gemini_live_voice=gemini_live_voice,
-            embedding_model=embedding_model,
-        )
+        save_ai_config(base_url, model)
 
         return jsonify({
             'status': 'saved',
             'provider': 'ollama',
             'base_url': ollama_client.base_url,
             'model': ollama_client.model,
-            'connected': ollama_client.check_connection(),
-            'tts_provider': tts_provider,
-            'browser_tts_voice_uri': browser_tts_voice_uri,
-            'gemini_tts_model': gemini_tts_model,
-            'gemini_tts_voice': gemini_tts_voice,
-            'gemini_tts_language_code': gemini_tts_language_code,
-            'gemini_tts_style_prompt': gemini_tts_style_prompt,
-            'gemini_tts_audio_encoding': gemini_tts_audio_encoding,
-            'gemini_tts_api_key_set': bool(gemini_tts_api_key),
-            'gemini_live_model': gemini_live_model,
-            'gemini_live_voice': gemini_live_voice,
-            'embedding_model': embedding_model,
+            'connected': ollama_client.check_connection()
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -6103,101 +2583,6 @@ def ai_test():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
-def _trim_utf8_bytes(value: str, max_bytes: int) -> str:
-    encoded = value.encode('utf-8')
-    if len(encoded) <= max_bytes:
-        return value
-    return encoded[:max_bytes].decode('utf-8', errors='ignore')
-
-
-@app.route('/api/tts/synthesize', methods=['POST'])
-def tts_synthesize():
-    """Synthetisiert Audio ueber Gemini TTS (Google Cloud Text-to-Speech API)."""
-    try:
-        data = request.json or {}
-        text = str(data.get('text', '')).strip()
-        if not text:
-            return jsonify({'success': False, 'error': 'text darf nicht leer sein'}), 400
-
-        config = load_ai_config()
-        tts_provider = str(config.get('tts_provider', 'browser')).strip().lower()
-        if tts_provider != 'gemini':
-            return jsonify({'success': False, 'error': 'tts_provider ist nicht auf gemini gesetzt'}), 400
-
-        api_key = str(config.get('gemini_tts_api_key', '')).strip()
-        if not api_key:
-            return jsonify({'success': False, 'error': 'Gemini TTS API Key ist nicht konfiguriert'}), 400
-
-        prompt = str(data.get('prompt', config.get('gemini_tts_style_prompt', ''))).strip()
-        text = _trim_utf8_bytes(text, 4000)
-        prompt = _trim_utf8_bytes(prompt, 4000)
-
-        combined_bytes = len(text.encode('utf-8')) + len(prompt.encode('utf-8'))
-        if combined_bytes > 8000:
-            allowed_prompt_bytes = max(0, 8000 - len(text.encode('utf-8')))
-            prompt = _trim_utf8_bytes(prompt, allowed_prompt_bytes)
-
-        model_name = str(data.get('model', config.get('gemini_tts_model', 'gemini-2.5-flash-tts'))).strip() or 'gemini-2.5-flash-tts'
-        voice_name = str(data.get('voice', config.get('gemini_tts_voice', 'Kore'))).strip() or 'Kore'
-        language_code = str(data.get('language_code', config.get('gemini_tts_language_code', 'de-DE'))).strip() or 'de-DE'
-        audio_encoding = str(data.get('audio_encoding', config.get('gemini_tts_audio_encoding', 'MP3'))).strip().upper() or 'MP3'
-
-        payload = {
-            'input': {
-                'text': text
-            },
-            'voice': {
-                'languageCode': language_code,
-                'name': voice_name,
-                'modelName': model_name
-            },
-            'audioConfig': {
-                'audioEncoding': audio_encoding
-            }
-        }
-
-        if prompt:
-            payload['input']['prompt'] = prompt
-
-        endpoint = f"https://texttospeech.googleapis.com/v1/text:synthesize?key={api_key}"
-        upstream = requests.post(endpoint, json=payload, timeout=60)
-
-        try:
-            upstream_data = upstream.json()
-        except Exception:
-            upstream_data = {'error': {'message': upstream.text[:500]}}
-
-        if upstream.status_code >= 400:
-            upstream_error = upstream_data.get('error', {}) if isinstance(upstream_data, dict) else {}
-            error_message = upstream_error.get('message') or f"Google TTS Fehler ({upstream.status_code})"
-            return jsonify({'success': False, 'error': error_message}), 502
-
-        audio_content = str(upstream_data.get('audioContent', '')).strip() if isinstance(upstream_data, dict) else ''
-        if not audio_content:
-            return jsonify({'success': False, 'error': 'Keine Audiodaten von Gemini TTS erhalten'}), 502
-
-        mime_type_map = {
-            'MP3': 'audio/mpeg',
-            'LINEAR16': 'audio/wav',
-            'ALAW': 'audio/basic',
-            'MULAW': 'audio/basic',
-            'OGG_OPUS': 'audio/ogg',
-            'PCM': 'audio/L16'
-        }
-
-        return jsonify({
-            'success': True,
-            'audio_base64': audio_content,
-            'mime_type': mime_type_map.get(audio_encoding, 'audio/mpeg'),
-            'model': model_name,
-            'voice': voice_name,
-            'language_code': language_code,
-            'audio_encoding': audio_encoding
-        })
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 # Kalender API Endpunkte
 @app.route('/api/calendar/status', methods=['GET'])
@@ -6319,193 +2704,6 @@ def calendar_day(day_name):
         logger.error(f"Calendar day error: {e}")
         return jsonify({'error': str(e)}), 500
 
-
-@app.route('/api/calendar/ui', methods=['GET'])
-def calendar_ui():
-    """Structured calendar data for interactive frontend cards."""
-    try:
-        if not calendar_enabled:
-            return jsonify({'error': 'Kalender nicht verfügbar'}), 400
-
-        if not simple_calendar_manager:
-            refresh_simple_calendar_manager()
-
-        if not simple_calendar_manager:
-            return jsonify({'error': 'Kalender nicht initialisiert'}), 400
-
-        view = (request.args.get('view') or 'day').strip().lower()
-        anchor_date = _parse_iso_anchor_date(request.args.get('date'))
-
-        if view == 'week':
-            start_date = anchor_date - timedelta(days=anchor_date.weekday())
-            end_date = start_date + timedelta(days=6)
-            period_label = f"Week of {start_date.strftime('%d.%m.%Y')}"
-        elif view == 'month':
-            start_date = date(anchor_date.year, anchor_date.month, 1)
-            if anchor_date.month == 12:
-                next_month = date(anchor_date.year + 1, 1, 1)
-            else:
-                next_month = date(anchor_date.year, anchor_date.month + 1, 1)
-            end_date = next_month - timedelta(days=1)
-            period_label = start_date.strftime('%B %Y')
-        elif view == 'list':
-            start_date = anchor_date
-            end_date = anchor_date + timedelta(days=13)
-            period_label = f"Next 14 days from {anchor_date.strftime('%d.%m.%Y')}"
-        else:
-            view = 'day'
-            start_date = anchor_date
-            end_date = anchor_date
-            period_label = anchor_date.strftime('%A, %d.%m.%Y')
-
-        start_dt = datetime.combine(start_date, datetime.min.time())
-        end_dt = datetime.combine(end_date, datetime.max.time())
-
-        events: List[Dict] = []
-        calendars = simple_calendar_manager.get_calendars()
-        for cal in calendars:
-            cal_events = simple_calendar_manager.get_events(cal.get('url', ''), start_dt, end_dt)
-            for event in cal_events:
-                event['calendar'] = cal.get('name', 'Unknown')
-                events.append(event)
-
-        events.sort(key=lambda item: item.get('start', ''))
-
-        return jsonify({
-            'success': True,
-            'view': view,
-            'anchor_date': anchor_date.strftime('%Y-%m-%d'),
-            'start_date': start_date.strftime('%Y-%m-%d'),
-            'end_date': end_date.strftime('%Y-%m-%d'),
-            'period_label': period_label,
-            'events': events,
-            'count': len(events)
-        })
-    except Exception as e:
-        logger.error(f"Calendar UI error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/calendar/update', methods=['POST'])
-def update_calendar_event():
-    """Update an existing calendar event by Nextcloud path."""
-    try:
-        if not calendar_enabled:
-            return jsonify({'error': 'Kalender nicht verfügbar'}), 400
-
-        if not simple_calendar_manager:
-            refresh_simple_calendar_manager()
-
-        if not simple_calendar_manager:
-            return jsonify({'error': 'Kalender nicht initialisiert'}), 400
-
-        data = request.json or {}
-        nextcloud_path = (data.get('nextcloud_path') or '').strip()
-        title = (data.get('title') or '').strip()
-        start_time = (data.get('start_time') or '').strip()
-        end_time = (data.get('end_time') or '').strip()
-        location = data.get('location')
-        description = data.get('description')
-
-        if not nextcloud_path or not title or not start_time:
-            return jsonify({'error': 'nextcloud_path, title and start_time are required'}), 400
-
-        success = simple_calendar_manager.update_event(
-            nextcloud_path=nextcloud_path,
-            title=title,
-            start_time=start_time,
-            end_time=end_time or None,
-            location=location,
-            description=description
-        )
-
-        if not success:
-            return jsonify({'error': 'Event could not be updated'}), 500
-
-        return jsonify({'success': True, 'message': 'Event updated successfully'})
-    except Exception as e:
-        logger.error(f"Calendar update error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-def _filter_tasks_for_scope(tasks: List[Dict], scope: str, anchor: date) -> List[Dict]:
-    """Filter tasks by due-date scope for card rendering."""
-    scope_lower = (scope or 'all').lower()
-    filtered = []
-
-    for task in tasks:
-        due = _parse_task_due_date(task.get('due_date'))
-        if scope_lower == 'today':
-            if due == anchor:
-                filtered.append(task)
-        elif scope_lower == 'overdue':
-            if due and due < anchor:
-                filtered.append(task)
-        else:
-            filtered.append(task)
-
-    def task_sort_key(task: Dict):
-        due = _parse_task_due_date(task.get('due_date'))
-        if due is None:
-            return (1, date.max, task.get('title', ''))
-        return (0, due, task.get('title', ''))
-
-    return sorted(filtered, key=task_sort_key)
-
-
-@app.route('/api/tasks/ui', methods=['GET'])
-def tasks_ui():
-    """Structured task data for interactive frontend cards."""
-    try:
-        if not tasks_enabled or not task_manager.tasks_client:
-            return jsonify({'error': 'Tasks nicht verfügbar'}), 400
-
-        scope = (request.args.get('scope') or 'all').strip().lower()
-        anchor_date = _parse_iso_anchor_date(request.args.get('date'))
-
-        tasks = task_manager.get_tasks(use_cache=True, list_name=None)
-        open_tasks = [task for task in tasks if not task.get('completed', False)]
-        filtered_tasks = _filter_tasks_for_scope(open_tasks, scope, anchor_date)
-
-        return jsonify({
-            'success': True,
-            'scope': scope,
-            'anchor_date': anchor_date.strftime('%Y-%m-%d'),
-            'tasks': filtered_tasks,
-            'count': len(filtered_tasks)
-        })
-    except Exception as e:
-        logger.error(f"Tasks UI error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/tasks/update/<task_uid>', methods=['POST'])
-def update_task(task_uid):
-    """Update an existing task by UID."""
-    try:
-        if not tasks_enabled or not task_manager.tasks_client:
-            return jsonify({'error': 'Tasks nicht verfügbar'}), 400
-
-        data = request.json or {}
-        list_name = data.get('list_name') or 'tasks'
-
-        success = task_manager.update_task(
-            task_uid=task_uid,
-            list_name=list_name,
-            title=data.get('title'),
-            description=data.get('description'),
-            due_date=data.get('due_date'),
-            priority=data.get('priority')
-        )
-
-        if not success:
-            return jsonify({'error': 'Task could not be updated'}), 500
-
-        return jsonify({'success': True, 'message': 'Task updated successfully'})
-    except Exception as e:
-        logger.error(f"Task update error: {e}")
-        return jsonify({'error': str(e)}), 500
-
 # Task/Todo API Endpunkte
 @app.route('/api/tasks/init', methods=['POST'])
 def init_tasks():
@@ -6551,67 +2749,23 @@ def create_task():
         due_date = data.get('due_date')  # YYYY-MM-DD
         priority = data.get('priority', 0)
         list_name = data.get('list_name', 'tasks')
-        location = data.get('location')
         
         if not title:
             return jsonify({'error': 'Titel ist erforderlich'}), 400
-
-        result = create_task_reminder(
-            title=title,
-            description=description,
-            due_date=due_date,
-            priority=priority,
-            list_name=list_name,
-            location=location
-        )
-
-        if result.get('success'):
+        
+        success = task_manager.create_task(title, description, due_date, priority, list_name)
+        
+        if success:
             return jsonify({
                 'status': 'created',
                 'title': title,
-                'message': result.get('message', f'Task "{title}" wurde erstellt')
+                'message': f'Task "{title}" wurde erstellt'
             })
-        return jsonify({'error': result.get('error', 'Fehler beim Erstellen des Tasks')}), 500
+        else:
+            return jsonify({'error': 'Fehler beim Erstellen des Tasks'}), 500
     
     except Exception as e:
         logger.error(f"Error creating task: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/tasks/create-with-details', methods=['POST'])
-def create_task_with_details():
-    """Erstellt eine Aufgabe/Erinnerung mit strukturierten Formular-Daten."""
-    try:
-        if not tasks_enabled or not task_manager.tasks_client:
-            return jsonify({'error': 'Tasks nicht verfügbar'}), 400
-
-        data = request.json or {}
-
-        title = (data.get('title') or '').strip()
-        description = data.get('description', '')
-        due_date = data.get('due_date')
-        priority = data.get('priority', 0)
-        list_name = data.get('list_name')
-        location = data.get('location')
-
-        if not title:
-            return jsonify({'error': 'Titel ist erforderlich'}), 400
-
-        result = create_task_reminder(
-            title=title,
-            description=description,
-            due_date=due_date,
-            priority=priority,
-            list_name=list_name,
-            location=location
-        )
-
-        if result.get('success'):
-            return jsonify(result)
-
-        return jsonify({'error': result.get('error', 'Fehler beim Erstellen des Tasks')}), 500
-    except Exception as e:
-        logger.error(f"Error in create_task_with_details: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/tasks/complete/<task_uid>', methods=['POST'])
@@ -6669,10 +2823,9 @@ def tasks_sync():
     
     try:
         # Starte Background-Load
-        payload = request.get_json(silent=True) or {}
         success = task_manager.sync_tasks_to_database(
-            list_name=payload.get('list_name', 'auto'),
-            batch_size=payload.get('batch_size', 100)
+            list_name=request.json.get('list_name', 'todo'),
+            batch_size=request.json.get('batch_size', 100)
         )
         
         if success:
@@ -6748,8 +2901,13 @@ def get_immich_client(username: str = None) -> Optional[ImmichClient]:
                 timeout_short = global_config.get('immich_timeout_short', 15)
                 timeout_long = global_config.get('immich_timeout_long', 45)
 
-        if immich_url and immich_api_key:
-            return ImmichClient(immich_url, immich_api_key, timeout_short, timeout_long)
+        normalized_immich_url = validate_service_url(
+            immich_url,
+            allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+        ) if immich_url else None
+
+        if normalized_immich_url and immich_api_key:
+            return ImmichClient(normalized_immich_url, immich_api_key, timeout_short, timeout_long)
         else:
             logger.warning("Immich not configured")
             return None
@@ -6766,99 +2924,6 @@ def build_immich_thumbnail_proxy_url(asset_id: str, username: str = None, size: 
     if username:
         params['username'] = username
     return f"{request.host_url.rstrip('/')}/api/immich/thumbnail/{asset_id}?{urlencode(params)}"
-
-
-def get_nextcloud_search_client(username: Optional[str] = None) -> Optional[NextcloudSearchClient]:
-    """Get Nextcloud Search API client with credentials"""
-    try:
-        if username:
-            user_config = load_user_config(username)
-            nextcloud_url = user_config.get('nextcloud_url')
-            nextcloud_username = user_config.get('nextcloud_username')
-            nextcloud_password = user_config.get('nextcloud_password')
-
-            if nextcloud_url and nextcloud_username and nextcloud_password:
-                return NextcloudSearchClient(
-                    url=nextcloud_url,
-                    username=nextcloud_username,
-                    password=nextcloud_password
-                )
-
-        # Fallback to environment variables
-        nextcloud_url = os.getenv('NEXTCLOUD_URL')
-        nextcloud_username = os.getenv('NEXTCLOUD_USERNAME')
-        nextcloud_password = os.getenv('NEXTCLOUD_PASSWORD')
-
-        if nextcloud_url and nextcloud_username and nextcloud_password:
-            return NextcloudSearchClient(nextcloud_url, nextcloud_username, nextcloud_password)
-
-        logger.warning("Nextcloud search client not configured")
-        return None
-
-    except Exception as e:
-        logger.error(f"Error creating Nextcloud search client: {e}")
-        return None
-
-
-def get_nextcloud_client(username: Optional[str] = None) -> Optional[NextcloudClient]:
-    """Get Nextcloud WebDAV client with credentials"""
-    try:
-        if username:
-            user_config = load_user_config(username)
-            nextcloud_url = user_config.get('nextcloud_url')
-            nextcloud_username = user_config.get('nextcloud_username')
-            nextcloud_password = user_config.get('nextcloud_password')
-
-            if nextcloud_url and nextcloud_username and nextcloud_password:
-                return NextcloudClient(
-                    url=nextcloud_url,
-                    username=nextcloud_username,
-                    password=nextcloud_password
-                )
-
-        # Fallback to environment variables
-        nextcloud_url = os.getenv('NEXTCLOUD_URL')
-        nextcloud_username = os.getenv('NEXTCLOUD_USERNAME')
-        nextcloud_password = os.getenv('NEXTCLOUD_PASSWORD')
-
-        if nextcloud_url and nextcloud_username and nextcloud_password:
-            return NextcloudClient(nextcloud_url, nextcloud_username, nextcloud_password)
-
-        logger.warning("Nextcloud client not configured")
-        return None
-
-    except Exception as e:
-        logger.error(f"Error creating Nextcloud client: {e}")
-        return None
-
-
-def extract_search_terms(prompt: str) -> str:
-    """Extract meaningful search terms from user prompt"""
-    # Remove common question words and filler words
-    stop_words = {
-        'der', 'die', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'einer', 'eines',
-        'und', 'oder', 'aber', 'nicht', 'auch', 'mit', 'für', 'von', 'auf', 'an',
-        'ist', 'sind', 'war', 'waren', 'hat', 'haben', 'wird', 'werden', 'mir', 'mein', 'meine',
-        'the', 'a', 'an', 'and', 'or', 'but', 'not', 'also', 'with', 'for', 'from',
-        'is', 'are', 'was', 'were', 'has', 'have', 'will', 'would', 'my', 'me',
-        'was', 'wie', 'wo', 'wann', 'warum', 'what', 'how', 'where', 'when', 'why',
-        'gibt', 'es', 'über', 'alle', 'zum', 'zur', 'about', 'all', 'to', 'zeig', 'zeige',
-        'finde', 'suche', 'such', 'find', 'search', 'show', 'tell'
-    }
-
-    words = prompt.lower().split()
-    meaningful_words = []
-
-    for word in words:
-        # Clean punctuation
-        word = word.strip('.,!?;:()[]{}"\'-')
-        # Keep if not stop word and length > 2
-        if word and word not in stop_words and len(word) > 2:
-            meaningful_words.append(word)
-
-    # Return first 3-5 most meaningful words as search query; empty string if none found
-    return ' '.join(meaningful_words[:5]) if meaningful_words else ''
-
 
 @app.route('/api/immich/test', methods=['POST'])
 def immich_test_connection():
@@ -6896,7 +2961,7 @@ def immich_search_photos():
         data = request.get_json()
         username = data.get('username')
         query = data.get('query', '')
-        limit = data.get('limit', 20)
+        limit = clamp_int(data.get('limit', 20), default=20, minimum=1, maximum=200)
 
         client = get_immich_client(username)
         if not client:
@@ -6948,8 +3013,8 @@ def immich_get_assets():
     """Holt Assets von Immich"""
     try:
         username = request.args.get('username')
-        limit = int(request.args.get('limit', 100))
-        skip = int(request.args.get('skip', 0))
+        limit = clamp_int(request.args.get('limit', 100), default=100, minimum=1, maximum=500)
+        skip = clamp_int(request.args.get('skip', 0), default=0, minimum=0, maximum=50000)
 
         client = get_immich_client(username)
         if not client:
@@ -6977,6 +3042,9 @@ def immich_thumbnail_proxy(asset_id):
         username = request.args.get('username')
         size = request.args.get('size', 'preview')
 
+        if size not in {'preview', 'thumbnail'}:
+            return jsonify({'success': False, 'error': 'Invalid thumbnail size'}), 400
+
         client = get_immich_client(username)
         if not client:
             return jsonify({'success': False, 'error': 'Immich nicht konfiguriert'}), 400
@@ -6998,7 +3066,7 @@ def immich_thumbnail_proxy(asset_id):
 
 @app.route('/api/immich/download/<asset_id>', methods=['GET'])
 def immich_download_proxy(asset_id):
-    """Proxy für originale Immich-Dateien als Download."""
+    """Proxy fuer originale Immich-Dateien als Download."""
     try:
         username = request.args.get('username')
 
@@ -7041,7 +3109,7 @@ def immich_search_by_context():
         data = request.get_json()
         username = data.get('username')
         query = data.get('query', '')
-        limit = data.get('limit', 20)
+        limit = clamp_int(data.get('limit', 20), default=20, minimum=1, maximum=200)
 
         client = get_immich_client(username)
         if not client:
@@ -7071,1474 +3139,6 @@ def immich_search_by_context():
         logger.error(f"Immich context search error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# ==================== API Registry Endpoints ====================
-
-@app.route('/api/registry/apis', methods=['GET'])
-def get_all_apis():
-    """Get all available APIs with their configuration status"""
-    try:
-        username = request.args.get('username')
-        registry = get_api_registry()
-        apis = registry.get_all_configured_apis(username)
-
-        return jsonify({
-            'success': True,
-            'apis': apis
-        })
-    except Exception as e:
-        logger.error(f"Error getting APIs: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/registry/health', methods=['GET'])
-def check_all_apis_health():
-    """Check health of all configured APIs"""
-    try:
-        username = request.args.get('username')
-        registry = get_api_registry()
-        health = registry.check_all_apis_health(username)
-
-        return jsonify({
-            'success': True,
-            'health': health
-        })
-    except Exception as e:
-        logger.error(f"Error checking API health: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/registry/<api_name>/health', methods=['GET'])
-def check_api_health(api_name):
-    """Check health of a specific API"""
-    try:
-        username = request.args.get('username')
-        use_cache = request.args.get('use_cache', 'true').lower() == 'true'
-
-        registry = get_api_registry()
-        health = registry.check_api_health(api_name, username, use_cache=use_cache)
-
-        return jsonify({
-            'success': True,
-            'api_name': api_name,
-            'health': health
-        })
-    except Exception as e:
-        logger.error(f"Error checking {api_name} health: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/registry/<api_name>/config', methods=['GET', 'POST', 'DELETE'])
-def manage_api_config(api_name):
-    """Get, update, or delete API configuration"""
-    try:
-        username = request.args.get('username')
-        registry = get_api_registry()
-
-        if request.method == 'GET':
-            config = registry.load_config(api_name, username)
-            api_class = registry.get_api_class(api_name)
-            configured = bool(config)
-
-            if api_class and not config and not api_class.requires_config():
-                config = api_class.get_default_config()
-                configured = True
-
-            # Get schema even when the API has not been configured yet.
-            schema = registry.get_api_schema(api_name, config, username)
-
-            # Remove sensitive values from response
-            safe_config = {}
-            for key, value in config.items():
-                if schema.get(key, {}).get('secret'):
-                    safe_config[key] = '***' if value else ''
-                else:
-                    safe_config[key] = value
-
-            return jsonify({
-                'success': True,
-                'api_name': api_name,
-                'config': safe_config,
-                'schema': schema,
-                'configured': configured
-            })
-
-        elif request.method == 'POST':
-            data = request.get_json()
-            config = data.get('config', {})
-
-            # Preserve existing secret values when UI sends masked placeholders (***).
-            existing_config = registry.load_config(api_name, username) or {}
-            api_class = registry.get_api_class(api_name)
-            schema = registry.get_api_schema(
-                api_name,
-                existing_config if existing_config else (api_class.get_default_config() if api_class and not api_class.requires_config() else config),
-                username
-            )
-
-            merged_config = dict(config)
-            for key, field_meta in schema.items():
-                if field_meta.get('secret') and merged_config.get(key) == '***' and existing_config.get(key):
-                    merged_config[key] = existing_config.get(key)
-
-            # Validate by trying to create instance
-            try:
-                instance = registry.create_api_instance(api_name, merged_config, username, use_cache=False)
-                if not instance:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Failed to create API instance with provided config'
-                    }), 400
-
-                # Test connection
-                if not instance.test_connection():
-                    return jsonify({
-                        'success': False,
-                        'error': 'Connection test failed with provided configuration'
-                    }), 400
-
-            except Exception as e:
-                return jsonify({
-                    'success': False,
-                    'error': f'Invalid configuration: {str(e)}'
-                }), 400
-
-            # Save config
-            if registry.save_config(api_name, merged_config, username):
-                return jsonify({
-                    'success': True,
-                    'message': f'{api_name} configuration saved successfully'
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': 'Failed to save configuration'
-                }), 500
-
-        elif request.method == 'DELETE':
-            if registry.delete_config(api_name, username):
-                return jsonify({
-                    'success': True,
-                    'message': f'{api_name} configuration deleted successfully'
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': 'Failed to delete configuration'
-                }), 500
-
-    except Exception as e:
-        logger.error(f"Error managing {api_name} config: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/registry/<api_name>/test', methods=['POST'])
-def test_api_connection(api_name):
-    """Test API connection with provided config"""
-    try:
-        data = request.get_json()
-        config = data.get('config', {})
-        username = data.get('username')
-
-        registry = get_api_registry()
-
-        # Preserve existing secret values when UI sends masked placeholders (***).
-        existing_config = registry.load_config(api_name, username) or {}
-        api_class = registry.get_api_class(api_name)
-        schema = registry.get_api_schema(
-            api_name,
-            existing_config if existing_config else (api_class.get_default_config() if api_class and not api_class.requires_config() else config),
-            username
-        )
-
-        merged_config = dict(config)
-        for key, field_meta in schema.items():
-            if field_meta.get('secret') and merged_config.get(key) == '***' and existing_config.get(key):
-                merged_config[key] = existing_config.get(key)
-
-        # Create instance with provided config
-        instance = registry.create_api_instance(api_name, merged_config, username, use_cache=False)
-        if not instance:
-            return jsonify({
-                'success': False,
-                'error': 'Failed to create API instance'
-            }), 400
-
-        # Test connection and get health info
-        health = instance.get_health_info()
-
-        return jsonify({
-            'success': True,
-            'api_name': api_name,
-            'health': health
-        })
-
-    except Exception as e:
-        logger.error(f"Error testing {api_name}: {e}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-# ==================== Email Endpoints ====================
-
-@app.route('/api/email/test', methods=['POST'])
-def email_test_connection():
-    """Test the IMAP email connection."""
-    try:
-        data = request.get_json(silent=True) or {}
-        username = data.get('username')
-        account_id = data.get('account_id')
-        config = data.get('config')
-        client = get_email_client(username=username, account_id=account_id, config=config)
-        if not client:
-            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert. Bitte IMAP-Einstellungen setzen.'}), 400
-        success = client.test_connection()
-        return jsonify({
-            'success': success,
-            'message': 'Verbindung erfolgreich' if success else 'Verbindung fehlgeschlagen',
-        })
-    except Exception as e:
-        logger.error("Email test error: %s", e)
-        return jsonify({'success': False, 'error': 'Interner Fehler beim E-Mail-Verbindungstest.'}), 500
-
-
-@app.route('/api/email/search', methods=['POST'])
-def email_search():
-    """Search emails by keyword query."""
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        account_id = data.get('account_id')
-        query = data.get('query', '')
-        limit = int(data.get('limit', 10))
-
-        client = get_email_client(username=username, account_id=account_id)
-        if not client:
-            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
-
-        results = client.search_emails(query, limit=limit)
-        sanitized = []
-        for mail in results:
-            body = mail.get('body', '')
-            sanitized.append({
-                'subject': mail.get('subject', ''),
-                'sender': mail.get('sender', ''),
-                'date': mail.get('date', ''),
-                'folder': mail.get('folder', ''),
-                'body_preview': (body[:300] + '...') if len(body) > 300 else body
-            })
-        return jsonify({'success': True, 'count': len(sanitized), 'results': sanitized})
-    except Exception as e:
-        logger.error("Email search error: %s", e)
-        return jsonify({'success': False, 'error': 'Interner Fehler bei der E-Mail-Suche.'}), 500
-
-
-@app.route('/api/email/summary', methods=['GET'])
-def email_summary():
-    """Return a summary of recent emails."""
-    try:
-        username = request.args.get('username')
-        account_id = request.args.get('account_id')
-        limit = int(request.args.get('limit', 20))
-
-        client = get_email_client(username=username, account_id=account_id)
-        if not client:
-            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
-
-        summary = client.get_email_summary(max_emails=limit)
-        return jsonify({'success': True, **summary})
-    except Exception as e:
-        logger.error("Email summary error: %s", e)
-        return jsonify({'success': False, 'error': 'Interner Fehler beim Laden der E-Mail-Übersicht.'}), 500
-
-
-@app.route('/api/email/folders', methods=['POST'])
-def email_folders():
-    """Return the available IMAP folders for the current configuration."""
-    try:
-        data = request.get_json(silent=True) or {}
-        username = data.get('username')
-        account_id = data.get('account_id')
-        config = data.get('config')
-
-        client = get_email_client(
-            username=username,
-            account_id=account_id,
-            config=config if config else None,
-            use_cache=False
-        )
-        if not client:
-            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
-
-        folders = client.list_folders()
-        return jsonify({'success': True, 'folders': folders, 'count': len(folders)})
-    except Exception as e:
-        logger.error("Email folders error: %s", e)
-        return jsonify({'success': False, 'error': 'Interner Fehler beim Laden der Ordnerliste.'}), 500
-
-
-@app.route('/api/email/send', methods=['POST'])
-def email_send():
-    """Send an email via the configured SMTP server."""
-    try:
-        data = request.get_json(silent=True) or {}
-        username = data.get('username')
-        account_id = data.get('account_id')
-        config = data.get('config')
-        payload = data.get('message', data)
-
-        client = get_email_client(
-            username=username,
-            account_id=account_id,
-            config=config if config else None,
-            use_cache=False
-        )
-        if not client:
-            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
-
-        result = client.send_email(
-            to=payload.get('to', ''),
-            subject=payload.get('subject', ''),
-            body=payload.get('body', ''),
-            cc=payload.get('cc', ''),
-            bcc=payload.get('bcc', ''),
-            reply_to=payload.get('reply_to', ''),
-            from_name=payload.get('from_name', ''),
-            from_address=payload.get('from_address', '')
-        )
-
-        return jsonify({
-            'success': True,
-            'message': 'E-Mail gesendet',
-            'result': result
-        })
-    except Exception as e:
-        logger.error("Email send error: %s", e)
-        return jsonify({'success': False, 'error': 'Interner Fehler beim E-Mail-Versand.'}), 500
-
-
-@app.route('/api/email/accounts', methods=['GET'])
-def email_accounts():
-    """Return configured email accounts and active account info."""
-    try:
-        username = request.args.get('username')
-        account_id = request.args.get('account_id')
-
-        client = get_email_client(username=username, account_id=account_id)
-        if not client:
-            return jsonify({'success': False, 'error': 'E-Mail nicht konfiguriert.'}), 400
-
-        return jsonify({
-            'success': True,
-            'accounts': client.get_accounts_overview(),
-            'active_account_id': client.active_account_id,
-        })
-    except Exception as e:
-        logger.error("Email accounts error: %s", e)
-        return jsonify({'success': False, 'error': 'Interner Fehler beim Laden der E-Mail-Konten.'}), 500
-
-
-# ==================== HomeAssistant Endpoints ====================
-
-@app.route('/api/homeassistant/states', methods=['GET'])
-def homeassistant_get_states():
-    """Get all Home Assistant entity states"""
-    try:
-        username = request.args.get('username')
-        registry = get_api_registry()
-
-        client = registry.create_api_instance('homeassistant', username=username)
-        if not client:
-            return jsonify({
-                'success': False,
-                'error': 'Home Assistant not configured'
-            }), 400
-
-        states = client.get_states()
-
-        return jsonify({
-            'success': True,
-            'states': states
-        })
-
-    except Exception as e:
-        logger.error(f"HomeAssistant get states error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/homeassistant/state/<path:entity_id>', methods=['GET'])
-def homeassistant_get_state(entity_id):
-    """Get state of a specific Home Assistant entity"""
-    try:
-        username = request.args.get('username')
-        registry = get_api_registry()
-
-        client = registry.create_api_instance('homeassistant', username=username)
-        if not client:
-            return jsonify({
-                'success': False,
-                'error': 'Home Assistant not configured'
-            }), 400
-
-        state = client.get_state(entity_id)
-
-        if state:
-            return jsonify({
-                'success': True,
-                'entity_id': entity_id,
-                'state': state
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': 'Entity not found'
-            }), 404
-
-    except Exception as e:
-        logger.error(f"HomeAssistant get state error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/homeassistant/service', methods=['POST'])
-def homeassistant_call_service():
-    """Call a Home Assistant service"""
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        domain = data.get('domain')
-        service = data.get('service')
-        entity_id = data.get('entity_id')
-        service_data = data.get('data', {})
-
-        if not domain or not service:
-            return jsonify({
-                'success': False,
-                'error': 'domain and service are required'
-            }), 400
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('homeassistant', username=username)
-        if not client:
-            return jsonify({
-                'success': False,
-                'error': 'Home Assistant not configured'
-            }), 400
-
-        success = client.call_service(domain, service, entity_id, service_data)
-
-        return jsonify({
-            'success': success,
-            'message': f'Service {domain}.{service} called' if success else 'Service call failed'
-        })
-
-    except Exception as e:
-        logger.error(f"HomeAssistant service call error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/homeassistant/search', methods=['POST'])
-def homeassistant_search():
-    """Search Home Assistant entities"""
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        query = data.get('query', '')
-        domains = data.get('domains')
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('homeassistant', username=username)
-        if not client:
-            return jsonify({
-                'success': False,
-                'error': 'Home Assistant not configured'
-            }), 400
-
-        results = client.search_entities(query, domains)
-
-        return jsonify({
-            'success': True,
-            'query': query,
-            'count': len(results),
-            'results': results
-        })
-
-    except Exception as e:
-        logger.error(f"HomeAssistant search error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-# ==================== Uptime Kuma Endpoints ====================
-
-@app.route('/api/uptimekuma/monitors', methods=['GET'])
-def uptimekuma_get_monitors():
-    """Get all Uptime Kuma monitors"""
-    try:
-        username = request.args.get('username')
-        registry = get_api_registry()
-
-        client = registry.create_api_instance('uptimekuma', username=username)
-        if not client:
-            return jsonify({
-                'success': False,
-                'error': 'Uptime Kuma not configured'
-            }), 400
-
-        monitors = client.get_monitors()
-
-        return jsonify({
-            'success': True,
-            'monitors': monitors
-        })
-
-    except Exception as e:
-        logger.error(f"Uptime Kuma get monitors error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/uptimekuma/monitor/<int:monitor_id>', methods=['GET'])
-def uptimekuma_get_monitor(monitor_id):
-    """Get a specific Uptime Kuma monitor"""
-    try:
-        username = request.args.get('username')
-        registry = get_api_registry()
-
-        client = registry.create_api_instance('uptimekuma', username=username)
-        if not client:
-            return jsonify({
-                'success': False,
-                'error': 'Uptime Kuma not configured'
-            }), 400
-
-        monitor = client.get_monitor(monitor_id)
-
-        if monitor:
-            return jsonify({
-                'success': True,
-                'monitor': monitor
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': 'Monitor not found'
-            }), 404
-
-    except Exception as e:
-        logger.error(f"Uptime Kuma get monitor error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/uptimekuma/stats', methods=['GET'])
-def uptimekuma_get_stats():
-    """Get Uptime Kuma statistics"""
-    try:
-        username = request.args.get('username')
-        monitor_id = request.args.get('monitor_id', type=int)
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('uptimekuma', username=username)
-        if not client:
-            return jsonify({
-                'success': False,
-                'error': 'Uptime Kuma not configured'
-            }), 400
-
-        stats = client.get_uptime_stats(monitor_id)
-
-        return jsonify({
-            'success': True,
-            'stats': stats
-        })
-
-    except Exception as e:
-        logger.error(f"Uptime Kuma get stats error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/uptimekuma/search', methods=['POST'])
-def uptimekuma_search():
-    """Search Uptime Kuma monitors"""
-    try:
-        data = request.get_json()
-        username = data.get('username')
-        query = data.get('query', '')
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('uptimekuma', username=username)
-        if not client:
-            return jsonify({
-                'success': False,
-                'error': 'Uptime Kuma not configured'
-            }), 400
-
-        results = client.search_monitors(query)
-
-        return jsonify({
-            'success': True,
-            'query': query,
-            'count': len(results),
-            'results': results
-        })
-
-    except Exception as e:
-        logger.error(f"Uptime Kuma search error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-# ==================== Public API Endpoints ====================
-
-def _reverse_geocode(latitude: float, longitude: float) -> Optional[Dict[str, Any]]:
-    try:
-        response = requests.get(
-            "https://nominatim.openstreetmap.org/reverse",
-            params={
-                'format': 'jsonv2',
-                'lat': latitude,
-                'lon': longitude,
-                'addressdetails': 1
-            },
-            headers={'User-Agent': 'MYND Assistant'},
-            timeout=10
-        )
-        response.raise_for_status()
-        return response.json()
-    except Exception as exc:
-        logger.warning("Reverse geocoding failed: %s", exc)
-        return None
-
-
-def _collect_place_candidates(address: Dict[str, Any]) -> List[str]:
-    candidates = [
-        address.get('city'),
-        address.get('town'),
-        address.get('village'),
-        address.get('municipality'),
-        address.get('county'),
-        address.get('state')
-    ]
-    return [entry for entry in candidates if entry]
-
-
-def _safe_text(value: Any) -> str:
-    if value is None:
-        return ''
-    return str(value).strip()
-
-
-def _extract_nina_warning_items(payload: Any, limit: int = 5) -> List[Dict[str, Any]]:
-    """Normalize NINA dashboard payload into a stable warning list."""
-    items = []
-    data = payload
-
-    if isinstance(payload, dict):
-        data = payload.get('warnings', payload)
-
-    if isinstance(data, list):
-        for raw in data:
-            if not isinstance(raw, dict):
-                continue
-
-            payload_data = raw.get('payload') if isinstance(raw.get('payload'), dict) else {}
-            detail_data = payload_data.get('data') if isinstance(payload_data.get('data'), dict) else {}
-            i18n_title = raw.get('i18nTitle') if isinstance(raw.get('i18nTitle'), dict) else {}
-            translated_headline = _safe_text(i18n_title.get('de') or i18n_title.get('en'))
-
-            identifier = _safe_text(raw.get('id') or raw.get('identifier') or raw.get('warningId'))
-            headline = _safe_text(
-                raw.get('headline')
-                or detail_data.get('headline')
-                or translated_headline
-                or raw.get('title')
-                or raw.get('i18nTitle')
-                or raw.get('event')
-                or raw.get('msgType')
-            )
-            severity = _safe_text(
-                raw.get('severity')
-                or detail_data.get('severity')
-                or raw.get('warnLevel')
-                or raw.get('level')
-            )
-            sent = _safe_text(raw.get('sent') or raw.get('effective') or raw.get('published'))
-            expires = _safe_text(raw.get('expires') or raw.get('until') or raw.get('ends'))
-            provider = _safe_text(
-                raw.get('provider')
-                or detail_data.get('provider')
-                or raw.get('sender')
-                or raw.get('source')
-            )
-            description = _safe_text(
-                raw.get('description')
-                or detail_data.get('description')
-                or detail_data.get('event')
-                or raw.get('text')
-                or raw.get('body')
-            )
-
-            if not headline and identifier:
-                headline = f"Warnung {identifier}"
-
-            if not headline:
-                continue
-
-            items.append({
-                'id': identifier,
-                'headline': headline,
-                'severity': severity,
-                'sent': sent,
-                'expires': expires,
-                'provider': provider,
-                'description': description
-            })
-
-    return items[:limit]
-
-
-def _classify_weather_icon(weather_id: Optional[int], weather_main: str) -> str:
-    main = _safe_text(weather_main).lower()
-    if weather_id is not None and 200 <= int(weather_id) < 700:
-        return 'rain'
-    if any(token in main for token in ['rain', 'drizzle', 'thunder', 'snow']):
-        return 'rain'
-    if any(token in main for token in ['cloud', 'mist', 'fog', 'haze', 'smoke']):
-        return 'cloud'
-    return 'sun'
-
-
-def _format_temperature(value: Any, units: str) -> str:
-    try:
-        temp = float(value)
-    except (TypeError, ValueError):
-        return ''
-
-    if units == 'imperial':
-        return f"{round(temp)}°F"
-    if units == 'standard':
-        return f"{round(temp)}K"
-    return f"{round(temp)}°C"
-
-
-def _load_weather_from_wttr(location_name: str = '', lat: Any = None, lon: Any = None) -> Optional[Dict[str, Any]]:
-    """Load weather from wttr.in as API-key-free fallback."""
-    query = _safe_text(location_name)
-    if not query and lat is not None and lon is not None:
-        query = f"{lat},{lon}"
-    if not query:
-        query = 'auto:ip'
-
-    try:
-        resp = requests.get(f"https://wttr.in/{query}", params={'format': 'j1'}, timeout=8)
-        if resp.status_code != 200:
-            return None
-
-        payload = resp.json() if resp.content else {}
-        current_list = payload.get('current_condition') if isinstance(payload, dict) else []
-        current = current_list[0] if isinstance(current_list, list) and current_list else {}
-        if not isinstance(current, dict) or not current:
-            return None
-
-        desc_entries = current.get('weatherDesc') if isinstance(current.get('weatherDesc'), list) else []
-        description = _safe_text((desc_entries[0] or {}).get('value') if desc_entries else '')
-        weather_code = current.get('weatherCode')
-
-        icon = 'sun'
-        try:
-            code_num = int(weather_code)
-            if code_num in {176, 179, 182, 185, 200, 227, 230, 248, 260, 263, 266, 281, 284, 293, 296, 299, 302, 305, 308, 311, 314, 317, 320, 323, 326, 329, 332, 335, 338, 350, 353, 356, 359, 362, 365, 368, 371, 374, 377, 386, 389, 392, 395}:
-                icon = 'rain'
-            elif code_num in {116, 119, 122, 143}:
-                icon = 'cloud'
-        except (TypeError, ValueError):
-            if any(token in description.lower() for token in ['rain', 'drizzle', 'storm', 'snow']):
-                icon = 'rain'
-            elif any(token in description.lower() for token in ['cloud', 'fog', 'mist', 'haze']):
-                icon = 'cloud'
-
-        nearest = payload.get('nearest_area') if isinstance(payload, dict) else []
-        area_name = ''
-        if isinstance(nearest, list) and nearest and isinstance(nearest[0], dict):
-            names = nearest[0].get('areaName') if isinstance(nearest[0].get('areaName'), list) else []
-            if names and isinstance(names[0], dict):
-                area_name = _safe_text(names[0].get('value'))
-
-        temp_c = current.get('temp_C')
-        feels_c = current.get('FeelsLikeC')
-        wind_kmph = current.get('windspeedKmph')
-        humidity = current.get('humidity')
-
-        hourly_preview = ''
-        weather_days = payload.get('weather') if isinstance(payload, dict) else []
-        if isinstance(weather_days, list) and weather_days and isinstance(weather_days[0], dict):
-            hourly = weather_days[0].get('hourly') if isinstance(weather_days[0].get('hourly'), list) else []
-            if hourly and isinstance(hourly[0], dict):
-                chance_rain = hourly[0].get('chanceofrain')
-                if chance_rain is not None:
-                    hourly_preview = f"Regenwahrscheinlichkeit aktuell etwa {chance_rain}%."
-
-        daily_preview = ''
-        forecast_days = []
-        if isinstance(weather_days, list) and len(weather_days) > 1 and isinstance(weather_days[1], dict):
-            t_min = weather_days[1].get('mintempC')
-            t_max = weather_days[1].get('maxtempC')
-            if t_min is not None and t_max is not None:
-                daily_preview = f"Morgen voraussichtlich zwischen {t_min}°C und {t_max}°C."
-
-        if isinstance(weather_days, list):
-            for day in weather_days[:6]:
-                if not isinstance(day, dict):
-                    continue
-
-                day_date = None
-                try:
-                    if day.get('date'):
-                        day_date = datetime.strptime(str(day.get('date')), '%Y-%m-%d').date()
-                except Exception:
-                    day_date = None
-
-                hourly_items = day.get('hourly') if isinstance(day.get('hourly'), list) else []
-                representative = hourly_items[4] if len(hourly_items) > 4 and isinstance(hourly_items[4], dict) else (hourly_items[0] if hourly_items and isinstance(hourly_items[0], dict) else {})
-                desc_items = representative.get('weatherDesc') if isinstance(representative.get('weatherDesc'), list) else []
-                day_desc = _safe_text((desc_items[0] or {}).get('value') if desc_items else '')
-
-                icon_for_day = 'sun'
-                if any(token in day_desc.lower() for token in ['rain', 'drizzle', 'storm', 'snow']):
-                    icon_for_day = 'rain'
-                elif any(token in day_desc.lower() for token in ['cloud', 'fog', 'mist', 'haze', 'overcast']):
-                    icon_for_day = 'cloud'
-
-                pop_percent = None
-                try:
-                    if representative.get('chanceofrain') is not None:
-                        pop_percent = int(representative.get('chanceofrain'))
-                except (TypeError, ValueError):
-                    pop_percent = None
-
-                forecast_days.append({
-                    'date': day_date.isoformat() if day_date else '',
-                    'label': day_date.strftime('%a') if day_date else '',
-                    'temp_min_display': f"{day.get('mintempC')}°C" if day.get('mintempC') not in (None, '') else '',
-                    'temp_max_display': f"{day.get('maxtempC')}°C" if day.get('maxtempC') not in (None, '') else '',
-                    'description': day_desc,
-                    'icon': icon_for_day,
-                    'pop_percent': pop_percent,
-                })
-
-        parts = []
-        if temp_c is not None:
-            parts.append(f"Aktuell {temp_c}°C")
-        if description:
-            parts.append(description.lower())
-        if area_name or query:
-            parts.append(f"in {area_name or query}")
-        if feels_c is not None:
-            parts.append(f"(gefühlt {feels_c}°C)")
-        if wind_kmph is not None:
-            parts.append(f"Wind {wind_kmph} km/h")
-        if humidity is not None:
-            parts.append(f"Luftfeuchte {humidity}%")
-
-        summary = ', '.join([p for p in parts if p]).strip(', ')
-        if hourly_preview:
-            summary = f"{summary}. {hourly_preview}" if summary else hourly_preview
-        if daily_preview:
-            summary = f"{summary} {daily_preview}" if summary else daily_preview
-
-        return {
-            'success': True,
-            'configured': True,
-            'status': 'ok',
-            'location_name': area_name or location_name,
-            'lat': lat,
-            'lon': lon,
-            'temperature': float(temp_c) if temp_c not in (None, '') else None,
-            'temperature_display': f"{temp_c}°C" if temp_c not in (None, '') else '',
-            'description': description,
-            'icon': icon,
-            'alerts': [],
-            'alerts_count': 0,
-            'hourly_preview': hourly_preview,
-            'daily_preview': daily_preview,
-            'summary': summary or 'Wetterdaten von wttr.in verfügbar.',
-            'forecast_days': forecast_days
-        }
-    except Exception as exc:
-        logger.debug('wttr.in fallback failed: %s', exc)
-        return None
-
-
-def get_local_weather_status() -> Dict[str, Any]:
-    """Collect local weather and forecast from OpenWeather for configured coordinates."""
-    result = {
-        'success': False,
-        'configured': False,
-        'status': 'not_configured',
-        'location_name': '',
-        'lat': None,
-        'lon': None,
-        'temperature': None,
-        'temperature_display': '',
-        'description': '',
-        'icon': 'sun',
-        'alerts': [],
-        'alerts_count': 0,
-        'hourly_preview': '',
-        'daily_preview': '',
-        'summary': '',
-        'forecast_days': []
-    }
-
-    try:
-        registry = get_api_registry()
-        config = registry.load_config('openweather')
-        result['location_name'] = _safe_text(config.get('location_name'))
-        result['lat'] = config.get('lat')
-        result['lon'] = config.get('lon')
-
-        client = registry.create_api_instance('openweather')
-        if not client:
-            result['summary'] = 'OpenWeather ist nicht konfiguriert.'
-            return result
-
-        result['configured'] = True
-        payload = client.get_current_and_forecast(exclude='minutely')
-        current = payload.get('current') if isinstance(payload, dict) else {}
-        weather_entries = current.get('weather') if isinstance(current, dict) else []
-        weather = weather_entries[0] if isinstance(weather_entries, list) and weather_entries else {}
-
-        result['status'] = 'ok'
-        result['success'] = True
-        result['lat'] = payload.get('lat')
-        result['lon'] = payload.get('lon')
-        result['temperature'] = current.get('temp')
-        result['temperature_display'] = _format_temperature(current.get('temp'), client.units)
-        result['description'] = _safe_text(weather.get('description') or weather.get('main'))
-        result['icon'] = _classify_weather_icon(weather.get('id'), weather.get('main'))
-
-        hourly = payload.get('hourly') if isinstance(payload, dict) else []
-        if isinstance(hourly, list) and len(hourly) > 1 and isinstance(hourly[1], dict):
-            next_hour_temp = _format_temperature(hourly[1].get('temp'), client.units)
-            next_hour_pop = hourly[1].get('pop')
-            pop_text = ''
-            try:
-                if next_hour_pop is not None:
-                    pop_text = f", Regenwahrscheinlichkeit {round(float(next_hour_pop) * 100)}%"
-            except (TypeError, ValueError):
-                pop_text = ''
-            if next_hour_temp:
-                result['hourly_preview'] = f"In der nächsten Stunde etwa {next_hour_temp}{pop_text}."
-
-        daily = payload.get('daily') if isinstance(payload, dict) else []
-        forecast_days = []
-        if isinstance(daily, list):
-            for day in daily[:6]:
-                if not isinstance(day, dict):
-                    continue
-
-                day_weather_entries = day.get('weather') if isinstance(day.get('weather'), list) else []
-                day_weather = day_weather_entries[0] if day_weather_entries else {}
-
-                day_date = None
-                try:
-                    if day.get('dt') is not None:
-                        day_date = datetime.fromtimestamp(int(day.get('dt'))).date()
-                except Exception:
-                    day_date = None
-
-                temp_block = day.get('temp') if isinstance(day.get('temp'), dict) else {}
-                pop_percent = None
-                try:
-                    if day.get('pop') is not None:
-                        pop_percent = max(0, min(100, int(round(float(day.get('pop')) * 100))))
-                except (TypeError, ValueError):
-                    pop_percent = None
-
-                forecast_days.append({
-                    'date': day_date.isoformat() if day_date else '',
-                    'label': day_date.strftime('%a') if day_date else '',
-                    'temp_min_display': _format_temperature(temp_block.get('min'), client.units),
-                    'temp_max_display': _format_temperature(temp_block.get('max'), client.units),
-                    'description': _safe_text(day_weather.get('description') or day_weather.get('main')),
-                    'icon': _classify_weather_icon(day_weather.get('id'), day_weather.get('main')),
-                    'pop_percent': pop_percent,
-                })
-        result['forecast_days'] = forecast_days
-        if isinstance(daily, list) and len(daily) > 1 and isinstance(daily[1], dict):
-            tomorrow = daily[1]
-            temp_block = tomorrow.get('temp') if isinstance(tomorrow.get('temp'), dict) else {}
-            t_min = _format_temperature(temp_block.get('min'), client.units)
-            t_max = _format_temperature(temp_block.get('max'), client.units)
-            if t_min and t_max:
-                result['daily_preview'] = f"Morgen voraussichtlich zwischen {t_min} und {t_max}."
-
-        alerts = payload.get('alerts') if isinstance(payload, dict) else []
-        if isinstance(alerts, list):
-            normalized = []
-            for entry in alerts[:5]:
-                if not isinstance(entry, dict):
-                    continue
-                normalized.append({
-                    'event': _safe_text(entry.get('event')),
-                    'sender_name': _safe_text(entry.get('sender_name')),
-                    'description': _safe_text(entry.get('description')),
-                    'start': entry.get('start'),
-                    'end': entry.get('end')
-                })
-            result['alerts'] = normalized
-            result['alerts_count'] = len(normalized)
-
-        location_label = result['location_name'] or 'deinem Standort'
-        temp_label = result['temperature_display'] or 'n/a'
-        desc_label = result['description'] or 'unbekannt'
-        if result['alerts_count'] > 0:
-            result['summary'] = (
-                f"Aktuell {temp_label} und {desc_label} in {location_label}. "
-                f"Es liegen {result['alerts_count']} Wetterwarnung(en) vor."
-            )
-        else:
-            result['summary'] = f"Aktuell {temp_label} und {desc_label} in {location_label}."
-
-        if result['hourly_preview']:
-            result['summary'] = f"{result['summary']} {result['hourly_preview']}"
-        if result['daily_preview']:
-            result['summary'] = f"{result['summary']} {result['daily_preview']}"
-
-        return result
-
-    except Exception as exc:
-        logger.warning('OpenWeather status failed: %s', exc)
-
-        # Fallback without API key using wttr.in
-        fallback = _load_weather_from_wttr(
-            location_name=result.get('location_name', ''),
-            lat=result.get('lat'),
-            lon=result.get('lon')
-        )
-        if fallback:
-            return fallback
-
-        result['status'] = 'error'
-        result['summary'] = f"Wetter konnte nicht geladen werden: {str(exc)}"
-        return result
-
-
-def get_local_security_status() -> Dict[str, Any]:
-    """Collect local security status from configured NINA plus weather from OpenWeather."""
-    result = {
-        'success': True,
-        'ars': '',
-        'nina_warning_count': 0,
-        'nina_warnings': [],
-        'headline': '',
-        'summary': '',
-        'weather': {},
-        'sources': {
-            'nina': False,
-            'openweather': False
-        },
-        'errors': []
-    }
-
-    registry = get_api_registry()
-
-    # NINA warnings for configured ARS
-    try:
-        nina_config = registry.load_config('nina')
-        ars = _safe_text(nina_config.get('ars'))
-        result['ars'] = ars
-
-        nina_client = registry.create_api_instance('nina')
-        if nina_client:
-            result['sources']['nina'] = True
-            if ars:
-                dashboard_result = nina_client.get_dashboard_with_fallback(ars)
-                result['ars'] = _safe_text(dashboard_result.get('ars_used') or ars)
-                warnings = _extract_nina_warning_items(dashboard_result.get('data'), limit=6)
-                result['nina_warnings'] = warnings
-                result['nina_warning_count'] = len(warnings)
-            else:
-                result['errors'].append('NINA ARS ist nicht konfiguriert')
-        else:
-            result['errors'].append('NINA Client nicht verfügbar')
-    except Exception as exc:
-        logger.error("NINA security status failed: %s", exc)
-        result['errors'].append(f"NINA Fehler: {str(exc)}")
-
-    try:
-        weather = get_local_weather_status()
-        result['weather'] = weather
-        result['sources']['openweather'] = weather.get('configured', False)
-    except Exception as exc:
-        logger.warning('OpenWeather attach failed: %s', exc)
-        result['errors'].append(f"OpenWeather Fehler: {str(exc)}")
-
-    if result['nina_warning_count'] > 0:
-        result['headline'] = f"{result['nina_warning_count']} aktive Warnung(en) für deinen Standort"
-        lines = [result['headline'] + '.']
-        for idx, warning in enumerate(result['nina_warnings'][:3], 1):
-            label = warning.get('headline') or f"Warnung {idx}"
-            severity = warning.get('severity')
-            if severity:
-                lines.append(f"{idx}. {label} (Stufe: {severity})")
-            else:
-                lines.append(f"{idx}. {label}")
-        result['summary'] = "\n".join(lines)
-    else:
-        result['headline'] = 'Keine akuten NINA-Warnungen für deinen Standort'
-        result['summary'] = (
-            'Aktuell liegen laut NINA keine akuten Warnungen für deinen Standort vor.'
-        )
-
-    return result
-
-
-def is_security_query(message: str) -> bool:
-    text = (message or '').lower()
-    keywords = [
-        'sicherheitslage',
-        'warnung',
-        'warnungen',
-        'nina',
-        'gefahrenlage',
-        'alarm',
-        'katastrophenschutz',
-        'lage bei mir'
-    ]
-    return any(keyword in text for keyword in keywords)
-
-
-def is_weather_query(message: str) -> bool:
-    text = (message or '').lower()
-    keywords = [
-        'wetter',
-        'temperatur',
-        'vorhersage',
-        'forecast',
-        'regen',
-        'sonne',
-        'wind',
-        'wie warm',
-        'weather'
-    ]
-    return any(keyword in text for keyword in keywords)
-
-
-@app.route('/api/location/resolve', methods=['POST'])
-def resolve_location():
-    """Resolve browser location to NINA ARS and OpenWeather coordinates."""
-    try:
-        payload = request.get_json() or {}
-        latitude = payload.get('lat')
-        longitude = payload.get('lon')
-        save_config = payload.get('save', True)
-
-        if latitude is None or longitude is None:
-            return jsonify({'success': False, 'error': 'lat and lon required'}), 400
-
-        latitude = float(latitude)
-        longitude = float(longitude)
-
-        reverse = _reverse_geocode(latitude, longitude)
-        address = reverse.get('address', {}) if reverse else {}
-        display_name = reverse.get('display_name', '') if reverse else ''
-        candidates = _collect_place_candidates(address)
-
-        registry = get_api_registry()
-        nina_result = None
-        nina_client = registry.create_api_instance('nina')
-        if nina_client:
-            resolved = nina_client.resolve_ars_for_places(candidates)
-            if resolved:
-                nina_result = {
-                    'ars': resolved.get('ars'),
-                    'name': resolved.get('name'),
-                    'hint': resolved.get('hint'),
-                    'score': resolved.get('score')
-                }
-                if save_config:
-                    nina_config = registry.load_config('nina')
-                    nina_config['ars'] = resolved.get('ars')
-                    registry.save_config('nina', nina_config)
-
-        openweather_result = {
-            'lat': latitude,
-            'lon': longitude,
-            'location_name': _safe_text(display_name)
-        }
-        openweather_error = None
-        if save_config:
-            try:
-                openweather_config = registry.load_config('openweather')
-                openweather_config['lat'] = latitude
-                openweather_config['lon'] = longitude
-                if display_name:
-                    openweather_config['location_name'] = display_name
-                registry.save_config('openweather', openweather_config)
-            except Exception as exc:
-                openweather_error = str(exc)
-                logger.warning('Could not persist OpenWeather coordinates: %s', exc)
-
-        return jsonify({
-            'success': True,
-            'location': {
-                'latitude': latitude,
-                'longitude': longitude,
-                'display_name': display_name,
-                'address': address
-            },
-            'nina': nina_result,
-            'openweather': openweather_result,
-            'openweather_error': openweather_error
-        })
-
-    except Exception as e:
-        logger.error(f"Location resolve error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/dwd/warnings/nowcast', methods=['GET'])
-def dwd_get_warnings_nowcast():
-    """Get DWD nowcast warnings"""
-    try:
-        language = request.args.get('lang', 'de')
-        registry = get_api_registry()
-        client = registry.create_api_instance('dwd')
-        if not client:
-            return jsonify({'success': False, 'error': 'DWD client unavailable'}), 400
-
-        data = client.get_warnings_nowcast(language)
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"DWD warnings error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/dwd/station-overview', methods=['GET'])
-def dwd_station_overview():
-    """Get DWD station overview by station IDs"""
-    try:
-        registry = get_api_registry()
-        station_ids = request.args.get('station_ids', '').strip()
-        if not station_ids:
-            config = registry.load_config('dwd')
-            station_ids = str(config.get('station_ids', '')).strip()
-        if not station_ids:
-            return jsonify({'success': False, 'error': 'station_ids required'}), 400
-
-        client = registry.create_api_instance('dwd')
-        if not client:
-            return jsonify({'success': False, 'error': 'DWD client unavailable'}), 400
-
-        data = client.get_station_overview_extended(
-            [entry.strip() for entry in station_ids.split(',') if entry.strip()]
-        )
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"DWD station overview error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/nina/event-codes', methods=['GET'])
-def nina_event_codes():
-    """Get NINA event codes"""
-    try:
-        registry = get_api_registry()
-        client = registry.create_api_instance('nina')
-        if not client:
-            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
-
-        data = client.get_event_codes()
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"NINA event codes error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/nina/dashboard', methods=['GET'])
-def nina_dashboard():
-    """Get NINA dashboard data for an ARS"""
-    try:
-        ars = request.args.get('ars')
-        if not ars:
-            registry = get_api_registry()
-            config = registry.load_config('nina')
-            ars = str(config.get('ars', '')).strip()
-        if not ars:
-            return jsonify({'success': False, 'error': 'ars required'}), 400
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('nina')
-        if not client:
-            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
-
-        dashboard_result = client.get_dashboard_with_fallback(ars)
-        return jsonify({
-            'success': True,
-            'ars': dashboard_result.get('ars_requested', ars),
-            'ars_used': dashboard_result.get('ars_used', ars),
-            'fallback_used': bool(dashboard_result.get('fallback_used')),
-            'data': dashboard_result.get('data')
-        })
-
-    except Exception as e:
-        logger.error(f"NINA dashboard error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/nina/map-data', methods=['GET'])
-def nina_map_data():
-    """Get NINA map data for a specific source"""
-    try:
-        source = request.args.get('source')
-        if not source:
-            return jsonify({'success': False, 'error': 'source required'}), 400
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('nina')
-        if not client:
-            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
-
-        data = client.get_map_data(source)
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"NINA map data error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/nina/regions', methods=['GET'])
-def nina_regions():
-    """Get NINA regional keys (ARS) list"""
-    try:
-        query = request.args.get('query', '').strip()
-        limit = int(request.args.get('limit', 200))
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('nina')
-        if not client:
-            return jsonify({'success': False, 'error': 'NINA client unavailable'}), 400
-
-        data = client.get_regional_keys(query=query, limit=limit)
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"NINA regions error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/security/status', methods=['GET'])
-def security_status():
-    """Get local security status based on configured NINA ARS and OpenWeather."""
-    try:
-        data = get_local_security_status()
-        return jsonify(data)
-    except Exception as e:
-        logger.error(f"Security status error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/weather/current', methods=['GET'])
-def weather_current():
-    """Get local current weather and forecast summary from OpenWeather."""
-    try:
-        data = get_local_weather_status()
-        return jsonify(data)
-    except Exception as e:
-        logger.error(f"Weather current error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/autobahn/roads', methods=['GET'])
-def autobahn_list_roads():
-    """List available Autobahn roads"""
-    try:
-        registry = get_api_registry()
-        client = registry.create_api_instance('autobahn')
-        if not client:
-            return jsonify({'success': False, 'error': 'Autobahn client unavailable'}), 400
-
-        data = client.list_roads()
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"Autobahn list roads error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/autobahn/road-services', methods=['GET'])
-def autobahn_road_services():
-    """Get Autobahn services for a road"""
-    try:
-        road_id = request.args.get('road_id')
-        service = request.args.get('service')
-        if not road_id or not service:
-            return jsonify({'success': False, 'error': 'road_id and service required'}), 400
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('autobahn')
-        if not client:
-            return jsonify({'success': False, 'error': 'Autobahn client unavailable'}), 400
-
-        data = client.get_road_services(road_id, service)
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"Autobahn road services error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/dashboard-deutschland/dashboard', methods=['GET'])
-def dashboard_deutschland_dashboard():
-    """Get Dashboard Deutschland entries"""
-    try:
-        registry = get_api_registry()
-        client = registry.create_api_instance('dashboard_deutschland')
-        if not client:
-            return jsonify({'success': False, 'error': 'Dashboard client unavailable'}), 400
-
-        data = client.get_dashboard_entries()
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"Dashboard Deutschland dashboard error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/dashboard-deutschland/indicators', methods=['GET'])
-def dashboard_deutschland_indicators():
-    """Get Dashboard Deutschland indicators by ids"""
-    try:
-        ids = request.args.get('ids', '')
-        if not ids:
-            return jsonify({'success': False, 'error': 'ids required'}), 400
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('dashboard_deutschland')
-        if not client:
-            return jsonify({'success': False, 'error': 'Dashboard client unavailable'}), 400
-
-        data = client.get_indicators([entry.strip() for entry in ids.split(',') if entry.strip()])
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"Dashboard Deutschland indicators error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/dashboard-deutschland/geojson', methods=['GET'])
-def dashboard_deutschland_geojson():
-    """Get Dashboard Deutschland GeoJSON"""
-    try:
-        registry = get_api_registry()
-        client = registry.create_api_instance('dashboard_deutschland')
-        if not client:
-            return jsonify({'success': False, 'error': 'Dashboard client unavailable'}), 400
-
-        data = client.get_geojson()
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"Dashboard Deutschland geojson error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/deutschland-atlas/service-info', methods=['GET'])
-def deutschland_atlas_service_info():
-    """Get Deutschland Atlas service info"""
-    try:
-        service = request.args.get('service')
-        if not service:
-            return jsonify({'success': False, 'error': 'service required'}), 400
-
-        registry = get_api_registry()
-        client = registry.create_api_instance('deutschland_atlas')
-        if not client:
-            return jsonify({'success': False, 'error': 'Deutschland Atlas client unavailable'}), 400
-
-        data = client.get_service_info(service)
-        return jsonify({'success': True, 'data': data})
-
-    except Exception as e:
-        logger.error(f"Deutschland Atlas service info error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
 # ==================== UI Configuration Endpoints ====================
 
 @app.route('/api/ui/system-config', methods=['GET', 'POST'])
@@ -8554,21 +3154,11 @@ def ui_system_config():
                     'base_url': config.get('base_url', ''),
                     'model': config.get('model', ''),
                     'immich_url_default': config.get('immich_url_default', ''),
-                    'immich_api_key_default': config.get('immich_api_key_default', ''),
+                    'immich_api_key_default': mask_secret(config.get('immich_api_key_default', '')),
+                    'immich_api_key_default_configured': bool(config.get('immich_api_key_default')),
                     'vector_db_enabled': config.get('vector_db_enabled', True),
                     'vector_db_provider': config.get('vector_db_provider', 'qdrant'),
-                    'vector_db_path': config.get('vector_db_path', './qdrant_data'),
-                    'briefing_daily_enabled': config.get('briefing_daily_enabled', BRIEFING_DAILY_ENABLED_DEFAULT),
-                    'briefing_weekly_enabled': config.get('briefing_weekly_enabled', BRIEFING_WEEKLY_ENABLED_DEFAULT),
-                    'briefing_morning_hour': config.get('briefing_morning_hour', int(BRIEFING_MORNING_HOUR)),
-                    # Email send settings for proactive briefings
-                    'briefing_send_daily': config.get('briefing_send_daily', False),
-                    'briefing_send_weekly': config.get('briefing_send_weekly', False),
-                    'briefing_send_recipients': config.get('briefing_send_recipients', ''),
-                    'briefing_send_account_id': config.get('briefing_send_account_id', ''),
-                    'briefing_send_talk': config.get('briefing_send_talk', False),
-                    'briefing_talk_room_id': config.get('briefing_talk_room_id', ''),
-                    'briefing_talk_webhook_secret_set': bool(config.get('briefing_talk_webhook_secret'))
+                    'vector_db_path': config.get('vector_db_path', './qdrant_data')
                 }
             })
 
@@ -8578,8 +3168,14 @@ def ui_system_config():
 
         # Update config values
         if 'immich_url_default' in data:
-            config['immich_url_default'] = data['immich_url_default']
-        if 'immich_api_key_default' in data:
+            normalized_default_immich = validate_service_url(
+                data['immich_url_default'],
+                allow_private_network=ALLOW_PRIVATE_NETWORK_TARGETS,
+            )
+            if data['immich_url_default'] and not normalized_default_immich:
+                return jsonify({'success': False, 'error': 'Invalid immich_url_default'}), 400
+            config['immich_url_default'] = normalized_default_immich or ''
+        if 'immich_api_key_default' in data and data['immich_api_key_default'] not in {'', '***'}:
             config['immich_api_key_default'] = data['immich_api_key_default']
         if 'base_url' in data:
             config['base_url'] = data['base_url']
@@ -8587,38 +3183,9 @@ def ui_system_config():
             config['model'] = data['model']
         if 'vector_db_enabled' in data:
             config['vector_db_enabled'] = data['vector_db_enabled']
-        if 'briefing_daily_enabled' in data:
-            config['briefing_daily_enabled'] = bool(data['briefing_daily_enabled'])
-        if 'briefing_weekly_enabled' in data:
-            config['briefing_weekly_enabled'] = bool(data['briefing_weekly_enabled'])
-        if 'briefing_morning_hour' in data:
-            config['briefing_morning_hour'] = max(0, min(23, int(data['briefing_morning_hour'])))
-
-        # Email send options
-        if 'briefing_send_daily' in data:
-            config['briefing_send_daily'] = bool(data['briefing_send_daily'])
-        if 'briefing_send_weekly' in data:
-            config['briefing_send_weekly'] = bool(data['briefing_send_weekly'])
-        if 'briefing_send_recipients' in data:
-            config['briefing_send_recipients'] = str(data['briefing_send_recipients'] or '')
-        if 'briefing_send_account_id' in data:
-            config['briefing_send_account_id'] = str(data['briefing_send_account_id'] or '')
-        if 'briefing_send_talk' in data:
-            config['briefing_send_talk'] = bool(data['briefing_send_talk'])
-        if 'briefing_talk_room_id' in data:
-            config['briefing_talk_room_id'] = str(data['briefing_talk_room_id'] or '')
-        if 'briefing_talk_webhook_secret' in data:
-            # persist only if non-empty; store as-is
-            secret = str(data['briefing_talk_webhook_secret'] or '').strip()
-            if secret:
-                config['briefing_talk_webhook_secret'] = secret
-            else:
-                # allow clearing
-                config.pop('briefing_talk_webhook_secret', None)
 
         # Save to file
-        with open(AI_CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        _safe_json_dump(AI_CONFIG_FILE, config)
 
         # Reload config
         load_ai_config()
@@ -8664,7 +3231,9 @@ def ui_runtime_config():
 def ui_profile_config():
     """User-specific profile configuration"""
     try:
-        username = _get_request_username()
+        payload = request.get_json(silent=True) or {}
+        username = request.args.get('username') if request.method == 'GET' else payload.get('username')
+        username = sanitize_username(username)
 
         if not username:
             return jsonify({'success': False, 'error': 'Username required'}), 400
@@ -8676,36 +3245,39 @@ def ui_profile_config():
                 'username': username,
                 'config': {
                     'immich_url': user_config.get('immich_url', ''),
-                    'immich_api_key': user_config.get('immich_api_key', ''),
+                    'immich_api_key': mask_secret(user_config.get('immich_api_key', '')),
+                    'immich_api_key_configured': bool(user_config.get('immich_api_key')),
                     'nextcloud_url': user_config.get('nextcloud_url', ''),
                     'nextcloud_username': user_config.get('nextcloud_username', ''),
-                    'nextcloud_password': user_config.get('nextcloud_password', ''),
+                    'nextcloud_password': mask_secret(user_config.get('nextcloud_password', '')),
+                    'nextcloud_password_configured': bool(user_config.get('nextcloud_password')),
                     'caldav_url': user_config.get('caldav_url', ''),
                     'caldav_username': user_config.get('caldav_username', ''),
-                    'caldav_password': user_config.get('caldav_password', '')
+                    'caldav_password': mask_secret(user_config.get('caldav_password', '')),
+                    'caldav_password_configured': bool(user_config.get('caldav_password')),
                 }
             })
 
         # POST - update user config
-        data = request.get_json()
+        data = payload
         user_config = load_user_config(username)
 
         # Update user-specific settings
         if 'immich_url' in data:
             user_config['immich_url'] = data['immich_url']
-        if 'immich_api_key' in data:
+        if 'immich_api_key' in data and data['immich_api_key'] not in {'', '***'}:
             user_config['immich_api_key'] = data['immich_api_key']
         if 'nextcloud_url' in data:
             user_config['nextcloud_url'] = data['nextcloud_url']
         if 'nextcloud_username' in data:
             user_config['nextcloud_username'] = data['nextcloud_username']
-        if 'nextcloud_password' in data:
+        if 'nextcloud_password' in data and data['nextcloud_password'] not in {'', '***'}:
             user_config['nextcloud_password'] = data['nextcloud_password']
         if 'caldav_url' in data:
             user_config['caldav_url'] = data['caldav_url']
         if 'caldav_username' in data:
             user_config['caldav_username'] = data['caldav_username']
-        if 'caldav_password' in data:
+        if 'caldav_password' in data and data['caldav_password'] not in {'', '***'}:
             user_config['caldav_password'] = data['caldav_password']
 
         save_user_config(username, user_config)
@@ -8720,7 +3292,7 @@ def ui_profile_config():
 def ui_connectivity_status():
     """Check connectivity status of all services"""
     try:
-        username = request.args.get('username')
+        username = sanitize_username(request.args.get('username'))
 
         status = {
             'ollama': {
@@ -8768,21 +3340,10 @@ def ui_index_status():
         }
 
         if knowledge_base and knowledge_base.db:
-            cursor = knowledge_base.db.cursor()
-
-            # Count documents
-            cursor.execute("SELECT COUNT(*) FROM files")
-            stats['total_documents'] = cursor.fetchone()[0]
-
-            # Count chunks
-            cursor.execute("SELECT COUNT(*) FROM chunks")
-            stats['total_chunks'] = cursor.fetchone()[0]
-
-            # Get last indexed timestamp
-            cursor.execute("SELECT MAX(indexed_at) FROM files")
-            last_indexed = cursor.fetchone()[0]
-            if last_indexed:
-                stats['last_indexed'] = last_indexed
+            db_stats = knowledge_base.db.get_document_stats()
+            stats['total_documents'] = db_stats.get('documents', 0)
+            stats['total_chunks'] = db_stats.get('chunks', 0)
+            stats['last_indexed'] = db_stats.get('last_updated')
 
         return jsonify({'success': True, 'stats': stats})
 
@@ -8794,7 +3355,7 @@ def ui_index_status():
 def ui_suggestions():
     """Get query suggestions based on available data"""
     try:
-        username = request.args.get('username')
+        username = sanitize_username(request.args.get('username'))
 
         suggestions = []
 
@@ -8841,7 +3402,7 @@ def ui_suggestions():
 def ui_immich_status():
     """Get Immich integration status"""
     try:
-        username = request.args.get('username')
+        username = sanitize_username(request.args.get('username'))
 
         if not username:
             return jsonify({'success': False, 'error': 'Username required'}), 400
@@ -8936,467 +3497,11 @@ def tools_test_execution(tool_name: str):
 
 # ==================== Agent Query Endpoint (Unified Chat Interface) ====================
 
-_EMAIL_KEYWORDS = [
-    'email', 'e-mail', 'e mail', 'mail', 'mails', 'emails', 'nachricht',
-    'posteingang', 'inbox', 'absender', 'betreff', 'gesendet', 'sent',
-    'newsletter', 'message', 'messages', 'inboxnachrichten'
-]
-
-_EMAIL_SEND_KEYWORDS = [
-    'sende', 'schicke', 'schick', 'verschicke', 'email schreiben', 'mail schreiben',
-    'schreibe eine mail', 'schreibe eine e-mail', 'write email', 'send email',
-    'compose email', 'verfasse', 'antworten', 'reply', 'weiterleiten', 'forward'
-]
-
-_CONTACT_KEYWORDS = [
-    'kontakt', 'kontakte', 'adressbuch', 'carddav', 'contact', 'contacts',
-    'telefonbuch', 'person', 'personen', 'anschrift', 'email adresse', 'e-mail adresse', 'mailadresse'
-]
-
-
-def is_email_query(prompt: str) -> bool:
-    """Return True if the prompt is likely asking about emails."""
-    prompt_lower = prompt.lower()
-    return any(kw in prompt_lower for kw in _EMAIL_KEYWORDS)
-
-
-def is_email_send_query(prompt: str) -> bool:
-    """Return True if the prompt is likely asking to draft or send an email."""
-    prompt_lower = prompt.lower()
-    if any(kw in prompt_lower for kw in _EMAIL_SEND_KEYWORDS):
-        r'\b(?:schick\w*|sende|send|reply|antworte|antwort\w*)\b.*\b(?:antwort\w*|reply|e-?mail|mail|nachricht)\b',
-        return True
-
-    flexible_patterns = [
-        r'\bschreib\w*\b.*\b(?:e-?mail|mail|nachricht)\b',
-        r'\b(?:verfass\w*|formulier\w*|entwerf\w*|compose|write)\b.*\b(?:e-?mail|mail|nachricht)\b',
-        r'\b(?:sende|send|schick\w*|verschick\w*|reply|antwort\w*|weiterleit\w*|forward)\b.*\b(?:e-?mail|mail|nachricht)\b',
-    ]
-    if any(re.search(pattern, prompt_lower, flags=re.IGNORECASE) for pattern in flexible_patterns):
-        return True
-
-    return is_email_query(prompt) and any(
-        kw in prompt_lower for kw in ['sende', 'schicke', 'verschicke', 'schreib', 'verfasse', 'write', 'send', 'reply', 'antwort']
-    )
-
-
-def is_contact_query(prompt: str) -> bool:
-    """Return True if the prompt is likely asking about contacts or an address book."""
-    prompt_lower = prompt.lower()
-    return any(kw in prompt_lower for kw in _CONTACT_KEYWORDS)
-
-
-def is_email_read_query(prompt: str) -> bool:
-    """Return True for inbox/list/search style email questions (not compose/send)."""
-    prompt_lower = (prompt or '').lower()
-    if not is_email_query(prompt) or is_email_send_query(prompt):
-        return False
-
-    return any(token in prompt_lower for token in [
-        'welche', 'zeige', 'liste', 'list', 'posteingang', 'inbox', 'ungelesen',
-        'heute', 'gestern', 'woche', 'month', 'monat', 'erhalten', 'eingegangen', 'angekommen'
-    ])
-
-
-def is_email_content_query(prompt: str) -> bool:
-    """Return True for prompts asking for email content/summary."""
-    prompt_lower = (prompt or '').lower()
-    if not is_email_query(prompt) or is_email_send_query(prompt):
-        return False
-
-    return any(token in prompt_lower for token in [
-        'was steht', 'inhalt', 'worum geht', 'zusammenfassen', 'zusammenfassung',
-        'was schreibt', 'was steht drin', 'was steht in', 'content'
-    ])
-
-
-def _extract_email_query_tokens(prompt: str) -> List[str]:
-    """Extract meaningful tokens for ranking a target email from a result list."""
-    text = _normalize_lookup_text(prompt)
-    stop_words = {
-        'was', 'steht', 'in', 'dem', 'der', 'die', 'das', 'den', 'heute', 'gestern', 'mail',
-        'email', 'e', 'von', 'ich', 'habe', 'bekommen', 'bitte', 'mir', 'zu', 'und', 'oder',
-        'worum', 'geht', 'inhalt', 'zusammenfassung', 'zusammenfassen', 'welche', 'zeige',
-        'posteingang', 'inbox', 'nachricht', 'nachrichten', 'ein', 'eine', 'einer'
-    }
-    tokens = [token for token in re.findall(r'[a-z0-9]+', text) if len(token) >= 3 and token not in stop_words]
-    # Preserve order while removing duplicates.
-    seen = set()
-    result: List[str] = []
-    for token in tokens:
-        if token not in seen:
-            seen.add(token)
-            result.append(token)
-    return result
-
-
-def _score_email_for_prompt(mail: Dict[str, Any], prompt: str) -> int:
-    """Score an email entry by how well it matches the user prompt."""
-    tokens = _extract_email_query_tokens(prompt)
-    sender = _normalize_lookup_text(mail.get('sender', ''))
-    subject = _normalize_lookup_text(mail.get('subject', ''))
-    body = _normalize_lookup_text((mail.get('body', '') or '')[:600])
-
-    score = 0
-    for token in tokens:
-        if token in sender:
-            score += 30
-        if token in subject:
-            score += 18
-        if token in body:
-            score += 5
-
-    prompt_lower = (prompt or '').lower()
-    date_str = str(mail.get('date') or '').lower()
-    if 'heute' in prompt_lower and datetime.now().strftime('%d %b').lower() in date_str:
-        score += 5
-    if 'gestern' in prompt_lower:
-        score += 2
-
-    return score
-
-
-def _email_body_to_text(body: str) -> str:
-    """Convert raw email body (plain text or HTML) into readable text."""
-    if not body:
-        return ''
-
-    text = str(body)
-    looks_like_html = '<html' in text.lower() or '<body' in text.lower() or '</' in text.lower()
-    if looks_like_html:
-        text = re.sub(r'(?is)<(script|style).*?>.*?</\1>', ' ', text)
-        text = re.sub(r'(?i)</?(br|p|div|li|tr|h1|h2|h3|h4|h5|h6)[^>]*>', '\n', text)
-        text = re.sub(r'(?is)<[^>]+>', ' ', text)
-
-    text = html.unescape(text)
-    text = text.replace('\r', '\n')
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    text = re.sub(r'[ \t]{2,}', ' ', text)
-    return text.strip()
-
-
-def _build_email_content_summary(mail: Dict[str, Any], prompt: str) -> str:
-    """Build a concise content summary for a single email."""
-    subject = str(mail.get('subject') or '(kein Betreff)').strip()
-    sender = str(mail.get('sender') or '').strip()
-    date_str = str(mail.get('date') or '').strip()
-    body_text = _email_body_to_text(str(mail.get('body') or ''))
-
-    if not body_text:
-        return f"Ich habe die Mail gefunden ({subject}), aber keinen lesbaren Inhalt extrahieren können."
-
-    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', body_text) if len(s.strip()) >= 30]
-    preferred = [
-        s for s in sentences
-        if any(kw in s.lower() for kw in ['bewertung', 'bestellung', 'lass uns wissen', 'würden gerne wissen', 'feedback'])
-    ]
-
-    summary_sentences = preferred[:3] if preferred else sentences[:3]
-    summary_text = ' '.join(summary_sentences).strip()
-    if not summary_text:
-        summary_text = body_text[:600] + ('...' if len(body_text) > 600 else '')
-
-    header = f"In der Mail \"{subject}\""
-    if sender:
-        header += f" von {sender}"
-    if date_str:
-        header += f" ({date_str})"
-    header += " geht es um Folgendes:"
-
-    return f"{header}\n\n{summary_text}"
-
-
-def extract_email_send_info_from_message(message: str) -> Dict[str, Any]:
-    """Extract a rough email draft from a natural language request."""
-    text = (message or '').strip()
-    normalized = ' '.join(text.split())
-    address_matches = re.findall(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}', normalized, flags=re.IGNORECASE)
-
-    subject = ''
-    subject_match = re.search(r'(?:betreff|subject)[:\-]\s*(.+?)(?:\s{2,}|$)', normalized, flags=re.IGNORECASE)
-    if subject_match:
-        subject = subject_match.group(1).strip(' "')
-
-    body = normalized
-    body_match = re.search(r'(?:nachricht|text|inhalt|body)[:\-]\s*(.+)$', normalized, flags=re.IGNORECASE)
-    if body_match:
-        body = body_match.group(1).strip()
-
-    if not subject:
-        if is_email_send_query(normalized):
-            subject = 'Neue Nachricht'
-        elif address_matches:
-            subject = 'Nachricht an ' + address_matches[0]
-
-    missing_info = []
-    if not address_matches:
-        missing_info.append('Empfänger')
-    if not body:
-        missing_info.append('Nachrichtentext')
-
-    return {
-        'to': ', '.join(address_matches),
-        'subject': subject,
-        'body': body,
-        'cc': '',
-        'bcc': '',
-        'missing_info': missing_info,
-        'has_recipient': bool(address_matches)
-    }
-
-
-def _extract_email_from_text(text: str) -> str:
-    """Extract the first email address from arbitrary text."""
-    if not text:
-        return ''
-    match = re.search(r'[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}', str(text), flags=re.IGNORECASE)
-    return match.group(0).strip() if match else ''
-
-
-def _extract_contact_query_from_email_prompt(prompt: str) -> str:
-    """Extract the intended recipient name from a compose-email prompt."""
-    text = ' '.join((prompt or '').split())
-    if not text:
-        return ''
-
-    patterns = [
-        r'(?:an|für|to)\s+(?:den|die|das|dem|der|the)?\s*([^,.;:]+?)(?:\s+(?:und|mit|wegen|bezüglich)\b.*)?$',
-        r'(?:schreibe|sende|schick(?:e)?|verschicke|compose|write)\s+(?:eine\s+)?(?:e-?mail|mail|nachricht)\s+(?:an|für|to)\s+([^,.;:]+?)(?:\s+(?:und|mit|wegen|bezüglich)\b.*)?$',
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if match:
-            candidate = match.group(1).strip(' "')
-            if candidate and not _extract_email_from_text(candidate):
-                return candidate
-
-    return ''
-
-
-def _normalize_lookup_text(text: str) -> str:
-    """Normalize text for robust contact matching without umlaut sensitivity."""
-    value = str(text or '').lower().strip()
-    replacements = {
-        'ä': 'ae',
-        'ö': 'oe',
-        'ü': 'ue',
-        'ß': 'ss',
-    }
-    for source, target in replacements.items():
-        value = value.replace(source, target)
-    value = re.sub(r'[^a-z0-9\s@._-]+', ' ', value)
-    return ' '.join(value.split())
-
-
-def _score_contact_match(contact: Dict[str, Any], recipient_query: str) -> int:
-    """Score how well a contact fits the requested recipient name."""
-    query_norm = _normalize_lookup_text(recipient_query)
-    if not query_norm:
-        return 0
-
-    full_name = _normalize_lookup_text(contact.get('full_name', ''))
-    given_name = _normalize_lookup_text(contact.get('given_name', ''))
-    family_name = _normalize_lookup_text(contact.get('family_name', ''))
-    organization = _normalize_lookup_text(contact.get('organization', ''))
-    haystack = ' '.join([full_name, given_name, family_name, organization]).strip()
-
-    score = 0
-    if full_name == query_norm:
-        score += 100
-    if given_name and family_name and query_norm in [
-        f'{given_name} {family_name}'.strip(),
-        f'{family_name} {given_name}'.strip()
-    ]:
-        score += 95
-    if query_norm and query_norm in haystack:
-        score += 35
-
-    query_tokens = [token for token in query_norm.split() if len(token) >= 2]
-    for token in query_tokens:
-        if token in full_name:
-            score += 10
-        elif token in haystack:
-            score += 4
-
-    score += min(5, len(contact.get('email', []) or []))
-    return score
-
-
-def get_carddav_client(username: str = None) -> Optional['NextcloudCardDAVClient']:
-    """Return a configured CardDAV client for *username*, or None if unavailable."""
-    try:
-        config = get_nextcloud_runtime_config()
-        if not config:
-            return None
-
-        nextcloud_url = str(config.get('url') or config.get('nextcloud_url') or '').strip()
-        nextcloud_username = str(username or config.get('username') or '').strip()
-        password = str(config.get('password') or '').strip()
-        if not all([nextcloud_url, nextcloud_username, password]):
-            return None
-
-        return NextcloudCardDAVClient(nextcloud_url, nextcloud_username, password)
-    except Exception as e:
-        logger.debug('CardDAV client not available: %s', e)
-        return None
-
-
-def search_carddav_contacts(query: str, username: str = None, limit: int = 10) -> List[Dict[str, Any]]:
-    """Search contacts in CardDAV address books by query."""
-    client = get_carddav_client(username)
-    if not client or not query.strip():
-        return []
-
-    matches: List[Dict[str, Any]] = []
-    query_lower = query.lower().strip()
-
-    try:
-        addressbooks = client.get_addressbooks()
-        addressbook_names = [book.get('name') for book in addressbooks if book.get('name')] or ['contacts']
-
-        for addressbook_name in addressbook_names:
-            try:
-                contacts = client.search_contacts(query, addressbook_name)
-                for contact in contacts:
-                    display_name = contact.get('full_name') or ' '.join([
-                        contact.get('given_name', ''),
-                        contact.get('family_name', '')
-                    ]).strip()
-                    searchable = ' '.join([
-                        display_name,
-                        contact.get('given_name', ''),
-                        contact.get('family_name', ''),
-                        contact.get('organization', ''),
-                        ' '.join(contact.get('email', [])),
-                    ]).lower()
-
-                    if query_lower in searchable:
-                        enriched = dict(contact)
-                        enriched['addressbook_name'] = addressbook_name
-                        matches.append(enriched)
-            except Exception as e:
-                logger.debug('CardDAV search failed for addressbook %s: %s', addressbook_name, e)
-
-        # Deduplicate by contact URL/id and prefer contacts with the most email addresses.
-        deduped: Dict[str, Dict[str, Any]] = {}
-        for contact in matches:
-            key = str(contact.get('url') or contact.get('id') or contact.get('full_name') or contact.get('organization') or id(contact))
-            existing = deduped.get(key)
-            if not existing or len(contact.get('email', [])) > len(existing.get('email', [])):
-                deduped[key] = contact
-
-        sorted_matches = sorted(
-            deduped.values(),
-            key=lambda item: (
-                0 if query_lower in str(item.get('full_name', '')).lower() else 1,
-                -(len(item.get('email', [])) or 0),
-                str(item.get('full_name', '')).lower()
-            )
-        )
-        return sorted_matches[:limit]
-    except Exception as e:
-        logger.debug('CardDAV contact search error: %s', e)
-        return []
-
-
-def resolve_email_contacts_for_prompt(
-    prompt: str,
-    username: str = None,
-    limit: int = 5,
-    timeout_seconds: float = 8.0
-) -> Dict[str, Any]:
-    """Resolve likely recipient contacts for an email compose prompt."""
-    recipient_query = _extract_contact_query_from_email_prompt(prompt)
-    search_query = recipient_query or prompt
-    contacts: List[Dict[str, Any]] = []
-
-    # CardDAV lookups can be slow on some servers. Use a hard timeout so
-    # compose requests never block the full chat endpoint.
-    executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(search_carddav_contacts, search_query, username, limit)
-    try:
-        contacts = future.result(timeout=max(0.5, float(timeout_seconds or 3.0)))
-    except FuturesTimeoutError:
-        logger.warning('CardDAV recipient lookup timed out for query: %s', search_query)
-        future.cancel()
-        contacts = []
-    except Exception as e:
-        logger.debug('CardDAV recipient lookup failed: %s', e)
-        contacts = []
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
-
-    scored_contacts: List[Dict[str, Any]] = sorted(
-        contacts,
-        key=lambda item: _score_contact_match(item, recipient_query),
-        reverse=True
-    )
-
-    email_candidates: List[str] = []
-    for contact in scored_contacts:
-        for email_address in contact.get('email', []) or []:
-            email_address = str(email_address).strip()
-            if email_address and email_address not in email_candidates:
-                email_candidates.append(email_address)
-
-    top_contact = scored_contacts[0] if scored_contacts else None
-    top_score = _score_contact_match(top_contact, recipient_query) if top_contact else 0
-
-    best_email = ''
-    if len(email_candidates) == 1:
-        best_email = email_candidates[0]
-    elif top_contact and (top_contact.get('email') or []):
-        # For clearly identified recipients, auto-pick the primary address.
-        best_email = str((top_contact.get('email') or [''])[0]).strip()
-
-    needs_selection = len(email_candidates) > 1 and not (best_email and top_score >= 45)
-
-    return {
-        'recipient_query': recipient_query,
-        'contacts': scored_contacts,
-        'email_candidates': email_candidates,
-        'best_email': best_email,
-        'needs_selection': needs_selection,
-        'has_contact_match': bool(contacts)
-    }
-
-
-def get_email_client(
-    username: str = None,
-    account_id: str = None,
-    config: Dict[str, Any] = None,
-    use_cache: bool = True
-) -> Optional['EmailClient']:
-    """Return a configured EmailClient for *username* and optional *account_id*."""
-    try:
-        registry = get_api_registry()
-
-        effective_config = None
-        if config is not None:
-            effective_config = dict(config)
-        elif account_id:
-            effective_config = registry.load_config('email', username)
-
-        if account_id:
-            if effective_config is None:
-                effective_config = {}
-            effective_config['selected_account_id'] = account_id
-
-        if effective_config is None:
-            return registry.create_api_instance('email', username=username, use_cache=use_cache)
-
-        return registry.create_api_instance('email', config=effective_config, username=username, use_cache=False)
-    except Exception as e:
-        logger.debug("Email client not available: %s", e)
-        return None
-
-
 def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
     """
     Erkennt die Intention der Anfrage
 
-    Returns: 'photos', 'files', 'calendar', 'tasks', 'email', 'mixed', 'general'
+    Returns: 'photos', 'files', 'calendar', 'tasks', 'mixed', 'general'
     """
     prompt_lower = prompt.lower()
 
@@ -9405,12 +3510,10 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
         return 'photos'
     elif preferred_source == 'files':
         return 'files'
-    elif preferred_source == 'email':
-        return 'email'
 
     # Erkenne Foto-Anfragen
     photo_keywords = ['foto', 'fotos', 'bild', 'bilder', 'image', 'images', 'photo', 'photos',
-                     'immich', 'gesicht', 'album', 'aufnahme',
+                     'immich', 'person', 'personen', 'gesicht', 'album', 'aufnahme', 
                      'zeig mir', 'gib mir', 'show me', 'finde', 'find',
                      'katze', 'hund', 'baum', 'auto', 'haus', 'mensch',
                      'katzen', 'hunde', 'bäume', 'autos', 'häuser', 'menschen']
@@ -9432,15 +3535,9 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
                     'erledigen', 'machen', 'erinnerung', 'erinnerungen', 'reminder', 'reminders']
     has_task = any(keyword in prompt_lower for keyword in task_keywords)
 
-    # Erkenne E-Mail-Anfragen
-    has_email = is_email_query(prompt)
-
     # Bestimme primäre Intention
-    active_intents = sum([has_photo, has_file, has_time, has_task, has_email])
+    active_intents = sum([has_photo, has_file, has_time, has_task])
 
-    # E-Mail-Anfragen haben Vorrang wenn eindeutig
-    if has_email and not has_photo and not has_file and not has_task:
-        return 'email'
     # Fotoanfragen mit Zeitbezug (z. B. "Foto von heute") sollen als
     # Foto-Intent laufen und nicht in den gemischten Pfad fallen.
     if has_photo and not has_file and not has_task:
@@ -9456,167 +3553,6 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
     else:
         return 'general'
 
-
-def _parse_conversation_context(context: str) -> List[Dict[str, str]]:
-    """Parse a flat conversation-history string into a list of role/content dicts.
-
-    The frontend serialises conversation turns as::
-
-        User: <turn>
-        Assistant: <turn>
-        ...
-
-    This function reconstructs the individual dicts so the model receives a proper
-    multi-turn conversation history rather than a single opaque assistant blob.
-    """
-    if not context or not context.strip():
-        return []
-
-    parsed: List[Dict[str, str]] = []
-    current_role: Optional[str] = None
-    current_lines: List[str] = []
-
-    for line in context.split('\n'):
-        if line.startswith('User: '):
-            if current_role and current_lines:
-                content = '\n'.join(current_lines).strip()
-                if content:
-                    parsed.append({'role': current_role, 'content': content})
-            current_role = 'user'
-            current_lines = [line[6:]]
-        elif line.startswith('Assistant: '):
-            if current_role and current_lines:
-                content = '\n'.join(current_lines).strip()
-                if content:
-                    parsed.append({'role': current_role, 'content': content})
-            current_role = 'assistant'
-            current_lines = [line[11:]]
-        elif current_role is not None:
-            current_lines.append(line)
-
-    # Flush the final turn
-    if current_role and current_lines:
-        content = '\n'.join(current_lines).strip()
-        if content:
-            parsed.append({'role': current_role, 'content': content})
-
-    return parsed
-
-
-def _build_integration_connect_response(provider: str, prompt: str, language: str = 'de', feature: str = '') -> Dict[str, Any]:
-    """Builds a unified interactive setup response for missing integrations."""
-    is_german = str(language or '').lower().startswith('de')
-    requested_feature = feature or provider
-
-    if provider == 'nextcloud':
-        response_text = (
-            "Ich kann diese Anfrage erst ausführen, wenn Nextcloud verbunden ist. "
-            "Du kannst dich jetzt direkt hier verbinden."
-            if is_german else
-            "I can run this request once Nextcloud is connected. You can connect it directly here now."
-        )
-        title = 'Nextcloud verbinden' if is_german else 'Connect Nextcloud'
-        description = (
-            'Verbinde zuerst Nextcloud per Login-Flow oder hinterlege URL + Benutzername + App-Passwort.'
-            if is_german else
-            'Connect Nextcloud via login flow or provide URL, username, and app password.'
-        )
-        fields = [
-            {
-                'name': 'nextcloud_url',
-                'label': 'Nextcloud URL',
-                'type': 'url',
-                'required': True,
-                'placeholder': 'https://cloud.example.com'
-            },
-            {
-                'name': 'username',
-                'label': 'Username',
-                'type': 'text',
-                'required': True,
-                'placeholder': 'your.username'
-            },
-            {
-                'name': 'password',
-                'label': 'App Password',
-                'type': 'password',
-                'required': True,
-                'placeholder': '••••••••'
-            }
-        ]
-        quick_actions = [
-            {
-                'type': 'nextcloud_login_flow',
-                'label': 'Login with Nextcloud' if not is_german else 'Mit Nextcloud einloggen'
-            }
-        ]
-        submit_endpoint = '/api/nextcloud/login'
-    elif provider == 'immich':
-        response_text = (
-            'Ich brauche eine konfigurierte Immich-Verbindung, um danach suchen zu können.'
-            if is_german else
-            'I need an active Immich connection before I can search photos.'
-        )
-        title = 'Immich konfigurieren' if is_german else 'Configure Immich'
-        description = (
-            'Trage Immich URL und API Key ein. Die Werte werden als Standard-Konfiguration gespeichert.'
-            if is_german else
-            'Enter Immich URL and API key. Values will be saved as default configuration.'
-        )
-        fields = [
-            {
-                'name': 'immich_url_default',
-                'label': 'Immich URL',
-                'type': 'url',
-                'required': True,
-                'placeholder': 'https://immich.example.com'
-            },
-            {
-                'name': 'immich_api_key_default',
-                'label': 'API Key',
-                'type': 'password',
-                'required': True,
-                'placeholder': '••••••••'
-            }
-        ]
-        quick_actions = []
-        submit_endpoint = '/api/ui/system-config'
-    else:
-        response_text = (
-            'Für diese Funktion fehlt noch eine API-Verbindung.'
-            if is_german else
-            'This feature needs an API connection before it can be used.'
-        )
-        title = 'API konfigurieren' if is_german else 'Configure API'
-        description = (
-            'Bitte hinterlege die notwendigen Zugangsdaten.'
-            if is_german else
-            'Please enter the required credentials.'
-        )
-        fields = []
-        quick_actions = []
-        submit_endpoint = ''
-
-    return {
-        'success': True,
-        'response': response_text,
-        'action': 'integration_connect_required',
-        'requires_input': True,
-        'integration_setup': {
-            'provider': provider,
-            'feature': requested_feature,
-            'title': title,
-            'description': description,
-            'fields': fields,
-            'quick_actions': quick_actions,
-            'submit_endpoint': submit_endpoint,
-            'prefill': {},
-            'original_prompt': prompt
-        },
-        'sources': [],
-        'ui_cards': []
-    }
-
 @app.route('/api/agent/query', methods=['POST'])
 def agent_query():
     """
@@ -9627,11 +3563,9 @@ def agent_query():
         data = request.get_json()
         prompt = data.get('prompt', '').strip()
         username = data.get('username')
-        account_id = data.get('account_id')
         language = data.get('language', 'de')
         context = data.get('context', '')  # Previous conversation context
         preferred_source = data.get('preferred_source', 'auto')
-        email_config = data.get('email_config') or data.get('emailConfig')
 
         if not prompt:
             return jsonify({
@@ -9639,245 +3573,75 @@ def agent_query():
                 'error': 'Keine Anfrage erhalten'
             }), 400
 
-        # Fast path: manual briefing request from chat.
-        if _is_manual_briefing_query(prompt):
-            kind = _requested_briefing_kind(prompt)
-            force_refresh = True
-
-            item = generate_proactive_briefing(kind=kind, force=force_refresh)
-            response_text = _format_briefing_for_chat(item) if item else 'Ich konnte gerade kein Briefing erstellen.'
-
-            return jsonify({
-                'success': True,
-                'response': response_text,
-                'action': 'manual_briefing',
-                'requires_input': False,
-                'briefing': item,
-                'sources': [],
-                'ui_cards': [],
-                'context_used': False,
-                'context_count': 0,
-                'training_saved': False
-            })
-
-        # Fast path for compose/send email requests before running other
-        # potentially slow context gatherers (weather/security/activity).
-        if is_email_send_query(prompt):
-            recipient_resolution = resolve_email_contacts_for_prompt(prompt, username=username)
-            draft_card = _build_email_card(prompt, language)
-            draft_source = _build_email_source_card(
-                subject=str(draft_card.get('subject') or 'Neue Nachricht').strip(),
-                sender=str(draft_card.get('to') or recipient_resolution.get('recipient_query') or 'Entwurf').strip() or 'Entwurf',
-                date_str='',
-                folder='Entwurf',
-                body_preview=str(draft_card.get('body') or '').strip() or str(prompt or '').strip(),
-                label='E-Mail-Entwurf'
-            )
-            contact_sources = [
-                _build_contact_source_card(contact, 'Empfänger')
-                for contact in (recipient_resolution.get('contacts', []) or [])[:3]
-            ]
-
-            if recipient_resolution.get('has_contact_match') and recipient_resolution.get('needs_selection'):
-                contact_cards = recipient_resolution.get('contacts', [])
-                contact_title = recipient_resolution.get('recipient_query') or 'den Kontakt'
-                contact_card = _build_contact_card(prompt, contact_cards, language)
-
-                return jsonify({
-                    'success': True,
-                    'response': f'Ich habe mehrere E-Mail-Adressen für {contact_title} gefunden. Welche soll ich verwenden?',
-                    'action': 'email_recipient_selection',
-                    'requires_input': True,
-                    'recipient_query': recipient_resolution.get('recipient_query', ''),
-                    'contacts': contact_cards,
-                    'email_candidates': recipient_resolution.get('email_candidates', []),
-                    'sources': [draft_source, *contact_sources],
-                    'ui_cards': [contact_card],
-                    'context_used': False,
-                    'context_count': 0,
-                    'training_saved': False
-                })
-
-            email_card = draft_card
-            cards = []
-
-            if recipient_resolution.get('best_email') and not email_card.get('to'):
-                email_card['to'] = recipient_resolution.get('best_email', '')
-
-            if recipient_resolution.get('has_contact_match') and not email_card.get('to'):
-                contact_cards = recipient_resolution.get('contacts', [])
-                if contact_cards:
-                    cards.append(_build_contact_card(prompt, contact_cards, language))
-
-            cards.append(email_card)
-
-            if email_card.get('to'):
-                response_text = 'Ich habe eine E-Mail-Vorlage vorbereitet. Du kannst sie jetzt direkt prüfen und senden.'
-            else:
-                response_text = 'Ich habe eine E-Mail-Vorlage vorbereitet. Bitte wähle einen Empfänger oder ergänze die Adresse.'
-
-            return jsonify({
-                'success': True,
-                'response': response_text,
-                'action': 'email_compose',
-                'requires_input': True,
-                'recipient_query': recipient_resolution.get('recipient_query', ''),
-                'contacts': recipient_resolution.get('contacts', []),
-                'email_candidates': recipient_resolution.get('email_candidates', []),
-                'sources': [draft_source, *contact_sources],
-                'ui_cards': cards,
-                'context_used': False,
-                'context_count': 0,
-                'training_saved': False
-            })
-
-        # Fast path for email read/list queries to avoid slow mixed pipelines and
-        # ensure deterministic inbox answers.
-        if is_email_read_query(prompt):
-            email_client_instance = get_email_client(
-                username=username,
-                account_id=account_id,
-                config=email_config if isinstance(email_config, dict) else None
-            )
-            if not email_client_instance:
-                return jsonify({
-                    'success': False,
-                    'error': 'E-Mail ist nicht konfiguriert. Bitte hinterlege die IMAP-Zugangsdaten in den Einstellungen.'
-                }), 400
-
-            profile = _build_email_query_profile(prompt)
-            is_content_request = is_email_content_query(prompt)
-
-            if profile.get('mode') == 'general':
-                emails = email_client_instance.search_emails(prompt, limit=10)
-                prompt_norm = ' '.join((prompt or '').split()).strip().lower()
-                if not emails and ('heute' in prompt_norm or 'today' in prompt_norm) and any(
-                    token in prompt_norm for token in ['mail', 'e-mail', 'email', 'posteingang', 'inbox']
-                ):
-                    today = date.today()
-                    emails = email_client_instance.fetch_emails(
-                        limit=20,
-                        folder_focus='inbox',
-                        since=today,
-                        until=today,
-                        unread=None,
-                    )
-            else:
-                emails = email_client_instance.fetch_emails(
-                    limit=profile.get('limit', 10),
-                    folder_focus=profile.get('folder_focus', 'all'),
-                    since=profile.get('since'),
-                    until=profile.get('until'),
-                    unread=profile.get('unread'),
-                )
-
-                # If today's inbox is empty, retry across all folders to avoid
-                # false negatives caused by provider-specific inbox mapping.
-                if not emails and profile.get('mode') in ['today_received', 'today_content']:
-                    emails = email_client_instance.fetch_emails(
-                        limit=profile.get('limit', 10),
-                        folder_focus='all',
-                        since=profile.get('since'),
-                        until=profile.get('until'),
-                        unread=profile.get('unread'),
-                    )
-
-            if not emails:
-                return jsonify({
-                    'success': True,
-                    'response': 'Ich habe keine passenden E-Mails gefunden. Möchtest du, dass ich ohne Zeitfilter im gesamten Posteingang suche?',
-                    'action': 'email_list',
-                    'requires_input': False,
-                    'sources': [],
-                    'ui_cards': [],
-                    'context_used': False,
-                    'context_count': 0,
-                    'training_saved': False
-                })
-
-            if is_content_request:
-                target_mail = max(emails, key=lambda m: _score_email_for_prompt(m, prompt))
-                content_response = _build_email_content_summary(target_mail, prompt)
-                body_text = _email_body_to_text(str(target_mail.get('body') or ''))
-                preview = body_text[:300] + ('...' if len(body_text) > 300 else '')
-                email_source = _build_email_source_card(
-                    subject=str(target_mail.get('subject') or '(kein Betreff)').strip(),
-                    sender=str(target_mail.get('sender') or '').strip(),
-                    date_str=str(target_mail.get('date') or '').strip(),
-                    folder=str(target_mail.get('folder') or 'INBOX').strip(),
-                    body_preview=preview,
-                    label='E-Mail-Inhalt'
-                )
-
-                return jsonify({
-                    'success': True,
-                    'response': content_response,
-                    'action': 'email_content',
-                    'requires_input': False,
-                    'email_results': [{
-                        'subject': str(target_mail.get('subject') or '(kein Betreff)').strip(),
-                        'sender': str(target_mail.get('sender') or '').strip(),
-                        'date': str(target_mail.get('date') or '').strip(),
-                        'folder': str(target_mail.get('folder') or 'INBOX').strip(),
-                        'body_preview': preview,
-                        'uid': target_mail.get('uid')
-                    }],
-                    'sources': [email_source],
-                    'ui_cards': [],
-                    'context_used': False,
-                    'context_count': 0,
-                    'training_saved': False
-                })
-
-            preview_items = []
-            response_lines = [f"Ich habe {len(emails)} passende E-Mails gefunden:"]
-            for idx, mail in enumerate(emails[:10], 1):
-                subject = str(mail.get('subject') or '(kein Betreff)').strip()
-                sender = str(mail.get('sender') or '').strip()
-                date_str = str(mail.get('date') or '').strip()
-                folder = str(mail.get('folder') or 'INBOX').strip()
-                response_lines.append(f"{idx}. {subject}" + (f" - von {sender}" if sender else "") + (f" ({date_str})" if date_str else ""))
-
-                body = str(mail.get('body') or '').strip()
-                preview_items.append({
-                    'subject': subject,
-                    'sender': sender,
-                    'date': date_str,
-                    'folder': folder,
-                    'body_preview': (body[:300] + '...') if len(body) > 300 else body,
-                    'uid': mail.get('uid')
-                })
-
-            return jsonify({
-                'success': True,
-                'response': '\n'.join(response_lines),
-                'action': 'email_list',
-                'requires_input': False,
-                'email_results': preview_items,
-                'sources': [],
-                'ui_cards': [],
-                'context_used': False,
-                'context_count': 0,
-                'training_saved': False
-            })
-
         message_lower = prompt.lower()
 
-        # Gather weather context if query is weather-related (but let AI respond)
-        weather_context = gather_weather_context(
-            get_local_weather_status, is_weather_query, prompt, _safe_text
-        )
+        # Action parser: explicit reminder/task creation
+        action_response = None
+        try:
+            import re
 
-        # Gather security context if query is security-related (but let AI respond)
-        security_context = gather_security_context(
-            get_local_security_status, is_security_query, prompt
-        )
+            pattern = r'(?:erstelle|create)\s+(?:eine?\s+)?(?:erinnerung|aufgabe|task|todo|aufgaben|tasks|reminder)\s+(?:fuer|für|um)\s+([^:]+):\s*(.+?)(?:\.|$)'
+            match = re.search(pattern, message_lower)
 
-        # Gather activity context if query is activity-related (but let AI respond)
-        activity_context = gather_activity_context(
-            get_updates_context, is_activity_query, prompt
-        )
+            if match:
+                time_ref = match.group(1).strip()
+                title = match.group(2).strip()
+
+                due_date = None
+                if 'morgen' in time_ref or 'tomorrow' in time_ref:
+                    due_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                elif 'heute' in time_ref or 'today' in time_ref:
+                    due_date = datetime.now().strftime('%Y-%m-%d')
+
+                if title and tasks_enabled and task_manager.tasks_client:
+                    success = task_manager.create_task(
+                        title=title,
+                        due_date=due_date,
+                        list_name='todo'
+                    )
+                    if success:
+                        action_response = f"✓ Erinnerung '{title}' wurde erstellt (faellig: {due_date or 'unbegrenzt'})"
+        except Exception as e:
+            logger.debug(f"Action parser error (this is OK): {e}")
+
+        if action_response:
+            return jsonify({
+                'success': True,
+                'response': action_response,
+                'action': 'task_created',
+                'context_used': False,
+                'context_count': 0,
+                'intent': 'tasks',
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': False
+                }
+            })
+
+        # Activity shortcut: direct response without LLM
+        activity_context = None
         is_activity_question = is_activity_query(prompt)
+        if is_activity_question:
+            updates_result = get_updates_context(activity_limit=10, notifications_limit=10)
+            activity_context = updates_result.get('context', '')
+
+            if not is_todo_query(prompt) and not any(k in message_lower for k in ['termin', 'kalender', 'aufgabe', 'todo', 'task']):
+                return jsonify({
+                    'success': True,
+                    'response': updates_result.get('summary_text', 'Keine Aktivitaetsdaten verfuegbar.'),
+                    'action': 'activity_lookup',
+                    'context_used': bool(activity_context),
+                    'context_count': 1 if activity_context else 0,
+                    'intent': 'activity',
+                    'sources_used': {
+                        'photos': False,
+                        'files': False,
+                        'calendar': False,
+                        'todos': False
+                    }
+                })
 
         # Calendar heuristic (same as legacy /api/chat)
         time_related_indicators = [
@@ -9889,72 +3653,9 @@ def agent_query():
         has_time_indicators = any(indicator in message_lower for indicator in time_related_indicators)
         has_question = any(word in message_lower.split()[:3] for word in question_words)
         is_potentially_calendar_query = has_time_indicators and has_question
-        intent = detect_query_intent(prompt, preferred_source)
 
-        # If the user wants to draft an email and we found multiple contact emails,
-        # ask which one should be used before composing the draft.
-        if is_email_send_query(prompt):
-            recipient_resolution = resolve_email_contacts_for_prompt(prompt, username=username)
-            if recipient_resolution.get('has_contact_match') and recipient_resolution.get('needs_selection'):
-                contact_cards = recipient_resolution.get('contacts', [])
-                contact_title = recipient_resolution.get('recipient_query') or 'den Kontakt'
-                contact_card = _build_contact_card(prompt, contact_cards, language)
-
-                return jsonify({
-                    'success': True,
-                    'response': f'Ich habe mehrere E-Mail-Adressen für {contact_title} gefunden. Welche soll ich verwenden?',
-                    'action': 'email_recipient_selection',
-                    'requires_input': True,
-                    'recipient_query': recipient_resolution.get('recipient_query', ''),
-                    'contacts': contact_cards,
-                    'email_candidates': recipient_resolution.get('email_candidates', []),
-                    'sources': [],
-                    'ui_cards': [contact_card],
-                    'context_used': False,
-                    'context_count': 0,
-                    'training_saved': False
-                })
-
-            # Fast path for compose/send requests: return interactive UI cards immediately
-            # instead of running the full autonomous + context pipeline.
-            email_card = _build_email_card(prompt, language)
-            cards = []
-
-            if recipient_resolution.get('best_email') and not email_card.get('to'):
-                email_card['to'] = recipient_resolution.get('best_email', '')
-
-            if recipient_resolution.get('has_contact_match') and not email_card.get('to'):
-                contact_cards = recipient_resolution.get('contacts', [])
-                if contact_cards:
-                    cards.append(_build_contact_card(prompt, contact_cards, language))
-
-            cards.append(email_card)
-
-            if email_card.get('to'):
-                response_text = 'Ich habe eine E-Mail-Vorlage vorbereitet. Du kannst sie jetzt direkt prüfen und senden.'
-            else:
-                response_text = 'Ich habe eine E-Mail-Vorlage vorbereitet. Bitte wähle einen Empfänger oder ergänze die Adresse.'
-
-            return jsonify({
-                'success': True,
-                'response': response_text,
-                'action': 'email_compose',
-                'requires_input': True,
-                'recipient_query': recipient_resolution.get('recipient_query', ''),
-                'contacts': recipient_resolution.get('contacts', []),
-                'email_candidates': recipient_resolution.get('email_candidates', []),
-                'sources': [],
-                'ui_cards': cards,
-                'context_used': False,
-                'context_count': 0,
-                'training_saved': False
-            })
-
-        # Interactive event creation: Let AI handle missing information naturally
+        # Interaktive Termin-Erstellung: Liefere Missing-Input-Form direkt an das Frontend
         if is_calendar_create_query(prompt):
-            if not get_nextcloud_runtime_config():
-                return jsonify(_build_integration_connect_response('nextcloud', prompt, language, feature='calendar_create'))
-
             event_info = extract_event_info_from_message(prompt)
 
             if event_info.get('missing_info'):
@@ -9965,60 +3666,8 @@ def agent_query():
                     except Exception as e:
                         logger.warning(f"Could not load calendars for interactive form: {e}")
 
-                # Build context for AI to handle missing information
-                missing_context = {
-                    'content': f"""=== TERMIN-ERSTELLUNG ===
-Der Nutzer möchte einen Termin erstellen.
-
-Bereits extrahierte Informationen:
-- Titel: {event_info.get('title') or 'nicht angegeben'}
-- Startzeit: {event_info.get('start_time') or 'nicht angegeben'}
-- Endzeit: {event_info.get('end_time') or 'nicht angegeben'}
-- Ort: {event_info.get('location') or 'nicht angegeben'}
-- Kalender: {event_info.get('calendar_name') or 'nicht angegeben'}
-
-Fehlende Informationen: {', '.join(event_info['missing_info'])}
-
-Verfügbare Kalender: {', '.join([cal['name'] for cal in calendars]) if calendars else 'nicht verfügbar'}
-
-AUFGABE: Frage den Nutzer natürlich nach den fehlenden Informationen.
-Erkläre, welche Angaben noch benötigt werden, um den Termin zu erstellen.""",
-                    'source': 'Termin-Erstellung',
-                    'path': 'calendar_creation',
-                    'similarity_score': 1.0,
-                    'metadata': {
-                        'action': 'calendar_missing_input',
-                        'extracted_info': event_info,
-                        'available_calendars': calendars
-                    }
-                }
-
-                # Let AI generate the response about missing information
-                system_message = f"""Du bist ein intelligenter persönlicher Assistent.
-
-{missing_context['content']}
-
-WICHTIG:
-- Antworte auf {language}
-- Frage natürlich und freundlich nach den fehlenden Informationen
-- Variiere deine Formulierung - vermeide stereotype Phrasen
-- Sei präzise und hilfreich"""
-
-                messages = [
-                    {'role': 'system', 'content': system_message},
-                    {'role': 'user', 'content': prompt}
-                ]
-
-                try:
-                    response = ollama_client.chat(messages, [])
-                    ai_response = response.get('message', {}).get('content',
-                        f"Um den Termin zu erstellen, benötige ich noch: {', '.join(event_info['missing_info'])}")
-                except Exception as e:
-                    logger.error(f"AI generation error for calendar missing input: {e}")
-                    ai_response = f"Um den Termin zu erstellen, benötige ich noch: {', '.join(event_info['missing_info'])}"
-
                 return jsonify({
-                    'response': ai_response,
+                    'response': "Ich kann den Termin erstellen, mir fehlen aber noch: " + ", ".join(event_info['missing_info']) + ".",
                     'action': 'calendar_missing_input',
                     'requires_input': True,
                     'missing_info': event_info['missing_info'],
@@ -10037,7 +3686,6 @@ WICHTIG:
                     'sources': []
                 })
 
-            # Create event and let AI generate success/failure message
             create_result = create_calendar_event(
                 title=event_info.get('title'),
                 start_time=event_info.get('start_time'),
@@ -10047,201 +3695,30 @@ WICHTIG:
                 description=prompt
             )
 
-            # Let AI generate natural response about success/failure
-            result_context = f"""=== TERMIN-ERSTELLUNG ===
-Ergebnis: {'Erfolg' if create_result.get('success') else 'Fehler'}
-{create_result.get('message', '') if create_result.get('success') else create_result.get('error', 'Unbekannter Fehler')}
-
-Erstellter Termin:
-- Titel: {event_info.get('title')}
-- Startzeit: {event_info.get('start_time')}
-- Endzeit: {event_info.get('end_time')}
-- Ort: {event_info.get('location') or 'kein Ort'}
-- Kalender: {event_info.get('calendar_name') or 'Standard-Kalender'}
-
-AUFGABE: Informiere den Nutzer {'über die erfolgreiche Erstellung' if create_result.get('success') else 'über den Fehler'} des Termins.
-Formuliere die Nachricht natürlich und variiert."""
-
-            system_message = f"""Du bist ein intelligenter persönlicher Assistent.
-
-{result_context}
-
-WICHTIG:
-- Antworte auf {language}
-- Formuliere die Nachricht natürlich und freundlich
-- Variiere deine Formulierung - vermeide stereotype Phrasen"""
-
-            messages = [
-                {'role': 'system', 'content': system_message},
-                {'role': 'user', 'content': prompt}
-            ]
-
-            try:
-                response = ollama_client.chat(messages, [])
-                ai_response = response.get('message', {}).get('content',
-                    create_result.get('message', 'Termin wurde erstellt.') if create_result.get('success')
-                    else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
-            except Exception as e:
-                logger.error(f"AI generation error for calendar result: {e}")
-                ai_response = (create_result.get('message', 'Termin wurde erstellt.') if create_result.get('success')
-                              else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
+            if create_result.get('success'):
+                return jsonify({
+                    'response': create_result.get('message', 'Termin wurde erstellt.'),
+                    'action': 'calendar_created',
+                    'calendar_used': True,
+                    'context_used': False,
+                    'context_count': 0,
+                    'training_saved': False,
+                    'sources': [],
+                    'created_event': create_result
+                })
 
             return jsonify({
-                'response': ai_response,
-                'action': 'calendar_created' if create_result.get('success') else 'calendar_create_failed',
+                'response': "Der Termin konnte nicht erstellt werden: " + create_result.get('error', 'Unbekannter Fehler'),
+                'action': 'calendar_create_failed',
                 'calendar_used': True,
                 'context_used': False,
                 'context_count': 0,
                 'training_saved': False,
-                'sources': [],
-                'created_event': create_result if create_result.get('success') else None
+                'sources': []
             })
 
-        # Interactive task/reminder creation: Let AI handle missing information naturally
-        if is_task_create_query(prompt):
-            if not get_nextcloud_runtime_config():
-                return jsonify(_build_integration_connect_response('nextcloud', prompt, language, feature='task_create'))
-
-            task_info = extract_task_info_from_message(prompt)
-
-            if task_info.get('missing_info'):
-                available_task_lists = get_available_task_lists()
-
-                # Build context for AI to handle missing information
-                missing_context = f"""=== AUFGABEN-ERSTELLUNG ===
-Der Nutzer möchte eine Aufgabe/Erinnerung erstellen.
-
-Bereits extrahierte Informationen:
-- Titel: {task_info.get('title') or 'nicht angegeben'}
-- Fälligkeitsdatum: {task_info.get('due_date') or 'nicht angegeben'}
-- Priorität: {task_info.get('priority', 0) or 'nicht angegeben'}
-- Liste: {task_info.get('list_name') or 'nicht angegeben'}
-- Ort: {task_info.get('location') or 'nicht angegeben'}
-
-Fehlende Informationen: {', '.join(task_info['missing_info'])}
-
-Verfügbare Aufgabenlisten: {', '.join(available_task_lists) if available_task_lists else 'nicht verfügbar'}
-
-AUFGABE: Frage den Nutzer natürlich nach den fehlenden Informationen.
-Erkläre, welche Angaben noch benötigt werden, um die Aufgabe zu erstellen."""
-
-                system_message = f"""Du bist ein intelligenter persönlicher Assistent.
-
-{missing_context}
-
-WICHTIG:
-- Antworte auf {language}
-- Frage natürlich und freundlich nach den fehlenden Informationen
-- Variiere deine Formulierung - vermeide stereotype Phrasen
-- Sei präzise und hilfreich"""
-
-                messages = [
-                    {'role': 'system', 'content': system_message},
-                    {'role': 'user', 'content': prompt}
-                ]
-
-                try:
-                    response = ollama_client.chat(messages, [])
-                    ai_response = response.get('message', {}).get('content',
-                        f"Um die Aufgabe zu erstellen, benötige ich noch: {', '.join(task_info['missing_info'])}")
-                except Exception as e:
-                    logger.error(f"AI generation error for task missing input: {e}")
-                    ai_response = f"Um die Aufgabe zu erstellen, benötige ich noch: {', '.join(task_info['missing_info'])}"
-
-                return jsonify({
-                    'response': ai_response,
-                    'action': 'task_missing_input',
-                    'requires_input': True,
-                    'missing_info': task_info['missing_info'],
-                    'extracted_info': {
-                        'title': task_info.get('title'),
-                        'due_date': task_info.get('due_date'),
-                        'priority': task_info.get('priority', 0),
-                        'list_name': task_info.get('list_name'),
-                        'location': task_info.get('location'),
-                        'description': task_info.get('description')
-                    },
-                    'available_task_lists': available_task_lists,
-                    'context_used': False,
-                    'context_count': 0,
-                    'calendar_used': False,
-                    'training_saved': False,
-                    'sources': []
-                })
-
-            # Create task and let AI generate success/failure message
-            create_result = create_task_reminder(
-                title=task_info.get('title'),
-                description=task_info.get('description') or prompt,
-                due_date=task_info.get('due_date'),
-                priority=task_info.get('priority', 0),
-                list_name=task_info.get('list_name'),
-                location=task_info.get('location')
-            )
-
-            # Let AI generate natural response about success/failure
-            result_context = f"""=== AUFGABEN-ERSTELLUNG ===
-Ergebnis: {'Erfolg' if create_result.get('success') else 'Fehler'}
-{create_result.get('message', '') if create_result.get('success') else create_result.get('error', 'Unbekannter Fehler')}
-
-Erstellte Aufgabe:
-- Titel: {task_info.get('title')}
-- Fälligkeitsdatum: {task_info.get('due_date') or 'kein Datum'}
-- Priorität: {task_info.get('priority', 0)}
-- Liste: {task_info.get('list_name') or 'Standard-Liste'}
-- Ort: {task_info.get('location') or 'kein Ort'}
-
-AUFGABE: Informiere den Nutzer {'über die erfolgreiche Erstellung' if create_result.get('success') else 'über den Fehler'} der Aufgabe.
-Formuliere die Nachricht natürlich und variiert."""
-
-            system_message = f"""Du bist ein intelligenter persönlicher Assistent.
-
-{result_context}
-
-WICHTIG:
-- Antworte auf {language}
-- Formuliere die Nachricht natürlich und freundlich
-- Variiere deine Formulierung - vermeide stereotype Phrasen"""
-
-            messages = [
-                {'role': 'system', 'content': system_message},
-                {'role': 'user', 'content': prompt}
-            ]
-
-            try:
-                response = ollama_client.chat(messages, [])
-                ai_response = response.get('message', {}).get('content',
-                    create_result.get('message', 'Aufgabe wurde erstellt.') if create_result.get('success')
-                    else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
-            except Exception as e:
-                logger.error(f"AI generation error for task result: {e}")
-                ai_response = (create_result.get('message', 'Aufgabe wurde erstellt.') if create_result.get('success')
-                              else f"Fehler: {create_result.get('error', 'Unbekannter Fehler')}")
-
-            return jsonify({
-                'response': ai_response,
-                'action': 'task_created' if create_result.get('success') else 'task_create_failed',
-                'calendar_used': False,
-                'context_used': False,
-                'context_count': 0,
-                'training_saved': False,
-                'sources': [],
-                'created_task': create_result if create_result.get('success') else None
-            })
-
-        # Detect missing integrations early and return interactive setup payloads.
-        requires_nextcloud = any([
-            intent in ['calendar', 'tasks'],
-            should_use_calendar(prompt),
-            should_use_tasks(prompt),
-            is_activity_question,
-            is_potentially_calendar_query,
-            'nextcloud' in message_lower
-        ])
-        if requires_nextcloud and not get_nextcloud_runtime_config():
-            return jsonify(_build_integration_connect_response('nextcloud', prompt, language, feature='nextcloud_context'))
-
-
+        # Detect query intent
+        intent = detect_query_intent(prompt, preferred_source)
         logger.info(f"Query intent: {intent}, preferred_source: {preferred_source}")
 
         # Collect context from different sources based on intent
@@ -10253,146 +3730,246 @@ WICHTIG:
 
         # Gather photo context if relevant
         if intent in ['photos', 'mixed']:
-            client = get_immich_client(username)
-            photo_context = gather_photo_context(client, prompt, username, build_immich_thumbnail_proxy_url)
-            if photo_context:
-                photo_results = photo_context.get('metadata', {}).get('photos', [])
-                logger.info(f"Found {len(photo_results)} photos for context with full metadata")
+            try:
+                client = get_immich_client(username)
+                if client:
+                    # Reduced limit for quicker response in agent context
+                    result = client.search_photos_intelligent(prompt, limit=6)
+                    if result.get('success') and result.get('results') and len(result['results']) > 0:
+                        # Format photo results for context with full details
+                        photos = result['results']
+                        photo_results = photos
+                        photo_lines = []
+                        
+                        photo_lines.append("### 📸 Gefundene Fotos")
+                        photo_lines.append("")
+                        
+                        for i, photo in enumerate(photos[:5], 1):  # Limit to 5 for context
+                            name = photo['original_file_name']
+                            date = photo.get('created_at', 'Unknown')
+                            people = photo.get('people', [])
+                            location = photo.get('location', '')
+                            objects = photo.get('objects', [])
+                            tags = photo.get('tags', [])
+                            photo_id = photo.get('id', 'N/A')
+                            asset_url = photo['asset_url']
+                            thumbnail_url = build_immich_thumbnail_proxy_url(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url', '')
 
-        # Gather file context for file/mixed/general queries so indexed chunks are
-        # consistently available for broad knowledge questions.
-        # Also fall back to file context for photo-intent queries when Immich is not configured.
-        immich_unavailable_fallback = intent == 'photos' and photo_context is None
-        if intent in ['files', 'mixed', 'general'] or immich_unavailable_fallback:
-            file_context = gather_file_context(knowledge_base, training_manager, prompt)
-            if file_context:
-                logger.info(f"Found {file_context[0].get('metadata', {}).get('count', 0)} file results with enhanced context (intent-based)")
+                            # Add numbered photo entry with thumbnail as clickable link
+                            photo_lines.append(f"#### Foto {i}: {name}")
+                            photo_lines.append(f"**ID:** `{photo_id}`")
+                            photo_lines.append(f"**Link:** [{asset_url}]({asset_url})")
+                            
+                            if date and date != 'Unknown':
+                                date_str = date[:10] if len(str(date)) > 10 else date
+                                photo_lines.append(f"**Datum:** {date_str}")
+                            
+                            if people:
+                                photo_lines.append(f"**Personen:** {', '.join(people)}")
+                            
+                            if location:
+                                photo_lines.append(f"**Ort:** {location}")
+                            
+                            if objects:
+                                photo_lines.append(f"**Objekte erkannt:** {', '.join(objects[:5])}")  # Show first 5
+                            
+                            if tags:
+                                photo_lines.append(f"**Tags:** {', '.join(tags[:5])}")  # Show first 5
+                            
+                            # Add thumbnail as image with link
+                            photo_lines.append(f"[![Vorschau]({thumbnail_url})]({asset_url})")
+                            photo_lines.append("")
 
-        # Intelligente Erkennung was kontexte werden sollten
-        use_calendar_intelligent = should_use_calendar(prompt)
-        use_tasks_intelligent = should_use_tasks(prompt)
+                        photo_context = {
+                            'content': '=== FOTOS VON IMMICH ===\n\n' + '\n'.join(photo_lines),
+                            'source': 'Immich Photos',
+                            'path': 'immich',
+                            'similarity_score': 1.0,
+                            'metadata': {
+                                'count': len(photos),
+                                'photo_ids': [p.get('id') for p in photos]
+                            }
+                        }
+                        logger.info(f"Found {len(photos)} photos for context with full metadata")
+            except Exception as e:
+                logger.error(f"Photo search error: {e}")
 
-        # Gather calendar context if relevant (Intent ODER intelligente Erkennung)
-        calendar_context = gather_calendar_context(
-            get_calendar_context, should_use_calendar, prompt, intent, calendar_enabled
-        )
+        # Gather file context if relevant
+        if intent in ['files', 'mixed']:
+            try:
+                file_results = knowledge_base.search_knowledge(prompt, k=8)
+                if file_results:
+                    file_context = file_results
+                    logger.info(f"Found {len(file_results)} file results for context")
+            except Exception as e:
+                logger.error(f"File search error: {e}")
 
-        # Gather todo context if relevant (Intent ODER intelligente Erkennung)
-        todo_context = gather_todo_context(
-            get_todo_data, is_todo_query, should_use_tasks, prompt, intent
-        )
+        # Gather calendar context if relevant
+        if (intent in ['calendar', 'mixed'] or is_potentially_calendar_query) and calendar_enabled:
+            try:
+                calendar_context_str = get_calendar_context(prompt)
+                if calendar_context_str:
+                    calendar_context = {
+                        'content': calendar_context_str,
+                        'source': 'Kalender',
+                        'path': 'calendar',
+                        'similarity_score': 1.0,
+                        'metadata': {}
+                    }
+                    logger.info("Calendar context added")
+            except Exception as e:
+                logger.error(f"Calendar error: {e}")
 
-        # Gather email context if query is email-related
-        email_context = None
-        try:
-            if intent in ['email', 'mixed'] or is_email_query(prompt):
-                email_client_instance = get_email_client(username)
-                if email_client_instance:
-                    email_context = gather_email_context(email_client_instance, prompt, limit=10)
-                    if email_context:
-                        logger.info("Email context added (%d emails)", email_context.get('metadata', {}).get('count', 0))
-        except Exception as e:
-            logger.warning("Email context error: %s", e)
+        # Gather todo context if relevant
+        todo_data = None
+        if intent in ['tasks', 'mixed']:
+            try:
+                if is_todo_query(prompt):
+                    todo_data = get_todo_data(prompt)
+                    todo_context_str = todo_data.get('context', '')
+                    if todo_context_str:
+                        todo_context = {
+                            'content': todo_context_str,
+                            'source': 'Todos',
+                            'path': 'todos',
+                            'similarity_score': 1.0,
+                            'metadata': {}
+                        }
+                        logger.info("Todo context added")
+            except Exception as e:
+                logger.error(f"Todo error: {e}")
 
-        # NEW: Proactively gather Nextcloud search context
-        # This searches across all Nextcloud providers (files, contacts, calendar, tasks)
-        nextcloud_search_context = None
-        try:
-            # Pure photo queries should not trigger cross-provider Nextcloud search.
-            if intent != 'photos':
-                search_client = get_nextcloud_search_client(username)
-                if search_client:
-                    nextcloud_search_context = gather_nextcloud_search_context(
-                        search_client, prompt, extract_search_terms
-                    )
-                    if nextcloud_search_context:
-                        logger.info(f"Nextcloud search found {nextcloud_search_context.get('metadata', {}).get('count', 0)} results")
-        except Exception as e:
-            logger.warning(f"Nextcloud search error: {e}")
+        # Für reine Todo/Erinnerungs-Anfragen direkt antworten,
+        # um generische LLM-Antworten ohne Datenbezug zu vermeiden.
+        if intent == 'tasks' and is_todo_query(prompt):
+            todo_data = todo_data or get_todo_data(prompt)
+            open_tasks = todo_data.get('tasks', [])
+            filtered_tasks = todo_data.get('filtered_tasks', open_tasks)
 
-        # NEW: Autonomous agent for comprehensive research
-        # The agent proactively searches multiple sources and gathers detailed information
-        autonomous_context = None
-        _ai_cfg = load_ai_config()
-        autonomous_enabled = _ai_cfg.get('autonomous_agent_enabled', True) and intent != 'photos'
-        try:
-            if autonomous_enabled:
-                # Get clients for autonomous agent
-                nextcloud_client = get_nextcloud_client(username)
-                search_client = get_nextcloud_search_client(username)
-                immich_client = get_immich_client(username)
-                autonomous_email_client = get_email_client(username)
-
-                # Create autonomous agent
-                agent = AutonomousAgent(
-                    nextcloud_client=nextcloud_client,
-                    search_client=search_client,
-                    knowledge_base=knowledge_base,
-                    immich_client=immich_client,
-                    training_manager=training_manager,
-                    email_client=autonomous_email_client
-                )
-
-                # Plan and execute autonomous actions
-                logger.info("Starting autonomous research...")
-                planned_actions = agent.analyze_query_and_plan_actions(prompt, {
+            if not todo_data.get('enabled', False):
+                return jsonify({
+                    'success': True,
+                    'response': 'Deine Erinnerungen sind aktuell nicht verbunden. Bitte prüfe die Nextcloud-Task-Konfiguration.',
+                    'context_used': False,
+                    'context_count': 0,
                     'intent': intent,
-                    'language': language
+                    'sources_used': {
+                        'photos': False,
+                        'files': False,
+                        'calendar': False,
+                        'todos': False
+                    }
                 })
 
-                if planned_actions:
-                    # Skip SEARCH_KNOWLEDGE_BASE action when file_context already provides KB results
-                    if file_context:
-                        original_count = len(planned_actions)
-                        planned_actions = [
-                            a for a in planned_actions
-                            if a.action_type.value != 'search_knowledge_base'
-                        ]
-                        skipped = original_count - len(planned_actions)
-                        if skipped > 0:
-                            logger.info(
-                                "Skipping %d autonomous SEARCH_KNOWLEDGE_BASE action(s) "
-                                "because file_context is already available",
-                                skipped,
-                            )
+            direct_response = _build_direct_todo_response(open_tasks, filtered_tasks, prompt)
+            return jsonify({
+                'success': True,
+                'response': direct_response,
+                'context_used': len(open_tasks) > 0,
+                'context_count': len(open_tasks),
+                'intent': intent,
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': True
+                }
+            })
 
-                    if not planned_actions:
-                        logger.info("No autonomous actions to execute after filtering")
-                    else:
-                        logger.info(f"Autonomous agent planned {len(planned_actions)} actions")
-                        results = agent.execute_actions(planned_actions, username)
+        # Combine all contexts
+        combined_context = []
 
-                        if results.get('success') and results.get('gathered_information'):
-                            autonomous_context = agent.format_autonomous_results_for_context(results)
-                            if autonomous_context:
-                                logger.info("Autonomous research completed successfully")
-        except Exception as e:
-            logger.warning(f"Autonomous agent error: {e}", exc_info=True)
+        if photo_context:
+            combined_context.insert(0, photo_context)
 
-        # Combine all contexts in priority order using gatherers helper
-        combined_context = combine_contexts(
-            weather_context, security_context, activity_context,
-            photo_context, file_context, calendar_context, todo_context, nextcloud_search_context,
-            email_ctx=email_context
-        )
+        if file_context:
+            combined_context.extend(file_context)
 
-        # Add autonomous research results if available
-        if autonomous_context:
-            combined_context.append(autonomous_context)
+        if calendar_context:
+            combined_context.insert(0, calendar_context)
 
-        # Build system message with context using gatherers helper
-        system_message = build_agent_system_message(combined_context, language)
+        if todo_context:
+            combined_context.insert(0, todo_context)
 
-        # Reconstruct structured conversation history from the flat context string so the
-        # model receives proper multi-turn turns instead of a single opaque blob.
-        history = _parse_conversation_context(context)
-        # Drop any trailing user turns to avoid duplicating the current user prompt.
-        while history and history[-1]['role'] == 'user':
-            history.pop()
+        # Für reine Foto-Anfragen direkt antworten, um LLM-Ausreden zu vermeiden
+        if intent == 'photos':
+            if photo_results:
+                response_lines = ["Hier sind passende Fotos aus Immich:", ""]
+                for i, photo in enumerate(photo_results[:5], 1):
+                    url = photo.get('asset_url')
+                    name = photo.get('original_file_name', f'Foto {i}')
+                    photo_id = photo.get('id', 'N/A')
+                    thumbnail_url = build_immich_thumbnail_proxy_url(photo_id, username, 'preview') if photo_id != 'N/A' else photo.get('thumbnail_url')
+                    people = photo.get('people', [])
+                    date_value = photo.get('created_at', '')
+                    date_label = date_value[:10] if date_value else ''
 
-        messages = [{'role': 'system', 'content': system_message}]
-        messages.extend(history)
-        messages.append({'role': 'user', 'content': prompt})
+                    response_lines.append(f"{i}. [{name}]({url})")
+                    response_lines.append(f"   ID: {photo_id}")
+                    if people:
+                        response_lines.append(f"   Personen: {', '.join(people)}")
+                    if date_label:
+                        response_lines.append(f"   Datum: {date_label}")
+                    if thumbnail_url and url:
+                        response_lines.append(f"   [![Vorschau {i}]({thumbnail_url})]({url})")
+                    response_lines.append("")
+
+                return jsonify({
+                    'success': True,
+                    'response': '\n'.join(response_lines).strip(),
+                    'context_used': True,
+                    'context_count': len(combined_context),
+                    'intent': intent,
+                    'sources_used': {
+                        'photos': True,
+                        'files': False,
+                        'calendar': False,
+                        'todos': False
+                    }
+                })
+
+            return jsonify({
+                'success': True,
+                'response': 'Ich habe in Immich keine passenden Fotos gefunden. Versuche einen anderen Namen oder ein anderes Suchwort.',
+                'context_used': False,
+                'context_count': 0,
+                'intent': intent,
+                'sources_used': {
+                    'photos': False,
+                    'files': False,
+                    'calendar': False,
+                    'todos': False
+                }
+            })
+
+        # Build system message with context
+        if not combined_context:
+            system_message = "Du bist ein hilfreicher Assistent. Antworte natürlich und präzise."
+        else:
+            context_parts = []
+            for ctx in combined_context:
+                source_name = ctx.get('source', 'Unknown')
+                content = ctx.get('content', '')
+                if content:
+                    context_parts.append(f"--- {source_name} ---\n{content}")
+
+            context_text = '\n\n'.join(context_parts)
+            system_message = f"""Du bist ein hilfreicher Assistent mit Zugriff auf folgende Informationen:
+
+{context_text}
+
+Nutze diese Informationen um die Frage präzise zu beantworten.
+Falls Fotos verfügbar sind, stelle sie als Markdown-Links dar.
+Antworte auf {language}."""
+
+        # Generate AI response
+        messages = [
+            {'role': 'system', 'content': system_message},
+            {'role': 'user', 'content': prompt}
+        ]
+
+        if context:
+            messages.insert(1, {'role': 'assistant', 'content': context})
 
         try:
             response = ollama_client.chat(messages, [])
@@ -10405,28 +3982,9 @@ WICHTIG:
 
             ai_response = response.get('message', {}).get('content', 'Entschuldigung, ich konnte keine Antwort generieren.')
 
-            source_cards = []
-            if file_context:
-                for context_item in file_context:
-                    cards = context_item.get('metadata', {}).get('source_cards', [])
-                    if cards:
-                        source_cards.extend(cards)
-
-            # Add email source cards
-            if email_context:
-                email_cards = email_context.get('metadata', {}).get('source_cards', [])
-                if email_cards:
-                    source_cards.extend(email_cards)
-
-            ui_cards = _build_ui_cards(prompt, intent, calendar_context, todo_context, photo_context, email_context, nextcloud_search_context, username, language)
-
-            # No hard source limit: rely on relevance filtering in context gatherers.
-
             return jsonify({
                 'success': True,
                 'response': ai_response,
-                'sources': source_cards,
-                'ui_cards': ui_cards,
                 'context_used': len(combined_context) > 0,
                 'context_count': len(combined_context),
                 'intent': intent,
@@ -10434,8 +3992,7 @@ WICHTIG:
                     'photos': photo_context is not None,
                     'files': file_context is not None and len(file_context) > 0,
                     'calendar': calendar_context is not None,
-                    'todos': todo_context is not None,
-                    'emails': email_context is not None
+                    'todos': todo_context is not None
                 }
             })
 
@@ -10452,98 +4009,6 @@ WICHTIG:
             'success': False,
             'error': str(e)
         }), 500
-
-
-@app.route('/api/chat/summarize', methods=['POST'])
-def summarize_chat():
-    """Create a robust summary for a provided chat transcript."""
-    try:
-        data = request.get_json() or {}
-        messages = data.get('messages') or []
-        language = str(data.get('language') or 'de').strip().lower()
-        title = str(data.get('title') or '').strip()
-
-        if not isinstance(messages, list):
-            return jsonify({'success': False, 'error': 'Ungültiges Nachrichtenformat.'}), 400
-
-        filtered: List[Dict[str, str]] = []
-        for msg in messages:
-            if not isinstance(msg, dict):
-                continue
-            role = str(msg.get('role') or '').strip().lower()
-            if role not in ('user', 'assistant'):
-                continue
-            content = str(msg.get('content') or '').strip()
-            if not content:
-                continue
-            # Keep payload bounded but informative.
-            filtered.append({'role': role, 'content': content[:3000]})
-
-        if not filtered:
-            return jsonify({'success': False, 'error': 'Keine Inhalte zum Zusammenfassen gefunden.'}), 400
-
-        # Keep recent context with a soft cap for model stability.
-        filtered = filtered[-120:]
-
-        transcript_lines = []
-        for idx, msg in enumerate(filtered, 1):
-            prefix = 'Nutzer' if msg['role'] == 'user' else 'Assistent'
-            transcript_lines.append(f"{idx}. {prefix}: {msg['content']}")
-
-        transcript = '\n'.join(transcript_lines)
-
-        is_german = language.startswith('de')
-        heading_kernidee = 'Kernidee' if is_german else 'Core Idea'
-        heading_decisions = 'Wichtige Entscheidungen' if is_german else 'Key Decisions'
-        heading_open = 'Offene Punkte' if is_german else 'Open Questions'
-        heading_next = 'Naechste sinnvolle Schritte' if is_german else 'Next Practical Steps'
-
-        system_prompt = (
-            "Du bist ein präziser Zusammenfassungs-Assistent. "
-            "Erstelle nur eine kompakte, korrekte Chat-Zusammenfassung aus dem gegebenen Verlauf. "
-            "Keine Halluzinationen, keine neuen Fakten."
-        )
-
-        user_prompt = '\n'.join([
-            f"Chat-Titel: {title or 'Unbenannter Chat'}",
-            "",
-            "Aufgabe:",
-            "Fasse den Verlauf strukturiert zusammen.",
-            "Nutze exakt diese Markdown-Struktur:",
-            f"## {heading_kernidee}",
-            f"## {heading_decisions}",
-            f"## {heading_open}",
-            f"## {heading_next}",
-            "",
-            "Regeln:",
-            "- Nur Inhalte aus dem Chat verwenden.",
-            "- Kurz, konkret, umsetzbar.",
-            "- Wenn ein Abschnitt keine Inhalte hat, schreibe 'Keine.'",
-            "",
-            "Verlauf:",
-            transcript,
-        ])
-
-        response = ollama_client.chat([
-            {'role': 'system', 'content': system_prompt},
-            {'role': 'user', 'content': user_prompt},
-        ], context=[])
-
-        if 'error' in response:
-            return jsonify({'success': False, 'error': response.get('error') or 'Zusammenfassung fehlgeschlagen.'}), 500
-
-        summary_text = str(response.get('message', {}).get('content') or '').strip()
-        if not summary_text:
-            return jsonify({'success': False, 'error': 'Leere Zusammenfassung erhalten.'}), 500
-
-        return jsonify({
-            'success': True,
-            'summary': summary_text,
-            'message_count': len(filtered)
-        })
-    except Exception as e:
-        logger.error(f"Chat summary error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/suggestions/query', methods=['POST'])
 def get_query_suggestions():
@@ -11041,6 +4506,13 @@ Requirements:
 
     return final_suggestions[:5]  # Return max 5 suggestions
 
+# Tasks/Todos Manager initialisieren wenn Konfiguration vorhanden
+# IMPORTANT: Initialize BEFORE if __name__ == '__main__' so it runs on module import too
+try:
+    initialize_tasks_from_config()
+except Exception as e:
+    logger.error(f"Error in initialize_tasks_from_config: {e}")
+
 if __name__ == '__main__':
     # Initialize knowledge base
     try:
@@ -11070,6 +4542,4 @@ if __name__ == '__main__':
     print(f"Todos/Tasks: {'Aktiviert' if tasks_enabled else 'Nicht verfügbar'}")
     print("Öffne http://localhost:5001 im Browser")
     
-    start_background_services()
-
     app.run(debug=False, host='0.0.0.0', port=5001, use_reloader=False)

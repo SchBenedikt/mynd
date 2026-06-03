@@ -415,7 +415,7 @@ class NextcloudClient:
 
             response = requests.put(
                 url,
-                auth=HTTPBasicAuth(self.username, self.password),
+                auth=self.auth_provider.get_auth(),
                 data=file_data,
                 headers=headers,
                 timeout=120
@@ -460,7 +460,7 @@ class NextcloudClient:
 
             response = requests.put(
                 url,
-                auth=HTTPBasicAuth(self.username, self.password),
+                auth=self.auth_provider.get_auth(),
                 data=content.encode('utf-8'),
                 headers=headers,
                 timeout=60
@@ -497,7 +497,7 @@ class NextcloudClient:
             response = requests.request(
                 'MKCOL',
                 url,
-                auth=HTTPBasicAuth(self.username, self.password),
+                auth=self.auth_provider.get_auth(),
                 timeout=30
             )
 
@@ -534,7 +534,7 @@ class NextcloudClient:
 
             response = requests.delete(
                 url,
-                auth=HTTPBasicAuth(self.username, self.password),
+                auth=self.auth_provider.get_auth(),
                 timeout=30
             )
 
@@ -581,7 +581,7 @@ class NextcloudClient:
             response = requests.request(
                 'MOVE',
                 source_url,
-                auth=HTTPBasicAuth(self.username, self.password),
+                auth=self.auth_provider.get_auth(),
                 headers=headers,
                 timeout=30
             )
@@ -629,7 +629,7 @@ class NextcloudClient:
             response = requests.request(
                 'COPY',
                 source_url,
-                auth=HTTPBasicAuth(self.username, self.password),
+                auth=self.auth_provider.get_auth(),
                 headers=headers,
                 timeout=30
             )
@@ -682,7 +682,7 @@ class NextcloudClient:
             response = requests.request(
                 'PROPPATCH',
                 url,
-                auth=HTTPBasicAuth(self.username, self.password),
+                auth=self.auth_provider.get_auth(),
                 data=proppatch_body.encode('utf-8'),
                 headers=headers,
                 timeout=30
@@ -739,7 +739,7 @@ class NextcloudClient:
             response = requests.request(
                 'REPORT',
                 url,
-                auth=HTTPBasicAuth(self.username, self.password),
+                auth=self.auth_provider.get_auth(),
                 data=report_body.encode('utf-8'),
                 headers=headers,
                 timeout=60
