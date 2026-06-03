@@ -1,0 +1,80 @@
+name: CI/CD Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/mynd-backend
+  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/mynd-frontend
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push backend image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+
+      - name: Build & push frontend image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+
+      - name: Wait for Docker pushes to settle
+        run: sleep 5
+
+      - name: Deploy to remote host via SSH
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          port: ${{ secrets.REMOTE_SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.DEPLOY_PATH }}
+            # optional: pull newest compose file from repo
+            git pull origin main || true
+            docker compose pull || true
+            docker compose -f docker-compose.prod.yml up -d --build
+
+      - name: Post-deploy check
+        run: |
+          echo "Deployed. You can verify health endpoints:" \
+            && echo "Backend: https://$REMOTE_HOST/api/knowledge/status" \
+            && echo "Frontend: https://$REMOTE_HOST/"
+
+# Required repository secrets:
+# - DOCKERHUB_USERNAME
+# - DOCKERHUB_TOKEN
+# - REMOTE_HOST
+# - REMOTE_USER
+# - REMOTE_SSH_PORT (optional, default 22)
+# - SSH_PRIVATE_KEY (private key for REMOTE_USER)
+# - DEPLOY_PATH (remote path where repo/compose lives)
