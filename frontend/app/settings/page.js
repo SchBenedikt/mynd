@@ -1965,7 +1965,7 @@ export default function SettingsPage() {
                       type="text"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder="z.B. Vinzenz"
+                      placeholder="z.B. Max"
                     />
                   </div>
                   <div className="button-group">

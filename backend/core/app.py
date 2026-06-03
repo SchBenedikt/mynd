@@ -4005,7 +4005,7 @@ def _build_email_card(prompt: str, language: str = 'de') -> Dict[str, Any]:
                 'Sehr geehrte Damen und Herren,\n\n'
                 'vielen Dank für Ihre Information. Ich werde mir die Dokumente zeitnah ansehen.\n\n'
                 'Mit freundlichen Grüßen\n'
-                'REDACTED'
+                'Project Contributor'
             )
     elif not str(draft.get('body', '')).strip() or str(draft.get('body', '')).strip() == str(prompt or '').strip():
         draft['body'] = ''

@@ -33,7 +33,7 @@ Voraussetzungen
 Repository einrichten
 
 ```bash
-cd .//MYND/mynd
+cd ./
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt

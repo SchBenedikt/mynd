@@ -155,7 +155,7 @@ class AutonomousAgent:
         has_photo_keyword = any(ind in query_lower for ind in photo_indicators)
         
         # Detect if this is a simple person+date photo query (handled by main flow)
-        person_keywords = ['user', 'schächner', 'benedikt', 'person', 'wer']
+        person_keywords = ['person', 'name', 'wer', 'owner']
         date_keywords = ['letzter', 'woche', 'gestern', 'heute', 'morgen', 'wann', 'datum',
                         'last', 'week', 'yesterday', 'today', 'tomorrow', 'when']
         has_person = any(p in query_lower for p in person_keywords)
