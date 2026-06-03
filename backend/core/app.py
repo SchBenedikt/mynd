@@ -2330,13 +2330,13 @@ Beantworte die Anfrage mit maximaler Intelligenz, Präzision und eleganter Tool-
             "messages": messages,
             "stream": False,
             "options": {
-                "temperature": 0.2,      # Leicht erhöht für besseres Reasoning, aber noch faktentreu
+                "temperature": 0.3,      # Slightly higher for more natural, varied responses
                 "top_p": 0.85,           # Verbesserte Balance zwischen Fokus und Vielfalt
                 "top_k": 40,             # Erweiterte Token-Auswahl für präzisere Formulierungen
-                "max_tokens": 3072,      # Mehr Tokens für komplexe Antworten mit Reasoning
+                "max_tokens": 4096,      # Mehr Tokens für komplexe Antworten mit Reasoning
                 "repeat_penalty": 1.15,  # Stärkere Vermeidung von Wiederholungen
-                "num_predict": 3072,     # Maximale Antwortlänge erhöht
-                "num_ctx": 4096,         # Kontextfenster für besseres Verständnis
+                "num_predict": 4096,     # Maximale Antwortlänge erhöht
+                "num_ctx": 8192,         # Larger context window for richer multi-turn conversations
                 "mirostat": 2,           # Aktiviere Mirostat für konsistente Qualität
                 "mirostat_tau": 5.0,     # Ziel-Perplexität für kohärente Antworten
                 "mirostat_eta": 0.1      # Lernrate für Mirostat-Anpassung
@@ -5677,6 +5677,224 @@ def update_embeddings():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+TXT_UPLOAD_DIR = os.path.join(DATA_DIR, 'uploaded_txt')
+os.makedirs(TXT_UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_TXT_EXTENSIONS = {'.txt'}
+TXT_MAX_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+def _index_txt_file(file_path: str, original_name: str) -> dict:
+    """Parse a text/WhatsApp file and add its chunks to the knowledge database."""
+    parser = DocumentParser()
+    content = parser.parse_file(file_path)
+
+    if not content or len(content.strip()) < 10:
+        return {'chunks': 0, 'warning': 'File appears empty or too short to index'}
+
+    # Split into chunks
+    chunks = knowledge_base.split_text(content)
+
+    if not chunks:
+        return {'chunks': 0, 'warning': 'No indexable chunks found'}
+
+    if knowledge_base.db:
+        # Use file path as unique document identifier so re-uploads replace old data
+        doc_id = knowledge_base.db.add_document(
+            name=original_name,
+            path=file_path,
+            file_type='.txt',
+            metadata={'source': 'uploaded_txt', 'original_name': original_name}
+        )
+
+        # Delete old chunks for this document before re-inserting
+        try:
+            knowledge_base.db.connection.execute(
+                "DELETE FROM chunks_fts WHERE document_id = ?", (doc_id,)
+            )
+            knowledge_base.db.connection.execute(
+                "DELETE FROM chunks WHERE document_id = ?", (doc_id,)
+            )
+            knowledge_base.db.connection.commit()
+        except Exception:
+            pass
+
+        knowledge_base.db.add_chunks(doc_id, chunks)
+        logger.info(f"Indexed {len(chunks)} chunks for uploaded file: {original_name}")
+        return {'chunks': len(chunks), 'doc_id': doc_id}
+    else:
+        # Fallback: extend in-memory knowledge
+        knowledge_base.knowledge_chunks.extend(chunks)
+        return {'chunks': len(chunks)}
+
+
+def _secure_txt_filename(filename: str) -> str:
+    """Return a safe filename for an uploaded .txt file."""
+    try:
+        from werkzeug.utils import secure_filename
+        safe = secure_filename(filename)
+    except Exception:
+        safe = re.sub(r'[^\w.\-]', '_', filename)
+    # Ensure it ends with .txt
+    if not safe.lower().endswith('.txt'):
+        safe = safe + '.txt'
+    # Prevent hidden files
+    if safe.startswith('.'):
+        safe = 'upload_' + safe
+    return safe or 'upload.txt'
+
+
+@app.route('/api/knowledge/upload-txt', methods=['POST'])
+def upload_txt_files():
+    """Upload one or more .txt files and index them into the knowledge base."""
+    if 'files' not in request.files:
+        return jsonify({'error': 'No files provided'}), 400
+
+    uploaded_files = request.files.getlist('files')
+    if not uploaded_files:
+        return jsonify({'error': 'No files provided'}), 400
+
+    results = []
+    errors = []
+
+    for upload in uploaded_files:
+        original_name = upload.filename or 'unknown.txt'
+        ext = os.path.splitext(original_name)[1].lower()
+
+        if ext not in ALLOWED_TXT_EXTENSIONS:
+            errors.append(f'{original_name}: Nur .txt Dateien sind erlaubt / Only .txt files are allowed')
+            continue
+
+        safe_name = _secure_txt_filename(original_name)
+        dest_path = os.path.join(TXT_UPLOAD_DIR, safe_name)
+
+        # Avoid overwriting – append a counter if needed
+        counter = 1
+        base, suffix = os.path.splitext(dest_path)
+        while os.path.exists(dest_path):
+            dest_path = f"{base}_{counter}{suffix}"
+            counter += 1
+
+        try:
+            upload.save(dest_path)
+
+            # Reject files that are too large
+            if os.path.getsize(dest_path) > TXT_MAX_SIZE_BYTES:
+                os.remove(dest_path)
+                errors.append(f'{original_name}: Datei zu groß / File too large (max. 50 MB)')
+                continue
+
+            index_result = _index_txt_file(dest_path, original_name)
+            results.append({
+                'name': original_name,
+                'saved_as': os.path.basename(dest_path),
+                'chunks': index_result.get('chunks', 0),
+                'warning': index_result.get('warning')
+            })
+        except Exception as e:
+            logger.error(f"Error uploading {original_name}: {e}")
+            errors.append(f'{original_name}: Upload fehlgeschlagen / Upload failed')
+            if os.path.exists(dest_path):
+                try:
+                    os.remove(dest_path)
+                except Exception:
+                    pass
+
+    if not results and errors:
+        return jsonify({'error': '; '.join(errors)}), 400
+
+    return jsonify({
+        'status': 'success',
+        'uploaded': results,
+        'errors': errors,
+        'total_chunks': sum(r['chunks'] for r in results)
+    })
+
+
+@app.route('/api/knowledge/txt-files', methods=['GET'])
+def list_txt_files():
+    """List all uploaded .txt files."""
+    try:
+        files = []
+        if knowledge_base.db:
+            cursor = knowledge_base.db.connection.cursor()
+            cursor.execute("""
+                SELECT d.id, d.name, d.path, d.created_at,
+                       COUNT(c.id) AS chunk_count
+                FROM documents d
+                LEFT JOIN chunks c ON c.document_id = d.id
+                WHERE json_extract(d.metadata, '$.source') = 'uploaded_txt'
+                GROUP BY d.id
+                ORDER BY d.created_at DESC
+            """)
+            for row in cursor.fetchall():
+                files.append({
+                    'id': row['id'],
+                    'name': row['name'],
+                    'created_at': row['created_at'],
+                    'chunk_count': row['chunk_count'],
+                    'file_exists': os.path.exists(row['path'])
+                })
+        else:
+            # Fallback: scan directory
+            for fname in sorted(os.listdir(TXT_UPLOAD_DIR)):
+                fpath = os.path.join(TXT_UPLOAD_DIR, fname)
+                if fname.endswith('.txt') and os.path.isfile(fpath):
+                    files.append({
+                        'id': None,
+                        'name': fname,
+                        'created_at': os.path.getctime(fpath),
+                        'chunk_count': 0,
+                        'file_exists': True
+                    })
+
+        return jsonify({'files': files})
+    except Exception as e:
+        logger.error(f"Error listing txt files: {e}")
+        return jsonify({'error': 'Could not list files'}), 500
+
+
+@app.route('/api/knowledge/txt-files/<int:doc_id>', methods=['DELETE'])
+def delete_txt_file(doc_id: int):
+    """Delete an uploaded .txt file and remove it from the knowledge base."""
+    try:
+        if not knowledge_base.db:
+            return jsonify({'error': 'Database not available'}), 500
+
+        cursor = knowledge_base.db.connection.cursor()
+        cursor.execute(
+            "SELECT id, name, path, metadata FROM documents WHERE id = ?", (doc_id,)
+        )
+        row = cursor.fetchone()
+
+        if not row:
+            return jsonify({'error': 'File not found'}), 404
+
+        metadata = json.loads(row['metadata'] or '{}')
+        if metadata.get('source') != 'uploaded_txt':
+            return jsonify({'error': 'Document is not an uploaded txt file'}), 400
+
+        file_path = row['path']
+        doc_name = row['name']
+
+        # Remove from database (CASCADE deletes chunks)
+        cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        knowledge_base.db.connection.commit()
+
+        # Remove physical file
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                logger.warning(f"Could not delete file {file_path}: {e}")
+
+        return jsonify({'status': 'deleted', 'name': doc_name})
+
+    except Exception as e:
+        logger.error(f"Error deleting txt file {doc_id}: {e}")
+        return jsonify({'error': 'Could not delete file'}), 500
+
 
 @app.route('/api/training/stats', methods=['GET'])
 def training_stats():
@@ -9192,7 +9410,7 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
 
     # Erkenne Foto-Anfragen
     photo_keywords = ['foto', 'fotos', 'bild', 'bilder', 'image', 'images', 'photo', 'photos',
-                     'immich', 'person', 'personen', 'gesicht', 'album', 'aufnahme', 
+                     'immich', 'gesicht', 'album', 'aufnahme',
                      'zeig mir', 'gib mir', 'show me', 'finde', 'find',
                      'katze', 'hund', 'baum', 'auto', 'haus', 'mensch',
                      'katzen', 'hunde', 'bäume', 'autos', 'häuser', 'menschen']
@@ -9237,6 +9455,52 @@ def detect_query_intent(prompt: str, preferred_source: str = 'auto') -> str:
         return 'mixed'
     else:
         return 'general'
+
+
+def _parse_conversation_context(context: str) -> List[Dict[str, str]]:
+    """Parse a flat conversation-history string into a list of role/content dicts.
+
+    The frontend serialises conversation turns as::
+
+        User: <turn>
+        Assistant: <turn>
+        ...
+
+    This function reconstructs the individual dicts so the model receives a proper
+    multi-turn conversation history rather than a single opaque assistant blob.
+    """
+    if not context or not context.strip():
+        return []
+
+    parsed: List[Dict[str, str]] = []
+    current_role: Optional[str] = None
+    current_lines: List[str] = []
+
+    for line in context.split('\n'):
+        if line.startswith('User: '):
+            if current_role and current_lines:
+                content = '\n'.join(current_lines).strip()
+                if content:
+                    parsed.append({'role': current_role, 'content': content})
+            current_role = 'user'
+            current_lines = [line[6:]]
+        elif line.startswith('Assistant: '):
+            if current_role and current_lines:
+                content = '\n'.join(current_lines).strip()
+                if content:
+                    parsed.append({'role': current_role, 'content': content})
+            current_role = 'assistant'
+            current_lines = [line[11:]]
+        elif current_role is not None:
+            current_lines.append(line)
+
+    # Flush the final turn
+    if current_role and current_lines:
+        content = '\n'.join(current_lines).strip()
+        if content:
+            parsed.append({'role': current_role, 'content': content})
+
+    return parsed
 
 
 def _build_integration_connect_response(provider: str, prompt: str, language: str = 'de', feature: str = '') -> Dict[str, Any]:
@@ -9977,8 +10241,6 @@ WICHTIG:
         if requires_nextcloud and not get_nextcloud_runtime_config():
             return jsonify(_build_integration_connect_response('nextcloud', prompt, language, feature='nextcloud_context'))
 
-        if intent == 'photos' and not get_immich_client(username):
-            return jsonify(_build_integration_connect_response('immich', prompt, language, feature='photo_search'))
 
         logger.info(f"Query intent: {intent}, preferred_source: {preferred_source}")
 
@@ -9999,7 +10261,9 @@ WICHTIG:
 
         # Gather file context for file/mixed/general queries so indexed chunks are
         # consistently available for broad knowledge questions.
-        if intent in ['files', 'mixed', 'general']:
+        # Also fall back to file context for photo-intent queries when Immich is not configured.
+        immich_unavailable_fallback = intent == 'photos' and photo_context is None
+        if intent in ['files', 'mixed', 'general'] or immich_unavailable_fallback:
             file_context = gather_file_context(knowledge_base, training_manager, prompt)
             if file_context:
                 logger.info(f"Found {file_context[0].get('metadata', {}).get('count', 0)} file results with enhanced context (intent-based)")
@@ -10119,14 +10383,16 @@ WICHTIG:
         # Build system message with context using gatherers helper
         system_message = build_agent_system_message(combined_context, language)
 
-        # Generate AI response
-        messages = [
-            {'role': 'system', 'content': system_message},
-            {'role': 'user', 'content': prompt}
-        ]
+        # Reconstruct structured conversation history from the flat context string so the
+        # model receives proper multi-turn turns instead of a single opaque blob.
+        history = _parse_conversation_context(context)
+        # Drop any trailing user turns to avoid duplicating the current user prompt.
+        while history and history[-1]['role'] == 'user':
+            history.pop()
 
-        if context:
-            messages.insert(1, {'role': 'assistant', 'content': context})
+        messages = [{'role': 'system', 'content': system_message}]
+        messages.extend(history)
+        messages.append({'role': 'user', 'content': prompt})
 
         try:
             response = ollama_client.chat(messages, [])
