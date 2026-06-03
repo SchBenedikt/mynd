@@ -4,3 +4,10 @@ literal:REDACTED==>REDACTED
 literal:"username"==>"username"
 literal:user==>user
 literal:__REDACTED_SECRET__==>__REDACTED_SECRET__
+literal:__REDACTED_IMMICH_API_KEY__==>__REDACTED_IMMICH_API_KEY__
+literal:__REDACTED_GEMINI_API_KEY__==>__REDACTED_GEMINI_API_KEY__
+literal:__REDACTED_WEBHOOK_SECRET__==>__REDACTED_WEBHOOK_SECRET__
+literal:https://fotos.example.com==>https://fotos.example.com
+literal:https://cloud.example.com==>https://cloud.example.com
+literal:REDACTED==>REDACTED
+literal:redacted-user==>redacted-user
