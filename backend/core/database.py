@@ -2,7 +2,6 @@ import sqlite3
 import json
 import time
 import logging
-import re
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import os
@@ -121,20 +120,6 @@ class KnowledgeDatabase:
                 created_at REAL NOT NULL
             )
         """)
-
-        # Indexing runs history
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS indexing_runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                started_at REAL,
-                ended_at REAL,
-                documents_count INTEGER DEFAULT 0,
-                chunks_count INTEGER DEFAULT 0,
-                errors TEXT,
-                scope TEXT,
-                created_at REAL NOT NULL
-            )
-        """)
         
         # Tasks table - für Nextcloud Todos Caching
         cursor.execute("""
@@ -193,10 +178,6 @@ class KnowledgeDatabase:
         
         # Tasks sync status index
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_sync_list ON tasks_sync_status(list_name)")
-
-        # Indexing runs indexes
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_indexing_runs_started ON indexing_runs(started_at)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_indexing_runs_scope ON indexing_runs(scope)")
         
         self.connection.commit()
     
@@ -289,9 +270,8 @@ class KnowledgeDatabase:
         start_time = time.time()
         
         try:
-            match_query = self._build_fts_match_query(query)
-            if not match_query:
-                return []
+            # Escape query properly for FTS5
+            escaped_query = query.replace('"', '""')
             
             cursor.execute("""
                 SELECT c.*, d.name as doc_name, d.path as doc_path, d.file_type
@@ -301,7 +281,7 @@ class KnowledgeDatabase:
                 WHERE chunks_fts MATCH ?
                 ORDER BY rank
                 LIMIT ?
-            """, (match_query, limit))
+            """, (escaped_query, limit))
             
             results = [dict(row) for row in cursor.fetchall()]
             execution_time = time.time() - start_time
@@ -314,21 +294,6 @@ class KnowledgeDatabase:
         except Exception as e:
             logger.error(f"Full-text search error: {str(e)}")
             return []
-
-    def _build_fts_match_query(self, query: str) -> str:
-        """Build a safe and effective FTS5 MATCH query from natural language input."""
-        cleaned = (query or "").strip()
-        if not cleaned:
-            return ""
-
-        # Keep word-like tokens only to avoid FTS parser errors on punctuation/operators.
-        tokens = [token for token in re.findall(r"\w+", cleaned.lower(), flags=re.UNICODE) if len(token) > 1]
-
-        if not tokens:
-            return ""
-
-        # Use prefix matching and OR-combination for robust recall with natural language queries.
-        return " OR ".join(f'"{token}"*' for token in tokens)
     
     def get_chunks_without_embeddings(self, model_name: str, limit: int = 100) -> List[Dict]:
         """Get chunks that need embeddings"""
@@ -358,21 +323,6 @@ class KnowledgeDatabase:
         
         result = cursor.fetchone()
         return dict(result) if result else None
-
-    def get_chunks_with_documents(self, limit: int = 100) -> List[Dict]:
-        """Return recent chunks with document metadata for semantic fallback searches."""
-        cursor = self.connection.cursor()
-
-        cursor.execute("""
-            SELECT c.id, c.content, c.chunk_index, c.embedding_id,
-                   d.name as doc_name, d.path as doc_path, d.file_type
-            FROM chunks c
-            JOIN documents d ON c.document_id = d.id
-            ORDER BY c.created_at DESC
-            LIMIT ?
-        """, (limit,))
-
-        return [dict(row) for row in cursor.fetchall()]
     
     def get_document_stats(self) -> Dict:
         """Get database statistics"""
@@ -402,67 +352,6 @@ class KnowledgeDatabase:
         stats['file_types'] = {row['file_type']: row['count'] for row in cursor.fetchall()}
         
         return stats
-
-    def get_embedding_coverage(self, model_name: str) -> Dict:
-        """Get embedding coverage for the active model."""
-        cursor = self.connection.cursor()
-
-        cursor.execute("SELECT COUNT(*) as count FROM chunks")
-        total_chunks = cursor.fetchone()['count']
-
-        cursor.execute(
-            """
-            SELECT COUNT(*) as count
-            FROM chunks c
-            JOIN embeddings e ON c.embedding_id = e.id
-            WHERE e.model_name = ?
-            """,
-            (model_name,)
-        )
-        embeddings_count = cursor.fetchone()['count']
-
-        cursor.execute(
-            """
-            SELECT COUNT(*) as count
-            FROM chunks c
-            LEFT JOIN embeddings e ON c.embedding_id = e.id
-            WHERE e.id IS NULL OR e.model_name != ?
-            """,
-            (model_name,)
-        )
-        missing_count = cursor.fetchone()['count']
-
-        percentage = round((embeddings_count / total_chunks) * 100, 2) if total_chunks else 0
-
-        return {
-            'model_name': model_name,
-            'total_chunks': total_chunks,
-            'generated_embeddings': embeddings_count,
-            'missing_embeddings': missing_count,
-            'completion_percentage': percentage,
-            'complete': total_chunks > 0 and missing_count == 0,
-        }
-
-    def record_index_run(self, started_at: float, ended_at: float, documents_count: int, chunks_count: int, errors: str = None, scope: str = None) -> int:
-        """Record an indexing run with basic statistics."""
-        cursor = self.connection.cursor()
-        try:
-            cursor.execute("""
-                INSERT INTO indexing_runs (started_at, ended_at, documents_count, chunks_count, errors, scope, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (started_at, ended_at, documents_count, chunks_count, errors or '', scope or '', time.time()))
-            self.connection.commit()
-            return cursor.lastrowid
-        except Exception as e:
-            logger.error(f"Error recording index run: {str(e)}")
-            self.connection.rollback()
-            return None
-
-    def get_indexing_runs(self, limit: int = 10) -> List[Dict]:
-        """Return recent indexing runs (most recent first)."""
-        cursor = self.connection.cursor()
-        cursor.execute("SELECT * FROM indexing_runs ORDER BY id DESC LIMIT ?", (limit,))
-        return [dict(row) for row in cursor.fetchall()]
     
     def _log_search(self, query: str, results_count: int, execution_time: float):
         """Log search query for optimization analysis"""

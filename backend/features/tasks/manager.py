@@ -5,7 +5,6 @@ TaskManager - Verwaltung von Todos/Tasks mit Caching und DB-Persistenz
 import logging
 import time
 from typing import List, Dict, Optional
-import threading
 from .simple import SimpleNextcloudTasks
 from .batch_loader import BatchTaskLoader, QuickTaskLoader
 
@@ -24,11 +23,6 @@ class TaskManager:
         self.cached_tasks: List[Dict] = []
         self.last_cache_time: float = 0
         self.cache_duration: float = 300  # 5 Minuten
-        self.auto_sync_enabled: bool = False
-        self.auto_sync_thread: Optional[threading.Thread] = None
-        self.auto_sync_interval: float = 300
-        self.auto_sync_list_name: str = 'auto'
-        self.last_auto_sync_time: float = 0
     
     def initialize(self, url: str, username: str, password: str) -> bool:
         """
@@ -53,7 +47,7 @@ class TaskManager:
             self.logger.error(f"❌ Error initializing task manager: {str(e)}")
             return False
     
-    def get_tasks(self, use_cache: bool = True, list_name: Optional[str] = None) -> List[Dict]:
+    def get_tasks(self, use_cache: bool = True, list_name: str = None) -> List[Dict]:
         """
         Holt alle aktiven Tasks
         Zuerst aus Datenbank, dann aus Cache, dann von WebDAV
@@ -64,28 +58,7 @@ class TaskManager:
         
         # Standard-Namen für Task-Listen (in Reihenfolge der Wahrscheinlichkeit)
         if list_name is None:
-            list_names = []
-
-            # Discover server-side task lists first.
-            discovered_lists = []
-            try:
-                discovered_lists = self.tasks_client.get_task_lists()
-            except Exception as e:
-                self.logger.debug(f"Could not auto-discover task lists: {e}")
-
-            fallback_lists = [
-                'todo',
-                'tasks',
-                'Todo',
-                'Tasks',
-                'My Tasks',
-                'Personal',
-                'Standard',
-                'Default',
-            ]
-            for name in [*discovered_lists, *fallback_lists]:
-                if name and name not in list_names:
-                    list_names.append(name)
+            list_names = ['todo', 'tasks', 'Todo', 'Tasks', 'My Tasks']
         else:
             list_names = [list_name]
         
@@ -100,24 +73,18 @@ class TaskManager:
                 self.logger.debug(f"Error loading from DB: {e}")
         
         # 2. FALLBACK: WebDAV laden (langsamer)
-        tasks: List[Dict] = []
-        seen_keys = set()
+        tasks = []
         tried_lists = []
         try:
             for name in list_names:
                 tried_lists.append(name)
                 try:
-                    list_tasks = self.tasks_client.get_tasks(name)
-                    if list_tasks:
-                        self.logger.info(f"⚠️  Using WebDAV fallback, found {len(list_tasks)} tasks from list: {name}")
-                        for task in list_tasks:
-                            task['list_name'] = name
-                            unique_key = task.get('uid') or task.get('nextcloud_path') or f"{name}:{task.get('title','')}:{task.get('due_date')}"
-                            if unique_key in seen_keys:
-                                continue
-                            seen_keys.add(unique_key)
-                            tasks.append(task)
-                except Exception:
+                    # Nur 1 Task laden, nicht alle!
+                    tasks = self.tasks_client.get_tasks(name)
+                    if tasks:  # Wenn Todos gefunden
+                        self.logger.info(f"⚠️  Using WebDAV fallback, found {len(tasks)} tasks from list: {name}")
+                        break
+                except:
                     continue
             
             self.cached_tasks = tasks
@@ -165,32 +132,8 @@ class TaskManager:
             self.database.complete_task_in_db(task_uid)
         
         return success
-
-    def update_task(self, task_uid: str, list_name: str = 'tasks', title: Optional[str] = None,
-                    description: Optional[str] = None, due_date: Optional[str] = None,
-                    priority: Optional[int] = None) -> bool:
-        """Aktualisiert ein bestehendes Task."""
-        if not self.tasks_client:
-            self.logger.error("Task client not initialized")
-            return False
-
-        success = self.tasks_client.update_task(
-            task_uid=task_uid,
-            list_name=list_name,
-            title=title,
-            description=description,
-            due_date=due_date,
-            priority=priority
-        )
-
-        if success:
-            # Cache invalidieren, damit UI sofort aktualisierte Daten lädt.
-            self.cached_tasks = []
-            self.last_cache_time = 0
-
-        return success
     
-    def sync_tasks_to_database(self, list_name: str = 'auto', batch_size: int = 100) -> bool:
+    def sync_tasks_to_database(self, list_name: str = 'todo', batch_size: int = 100) -> bool:
         """
         Startet den Background-Batch-Load aller Tasks von Nextcloud in DB
         **DIES SOLLTE NUR EINMAL MACHEN!**
@@ -221,73 +164,6 @@ class TaskManager:
             return {'status': 'not_initialized'}
         
         return self.batch_loader.get_load_status()
-
-    def start_auto_sync(self, list_name: str = 'auto', interval_seconds: int = 300) -> bool:
-        """
-        Startet periodischen Background-Sync Nextcloud -> DB.
-        Nutzt inkrementelles Upsert (kein DB-Clear).
-        """
-        if not self.batch_loader or not self.database or not self.tasks_client:
-            self.logger.warning("Auto-sync not available: missing batch loader, DB, or tasks client")
-            return False
-
-        if interval_seconds < 30:
-            interval_seconds = 30
-
-        self.auto_sync_list_name = list_name or 'auto'
-        self.auto_sync_interval = float(interval_seconds)
-
-        # Bereits laufend: nur Konfiguration aktualisieren.
-        if self.auto_sync_enabled and self.auto_sync_thread and self.auto_sync_thread.is_alive():
-            self.logger.info(
-                f"Auto-sync already running; updated config: list={self.auto_sync_list_name}, "
-                f"interval={int(self.auto_sync_interval)}s"
-            )
-            return True
-
-        self.auto_sync_enabled = True
-        self.auto_sync_thread = threading.Thread(target=self._auto_sync_loop, daemon=True)
-        self.auto_sync_thread.start()
-        self.logger.info(
-            f"🔁 Task auto-sync started: list='{self.auto_sync_list_name}', interval={int(self.auto_sync_interval)}s"
-        )
-        return True
-
-    def stop_auto_sync(self) -> None:
-        """Stoppt periodischen Auto-Sync."""
-        self.auto_sync_enabled = False
-        self.logger.info("Task auto-sync stopped")
-
-    def _auto_sync_loop(self) -> None:
-        """Background-Loop für periodisches inkrementelles Syncing."""
-        while self.auto_sync_enabled:
-            try:
-                if not self.batch_loader or not self.tasks_client or not self.database:
-                    self.logger.warning("Auto-sync disabled due to missing components")
-                    self.auto_sync_enabled = False
-                    break
-
-                if self.batch_loader.is_loading:
-                    self.logger.debug("Auto-sync skipped: batch loader already running")
-                else:
-                    started = self.batch_loader.start_background_load(self.auto_sync_list_name)
-                    if started:
-                        self.last_auto_sync_time = time.time()
-                        self.logger.info("Auto-sync batch load started")
-            except Exception as e:
-                self.logger.error(f"Auto-sync loop error: {str(e)}")
-
-            time.sleep(self.auto_sync_interval)
-
-    def get_auto_sync_status(self) -> Dict:
-        """Gibt Auto-Sync-Status zurück."""
-        return {
-            'enabled': self.auto_sync_enabled,
-            'interval_seconds': int(self.auto_sync_interval),
-            'list_name': self.auto_sync_list_name,
-            'last_sync_at': self.last_auto_sync_time,
-            'thread_alive': bool(self.auto_sync_thread and self.auto_sync_thread.is_alive())
-        }
     
     def format_tasks_for_context(self, tasks: List[Dict]) -> str:
         """Formatiert Tasks für AI-Kontext"""
