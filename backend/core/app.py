@@ -2267,7 +2267,7 @@ def auth_nextcloud_login():
         client_secret = oauth_config.get('client_secret', '')
         if not all([nc_url, client_id, client_secret]):
             return jsonify({'error': 'Unvollständige OAuth2-Konfiguration'}), 400
-        cb_uri = request.url_root.rstrip('/') + '/api/nextcloud/oauth/callback'
+        cb_uri = request.url_root.rstrip('/') + '/api/auth/nextcloud/callback'
         oauth_provider = OAuth2NextcloudProvider({
             'nextcloud_url': nc_url,
             'client_id': client_id,
@@ -2285,6 +2285,16 @@ def auth_nextcloud_login():
     except Exception as e:
         logger.error(f"Error in Nextcloud auth login: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auth/nextcloud/callback', methods=['GET'])
+def auth_nextcloud_callback():
+    """
+    OAuth2 Callback auf dem /api/auth/nextcloud/callback Pfad
+    (matching der in Nextcloud registrierten Redirect-URI).
+    Delegiert an den bestehenden nextcloud_oauth_callback Handler.
+    """
+    return nextcloud_oauth_callback()
 
 
 @app.route('/api/auth/me', methods=['GET'])
