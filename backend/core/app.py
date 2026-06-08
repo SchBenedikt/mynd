@@ -108,6 +108,40 @@ AI_CONFIG_FILE = os.path.join(CONFIG_DIR, "ai_config.json")
 CALENDAR_CONFIG_FILE = os.path.join(CONFIG_DIR, "calendar_config.json")
 ALLOW_PRIVATE_NETWORK_TARGETS = os.getenv('ALLOW_PRIVATE_NETWORK_TARGETS', 'false').lower() == 'true'
 
+RUNTIME_CONFIG_FILE = os.path.join(CONFIG_DIR, "runtime_config.json")
+
+
+def load_runtime_config() -> dict:
+    """Load runtime config persisted by the web UI."""
+    try:
+        if os.path.exists(RUNTIME_CONFIG_FILE):
+            with open(RUNTIME_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f) or {}
+    except Exception as e:
+        logger.error(f"Error loading runtime config: {e}")
+    return {}
+
+
+def apply_runtime_config(config: dict):
+    """Apply runtime config to running app (partial, best-effort)."""
+    global ALLOW_PRIVATE_NETWORK_TARGETS
+    try:
+        if 'ALLOW_PRIVATE_NETWORK_TARGETS' in config:
+            ALLOW_PRIVATE_NETWORK_TARGETS = bool(config.get('ALLOW_PRIVATE_NETWORK_TARGETS'))
+
+        if 'SESSION_COOKIE_SECURE' in config:
+            app.config['SESSION_COOKIE_SECURE'] = bool(config.get('SESSION_COOKIE_SECURE'))
+
+        if 'OLLAMA_BASE_URL' in config:
+            try:
+                # update ollama_client if initialized
+                if 'ollama_client' in globals() and globals()['ollama_client']:
+                    globals()['ollama_client'].update_config(config.get('OLLAMA_BASE_URL'), config.get('OLLAMA_MODEL', globals()['ollama_client'].model))
+            except Exception:
+                logger.exception('Failed to update Ollama client from runtime config')
+    except Exception:
+        logger.exception('Error applying runtime config')
+
 
 def _safe_json_dump(path: str, data: Dict) -> None:
     """Write JSON atomically with restrictive file permissions for secrets."""
@@ -674,6 +708,14 @@ def save_user_config(username: str, config: dict) -> None:
 # Initialisierung
 knowledge_base = KnowledgeBase()
 ollama_client = OllamaClient()
+# Load and apply runtime config persisted from web UI (if any)
+try:
+    _runtime_cfg = load_runtime_config()
+    if _runtime_cfg:
+        apply_runtime_config(_runtime_cfg)
+        logger.info("Runtime config applied from file")
+except Exception:
+    logger.exception("Failed to load/apply runtime config")
 training_manager = TrainingManager()
 metadata_extractor = MetadataExtractor()
 
@@ -2100,6 +2142,40 @@ def nextcloud_config_get():
 
     except Exception as e:
         logger.error(f"Error getting config: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/runtime/config', methods=['GET'])
+def runtime_config_get():
+    """Get runtime configuration persisted via web UI (masked where appropriate)."""
+    try:
+        cfg = load_runtime_config()
+        safe = cfg.copy()
+        return jsonify({'configured': bool(safe), 'config': safe})
+    except Exception as e:
+        logger.error(f"Error loading runtime config: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/runtime/config', methods=['POST'])
+def runtime_config_set():
+    """Persist runtime configuration sent from the web UI and apply it."""
+    try:
+        data = request.get_json(silent=True) or {}
+
+        # Allowlist keys
+        allowed = {'OLLAMA_BASE_URL', 'OLLAMA_MODEL', 'ALLOW_PRIVATE_NETWORK_TARGETS', 'SESSION_COOKIE_SECURE'}
+        to_save = {k: v for k, v in data.items() if k in allowed}
+
+        if not to_save:
+            return jsonify({'error': 'No valid config keys provided'}), 400
+
+        _safe_json_dump(RUNTIME_CONFIG_FILE, to_save)
+        apply_runtime_config(to_save)
+
+        return jsonify({'status': 'ok', 'saved': list(to_save.keys())})
+    except Exception as e:
+        logger.error(f"Error saving runtime config: {e}")
         return jsonify({'error': str(e)}), 500
 
 

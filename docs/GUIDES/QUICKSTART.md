@@ -36,14 +36,20 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
-2. Environment‑Variablen (`.env`) anlegen (NICHT in Git):
+2. Konfiguration: Web‑Interface oder `.env`
+
+Du kannst die meisten Laufzeit‑Einstellungen direkt im Web‑Interface oder per API setzen (empfohlen). Damit vermeidest du `.env`‑Dateien im Repo.
+
+Beispiel: per API (nachdem die App läuft)
 
 ```bash
-# Beispiel (.env)
-FLASK_SECRET_KEY=$(python -c 'import secrets; print(secrets.token_hex(32))')
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-ALLOW_PRIVATE_NETWORK_TARGETS=false
+# Setze Ollama Base URL und deaktiviere private network targets
+curl -X POST http://localhost:5000/api/runtime/config \
+	-H "Content-Type: application/json" \
+	-d '{"OLLAMA_BASE_URL":"http://127.0.0.1:11434","ALLOW_PRIVATE_NETWORK_TARGETS":false}'
 ```
+
+Hinweis: `FLASK_SECRET_KEY` solltest du idealerweise sicher über Umgebungsvariable setzen bevor die App gestartet wird (oder lokal in einem sicheren Secret Store), da Änderungen daran einen Neustart erfordern.
 
 3. Sicherstellen, dass `backend/config` in `.gitignore` steht:
 
