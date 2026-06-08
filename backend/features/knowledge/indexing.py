@@ -158,6 +158,7 @@ class IndexingManager:
             self.nextcloud_config = nextcloud_config
             # Konfiguration speichern
             try:
+                # If config contains username, save per-account as well
                 with open(self.config_file, 'w') as f:
                     json.dump(self.nextcloud_config, f)
                 self.logger.info("Nextcloud configuration saved")
@@ -427,6 +428,14 @@ class IndexingManager:
                     name = source.get('file', os.path.basename(path))
                     file_type = source.get('type', 'text')
                     metadata = source
+                    # Ensure owner metadata if available
+                    try:
+                        owner = self.nextcloud_config.get('username') if isinstance(self.nextcloud_config, dict) else None
+                        if owner:
+                            metadata = dict(metadata or {})
+                            metadata['owner'] = owner
+                    except Exception:
+                        pass
 
                     # Check if document already exists
                     cursor.execute("SELECT id FROM documents WHERE path = ?", (path,))

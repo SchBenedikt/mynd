@@ -264,7 +264,7 @@ class KnowledgeDatabase:
             self.connection.rollback()
             raise
     
-    def search_fulltext(self, query: str, limit: int = 10) -> List[Dict]:
+    def search_fulltext(self, query: str, limit: int = 10, owner: Optional[str] = None) -> List[Dict]:
         """Full-text search using FTS5"""
         cursor = self.connection.cursor()
         start_time = time.time()
@@ -273,15 +273,28 @@ class KnowledgeDatabase:
             # Escape query properly for FTS5
             escaped_query = query.replace('"', '""')
             
-            cursor.execute("""
-                SELECT c.*, d.name as doc_name, d.path as doc_path, d.file_type
-                FROM chunks_fts fts
-                JOIN chunks c ON fts.rowid = c.id
-                JOIN documents d ON c.document_id = d.id
-                WHERE chunks_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
-            """, (escaped_query, limit))
+            # Optionally filter by owner stored in documents.metadata JSON
+            if owner:
+                cursor.execute("""
+                    SELECT c.*, d.name as doc_name, d.path as doc_path, d.file_type
+                    FROM chunks_fts fts
+                    JOIN chunks c ON fts.rowid = c.id
+                    JOIN documents d ON c.document_id = d.id
+                    WHERE chunks_fts MATCH ?
+                    AND json_extract(d.metadata, '$.owner') = ?
+                    ORDER BY rank
+                    LIMIT ?
+                """, (escaped_query, owner, limit))
+            else:
+                cursor.execute("""
+                    SELECT c.*, d.name as doc_name, d.path as doc_path, d.file_type
+                    FROM chunks_fts fts
+                    JOIN chunks c ON fts.rowid = c.id
+                    JOIN documents d ON c.document_id = d.id
+                    WHERE chunks_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                """, (escaped_query, limit))
             
             results = [dict(row) for row in cursor.fetchall()]
             execution_time = time.time() - start_time

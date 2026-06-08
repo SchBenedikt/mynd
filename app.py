@@ -242,6 +242,10 @@ class KnowledgeBase:
     
     def search_knowledge(self, query, k=3):
         """High-performance search using available engine"""
+        return self.search_knowledge_for_user(query, k=k)
+
+    def search_knowledge_for_user(self, query, k=3, owner: str = None):
+        """High-performance search using available engine, optionally filtered by owner"""
         if not query or len(query.strip()) < 2:
             return []
         
@@ -249,10 +253,10 @@ class KnowledgeBase:
         if self.search_engine:
             try:
                 if hasattr(self.search_engine, 'hybrid_search'):
-                    results = self.search_engine.hybrid_search(query, k=k)
+                    results = self.search_engine.hybrid_search(query, k=k, owner=owner)
                 else:
                     results = self.search_engine.search(query, k=k)
-                
+
                 # Convert to expected format
                 formatted_results = []
                 for result in results:
@@ -264,14 +268,14 @@ class KnowledgeBase:
                         'similarity_score': result.get('similarity_score', 0.5),
                         'search_type': result.get('search_type', 'search')
                     })
-                
+
                 logger.info(f"Search: {len(formatted_results)} results for query: {query[:50]}...")
                 return formatted_results
-                
+
             except Exception as e:
                 logger.error(f"Search error: {str(e)}")
                 # Fallback to simple search
-        
+
         # Fallback to simple text search
         return self._simple_search(query, k)
     
@@ -1060,7 +1064,9 @@ def chat():
     
     # Suche nach relevantem Wissen mit mehr Ergebnissen
     try:
-        relevant_context = knowledge_base.search_knowledge(message, k=10)  # Mehr Kontext!
+        cfg = indexing_manager.get_config(mask_password=True) or {}
+        owner = cfg.get('username')
+        relevant_context = knowledge_base.search_knowledge_for_user(message, k=10, owner=owner)  # Mehr Kontext!
         logger.info(f"Found {len(relevant_context)} context items for query: {message[:50]}...")
     except Exception as e:
         logger.error(f"Search error: {str(e)}")

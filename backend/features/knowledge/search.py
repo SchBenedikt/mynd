@@ -193,7 +193,7 @@ class SimpleSearchEngine:
         """Perform search using SQLite FTS plus embedding reranking."""
         return self.hybrid_search(query, k=k)
 
-    def hybrid_search(self, query: str, k: int = 5, semantic_weight: float = 0.7) -> List[Dict]:
+    def hybrid_search(self, query: str, k: int = 5, semantic_weight: float = 0.7, owner: str = None) -> List[Dict]:
         """Rerank search candidates with semantic similarity and full-text relevance."""
         try:
             if not query or len(query.strip()) < 2:
@@ -202,18 +202,21 @@ class SimpleSearchEngine:
             logger.info("Searching for: %s", query)
 
             candidate_limit = max(k * 6, 20)
-            fts_results = self.db.search_fulltext(query, limit=candidate_limit)
+            fts_results = self.db.search_fulltext(query, limit=candidate_limit, owner=owner)
 
             keyword_results = []
             if len(fts_results) < k:
                 for keyword in self._extract_keywords(query)[:3]:
                     if len(keyword) > 2:
-                        keyword_results.extend(self.db.search_fulltext(keyword, limit=max(2, k // 2)))
+                        keyword_results.extend(self.db.search_fulltext(keyword, limit=max(2, k // 2), owner=owner))
 
             candidate_results = self._merge_candidates(fts_results, keyword_results)
 
             if len(candidate_results) < k:
-                fallback_candidates = self.db.get_chunks_with_documents(limit=max(candidate_limit, 100))
+                try:
+                    fallback_candidates = self.db.get_chunks_with_documents(limit=max(candidate_limit, 100))
+                except Exception:
+                    fallback_candidates = []
                 candidate_results = self._merge_candidates(candidate_results, fallback_candidates)
 
             logger.info("Candidate results for '%s': %s", query, len(candidate_results))

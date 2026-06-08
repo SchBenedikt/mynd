@@ -28,6 +28,7 @@ from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvide
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
 from backend.features.integration.loginflow_state import loginflow_state
 from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
+from backend.features.integration.nextcloud_accounts import save_account, save_accounts, get_account
 # from backend.features.knowledge.engine import SemanticSearchEngine
 # Temporär deaktiviert wegen faiss Problemen
 class SemanticSearchEngine:
@@ -340,17 +341,21 @@ class KnowledgeBase:
     
     def search_knowledge(self, query, k=3):
         """High-performance search using available engine"""
+        return self.search_knowledge_for_user(query, k=k)
+
+    def search_knowledge_for_user(self, query, k=3, owner: str = None):
+        """High-performance search using available engine, optionally filtered by owner"""
         if not query or len(query.strip()) < 2:
             return []
-        
+
         # Use search engine if available
         if self.search_engine:
             try:
                 if hasattr(self.search_engine, 'hybrid_search'):
-                    results = self.search_engine.hybrid_search(query, k=k)
+                    results = self.search_engine.hybrid_search(query, k=k, owner=owner)
                 else:
                     results = self.search_engine.search(query, k=k)
-                
+
                 # Convert to expected format
                 formatted_results = []
                 for result in results:
@@ -362,14 +367,14 @@ class KnowledgeBase:
                         'similarity_score': result.get('similarity_score', 0.5),
                         'search_type': result.get('search_type', 'search')
                     })
-                
+
                 logger.info(f"Search: {len(formatted_results)} results for query: {query[:50]}...")
                 return formatted_results
-                
+
             except Exception as e:
                 logger.error(f"Search error: {str(e)}")
                 # Fallback to simple search
-        
+
         # Fallback to simple text search
         return self._simple_search(query, k)
     
@@ -1967,6 +1972,12 @@ def nextcloud_loginflow_poll():
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
         _safe_json_dump(config_file, nextcloud_config)
 
+        # Save per-user account and keep global indexing config in sync
+        try:
+            save_account(username, nextcloud_config)
+        except Exception:
+            logger.exception("Failed to save nextcloud account to accounts file")
+
         indexing_manager.save_nextcloud_config(server, username, app_password, '/')
 
         session.pop('loginflow_nextcloud_url', None)
@@ -2037,7 +2048,12 @@ def nextcloud_direct_login():
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
         _safe_json_dump(config_file, nextcloud_config)
 
-        # Speichere auch die Basis-Konfiguration für Indexing
+        # Speichere pro-user Account und Basis-Konfiguration für Indexing
+        try:
+            save_account(username, nextcloud_config)
+        except Exception:
+            logger.exception("Failed to save nextcloud account to accounts file")
+
         indexing_manager.save_nextcloud_config(
             nextcloud_url,
             username,
@@ -3797,7 +3813,9 @@ def agent_query():
         # Gather file context if relevant
         if intent in ['files', 'mixed']:
             try:
-                file_results = knowledge_base.search_knowledge(prompt, k=8)
+                cfg = indexing_manager.get_config(mask_password=True) or {}
+                owner = cfg.get('username')
+                file_results = knowledge_base.search_knowledge_for_user(prompt, k=8, owner=owner)
                 if file_results:
                     file_context = file_results
                     logger.info(f"Found {len(file_results)} file results for context")

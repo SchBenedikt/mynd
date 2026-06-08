@@ -14,7 +14,7 @@ COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r backend/requirements.txt
 
-COPY run_app.py run_app.py
+COPY scripts/run_app.py run_app.py
 COPY backend/__init__.py backend/__init__.py
 COPY backend/core backend/core
 COPY backend/features backend/features

@@ -322,7 +322,14 @@ class AutonomousAgent:
                     error="Knowledge base not available"
                 )
 
-            results = self.knowledge.search_knowledge(query, k=limit)
+            try:
+                from backend.features.knowledge.indexing import indexing_manager
+                cfg = indexing_manager.get_config(mask_password=True) or {}
+                owner = cfg.get('username')
+            except Exception:
+                owner = None
+
+            results = self.knowledge.search_knowledge_for_user(query, k=limit, owner=owner)
 
             if results:
                 # Format results for AI consumption

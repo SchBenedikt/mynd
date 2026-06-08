@@ -372,7 +372,10 @@ def gather_photo_context(client, prompt: str, username: str, build_thumbnail_url
 def gather_file_context(knowledge_base, training_manager, prompt: str) -> Optional[List[Dict]]:
     """Gather file context from knowledge base with enhanced training manager context"""
     try:
-        file_results = knowledge_base.search_knowledge(prompt, k=80)
+        from backend.features.knowledge.indexing import indexing_manager
+        cfg = indexing_manager.get_config(mask_password=True) or {}
+        owner = cfg.get('username')
+        file_results = knowledge_base.search_knowledge_for_user(prompt, k=80, owner=owner)
         if not file_results:
             return None
 
