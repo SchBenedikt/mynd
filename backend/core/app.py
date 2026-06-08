@@ -1859,20 +1859,21 @@ def nextcloud_oauth_callback():
             '/'
         )
 
+        # Benutzer in Session setzen
+        session['auth_user'] = username
+        session.permanent = True
+
         # Cleanup Session
+        redirect_to = session.pop('oauth2_redirect_to', '/')
         session.pop('oauth2_state', None)
         session.pop('oauth2_nextcloud_url', None)
         session.pop('oauth2_client_id', None)
         session.pop('oauth2_client_secret', None)
         session.pop('oauth2_redirect_uri', None)
 
-        # Erfolgreiche Antwort für Frontend
-        return jsonify({
-            'status': 'success',
-            'message': 'OAuth2 authentication successful',
-            'username': username,
-            'nextcloud_url': nextcloud_url
-        })
+        # Redirect zurück zum Frontend (für AuthGate-Login-Flow)
+        frontend_url = request.url_root.rstrip('/') + redirect_to
+        return redirect(frontend_url)
 
     except Exception as e:
         logger.error(f"Error in OAuth2 callback: {str(e)}")
@@ -2114,6 +2115,227 @@ def nextcloud_direct_login():
     except Exception as e:
         logger.error(f"Error in direct login: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+USERS_FILE = os.path.join(CONFIG_DIR, 'users.json')
+
+
+def _load_users() -> dict:
+    if os.path.exists(USERS_FILE):
+        try:
+            with open(USERS_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_users(users: dict) -> None:
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(USERS_FILE, 'w') as f:
+        json.dump(users, f, indent=2)
+
+
+@app.route('/api/setup/status', methods=['GET'])
+def setup_status():
+    try:
+        users = _load_users()
+        needs_setup = len(users) == 0
+        oauth_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
+        nc_url = ''
+        oauth_configured = False
+        if os.path.exists(oauth_file):
+            try:
+                with open(oauth_file, 'r') as f:
+                    oauth = json.load(f)
+                nc_url = oauth.get('nextcloud_url', '')
+                oauth_configured = bool(nc_url and oauth.get('client_id'))
+            except Exception:
+                pass
+        if not nc_url:
+            nc_config_file = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+            if os.path.exists(nc_config_file):
+                try:
+                    with open(nc_config_file, 'r') as f:
+                        nc = json.load(f)
+                    nc_url = nc.get('nextcloud_url', '')
+                except Exception:
+                    pass
+        return jsonify({
+            'success': True,
+            'needs_setup': needs_setup,
+            'oauth_configured': oauth_configured,
+            'admin_user': 'admin',
+            'nextcloud_url': nc_url
+        })
+    except Exception as e:
+        logger.error(f"Error in setup status: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/setup/bootstrap', methods=['POST'])
+def setup_bootstrap():
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        mode = data.get('mode', '')
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+
+        if mode == 'admin':
+            admin_username = data.get('admin_name', 'admin')
+            admin_password = data.get('admin_password', '')
+            users = _load_users()
+            if admin_username not in users:
+                try:
+                    from werkzeug.security import generate_password_hash
+                    hashed = generate_password_hash(admin_password)
+                except ImportError:
+                    hashed = admin_password
+                users[admin_username] = {'password': hashed, 'name': admin_username}
+                _save_users(users)
+            logger.info(f"Local user created: {admin_username}")
+
+        elif mode == 'nextcloud':
+            nc_url = data.get('nextcloud_url', '').rstrip('/')
+            client_id = data.get('client_id', '')
+            client_secret = data.get('client_secret', '')
+            oauth_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
+            oauth_config = {
+                'nextcloud_url': nc_url,
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'scope': 'files',
+                'configured': True
+            }
+            with open(oauth_file, 'w') as f:
+                json.dump(oauth_config, f, indent=2)
+            users = _load_users()
+            if not users:
+                users['admin'] = {'provider': 'nextcloud', 'name': 'Nextcloud User'}
+                _save_users(users)
+            logger.info(f"Nextcloud OAuth config saved for {nc_url}")
+
+        elif mode == 'system':
+            ollama_config = {}
+            if data.get('enable_ollama'):
+                ollama_config = {
+                    'base_url': data.get('base_url', 'http://localhost:11434'),
+                    'model': data.get('model', 'gemma2:latest'),
+                    'embedding_model': data.get('embedding_model', 'nomic-embed-text')
+                }
+                ai_file = os.path.join(CONFIG_DIR, 'ai_config.json')
+                with open(ai_file, 'w') as f:
+                    json.dump(ollama_config, f, indent=2)
+            if data.get('enable_immich'):
+                immich_config = {
+                    'immich_url_default': data.get('immich_url_default', ''),
+                    'immich_api_key_default': data.get('immich_api_key_default', '')
+                }
+                runtime_file = os.path.join(CONFIG_DIR, 'runtime_config.json')
+                existing = {}
+                if os.path.exists(runtime_file):
+                    try:
+                        with open(runtime_file) as f:
+                            existing = json.load(f)
+                    except Exception:
+                        pass
+                existing.update(immich_config)
+                with open(runtime_file, 'w') as f:
+                    json.dump(existing, f, indent=2)
+            logger.info("System config saved")
+
+        return jsonify({'success': True, 'message': 'Setup abgeschlossen'})
+    except Exception as e:
+        logger.error(f"Error in setup bootstrap: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/nextcloud/login', methods=['GET'])
+def auth_nextcloud_login():
+    """
+    Startet den Nextcloud OAuth2 Login aus der AuthGate-Loginseite.
+    Liest die gespeicherte OAuth2-Konfiguration und leitet zu Nextcloud weiter.
+    """
+    try:
+        redirect_to = request.args.get('redirect_to', '/')
+        oauth_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
+        if not os.path.exists(oauth_file):
+            return jsonify({'error': 'Nextcloud OAuth2 nicht konfiguriert'}), 400
+        with open(oauth_file) as f:
+            oauth_config = json.load(f)
+        nc_url = oauth_config.get('nextcloud_url', '')
+        client_id = oauth_config.get('client_id', '')
+        client_secret = oauth_config.get('client_secret', '')
+        if not all([nc_url, client_id, client_secret]):
+            return jsonify({'error': 'Unvollständige OAuth2-Konfiguration'}), 400
+        cb_uri = request.url_root.rstrip('/') + '/api/nextcloud/oauth/callback'
+        oauth_provider = OAuth2NextcloudProvider({
+            'nextcloud_url': nc_url,
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'scope': 'files'
+        })
+        authorization_url, state = oauth_provider.get_authorization_url(cb_uri)
+        session['oauth2_state'] = state
+        session['oauth2_nextcloud_url'] = nc_url
+        session['oauth2_client_id'] = client_id
+        session['oauth2_client_secret'] = client_secret
+        session['oauth2_redirect_uri'] = cb_uri
+        session['oauth2_redirect_to'] = redirect_to
+        return redirect(authorization_url)
+    except Exception as e:
+        logger.error(f"Error in Nextcloud auth login: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auth/me', methods=['GET'])
+def auth_me():
+    username = session.get('auth_user')
+    if username:
+        users = _load_users()
+        if username in users:
+            return jsonify({
+                'authenticated': True,
+                'user': {'name': users[username].get('name', username), 'username': username}
+            })
+    return jsonify({'authenticated': False, 'user': None})
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+        if not username or not password:
+            return jsonify({'error': 'Benutzername und Passwort erforderlich'}), 400
+        users = _load_users()
+        user = users.get(username)
+        if not user:
+            return jsonify({'error': 'Ungültiger Benutzername oder Passwort'}), 401
+        stored = user.get('password', '')
+        try:
+            from werkzeug.security import check_password_hash
+            valid = check_password_hash(stored, password)
+        except ImportError:
+            valid = stored == password
+        if not valid:
+            return jsonify({'error': 'Ungültiger Benutzername oder Passwort'}), 401
+        session['auth_user'] = username
+        session.permanent = True
+        logger.info(f"User logged in: {username}")
+        return jsonify({
+            'success': True,
+            'user': {'name': user.get('name', username), 'username': username}
+        })
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    session.pop('auth_user', None)
+    return jsonify({'success': True})
 
 
 @app.route('/api/nextcloud/config', methods=['GET'])
