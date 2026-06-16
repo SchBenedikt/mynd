@@ -1745,6 +1745,34 @@ def indexing_config():
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
+@app.route('/api/indexing/path', methods=['GET', 'POST'])
+def indexing_path():
+    """Lädt oder speichert den Indexierungs-Pfad"""
+    if request.method == 'GET':
+        try:
+            config = indexing_manager.get_config()
+            return jsonify({'path': config.get('path', '/')})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    elif request.method == 'POST':
+        try:
+            data = request.get_json(silent=True) or {}
+            new_path = str(data.get('path', '/')).strip() or '/'
+            if not new_path.startswith('/'):
+                new_path = '/' + new_path
+            config = indexing_manager.get_config(mask_password=False)
+            if config.get('url') and config.get('username'):
+                indexing_manager.save_nextcloud_config(
+                    config['url'], config['username'], config.get('password', ''),
+                    remote_path=new_path,
+                    exclude_paths=config.get('exclude_paths')
+                )
+                return jsonify({'status': 'saved', 'path': new_path})
+            else:
+                return jsonify({'error': 'Keine Nextcloud-Konfiguration vorhanden'}), 400
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
 @app.route('/api/nextcloud/oauth/authorize', methods=['POST'])
 def nextcloud_oauth_authorize():
     """
