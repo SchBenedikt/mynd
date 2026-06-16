@@ -1656,8 +1656,19 @@ def start_indexing():
     
     # Wenn keine Konfiguration übergeben, versuche die gespeicherte zu laden
     if not nextcloud_config:
-        saved_config = indexing_manager.get_config(mask_password=False)  # Intern volles Passwort
-        if not saved_config.get('password'):
+        saved_config = indexing_manager.get_config(mask_password=False)
+        # Gültig wenn URL und Benutzername gesetzt sind (Passwort ODER OAuth reichen)
+        has_basic_auth = bool(saved_config.get('password'))
+        has_oauth = False
+        try:
+            oauth_path = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
+            if os.path.exists(oauth_path):
+                with open(oauth_path) as f:
+                    oauth_data = json.load(f)
+                has_oauth = bool(oauth_data.get('access_token'))
+        except Exception:
+            pass
+        if not saved_config.get('url') or not saved_config.get('username') or not (has_basic_auth or has_oauth):
             return jsonify({'error': 'Keine Nextcloud Konfiguration vorhanden'}), 400
         nextcloud_config = saved_config
     
