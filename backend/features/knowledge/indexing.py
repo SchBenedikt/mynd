@@ -253,7 +253,18 @@ class IndexingManager:
                 token = oauth.get('access_token')
                 if token:
                     from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
-                    return OAuth2NextcloudProvider(oauth)
+                    provider = OAuth2NextcloudProvider(oauth)
+                    # Token frisch halten – bei Ablauf automatisch erneuern
+                    try:
+                        if provider.refresh_token:
+                            provider.refresh_access_token()
+                            # Persistiere aktualisierten Token
+                            oauth.update(provider.to_config_dict())
+                            with open(oauth_file, 'w') as f:
+                                json.dump(oauth, f, indent=2)
+                    except Exception:
+                        pass
+                    return provider
         except Exception as e:
             self.logger.warning(f"Could not load OAuth provider: {e}")
         return None
@@ -359,6 +370,20 @@ class IndexingManager:
                     if self.stop_event.is_set():
                         self.logger.info("Indexing stopped by user")
                         break
+                    
+                    # Token alle 50 Batches auffrischen (lange Läufe)
+                    if auth_provider and batch_idx > 0 and batch_idx % 50 == 0:
+                        try:
+                            auth_provider.refresh_access_token()
+                            oauth_file = os.path.join(os.path.dirname(self.config_file), 'nextcloud_oauth2.json')
+                            if os.path.exists(oauth_file):
+                                with open(oauth_file) as f:
+                                    oauth = json.load(f)
+                                oauth.update(auth_provider.to_config_dict())
+                                with open(oauth_file, 'w') as f:
+                                    json.dump(oauth, f, indent=2)
+                        except Exception:
+                            pass
                     
                     self.logger.info(f"Processing batch {batch_idx + 1}/{len(file_batches)} with {len(batch)} files")
                     
