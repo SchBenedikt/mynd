@@ -85,7 +85,7 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'true').lower() == 'true'
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
 
 # Logging konfigurieren
 logging.basicConfig(level=logging.INFO)
@@ -1872,7 +1872,10 @@ def nextcloud_oauth_callback():
         session.pop('oauth2_redirect_uri', None)
 
         # Redirect zurück zum Frontend (für AuthGate-Login-Flow)
-        frontend_url = request.url_root.rstrip('/') + redirect_to
+        if redirect_to.startswith('http://') or redirect_to.startswith('https://'):
+            frontend_url = redirect_to
+        else:
+            frontend_url = request.url_root.rstrip('/') + redirect_to
         return redirect(frontend_url)
 
     except Exception as e:
@@ -2307,6 +2310,11 @@ def auth_me():
                 'authenticated': True,
                 'user': {'name': users[username].get('name', username), 'username': username}
             })
+        # Nextcloud/OAuth users may not be in users.json
+        return jsonify({
+            'authenticated': True,
+            'user': {'name': username, 'username': username}
+        })
     return jsonify({'authenticated': False, 'user': None})
 
 

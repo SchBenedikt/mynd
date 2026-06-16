@@ -129,10 +129,12 @@ class OAuth2NextcloudProvider(AuthProvider):
                 redirect_uri=redirect_uri
             )
 
+            token_url = urljoin(self.nextcloud_url, self.OAUTH2_TOKEN_ENDPOINT)
+
             token = oauth.fetch_token(
-                url=urljoin(self.nextcloud_url, self.OAUTH2_TOKEN_ENDPOINT),
+                token_url,
                 client_secret=self.client_secret,
-                authorization_response=authorization_code
+                code=authorization_code
             )
 
             self.access_token = token.get('access_token', '')

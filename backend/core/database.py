@@ -337,6 +337,20 @@ class KnowledgeDatabase:
         result = cursor.fetchone()
         return dict(result) if result else None
     
+    def get_embedding_coverage(self, model_name: str) -> float:
+        """Get embedding coverage ratio (chunks with embeddings / total chunks) for a model"""
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT COUNT(*) as count FROM chunks")
+        total_chunks = cursor.fetchone()['count']
+        if total_chunks == 0:
+            return 0.0
+        cursor.execute(
+            "SELECT COUNT(DISTINCT c.id) as count FROM chunks c JOIN embeddings e ON c.embedding_id = e.id WHERE e.model_name = ?",
+            (model_name,),
+        )
+        covered = cursor.fetchone()['count']
+        return covered / total_chunks
+
     def get_document_stats(self) -> Dict:
         """Get database statistics"""
         cursor = self.connection.cursor()

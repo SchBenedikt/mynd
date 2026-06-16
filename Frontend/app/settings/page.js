@@ -1066,7 +1066,7 @@ export default function SettingsPage() {
     }
   };
 
-<<<<<<< HEAD
+  // Email indexing helpers
   const loadEmailIndexingConfig = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/email-indexing/config`);
@@ -1114,7 +1114,9 @@ export default function SettingsPage() {
         use_ssl: Boolean(emailConfig.use_ssl)
       }
     };
-=======
+  };
+
+  // TXT file helpers
   const loadTxtFiles = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/knowledge/txt-files`);
@@ -1198,7 +1200,6 @@ export default function SettingsPage() {
     } catch (err) {
       setTxtUploadStatus('Error: ' + err.message);
     }
->>>>>>> origin/copilot/enhance-application-include-txt-files
   };
 
   const saveIndexingConfig = async () => {
@@ -3336,7 +3337,7 @@ export default function SettingsPage() {
                   )}
                 </div>
 
-<<<<<<< HEAD
+
                 <div className="panel-section" style={{marginTop: '2rem'}}>
                   <div className="section-title">{tr('E-Mail-Indexierung', 'Email Indexing')}</div>
                   <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
@@ -3573,7 +3574,10 @@ export default function SettingsPage() {
                           {emailIndexingDetails.message}
                         </div>
                       )}
-=======
+                    </div>
+                  )}
+                </div>
+
                 {/* TXT File Upload Section */}
                 <div className="panel-section" style={{marginTop: '2rem'}}>
                   <div className="section-title">{tr('Eigene Textdateien', 'Custom Text Files')}</div>
@@ -3637,7 +3641,7 @@ export default function SettingsPage() {
                           </div>
                         ))}
                       </div>
->>>>>>> origin/copilot/enhance-application-include-txt-files
+
                     </div>
                   )}
                 </div>
