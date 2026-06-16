@@ -159,8 +159,9 @@ class OAuth2NextcloudProvider(AuthProvider):
         try:
             oauth = OAuth2Session(client_id=self.client_id)
 
+            token_url = urljoin(self.nextcloud_url, self.OAUTH2_TOKEN_ENDPOINT)
             token = oauth.refresh_token(
-                url=urljoin(self.nextcloud_url, self.OAUTH2_TOKEN_ENDPOINT),
+                token_url,
                 client_id=self.client_id,
                 client_secret=self.client_secret,
                 refresh_token=self.refresh_token
