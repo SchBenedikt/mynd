@@ -1859,6 +1859,16 @@ def nextcloud_oauth_callback():
             '/'
         )
 
+        # Auch nextcloud_config.json für die Settings-Seite aktualisieren
+        nc_config_path = os.path.join(CONFIG_DIR, 'nextcloud_config.json')
+        _safe_json_dump(nc_config_path, {
+            'nextcloud_url': nextcloud_url,
+            'username': username,
+            'display_name': username,
+            'auth_type': 'oauth2',
+            'configured': True
+        })
+
         # Benutzer in Session setzen
         session['auth_user'] = username
         session.permanent = True
