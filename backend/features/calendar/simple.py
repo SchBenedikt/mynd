@@ -683,13 +683,26 @@ def create_simple_calendar_manager(nextcloud_url: str = None, username: str = No
         if not password:
             password = fallback.get('password') or os.getenv('NEXTCLOUD_PASSWORD')
 
-        print(f"DEBUG: URL={nextcloud_url}")
-        print(f"DEBUG: Username={username}")
-        print(f"DEBUG: Password configured={password is not None}")
-
         if not nextcloud_url:
             logger.error("Missing Nextcloud URL")
             return None
+
+        # Falls kein Passwort und kein AuthProvider: OAuth2 versuchen
+        if not auth_provider and not (username and password):
+            try:
+                oauth_file = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'nextcloud_oauth2.json')
+                oauth_file = os.path.abspath(oauth_file)
+                if os.path.exists(oauth_file):
+                    with open(oauth_file) as f:
+                        oauth_config = json.load(f)
+                    if oauth_config.get('access_token'):
+                        from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
+                        auth_provider = OAuth2NextcloudProvider(oauth_config)
+                        if not username:
+                            username = oauth_config.get('username', '')
+                        logger.info("Calendar using OAuth2 provider")
+            except Exception as e:
+                logger.warning(f"Could not init calendar OAuth2: {e}")
 
         if not auth_provider and not (username and password):
             logger.error("Missing Nextcloud configuration (username/password or auth_provider)")
