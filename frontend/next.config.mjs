@@ -3,7 +3,7 @@ const backendOrigin = (process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:
 
 const nextConfig = {
   reactStrictMode: true,
-  allowedDevOrigins: ['127.0.2.2', '127.0.0.1', '192.168.178.50'],
+  allowedDevOrigins: ['127.0.2.2', '127.0.0.1', '192.168.178.50', '192.168.178.52'],
   async rewrites() {
     return [
       {
