@@ -1953,9 +1953,9 @@ export default function SettingsPage() {
           <div className="status-badges">
             {isSidebarCollapsed ? (
               <div
-                className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok' && health.embeddings==='ok') ? 'ok' : (health.ollama==='error' || health.kb==='error' || health.embeddings==='error') ? 'error' : 'loading'}`}
+                className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='error' || health.kb==='error') ? 'error' : 'loading'}`}
                 title={`Ollama: ${health.ollama === 'ok' ? 'Online' : 'Offline'} · KB: ${health.kb === 'ok' ? 'Verbunden' : 'Offline'} · Embeddings: ${health.embeddings === 'ok' ? 'Komplett' : health.embeddings === 'loading' ? 'Lade...' : 'Offline'}`}>
-                <div className={`status-dot ${(health.ollama==='ok' && health.kb==='ok' && health.embeddings==='ok') ? 'ok' : (health.ollama==='error' || health.kb==='error' || health.embeddings==='error') ? 'error' : 'loading'}`} />
+                <div className={`status-dot ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='error' || health.kb==='error') ? 'error' : 'loading'}`} />
               </div>
             ) : (
               <>
