@@ -636,6 +636,7 @@ body {
   width: 44px;
   min-width: 44px;
   padding: 0.65rem;
+  overflow: visible;
 }
 
 .left-sidebar.collapsed .new-chat-btn {
@@ -878,64 +879,7 @@ body {
 .status-badge.combined .status-dot.loading { background: #f59e0b }
 .status-badge.combined .status-dot.error { background: #ef4444 }
 
-.status-tooltip {
-  display:none;
-  position:absolute;
-  bottom:calc(100% + 8px);
-  left:50%;
-  transform:translateX(-50%);
-  background:#1e293b;
-  color:#f1f5f9;
-  border-radius:10px;
-  padding:10px 14px;
-  white-space:nowrap;
-  font-size:12px;
-  line-height:1.5;
-  box-shadow:0 8px 24px rgba(0,0,0,0.25);
-  z-index:1000;
-}
-.status-tooltip::after {
-  content:'';
-  position:absolute;
-  top:100%;
-  left:50%;
-  transform:translateX(-50%);
-  border:6px solid transparent;
-  border-top-color:#1e293b;
-}
-.status-badge.combined:hover .status-tooltip {
-  display:block;
-}
-.tooltip-row {
-  display:flex;
-  align-items:center;
-  gap:8px;
-  padding:2px 0;
-}
-.tooltip-row + .tooltip-row {
-  border-top:1px solid rgba(255,255,255,0.08);
-  margin-top:4px;
-  padding-top:6px;
-}
-.tooltip-dot {
-  width:8px;
-  height:8px;
-  border-radius:50%;
-  flex-shrink:0;
-}
-.tooltip-dot.ok { background:#22c55e; }
-.tooltip-dot.error { background:#ef4444; }
-.tooltip-dot.loading { background:#f59e0b; }
-.tooltip-dot.unknown { background:#94a3b8; }
-.tooltip-label {
-  font-weight:600;
-  color:#e2e8f0;
-  min-width:48px;
-}
-.tooltip-value {
-  color:#94a3b8;
-  text-align:right;
-}
+
 
 .sidebar-footer .settings-btn {
   margin-bottom: 0.75rem;

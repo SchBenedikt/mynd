@@ -2683,20 +2683,10 @@ export default function HomePage() {
           {isSidebarCollapsed ? (
             <>
               <div className="status-badges">
-                <div className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error'}`}>
+                <div
+                  className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error'}`}
+                  title={`Ollama: ${health.ollama === 'ok' ? 'Online' : 'Offline'} · KB: ${health.kb === 'ok' ? 'Verbunden' : 'Offline'}`}>
                   <div className={`status-dot ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error'}`} />
-                  <div className="status-tooltip">
-                    <div className="tooltip-row">
-                      <span className={`tooltip-dot ${health.ollama}`} />
-                      <span className="tooltip-label">Ollama</span>
-                      <span className="tooltip-value">{health.ollama === 'ok' ? 'Online' : 'Offline'}</span>
-                    </div>
-                    <div className="tooltip-row">
-                      <span className={`tooltip-dot ${health.kb}`} />
-                      <span className="tooltip-label">KB</span>
-                      <span className="tooltip-value">{health.kb === 'ok' ? 'Verbunden' : 'Offline'}</span>
-                    </div>
-                  </div>
                 </div>
               </div>
               <div className="sidebar-user-collapsed" style={{marginTop:8, display:'flex', gap:8, alignItems:'center', justifyContent:'center'}}>
