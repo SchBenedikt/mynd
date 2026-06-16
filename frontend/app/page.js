@@ -2684,9 +2684,9 @@ export default function HomePage() {
             <>
               <div className="status-badges">
                 <div
-                  className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error'}`}
+                  className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='error' || health.kb==='error') ? 'error' : 'loading'}`}
                   title={`Ollama: ${health.ollama === 'ok' ? 'Online' : 'Offline'} · KB: ${health.kb === 'ok' ? 'Verbunden' : 'Offline'}`}>
-                  <div className={`status-dot ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok') ? 'loading' : 'error'}`} />
+                  <div className={`status-dot ${(health.ollama==='ok' && health.kb==='ok') ? 'ok' : (health.ollama==='error' || health.kb==='error') ? 'error' : 'loading'}`} />
                 </div>
               </div>
               <div className="sidebar-user-collapsed" style={{marginTop:8, display:'flex', gap:8, alignItems:'center', justifyContent:'center'}}>
