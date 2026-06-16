@@ -1951,31 +1951,41 @@ export default function SettingsPage() {
             <i className="fas fa-cog"></i> {!isSidebarCollapsed && t('settings')}
           </button>
           <div className="status-badges">
-            <div className={`status-badge ${health.ollama}`}>
-              <div className={`status-dot ${health.ollama}`}></div>
-              <div className="status-meta">
-                <span className="status-label">Ollama</span>
-                <span className="status-value">{health.ollama === 'ok' ? 'Online' : 'Offline'}</span>
+            {isSidebarCollapsed ? (
+              <div
+                className={`status-badge combined ${(health.ollama==='ok' && health.kb==='ok' && health.embeddings==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok' || health.embeddings==='ok') ? 'loading' : 'error'}`}
+                title={`Ollama: ${health.ollama === 'ok' ? 'Online' : 'Offline'} · KB: ${health.kb === 'ok' ? 'Verbunden' : 'Offline'} · Embeddings: ${health.embeddings === 'ok' ? 'Komplett' : health.embeddings === 'loading' ? 'Lade...' : 'Offline'}`}>
+                <div className={`status-dot ${(health.ollama==='ok' && health.kb==='ok' && health.embeddings==='ok') ? 'ok' : (health.ollama==='ok' || health.kb==='ok' || health.embeddings==='ok') ? 'loading' : 'error'}`} />
               </div>
-            </div>
-            <div className={`status-badge ${health.kb}`}>
-              <div className={`status-dot ${health.kb}`}></div>
-              <div className="status-meta">
-                <span className="status-label">KB</span>
-                <span className="status-value">{health.kb === 'ok' ? 'Verbunden' : 'Offline'}</span>
-              </div>
-            </div>
-            <div className={`status-badge ${health.embeddings}`}>
-              <div className={`status-dot ${health.embeddings}`}></div>
-              <div className="status-meta">
-                <span className="status-label">Embeddings</span>
-                <span className="status-value">
-                  {embeddingCoverage
-                    ? `${embeddingCoverageLabel}${embeddingCoverage.complete ? ' · komplett' : ' · offen'}`
-                    : 'Unbekannt'}
-                </span>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className={`status-badge ${health.ollama}`}>
+                  <div className={`status-dot ${health.ollama}`}></div>
+                  <div className="status-meta">
+                    <span className="status-label">Ollama</span>
+                    <span className="status-value">{health.ollama === 'ok' ? 'Online' : 'Offline'}</span>
+                  </div>
+                </div>
+                <div className={`status-badge ${health.kb}`}>
+                  <div className={`status-dot ${health.kb}`}></div>
+                  <div className="status-meta">
+                    <span className="status-label">KB</span>
+                    <span className="status-value">{health.kb === 'ok' ? 'Verbunden' : 'Offline'}</span>
+                  </div>
+                </div>
+                <div className={`status-badge ${health.embeddings}`}>
+                  <div className={`status-dot ${health.embeddings}`}></div>
+                  <div className="status-meta">
+                    <span className="status-label">Embeddings</span>
+                    <span className="status-value">
+                      {embeddingCoverage
+                        ? `${embeddingCoverageLabel}${embeddingCoverage.complete ? ' · komplett' : ' · offen'}`
+                        : 'Unbekannt'}
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
