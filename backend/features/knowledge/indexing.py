@@ -279,8 +279,34 @@ class IndexingManager:
             exclude_paths = self.nextcloud_config.get('exclude_paths', [])
             if exclude_paths:
                 self.logger.info(f"Excluding paths: {exclude_paths}")
-            # Dateien auflisten
-            files = nc_client.list_files(self.nextcloud_config.get('path', '/'), recursive=True, exclude_paths=exclude_paths)
+
+            # Dateien im Hintergrund auflisten, während wir den Fortschritt aktualisieren
+            files = []
+            listing_done = False
+            def _do_listing():
+                nonlocal files, listing_done
+                try:
+                    files = nc_client.list_files(self.nextcloud_config.get('path', '/'), recursive=True, exclude_paths=exclude_paths)
+                except Exception as e:
+                    self.logger.error(f"File listing error: {e}")
+                finally:
+                    listing_done = True
+            listing_thread = threading.Thread(target=_do_listing, daemon=True)
+            listing_thread.start()
+
+            while not listing_done:
+                self.current_progress.total_files = len(files)
+                self.notify_progress()
+                if self.stop_event.is_set():
+                    self.logger.info("Indexing stopped during file listing")
+                    self.current_progress.status = IndexingStatus.IDLE
+                    self.current_progress.end_time = time.time()
+                    self.notify_progress()
+                    return
+                time.sleep(2)
+
+            self.current_progress.total_files = len(files)
+            self.notify_progress()
             
             if not files:
                 self.logger.info("No files found")
@@ -297,20 +323,17 @@ class IndexingManager:
                         cursor = knowledge_base.db.connection.cursor()
                         cursor.execute("SELECT path FROM documents")
                         existing_paths = {row['path'] for row in cursor.fetchall()}
-                        # Keep only files that are not yet indexed
                         new_files = [f for f in files if f.get('path') not in existing_paths]
                         skipped = len(files) - len(new_files)
                         if skipped > 0:
                             self.logger.info(f"Skipping {skipped} already-indexed files")
                         files = new_files
                     except Exception:
-                        # Fallback: do not filter if DB read fails
                         pass
             except Exception:
                 pass
             
-            # Alle Dateien verarbeiten mit parallelem Download
-            self.logger.info(f"Processing all {len(files)} files with {self.max_workers} workers...")
+            self.logger.info(f"Processing {len(files)} files with {self.max_workers} workers...")
             
             self.current_progress.total_files = len(files)
             self.notify_progress()
