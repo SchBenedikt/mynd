@@ -1,266 +1,298 @@
-# 📁 Projectstruktur - MYND Assistant
+# Projektstruktur - MYND
 
-## 🎯 Quick Navigation
+## Quick Navigation
 
 | Bereich | Pfad | Beschreibung |
 |---------|------|-------------|
-| **Starten Sie hier** | [`docs/ONBOARDING/`](docs/ONBOARDING/) | Setup, Deployment, Geheimnisse |
-| **Backend Code** | [`backend/`](backend/) | Python FastAPI Server |
-| **Frontend Code** | [`frontend/`](frontend/) | Next.js React Application |
-| **Tests** | [`tests/`](tests/) | Unit & Integration Tests |
-| **Dokumentation** | [`docs/`](docs/) | Vollständige Dokumentation |
-| **Scripts** | [`scripts/`](scripts/) | Utility & Setup Scripts |
-| **Daten** | [`data/`](data/) | Runtime Data (Cache, Training) |
+| **Start hier** | `docs/ONBOARDING/` | Setup, Deployment, Secrets |
+| **Backend** | `backend/` | Python Flask Server |
+| **Frontend** | `frontend/` | Next.js React App |
+| **Tests** | `tests/` | Unit & Integration Tests |
+| **Dokumentation** | `docs/` | Vollständige Dokumentation |
+| **Scripts** | `scripts/` | Utility & Setup Scripts |
+| **Daten** | `data/` | Laufzeitdaten |
 
----
+## Detaillierte Struktur
 
-## 📂 Detaillierte Struktur
-
-### 🚀 Root-Verzeichnis (Sauber & Minimal)
+### Root-Verzeichnis
 
 ```
 .
 ├── README.md                 # Projekt-Übersicht
 ├── CONTRIBUTING.md           # Developer-Guidelines
+├── PROJECT_STRUCTURE.md      # Diese Datei
 ├── .env.example              # Environment Template
-├── .gitignore               # Git Ignore-Regeln
-├── TREE.txt                 # ASCII-Übersicht
-├── knowledge_base.db*       # SQLite Datenbank (gitignored)
+├── .gitignore                # Git-Ignore-Regeln
+├── app.py                    # Legacy-Flask-App (root)
+├── docker-compose.yml        # Docker-Compose (Dev)
+├── docker-compose.prod.yml   # Docker-Compose (Production)
+├── deploy.sh                 # Deployment-Skript
+├── LICENSE                   # Lizenz
+├── backend/                  # Python Backend
+├── frontend/                 # Next.js Frontend
+├── docs/                     # Dokumentation
+├── scripts/                  # Hilfsskripte
+├── tests/                    # Tests
+├── data/                     # Laufzeitdaten
+└── .github/                  # CI/CD-Workflows
 ```
 
-### 📚 docs/ - Vollständige Dokumentation
-
-```
-docs/
-├── README.md                # Dokumentation Übersicht
-├── ONBOARDING/              # ⭐ STARTEN SIE HIER
-│   ├── SECRETS_QUICKSTART.md
-│   ├── DEPLOYMENT_CHECKLIST.md
-│   ├── STATUS_DASHBOARD.md
-│   └── [7 weitere Onboarding-Docs]
-├── API/                     # API-Schnittstellen
-│   ├── new-api-endpoints.md
-│   └── NEXTCLOUD_API_INTEGRATIONS.md
-├── GUIDES/                  # Tutorials & How-Tos
-│   ├── QUICKSTART.md
-│   ├── BATCH_LOADING_GUIDE.md
-│   ├── IMMICH_FEATURES_UPDATE.md
-│   └── [3 weitere Guides]
-├── SECURITY/                # 🔐 Security & Threat Models
-│   ├── README_SECURITY_REVIEW.md
-│   ├── SECRET_MANAGEMENT.md
-│   └── THREAT_MODEL.md
-└── REPORTS/                 # Audit & Code Reviews
-    ├── COMPLETION_REPORT.md
-    └── REVIEW_SUMMARY.md
-```
-
-### 🐍 backend/ - Python FastAPI Server
+### Backend (`backend/`)
 
 ```
 backend/
-├── requirements.txt         # Python Dependencies
 ├── __init__.py
-├── core/                    # ⭐ Hauptserver
-│   ├── app.py              # FastAPI App Entry Point
-│   ├── database.py         # SQLite/ORM Logic
-│   ├── security_*.py       # Security Utilities
-│   └── training_data.json  # ML Training Data
-├── config/                  # Konfigurationsdateien (GITIGNORED!)
-│   ├── *.example.json       # Sichere Templates
-│   └── .gitkeep            # Verzeichnis-Marker
+├── requirements.txt         # Python-Abhängigkeiten
+├── Dockerfile               # Docker-Build für Backend
+├── config/                  # Laufzeit-Konfiguration (nicht in Git!)
+│   ├── ai_config.json
+│   ├── indexing_config.json
+│   ├── nextcloud_config.json
+│   ├── nextcloud_oauth2.json
+│   ├── runtime_config.json
+│   └── users.json
+├── core/                    # Haupt-App
+│   ├── app.py              # Flask-App (Haupteinstiegspunkt)
+│   ├── database.py         # SQLite-Datenbanklogik
+│   ├── security_hardening.py
+│   ├── security_utils.py
+│   ├── autonomous/         # Autonomer Agent
+│   │   └── agent.py
+│   ├── context/            # Kontext-Gatherer
+│   │   └── gatherers.py
+│   └── routes/             # API-Routen (Erweiterungen)
+│       └── __init__.py
 ├── features/               # Feature-Module
-│   ├── calendar/           # Kalender-Integration
-│   ├── documents/          # Dokument-Verarbeitung
+│   ├── calendar/           # Kalender-Integration (CalDAV)
+│   │   ├── manager.py
+│   │   └── simple.py
+│   ├── documents/          # Dokumenten-Parser
+│   │   ├── parser.py
+│   │   └── parser_hardened.py
 │   ├── integration/        # Externe Integrationen
-│   ├── knowledge/          # Knowledge Graph
-│   ├── tasks/              # Task Management
-│   └── training/           # ML Training
-└── [andere Module]
+│   │   ├── nextcloud_client.py
+│   │   ├── nextcloud_client_hardened.py
+│   │   ├── nextcloud_accounts.py
+│   │   ├── auth_manager.py
+│   │   ├── auth_provider.py
+│   │   ├── auth_basic.py
+│   │   ├── auth_nextcloud_direct.py
+│   │   ├── oauth2_nextcloud.py
+│   │   ├── oauth2_nextcloud_pkce.py
+│   │   ├── loginflow_state.py
+│   │   ├── immich_client.py
+│   │   ├── talk_client.py
+│   │   ├── activity_client.py
+│   │   ├── notifications_client.py
+│   │   ├── carddav_client.py
+│   │   ├── search_client.py
+│   │   ├── api_registry.py
+│   │   ├── email_client.py
+│   │   ├── autobahn_client.py
+│   │   ├── openweather_client.py
+│   │   ├── dwd_client.py
+│   │   ├── nina_client.py
+│   │   ├── dashboard_deutschland_client.py
+│   │   ├── deutschland_atlas_client.py
+│   │   ├── uptimekuma_client.py
+│   │   └── homeassistant_client.py
+│   ├── knowledge/          # Wissensdatenbank & Indexierung
+│   │   ├── indexing.py
+│   │   ├── search.py
+│   │   ├── engine.py
+│   │   ├── graph.py
+│   │   ├── metadata.py
+│   │   └── email_indexing.py
+│   ├── tasks/              # Aufgaben/Todos (Nextcloud Tasks)
+│   │   ├── manager.py
+│   │   ├── batch_loader.py
+│   │   └── simple.py
+│   └── training/           # ML-Training
+│       └── manager.py
+└── templates/              # HTML-Templates (Fallback)
 ```
 
-### ⚛️ frontend/ - Next.js React App
+### Frontend (`frontend/`)
 
 ```
 frontend/
-├── package.json            # Node Dependencies
-├── next.config.mjs         # Next.js Config
-├── jsconfig.json          # JavaScript Config
+├── package.json            # Node.js-Abhängigkeiten
+├── next.config.mjs         # Next.js-Konfiguration
+├── jsconfig.json
+├── Dockerfile
+├── .env.local.example
 ├── app/                    # Next.js App Router
-│   ├── layout.js          # Root Layout
-│   ├── page.js            # Home Page
-│   ├── globals.css        # Global Styles
-│   └── settings/          # Settings Pages
-├── components/            # React Components
+│   ├── layout.js          # Root-Layout
+│   ├── page.js            # Startseite (Chat)
+│   ├── globals.css        # Globale Styles
+│   ├── admin/             # Admin-Seiten
+│   ├── settings/          # Einstellungen
+│   ├── setup/             # Setup-Wizard
+│   ├── internal/          # Interne Tools
+│   └── knowledge-graph/   # Knowledge-Graph-Visualisierung
+├── components/            # React-Komponenten
+│   ├── AuthGate.js
+│   ├── AuthGate.css
+│   ├── ContextDataCard.js
+│   ├── KnowledgeGraph.js
+│   ├── KnowledgeGraph.module.css
+│   ├── SetupWizard.js
+│   ├── SourceCard.js
+│   ├── StatusPill.js
+│   ├── SuggestionsPanel.js
+│   ├── ThemeSelector.js
+│   └── UserBar.js
 ├── hooks/                 # Custom React Hooks
-└── README.md             # Frontend Guide
+└── data/                  # Frontend-Daten
 ```
 
-### 🧪 tests/ - Testsuite
+### Tests (`tests/`)
 
 ```
 tests/
 ├── README.md
-├── test_*.py              # Unit Tests für Backend
-├── test_auth_*.py         # Authentication Tests
-├── test_immich_*.py       # Immich Integration Tests
-├── test_chat_*.py         # Chat/Agent Tests
-├── test_todos.py          # Task Management Tests
-├── fix_database.py        # DB Fixtures
-└── knowledge_*            # Test Data
+├── test_auth_plugin.py
+├── test_auth_unit.py
+├── test_agent_photo_search.py
+├── test_chat_with_todos.py
+├── test_immich_direct.py
+├── test_immich_features.py
+├── test_init_tasks.py
+├── test_nextcloud_apis.py
+├── test_secrets_management.py
+├── test_security_hardening.py
+├── test_todos.py
+└── fix_database.py
 ```
 
-### 🛠️ scripts/ - Utilities & Tools
+### Scripts (`scripts/`)
 
 ```
 scripts/
-├── run_app.py             # Start Backend & Frontend
-├── setup/                 # Setup Tools
-│   ├── setup_env.py       # Environment Wizard
-│   └── .git-pre-commit-check.py  # Secret Scanner
-├── debug/                 # Debugging Tools
-│   ├── [Debug Scripts]
-├── demo/                  # Demo Scripts
-├── examples/              # Example Usage
-└── inspect/               # Inspection Tools
+├── run_app.py             # App-Start (empfohlen)
+├── setup/                 # Setup-Tools
+│   ├── setup_env.py       # Environment-Wizard
+│   ├── setup_nextcloud.py # Nextcloud-Setup
+│   ├── check_backend_endpoints.py
+│   └── .git-pre-commit-check.py
+├── demo/
+│   └── demo_batch_loading.py
+├── debug/
+├── examples/
+├── inspect/
+├── demo_batch_loading.py
+├── debug_nextcloud.py
+├── inspect_ics.py
+├── find_open_tasks.py
+├── find_assets_endpoint.py
+├── find_immich_endpoints.py
+├── get_immich_version.py
+├── test_auth_plugin.py
+├── test_auth_unit.py
+├── test_chat_with_todos.py
+├── test_immich_direct.py
+├── test_immich_features.py
+├── test_init_tasks.py
+├── test_nextcloud_apis.py
+├── test_todos.py
+├── test_additional_apis.py
+├── test_agent_photo_search.py
+├── example_auth_usage.py
+└── example_nextcloud_apis.py
 ```
 
-### 📊 data/ - Runtime Data
+### Dokumentation (`docs/`)
+
+```
+docs/
+├── README.md              # Doku-Übersicht
+├── ADMIN_SETUP.md
+├── AUTONOMOUS_AGENT.md
+├── BATCH_LOADING_GUIDE.md
+├── BENUTZERHANDBUCH_AUTONOMOUS.md
+├── CALENDAR_IMPROVEMENTS.md
+├── IMMICH_COMPLETION.md
+├── IMMICH_FEATURES_UPDATE.md
+├── IMMICH_INTEGRATION.md
+├── INFRASTRUCTURE.md
+├── NEXTCLOUD_API_INTEGRATIONS.md
+├── NEXTCLOUD_AUTH_PLUGIN.md
+├── nextcloud-talk-bot.md
+├── SECRETS.md
+├── TALK_BOT_SETUP_GUIDE.md
+├── technical_documentation.md
+├── API/
+│   ├── new-api-endpoints.md
+│   └── NEXTCLOUD_API_INTEGRATIONS.md
+├── GUIDES/
+│   ├── BATCH_LOADING_GUIDE.md
+│   ├── IMMICH_FEATURES_UPDATE.md
+│   ├── INDEX.md
+│   ├── NEXTCLOUD_INTEGRATION_GUIDE.md
+│   ├── QUICKSTART.md
+│   └── todo.md
+├── ONBOARDING/
+│   ├── DEPLOYMENT_CHECKLIST.md
+│   ├── REORGANIZATION_SUMMARY.md
+│   ├── SECRETS_FIX_SUMMARY.md
+│   ├── SECRETS_IMPLEMENTATION_COMPLETE.md
+│   ├── SECRETS_MANAGEMENT_CHECKLIST.md
+│   ├── SECRETS_QUICKSTART.md
+│   ├── STATUS_DASHBOARD.md
+│   └── STRUCTURE.md
+└── SECURITY/
+    ├── README_SECURITY_REVIEW.md
+    ├── SECRET_MANAGEMENT.md
+    └── THREAT_MODEL.md
+```
+
+### Daten (`data/`)
 
 ```
 data/
-├── user_knowledge.txt     # Benutzer-Wissensdatenbank
-├── cache/                 # Daten-Cache (gitignored)
-│   └── .gitkeep
-├── config/                # Runtime Config (gitignored)
-│   └── .gitkeep
-├── training/              # ML Training Data (gitignored)
-│   └── .gitkeep
-└── [andere Runtime-Daten]
+└── user_knowledge.txt     # Benutzer-Wissensdatenbank
 ```
 
-### 📈 reports/ - Generierte Reports
+Laufzeitdaten (in `.gitignore`, nicht eingecheckt):
+- `data/cache/` - Daten-Cache
+- `data/training/` - ML-Training-Daten
+- Reports in `reports/`
 
-```
-reports/                    # (GITIGNORED)
-├── code_review_report.md
-├── code_review_report.json
-└── [andere Audit-Reports]
-```
-
-### 🔄 .github/ - CI/CD Pipeline
+### CI/CD (`.github/`)
 
 ```
 .github/
 └── workflows/
-    └── ci.yml            # GitHub Actions CI/CD
+    └── ci.yml            # GitHub Actions
 ```
 
----
+## Wichtige Sicherheitshinweise
 
-## 🔐 Wichtige Sicherheitsnoten
-
-### ❌ Niemals committed:
+### Niemals committed:
 - `.env` - Lokale Umgebungsvariablen
 - `backend/config/*.json` - Konfigurationen mit Secrets
-- `data/cache/`, `data/training/`, `reports/`
+- `data/cache/`, `data/training/`
 - `*.db*` - Datenbank-Dateien
 
-### ✅ Diese existieren:
-- `.env.example` - Sichere Template
-- `backend/config/*.example.json` - Sichere Templates
+### Vorhandene Templates:
+- `.env.example` - Environment-Template
+- `frontend/.env.local.example` - Frontend-Env-Template
 
-### 🚀 Setup:
+## Setup
+
 ```bash
 # 1. Environment konfigurieren
-python3 scripts/setup/setup_env.py
+python scripts/setup/setup_env.py
 
 # 2. Backend starten
-cd backend/core && python3 app.py
+python scripts/run_app.py
+# -> http://localhost:5001
 
 # 3. Frontend starten (neues Terminal)
 cd frontend && npm run dev
+# -> http://localhost:3000
 ```
 
----
+## API-Übersicht
 
-## 📖 Zu lesende Dokumentation
-
-1. **[ONBOARDING](docs/ONBOARDING/)** (5-15 Min)
-   - Schnelle Setup & Geheimnis-Verwaltung
-
-2. **[QUICKSTART Guide](docs/GUIDES/QUICKSTART.md)** (10 Min)
-   - Erste Schritte
-
-3. **[Security Review](docs/SECURITY/README_SECURITY_REVIEW.md)** (20 Min)
-   - Sicherheitsarchitektur
-
-4. **[API Dokumentation](docs/API/)** (15 Min)
-   - Schnittstellen & Integrationen
-
-5. **[Threat Model](docs/SECURITY/THREAT_MODEL.md)** (25 Min)
-   - Sicherheitsanalyse
-
----
-
-## 🎯 Typische Workflows
-
-### Entwickler starten:
-```
-docs/ONBOARDING/SECRETS_QUICKSTART.md
-    → docs/GUIDES/QUICKSTART.md
-        → backend/core/app.py
-            → frontend/app/page.js
-```
-
-### Deployment:
-```
-docs/ONBOARDING/DEPLOYMENT_CHECKLIST.md
-    → scripts/setup/setup_env.py
-        → docker-compose up
-            → Production Monitor
-```
-
-### Sicherheitsreview:
-```
-docs/SECURITY/README_SECURITY_REVIEW.md
-    → docs/SECURITY/THREAT_MODEL.md
-        → reports/code_review_report.md
-            → Issues beheben
-```
-
-### Testing:
-```
-tests/
-    → pytest
-        → Coverage Report
-            → CI/CD (GitHub Actions)
-```
-
----
-
-## 📊 Statistik
-
-| Metrik | Wert |
-|--------|------|
-| **Backend Module** | 6+ |
-| **Frontend Pages** | 5+ |
-| **Test Files** | 20+ |
-| **Documentation Pages** | 15+ |
-| **Configuration Templates** | 5+ |
-| **Gesamt LOC** | 13,000+ |
-
----
-
-### 🔗 Schnelle Links
-
-- 📘 [Projekt README](README.md)
-- 📝 [CONTRIBUTING Guide](CONTRIBUTING.md)
-- 🔐 [Secrets Management](docs/ONBOARDING/SECRETS_QUICKSTART.md)
-- 🚀 [Deployment Checklist](docs/ONBOARDING/DEPLOYMENT_CHECKLIST.md)
-- 🛡️ [Security Review](docs/SECURITY/README_SECURITY_REVIEW.md)
-
----
-
-**Zuletzt aktualisiert:** April 1, 2026  
-**Version:** 2.0 (Umstrukturiert & Reorganisiert)
+Siehe `README.md` für die vollständige API-Referenz oder `docs/API/new-api-endpoints.md`.

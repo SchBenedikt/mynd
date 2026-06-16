@@ -1,24 +1,21 @@
 # Contributing to MYND
 
-Thank you for contributing to MYND! This document provides guidelines for participating in the project.
-
 ## Branch Strategy
 
 - `main` - Production-ready code
 - `develop` - Development branch
 - `feature/*` - Feature branches
 - `bugfix/*` - Bug fix branches
-- `claude/*` - AI-assisted development branches
+- `claude/*` - KI-assistierte Entwicklung
 
 ## Development Setup
 
 ### Backend
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
 ```
 
 ### Frontend
@@ -46,31 +43,30 @@ npm run dev
 3. **Security**
    - Validate all inputs
    - Don't commit secrets
-   - Use security utilities provided
+   - Use security utilities from `backend/core/security_utils.py`
    - Check OWASP Top 10 implications
 
 4. **Documentation**
-   - Update docs/ if behavior changes
+   - Update `docs/` if behavior changes
    - Add docstrings and type hints
-   - Include usage examples
+   - Keep README.md and PROJECT_STRUCTURE.md in sync
 
 ## File Organization
 
 ```
-scripts/
-  ├── demo/          → Demo scripts
-  ├── debug/         → Debug & testing
-  ├── examples/      → Usage examples
-  └── inspect/       → Inspection tools
+backend/
+├── core/          → Haupt-App (app.py, database.py, security*)
+├── features/      → Feature-Module (calendar, documents, integration, knowledge, tasks, training)
+└── config/        → Laufzeit-Konfiguration (gitignored)
 
-data/
-  ├── cache/         → Database files
-  ├── training/      → Training data
-  └── config/        → Configuration
+frontend/
+├── app/           → Next.js App Router
+└── components/    → React-Komponenten
 
-tests/               → All test files
-docs/                → All documentation
-reports/             → Generated reports
+scripts/           → Setup, Debug, Demo
+tests/             → Test-Dateien
+docs/              → Dokumentation
+data/              → Laufzeitdaten (gitignored)
 ```
 
 ## Testing Requirements
@@ -93,16 +89,15 @@ reports/             → Generated reports
 ## Commit Messages
 
 ```
-[TYPE] Brief description
+[TYPE] Kurze Beschreibung
 
-Optional detailed explanation
-- Bullet point details
-- Follow your changes
+Optionale ausführliche Erklärung
+- Aufzählung der Änderungen
 
 Fixes: #123
 ```
 
-Types: `feat`, `fix`, `docs`, `refactor`, `test`, `security`
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `security`, `chore`
 
 ## PR Review Checklist
 
@@ -113,17 +108,15 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `security`
 - [ ] Code formatted properly
 - [ ] Breaking changes documented
 
-## Architecture Decisions
+## Architecture
 
-- Backend uses Flask/FastAPI
-- Frontend uses Next.js
-- Database TBD per config
-- Authentication providers supported
+- **Backend**: Flask (Python) mit SQLite + semantischer Suche
+- **Frontend**: Next.js (React) mit App Router
+- **AI**: Ollama (lokales LLM) via REST-API
+- **Integrationen**: Nextcloud (CalDAV, WebDAV, Tasks, Activity), Immich, OpenWeather, DWD, Home Assistant
+- **Auth**: OAuth2 (PKCE), Login Flow v2, Basic Auth
 
 ## Questions?
 
-- Check existing documentation in `/docs`
+- Check documentation in `/docs`
 - Review security guidelines in `/docs/SECURITY`
-- Check code review report in `/reports`
-
-Thank you for contributing! 🙏

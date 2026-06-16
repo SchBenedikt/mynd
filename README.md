@@ -1,36 +1,23 @@
 # MYND - Integrierte KI-gestützte Produktivitätsplattform
 
-Ein modernes, sicheres und performantes System zur Integrierung von Nextcloud, Immich, Kalender und KI-gestützter Aufgabenverwaltung.
+Ein modernes System zur Integration von Nextcloud, Immich, Kalender und KI-gestützter Aufgabenverwaltung mit lokalem Ollama-Backend.
 
-## 🔐 SECURITY NOTICE
+## Quick Start (3 Minuten)
 
-**⚠️ WICHTIG:** Dieses Projekt verwendet Environment Variables zum Schutz von Secrets!
-
-- ❌ Committe **NIEMALS** `.env` Dateien zu Git
-- ❌ Committe **NIEMALS** API-Keys, Passwörter, oder Tokens
-- ✅ Nutze `.env.example` als Template
-- ✅ Führe `python3 scripts/setup/setup_env.py` für Setup aus
-
-**Dokumentation:** Siehe [`docs/ONBOARDING/SECRETS_QUICKSTART.md`](docs/ONBOARDING/SECRETS_QUICKSTART.md) | [`docs/SECURITY/SECRET_MANAGEMENT.md`](docs/SECURITY/SECRET_MANAGEMENT.md)
-
-## 🚀 Quick Start (3 Minuten)
-
-### 1️⃣ Umgebung einrichten
+### 1. Umgebung einrichten
 ```bash
-python3 scripts/setup/setup_env.py
-# oder manuell:
-cp .env.example .env && nano .env
+cp .env.example .env
+# .env mit eigenen Zugangsdaten füllen
 ```
 
-### 2️⃣ Backend starten
+### 2. Backend starten
 ```bash
-cd backend/core
-export $(cat ../../.env | xargs)
-python3 app.py
-# Backend läuft unter: http://localhost:5000
+pip install -r backend/requirements.txt
+python scripts/run_app.py
+# Backend läuft unter: http://localhost:5001
 ```
 
-### 3️⃣ Frontend starten (neues Terminal)
+### 3. Frontend starten (neues Terminal)
 ```bash
 cd frontend
 npm install
@@ -38,126 +25,128 @@ npm run dev
 # Frontend läuft unter: http://localhost:3000
 ```
 
-## 📁 Projektstruktur (Übersicht)
-
-**Vollständiger Überblick:** [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md)
+## Projektstruktur (Übersicht)
 
 | Bereich | Pfad | Zweck |
 |---------|------|-------|
-| **Dokumentation** | `docs/` | ONBOARDING, Security, API, Guides |
-| **Backend** | `backend/` | Python FastAPI Server |
+| **Backend** | `backend/` | Python Flask Server |
 | **Frontend** | `frontend/` | Next.js React App |
 | **Tests** | `tests/` | Unit & Integration Tests |
-| **Tools** | `scripts/` | Setup, Debug, Demo Scripts |
-| **Runtime Data** | `data/` | Cache, Config, Training (gitignored) |
+| **Dokumentation** | `docs/` | Guides, API, Security, Onboarding |
+| **Scripts** | `scripts/` | Setup, Debug, Demo |
+| **Daten** | `data/` | Laufzeitdaten (Cache, Training) |
 
-## 📚 DOCUMENTATION
+Vollständiger Überblick: [`PROJECT_STRUCTURE.md`](PROJECT_STRUCTURE.md)
 
-### 🎯 Für neue Entwickler
-1. **[Project Structure](PROJECT_STRUCTURE.md)** - Übersicht (5 Min)
-2. **[Secrets Quick Start](docs/ONBOARDING/SECRETS_QUICKSTART.md)** - Security (5 Min)
-3. **[Quick Start Guide](docs/GUIDES/QUICKSTART.md)** - Getting Started (10 Min)
+## Features
 
-### 🔐 Für Security
-1. **[Security Review](docs/SECURITY/README_SECURITY_REVIEW.md)** - OWASP Top 10
-2. **[Threat Model](docs/SECURITY/THREAT_MODEL.md)** - STRIDE Analysis
-3. **[Code Review Report](reports/code_review_report.md)** - Detailed Findings
+- **Chat mit KI** - Lokales Ollama (Gemma, Llama, etc.) mit RAG-Kontext
+- **Nextcloud-Integration** - Dokumenten-Indexierung, Kalender (CalDAV), Tasks (Tasks.org), Aktivitäten, Benachrichtigungen
+- **Immich-Integration** - Foto-Suche und -Verwaltung
+- **Kalender** - Terminübersicht und -erstellung via Chat
+- **Aufgaben/Todos** - Nextcloud Tasks mit Sync, Fälligkeitsdaten, Filter
+- **Wissensdatenbank** - SQLite-basiert mit semantischer Suche
+- **Dokumenten-Parser** - PDF, DOCX, XLSX, PPTX, MD, HTML
+- **Authentifizierung** - OAuth2 (PKCE), Login Flow v2, Basic Auth
+- **Docker-Setup** - Einfacher Start mit `docker-compose`
 
-### 🚀 Für Deployment
-1. **[Deployment Checklist](docs/ONBOARDING/DEPLOYMENT_CHECKLIST.md)** - Pre-Deploy
-2. **[Infrastructure Guide](docs/INFRASTRUCTURE.md)** - Setup & Deployment
-3. **[Status Dashboard](docs/ONBOARDING/STATUS_DASHBOARD.md)** - Monitoring
-
-### 📖 API & Integration
-- **[API Endpoints](docs/API/new-api-endpoints.md)** - REST API Reference
-- **[Nextcloud Integration](docs/API/NEXTCLOUD_API_INTEGRATIONS.md)** - NC API
-- **[Immich Integration](docs/IMMICH_INTEGRATION.md)** - Photo Management
-
-## 🔧 Setup & Tools
-
-### Environment Setup
-```bash
-# Interaktiver Wizard (empfohlen)
-python3 scripts/setup/setup_env.py
-
-# Pre-Commit Hook (verhindert Secrets-Leaks)
-cp scripts/setup/.git-pre-commit-check.py .git/hooks/pre-commit
-chmod +x .git/hooks/pre-commit
-```
-
-### Demo & Tests
-```bash
-# Demo Scripts
-python scripts/demo/demo_batch_loading.py
-
-# Tests
-python -m unittest discover -s tests -p "test_*.py" -v
-```
-
-## 🧪 Testing
-
-```bash
-# Alle Tests ausführen
-cd tests
-python -m unittest discover -s . -p "test_*.py" -v
-
-# Spezifische Test-Kategorien
-python -m unittest tests.test_secrets_management -v
-python -m unittest tests.test_security_hardening -v
-python -m unittest tests.test_auth_plugin -v
-```
-
-## 🐳 Docker Setup (Optional)
+## Docker (Optional)
 
 ```bash
 docker-compose up -d
-
-# Services:
-# - Backend: http://localhost:5000
-# - Frontend: http://localhost:3000
+# Backend: http://localhost:5001
+# Frontend: http://localhost:3000
 ```
 
-## 📋 Key Features
+## API Endpunkte
 
-- ✅ **Sichere Authentifizierung** - OAuth2, PKCE, JWT
-- ✅ **Multi-Source Integration** - Nextcloud, Immich, Calendar
-- ✅ **KI-gestützte Analyse** - Document processing, task intelligence
-- ✅ **Modernes Tech-Stack** - Python Backend, Next.js Frontend
-- ✅ **Production-Ready** - Security hardened (OWASP Top 10)
-- ✅ **Fully Tested** - 30+ Tests, 80%+ Coverage
-- ✅ **Well Documented** - 15,000+ Lines of Docs
+### Chat & KI
+| Endpunkt | Methode | Beschreibung |
+|----------|---------|--------------|
+| `/api/chat` | POST | Chat-Anfrage mit Kontext |
+| `/api/ollama/status` | GET | Ollama-Verbindungsstatus |
+| `/api/ollama/models` | GET | Verfügbare Modelle |
+| `/api/ai/config` | GET/POST | AI-Konfiguration lesen/speichern |
+| `/api/ai/test` | POST | AI-Verbindung testen |
 
-## 🤝 Contributing
+### Wissen & Indexierung
+| Endpunkt | Methode | Beschreibung |
+|----------|---------|--------------|
+| `/api/knowledge/status` | GET | Wissensdatenbank-Status |
+| `/api/knowledge/sources` | GET | Geladene Quellen |
+| `/api/knowledge/reload` | POST | Wissensbasis neu laden |
+| `/api/knowledge/migrate` | POST | JSON-Cache migrieren |
+| `/api/knowledge/update-embeddings` | POST | Embeddings aktualisieren |
+| `/api/indexing/start` | POST | Nextcloud-Indexierung starten |
+| `/api/indexing/stop` | POST | Indexierung stoppen |
+| `/api/indexing/progress` | GET | Indexierungs-Fortschritt |
+| `/api/indexing/config` | GET/POST | Indexierungs-Konfiguration |
 
-Siehe [`CONTRIBUTING.md`](CONTRIBUTING.md) für Guidelines.
+### Kalender
+| Endpunkt | Methode | Beschreibung |
+|----------|---------|--------------|
+| `/api/calendar/status` | GET | Kalender-Status |
+| `/api/calendar/today` | GET | Heutige Termine |
+| `/api/calendar/tomorrow` | GET | Morgige Termine |
+| `/api/calendar/week` | GET | Termine diese Woche |
+| `/api/calendar/next-week` | GET | Termine nächste Woche |
+| `/api/calendar/create` | POST | Termin via Chat erstellen |
+| `/api/calendar/calendars` | GET | Verfügbare Kalender |
 
-### Wichtige Rules
-1. **Niemals Secrets committe** - Use `.env.example`
-2. **Tests schreiben** - Minimum 80% Coverage
-3. **Security First** - Input Validation, Error Handling
-4. **Dokumentation** - Comments, Updated Docs
+### Aufgaben (Todos)
+| Endpunkt | Methode | Beschreibung |
+|----------|---------|--------------|
+| `/api/tasks/list` | GET | Alle offenen Aufgaben |
+| `/api/tasks/create` | POST | Aufgabe erstellen |
+| `/api/tasks/complete/<uid>` | POST | Aufgabe abschließen |
+| `/api/tasks/status` | GET | Task-Integration Status |
+| `/api/tasks/sync` | POST | Tasks in DB synchronisieren |
+| `/api/tasks/db-stats` | GET | Datenbank-Statistiken |
 
-## 📊 Statistics
+### Nextcloud-Integration
+| Endpunkt | Methode | Beschreibung |
+|----------|---------|--------------|
+| `/api/auth/nextcloud/login` | POST | Nextcloud-Login (Basic/OAuth) |
+| `/api/auth/nextcloud/callback` | GET | OAuth2-Callback |
+| `/api/auth/nextcloud/status` | GET | Auth-Status |
+| `/api/auth/nextcloud/logout` | POST | Logout |
 
-| Metric | Value |
-|--------|-------|
-| Backend Modules | 6+ |
-| Frontend Pages | 5+ |
-| Test Files | 20+ |
-| Documentation | 15,000+ Lines |
-| Total Code | 13,000+ Lines |
+### Sonstige
+| Endpunkt | Methode | Beschreibung |
+|----------|---------|--------------|
+| `/api/health` | GET | Health-Check |
+| `/api/training/stats` | GET | Trainings-Statistiken |
 
-## 🔗 Quick Links
+## Konfiguration
 
-- 📘 [README](README.md)
-- 📋 [Contributing](CONTRIBUTING.md)
-- 🏗️ [Project Structure](PROJECT_STRUCTURE.md)
-- 🔐 [Secrets Management](docs/ONBOARDING/SECRETS_QUICKSTART.md)
-- 🛡️ [Security Review](docs/SECURITY/README_SECURITY_REVIEW.md)
-- 📊 [Code Review Report](reports/code_review_report.md)
+### Environment (.env)
+Wichtige Variablen in `.env.example`:
+- **Nextcloud**: `NEXTCLOUD_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_PASSWORD`
+- **Ollama**: `OLLAMA_BASE_URL`, `OLLAMA_MODEL` (default: `gemma3:latest`)
+- **Immich**: `IMMICH_URL`, `IMMICH_API_KEY`
+- **Security**: `JWT_SECRET`, `SESSION_SECRET`, `CORS_ORIGINS`
+- **Frontend**: `NEXT_PUBLIC_BACKEND_URL`
 
----
+## Tests
 
-**Version:** 2.0 (Reorganisiert & Production-Ready)  
-**Letztes Update:** April 1, 2026  
-**Status:** ✅ PRODUCTION READY
+```bash
+cd tests
+python -m pytest . -v
+
+# Bestimmte Testkategorien
+python -m pytest test_auth_unit.py test_todos.py -v
+```
+
+## Dokumentation
+
+| Bereich | Pfad |
+|---------|------|
+| **Onboarding & Setup** | `docs/ONBOARDING/` |
+| **Guides & Tutorials** | `docs/GUIDES/` |
+| **API-Referenz** | `docs/API/` |
+| **Security** | `docs/SECURITY/` |
+| **Beitragen** | `CONTRIBUTING.md` |
+
+## Lizenz
+
+Siehe `LICENSE`.
