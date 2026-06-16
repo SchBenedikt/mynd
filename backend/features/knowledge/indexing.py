@@ -17,6 +17,7 @@ from backend.features.documents.parser import DocumentParser
 class IndexingStatus(Enum):
     IDLE = "idle"
     RUNNING = "running"
+    EMBEDDING = "embedding"
     COMPLETED = "completed"
     ERROR = "error"
 
@@ -410,6 +411,18 @@ class IndexingManager:
                 
                 # Cache speichern für schnelleren Neustart
                 self._save_knowledge_cache(all_chunks, sources)
+                
+                # Automatisch Embeddings für neue Chunks erzeugen
+                try:
+                    from app import knowledge_base
+                    if knowledge_base and knowledge_base.search_engine:
+                        self.logger.info("Generating embeddings for new chunks...")
+                        self.current_progress.status = IndexingStatus.EMBEDDING
+                        self.notify_progress()
+                        knowledge_base.search_engine.update_missing_embeddings()
+                        self.logger.info("Embeddings generated successfully")
+                except Exception as e:
+                    self.logger.warning(f"Embedding generation failed: {e}")
                 
                 self.current_progress.status = IndexingStatus.COMPLETED
                 self.logger.info(f"Indexing completed: {len(all_chunks)} chunks from {len(sources)} documents")
