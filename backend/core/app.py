@@ -1880,7 +1880,6 @@ def nextcloud_oauth_callback():
 
         # Datei-Indexierung automatisch starten (bei erstem Login oder immer)
         try:
-            from backend.features.knowledge.indexing import indexing_manager
             if indexing_manager.current_progress.status.value != 'running':
                 indexing_manager.start_indexing()
                 logger.info("Indexing auto-started after OAuth login")
