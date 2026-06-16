@@ -67,6 +67,9 @@ class IndexingManager:
         self.batch_size = 50  # Batch-Verarbeitung für bessere Performance
         self.last_indexing_start = 0
         self.last_indexing_end = 0
+        self._periodic_thread: Optional[threading.Thread] = None
+        self._periodic_stop_event = threading.Event()
+        self._periodic_interval = 6 * 3600  # default: 6 Stunden
         
     def add_progress_callback(self, callback: Callable[[IndexingProgress], None]):
         """Fügt einen Callback für Fortschritts-Updates hinzu"""
@@ -196,6 +199,44 @@ class IndexingManager:
             self.stop_event.set()
             self.logger.info("Indexing stop requested")
     
+    def start_periodic_indexing(self, interval_hours: int = 6):
+        """Startet periodische Hintergrund-Indexierung. Der erste Durchlauf startet sofort."""
+        self._periodic_interval = max(1, interval_hours) * 3600
+        if self._periodic_thread and self._periodic_thread.is_alive():
+            self.logger.info("Periodic indexing already running")
+            return
+        self._periodic_stop_event.clear()
+        self._periodic_thread = threading.Thread(
+            target=self._periodic_worker,
+            daemon=True,
+            name="periodic-indexer"
+        )
+        self._periodic_thread.start()
+        self.logger.info(f"Periodic indexing started (interval={interval_hours}h)")
+
+    def stop_periodic_indexing(self):
+        """Stoppt die periodische Hintergrund-Indexierung."""
+        self._periodic_stop_event.set()
+        self.stop_indexing()
+        self.logger.info("Periodic indexing stopped")
+
+    def _periodic_worker(self):
+        """Worker-Loop: wartet Intervall, startet Indexierung, wiederholt sich."""
+        while not self._periodic_stop_event.is_set():
+            if self.nextcloud_config.get('url') and self.nextcloud_config.get('username'):
+                self.logger.info("Periodic check: starting indexing run")
+                self.start_indexing()
+                while self.current_progress.status == IndexingStatus.RUNNING:
+                    if self._periodic_stop_event.is_set():
+                        self.stop_indexing()
+                        break
+                    time.sleep(5)
+            else:
+                self.logger.debug("Periodic indexing skipped – no Nextcloud config")
+
+            if self._periodic_stop_event.wait(self._periodic_interval):
+                break
+
     def _get_auth_provider(self):
         """Erzeugt AuthProvider aus OAuth2-Konfiguration falls vorhanden."""
         try:

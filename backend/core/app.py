@@ -1878,6 +1878,15 @@ def nextcloud_oauth_callback():
             calendar_enabled = True
             logger.info("Calendar manager re-initialized after OAuth callback")
 
+        # Datei-Indexierung automatisch starten (bei erstem Login oder immer)
+        try:
+            from backend.features.knowledge.indexing import indexing_manager
+            if indexing_manager.current_progress.status.value != 'running':
+                indexing_manager.start_indexing()
+                logger.info("Indexing auto-started after OAuth login")
+        except Exception as e:
+            logger.warning(f"Could not auto-start indexing: {e}")
+
         # Benutzer in Session setzen
         session['auth_user'] = username
         session.permanent = True
@@ -4879,6 +4888,19 @@ if __name__ == '__main__':
     
     # Indexing Manager konfiguration laden
     indexing_manager.load_nextcloud_config()
+
+    # Automatische Hintergrund-Indexierung starten (alle 6h)
+    try:
+        indexing_manager.start_periodic_indexing(interval_hours=6)
+    except Exception as e:
+        logger.error(f"Could not start periodic indexing: {e}")
+
+    # Wenn noch nie indexiert wurde (erster Start), sofort loslegen
+    try:
+        if indexing_manager.last_indexing_end == 0 and indexing_manager.nextcloud_config.get('url'):
+            indexing_manager.start_indexing()
+    except Exception as e:
+        logger.error(f"Could not trigger initial indexing: {e}")
     
     print("AI-Chat-Anwendung wird gestartet...")
     
