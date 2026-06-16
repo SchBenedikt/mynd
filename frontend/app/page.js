@@ -993,7 +993,7 @@ export default function HomePage() {
       const configRes = await fetch(`${API_BASE}/api/indexing/config`);
       if (configRes.ok) {
         const config = await configRes.json();
-        if (!config.url || !config.username || !config.password) {
+        if (!config.url || !config.username) {
           setIndexingStatus('error: Nextcloud configuration required. Please configure in Settings first.');
           return;
         }
