@@ -128,8 +128,13 @@ class IndexingManager:
                 }
 
                 # Skip unusable entries and continue searching for valid credentials.
-                if not normalized['url'] or not normalized['username'] or not normalized['password']:
+                if not normalized['url'] or not normalized['username']:
                     continue
+                if not normalized['password']:
+                    # Leeres Passwort ist OK wenn OAuth2-Konfiguration existiert
+                    oauth_file = os.path.join(os.path.dirname(self.config_file), 'nextcloud_oauth2.json')
+                    if not os.path.exists(oauth_file):
+                        continue
 
                 self.nextcloud_config = normalized
 
