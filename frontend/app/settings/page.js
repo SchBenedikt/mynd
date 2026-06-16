@@ -1265,11 +1265,11 @@ export default function SettingsPage() {
 
   const startIndexing = async () => {
     try {
-      // First check if there's a configuration
+      // First check if there's a configuration (password or OAuth2)
       const configRes = await fetch(`${API_BASE}/api/indexing/config`, {credentials: 'include'});
       if (configRes.ok) {
         const config = await configRes.json();
-        if (!config.url || !config.username || !config.password) {
+        if (!config.url || !config.username) {
           setIndexingStatus('error: Nextcloud configuration required. Please configure your Nextcloud connection first.');
           return;
         }
