@@ -929,7 +929,7 @@ export default function HomePage() {
       const kb = await safeReadJson(kbRes);
       setHealth({
         ollama: ollama.connected ? 'ok' : 'error',
-        kb: kb.chunks_loaded > 0 ? 'ok' : 'error'
+        kb: kb.database_path ? 'ok' : 'error'
       });
       // also fetch current user (if any) to display in sidebar
       try {

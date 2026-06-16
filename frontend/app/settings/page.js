@@ -1246,7 +1246,7 @@ export default function SettingsPage() {
       const embeddingsComplete = Boolean(kb.embeddings_complete ?? (totalChunks > 0 && missingEmbeddings === 0));
       setHealth({
         ollama: ollama.connected ? 'ok' : 'error',
-        kb: kb.chunks_loaded > 0 ? 'ok' : 'error',
+        kb: kb.database_path ? 'ok' : 'error',
         embeddings: kb.semantic_search_available ? (embeddingsComplete ? 'ok' : 'loading') : 'error'
       });
       setEmbeddingCoverage({
