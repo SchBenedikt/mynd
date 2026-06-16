@@ -121,6 +121,8 @@ class NextcloudClient:
                 if current_dir in visited_dirs:
                     continue
                 visited_dirs.add(current_dir)
+                if len(visited_dirs) % 10 == 0:
+                    self.logger.info(f"BFS progress: visited {len(visited_dirs)} dirs, found {len(files)} files")
 
                 # Skip excluded paths
                 current_path = current_dir.rstrip('/')
