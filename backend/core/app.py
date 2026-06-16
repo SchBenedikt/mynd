@@ -2322,7 +2322,7 @@ def setup_bootstrap():
 def auth_nextcloud_login():
     """
     Startet den Nextcloud OAuth2 Login aus der AuthGate-Loginseite.
-    Liest die gespeicherte OAuth2-Konfiguration und leitet zu Nextcloud weiter.
+    Versucht zuerst, das bestehende Token wiederzuverwenden, bevor ein neuer OAuth-Flow gestartet wird.
     """
     try:
         redirect_to = request.args.get('redirect_to', '/')
@@ -2334,8 +2334,26 @@ def auth_nextcloud_login():
         nc_url = oauth_config.get('nextcloud_url', '')
         client_id = oauth_config.get('client_id', '')
         client_secret = oauth_config.get('client_secret', '')
+        access_token = oauth_config.get('access_token', '')
         if not all([nc_url, client_id, client_secret]):
             return jsonify({'error': 'Unvollständige OAuth2-Konfiguration'}), 400
+
+        # Versuche bestehendes Token wiederzuverwenden (kein neuer OAuth-Flow)
+        if access_token:
+            try:
+                existing_provider = OAuth2NextcloudProvider(oauth_config)
+                user_info = existing_provider.get_user_info()
+                if user_info and user_info.get('id'):
+                    session['auth_user'] = user_info['id']
+                    session.permanent = True
+                    logger.info(f"Reused existing OAuth token for {user_info['id']}")
+                    if redirect_to:
+                        return redirect(redirect_to)
+                    return jsonify({'status': 'authenticated', 'user': user_info['id']})
+            except Exception as e:
+                logger.info(f"Existing token invalid, starting new OAuth flow: {e}")
+
+        # Neuer OAuth-Flow
         cb_uri = request.url_root.rstrip('/') + '/api/auth/nextcloud/callback'
         oauth_provider = OAuth2NextcloudProvider({
             'nextcloud_url': nc_url,
