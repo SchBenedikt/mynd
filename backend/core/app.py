@@ -1871,10 +1871,8 @@ def nextcloud_oauth_callback():
 
         # Kalender-Manager neu initialisieren (nachdem Config geschrieben wurde)
         global simple_calendar_manager, calendar_enabled
-        from backend.features.integration.oauth2_nextcloud import OAuth2TokenAuth
-        token_auth = OAuth2TokenAuth(access_token)
         from backend.features.calendar.simple import create_simple_calendar_manager as make_calendar
-        new_cal = make_calendar(nextcloud_url=nextcloud_url, username=username, auth_provider=token_auth)
+        new_cal = make_calendar(nextcloud_url=nextcloud_url, username=username, auth_provider=oauth_provider)
         if new_cal:
             simple_calendar_manager = new_cal
             calendar_enabled = True

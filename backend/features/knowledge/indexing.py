@@ -196,15 +196,38 @@ class IndexingManager:
             self.stop_event.set()
             self.logger.info("Indexing stop requested")
     
+    def _get_auth_provider(self):
+        """Erzeugt AuthProvider aus OAuth2-Konfiguration falls vorhanden."""
+        try:
+            oauth_file = os.path.join(os.path.dirname(self.config_file), 'nextcloud_oauth2.json')
+            if os.path.exists(oauth_file):
+                with open(oauth_file) as f:
+                    oauth = json.load(f)
+                token = oauth.get('access_token')
+                if token:
+                    from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
+                    return OAuth2NextcloudProvider(oauth)
+        except Exception as e:
+            self.logger.warning(f"Could not load OAuth provider: {e}")
+        return None
+
     def _indexing_worker(self):
         """Hintergrund-Worker für die Indexierung mit paralleler Verarbeitung"""
         try:
             # Nextcloud Client initialisieren
-            nc_client = NextcloudClient(
-                self.nextcloud_config['url'],
-                self.nextcloud_config['username'],
-                self.nextcloud_config['password']
-            )
+            auth_provider = self._get_auth_provider()
+            if auth_provider:
+                nc_client = NextcloudClient(
+                    self.nextcloud_config['url'],
+                    self.nextcloud_config['username'],
+                    auth_provider=auth_provider
+                )
+            else:
+                nc_client = NextcloudClient(
+                    self.nextcloud_config['url'],
+                    self.nextcloud_config['username'],
+                    self.nextcloud_config['password']
+                )
             
             self.logger.info("Testing Nextcloud connection...")
             if not nc_client.test_connection():
