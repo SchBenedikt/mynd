@@ -189,7 +189,7 @@ class OAuth2NextcloudProvider(AuthProvider):
             import requests
             headers = {'Authorization': f'Bearer {self.access_token}'}
             response = requests.get(
-                urljoin(self.nextcloud_url, '/ocs/v2.php/apps/provisioning_api/api/v1/users/me'),
+                urljoin(self.nextcloud_url, '/ocs/v2.php/cloud/user'),
                 headers=headers,
                 params={'format': 'json'},
                 timeout=30
@@ -197,10 +197,16 @@ class OAuth2NextcloudProvider(AuthProvider):
 
             if response.status_code == 200:
                 data = response.json()
-                return data.get('ocs', {}).get('data', {})
+                ocs_data = data.get('ocs', {}).get('data', {})
+                # Fallback: 'id' aus ocs_data oder 'userId' aus dem alten Format
+                user_id = ocs_data.get('id') or ocs_data.get('userId') or ''
+                return {
+                    'id': user_id or self.access_token[:8],
+                    'display-name': ocs_data.get('display-name', user_id)
+                }
             else:
                 self.logger.error(f"Failed to get user info: {response.status_code}")
-                return {}
+                return {'id': self.access_token[:8]}
 
         except Exception as e:
             self.logger.error(f"Error getting user info: {str(e)}")
