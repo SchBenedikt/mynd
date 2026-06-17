@@ -284,6 +284,18 @@ class NextcloudClient:
                 self.logger.debug(f"Successfully downloaded {remote_path}")
                 return True
             elif response.status_code == 401:
+                # Token auffrischen und erneut versuchen
+                try:
+                    from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
+                    if isinstance(self.auth_provider, OAuth2NextcloudProvider) and self.auth_provider.refresh_token:
+                        self.auth_provider.refresh_access_token()
+                        response = requests.get(url, auth=self.auth_provider.get_auth(), timeout=60)
+                        if response.status_code == 200:
+                            with open(local_path, 'wb') as f:
+                                f.write(response.content)
+                            return True
+                except Exception as refresh_err:
+                    self.logger.warning(f"Token refresh failed during download: {refresh_err}")
                 self.logger.error(f"Authentication failed for {remote_path}")
                 return False
             elif response.status_code == 404:

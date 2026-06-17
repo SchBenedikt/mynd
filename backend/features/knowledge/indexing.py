@@ -125,7 +125,7 @@ class IndexingManager:
                     'username': str(loaded.get('username') or '').strip(),
                     'password': str(loaded.get('password') or '').strip(),
                     'path': str(loaded.get('path') or '/').strip() or '/',
-                    'exclude_paths': loaded.get('exclude_paths', ['/Fotosharing', '/Videos', '/Handys'])
+                    'exclude_paths': loaded.get('exclude_paths', ['/Fotosharing', '/Videos', '/Handys', '/Computer', '/node_modules'])
                 }
 
                 # Skip unusable entries and continue searching for valid credentials.
@@ -379,8 +379,8 @@ class IndexingManager:
                         self.logger.info("Indexing stopped by user")
                         break
                     
-                    # Token alle 50 Batches auffrischen (lange Läufe)
-                    if auth_provider and batch_idx > 0 and batch_idx % 50 == 0:
+                    # Token alle 10 Batches auffrischen (lange Läufe)
+                    if auth_provider and batch_idx > 0 and batch_idx % 10 == 0:
                         try:
                             auth_provider.refresh_access_token()
                             oauth_file = os.path.join(os.path.dirname(self.config_file), 'nextcloud_oauth2.json')
@@ -390,8 +390,8 @@ class IndexingManager:
                                 oauth.update(auth_provider.to_config_dict())
                                 with open(oauth_file, 'w') as f:
                                     json.dump(oauth, f, indent=2)
-                        except Exception:
-                            pass
+                        except Exception as refresh_err:
+                            self.logger.warning(f"Token refresh failed: {refresh_err}")
                     
                     self.logger.info(f"Processing batch {batch_idx + 1}/{len(file_batches)} with {len(batch)} files")
                     
