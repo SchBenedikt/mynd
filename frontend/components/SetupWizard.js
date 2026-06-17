@@ -333,10 +333,16 @@ export default function SetupWizard() {
   const [copyOk, setCopyOk] = useState(false);
 
   const copyRedirectUri = () => {
-    navigator.clipboard.writeText(redirectUri).then(() => {
+    const input = document.createElement('input');
+    input.value = redirectUri;
+    document.body.appendChild(input);
+    input.select();
+    try {
+      document.execCommand('copy');
       setCopyOk(true);
       setTimeout(() => setCopyOk(false), 2000);
-    }).catch(() => {});
+    } catch (e) {}
+    document.body.removeChild(input);
   };
 
   const nextcloudHint = [
@@ -544,10 +550,12 @@ export default function SetupWizard() {
 
                 <div className="setup-redirect">
                   <span className="setup-redirect-label">Redirect-URI</span>
-                  <code className="setup-redirect-code">{redirectUri}</code>
-                  <button type="button" className="btn btn-sm" onClick={copyRedirectUri} style={{marginLeft: '0.5rem'}}>
-                    {copyOk ? '✓ Kopiert' : 'Kopieren'}
-                  </button>
+                  <div style={{display:'flex', alignItems:'center', gap:'0.25rem'}}>
+                    <code className="setup-redirect-code" style={{flex:1}}>{redirectUri}</code>
+                    <button type="button" onClick={copyRedirectUri} style={{fontSize:'0.75rem', padding:'0.15rem 0.4rem', whiteSpace:'nowrap', cursor:'pointer', border:'1px solid #334155', borderRadius:'4px', background:'#1e293b', color:'#94a3b8', lineHeight:1}}>
+                      {copyOk ? '✓' : '📋'}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="setup-note">Speichern aktiviert die Nextcloud-Anmeldung direkt im Webinterface. Das ist die globale Login-Verbindung, nicht die persönliche Benutzer-Verbindung.</div>
