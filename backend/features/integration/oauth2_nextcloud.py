@@ -256,6 +256,9 @@ class OAuth2NextcloudProvider(AuthProvider):
                         requesttoken = cookie.value
                         break
             if requesttoken:
+                # Auth-Header entfernen – CalDAV akzeptiert nur Session-Cookies, kein Bearer
+                session.headers.pop('Authorization', None)
+                session.headers.pop('OCS-APIRequest', None)
                 return session, requesttoken
             self.logger.warning("Could not extract requesttoken")
             return None
