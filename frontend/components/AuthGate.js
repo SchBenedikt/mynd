@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { usePathname, useRouter } from 'next/navigation';
 import './AuthGate.css';
 
@@ -21,6 +21,15 @@ export default function AuthGate({ children }) {
   const [forceOpen, setForceOpen] = useState(false);
   const [setupFlowActive, setSetupFlowActive] = useState(false);
   const [showLocalLogin, setShowLocalLogin] = useState(false);
+  const lastReplaceRef = useRef(0);
+  const [setupStatusRefresh, setSetupStatusRefresh] = useState(0);
+
+  const guardedReplace = (url) => {
+    const now = Date.now();
+    if (now - lastReplaceRef.current < 2000) return;
+    lastReplaceRef.current = now;
+    router.replace(url);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +86,7 @@ export default function AuthGate({ children }) {
               setSetupFlowActive(false);
             }
             if (needsSetup && pathname !== '/setup') {
-              router.replace('/setup');
+              guardedReplace('/setup');
             }
           })
           .catch(() => {});
@@ -92,13 +101,9 @@ export default function AuthGate({ children }) {
   useEffect(() => {
     if (!ready) return;
     if (setupRequired && pathname !== '/setup') {
-      router.replace('/setup');
-      return;
+      guardedReplace('/setup');
     }
-    if (!setupRequired && pathname?.startsWith('/setup') && !setupFlowActive) {
-      router.replace('/');
-    }
-  }, [ready, pathname, router, setupRequired, setupFlowActive]);
+  }, [ready, pathname, setupRequired]);
 
   useEffect(() => {
     const openHandler = () => {

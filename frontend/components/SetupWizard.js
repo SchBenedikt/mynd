@@ -330,6 +330,15 @@ export default function SetupWizard() {
     ? `${window.location.origin}/api/auth/nextcloud/callback`
     : '/api/auth/nextcloud/callback';
 
+  const [copyOk, setCopyOk] = useState(false);
+
+  const copyRedirectUri = () => {
+    navigator.clipboard.writeText(redirectUri).then(() => {
+      setCopyOk(true);
+      setTimeout(() => setCopyOk(false), 2000);
+    }).catch(() => {});
+  };
+
   const nextcloudHint = [
     'In Nextcloud als Admin eine OAuth2-App anlegen oder die vorhandene OAuth2-Funktion nutzen.',
     'Die Callback-URL in der Nextcloud-App muss exakt auf die unten angezeigte Redirect-URI zeigen.',
@@ -375,7 +384,7 @@ export default function SetupWizard() {
             <h2 className="setup-title">MYND ist jetzt eingerichtet</h2>
             <p className="setup-subtitle">Öffne jetzt die Startseite. Dort solltest du entweder die Login-Ansicht oder die normale Oberfläche sehen, je nachdem ob du bereits angemeldet bist.</p>
             <div className="setup-complete-actions">
-              <button type="button" className="btn btn-primary" onClick={() => router.replace('/')}>Startseite öffnen</button>
+              <button type="button" className="btn btn-primary" onClick={() => window.location.href = '/'}>Startseite öffnen</button>
             </div>
             {setupMessage ? <div className="setup-message success">{setupMessage}</div> : null}
             {setupError ? <div className="setup-message error">{setupError}</div> : null}
@@ -536,6 +545,9 @@ export default function SetupWizard() {
                 <div className="setup-redirect">
                   <span className="setup-redirect-label">Redirect-URI</span>
                   <code className="setup-redirect-code">{redirectUri}</code>
+                  <button type="button" className="btn btn-sm" onClick={copyRedirectUri} style={{marginLeft: '0.5rem'}}>
+                    {copyOk ? '✓ Kopiert' : 'Kopieren'}
+                  </button>
                 </div>
 
                 <div className="setup-note">Speichern aktiviert die Nextcloud-Anmeldung direkt im Webinterface. Das ist die globale Login-Verbindung, nicht die persönliche Benutzer-Verbindung.</div>
