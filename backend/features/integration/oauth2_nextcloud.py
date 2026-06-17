@@ -50,6 +50,7 @@ class OAuth2NextcloudProvider(AuthProvider):
         self.access_token = config.get('access_token', '')
         self.refresh_token = config.get('refresh_token', '')
         self.scope = config.get('scope', 'files')
+        self.app_password = config.get('app_password', '')
 
     def get_auth(self) -> OAuth2TokenAuth:
         """
@@ -213,9 +214,45 @@ class OAuth2NextcloudProvider(AuthProvider):
             self.logger.error(f"Error getting user info: {str(e)}")
             return {}
 
+    def generate_app_password(self) -> Optional[str]:
+        """
+        Generate an app password using the Bearer token.
+        App passwords work with Basic auth for all DAV endpoints (including CalDAV).
+
+        Returns:
+            App password string or None if generation failed
+        """
+        if not self.access_token:
+            return None
+        try:
+            import requests
+            session = requests.Session()
+            session.headers.update({
+                'Authorization': f'Bearer {self.access_token}',
+                'OCS-APIRequest': 'true',
+                'Accept': 'application/json'
+            })
+            resp = session.post(
+                urljoin(self.nextcloud_url, '/ocs/v2.php/core/apppassword'),
+                data={'name': 'MYND Calendar'},
+                timeout=15
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                ocs_data = data.get('ocs', {}).get('data', {})
+                app_password = ocs_data.get('apppassword') or ocs_data.get('token') or ''
+                if app_password:
+                    self.logger.info("App password generated for calendar access")
+                    return app_password
+            self.logger.warning(f"Could not generate app password: {resp.status_code} {resp.text[:200]}")
+            return None
+        except Exception as e:
+            self.logger.warning(f"Error generating app password: {e}")
+            return None
+
     def to_config_dict(self) -> Dict[str, Any]:
         """Convert provider state to configuration dictionary"""
-        return {
+        d = {
             'nextcloud_url': self.nextcloud_url,
             'client_id': self.client_id,
             'client_secret': self.client_secret,
@@ -223,3 +260,6 @@ class OAuth2NextcloudProvider(AuthProvider):
             'refresh_token': self.refresh_token,
             'scope': self.scope
         }
+        if hasattr(self, 'app_password') and self.app_password:
+            d['app_password'] = self.app_password
+        return d

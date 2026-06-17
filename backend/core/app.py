@@ -27,6 +27,8 @@ from backend.features.integration.auth_manager import get_auth_manager, AuthMana
 from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 from backend.features.integration.auth_nextcloud_direct import DirectNextcloudProvider
 from backend.features.integration.loginflow_state import loginflow_state
+from backend.features.integration.api_registry import get_api_registry
+import backend.features.integration  # noqa: F401 - triggers API type registration
 from backend.features.knowledge.indexing import indexing_manager, IndexingProgress
 from backend.features.integration.nextcloud_accounts import save_account, save_accounts, get_account
 # from backend.features.knowledge.engine import SemanticSearchEngine
@@ -1874,6 +1876,15 @@ def nextcloud_oauth_callback():
 
         logger.info(f"Authenticated as user: {username}")
 
+        # Generiere App-Passwort für Kalender-Zugriff (CalDAV benötigt Basic Auth)
+        app_password = None
+        try:
+            app_password = oauth_provider.generate_app_password()
+            if app_password:
+                logger.info("App password generated for calendar CalDAV access")
+        except Exception as e:
+            logger.warning(f"Could not generate app password: {e}")
+
         # Speichere OAuth2 Konfiguration
         oauth_config = {
             'nextcloud_url': nextcloud_url,
@@ -1885,16 +1896,19 @@ def nextcloud_oauth_callback():
             'auth_type': 'oauth2',
             'scope': 'files'
         }
+        if app_password:
+            oauth_config['app_password'] = app_password
 
         # Speichere in Indexing Manager
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
         _safe_json_dump(config_file, oauth_config)
 
         # Speichere auch die Basis-Konfiguration für Indexing
+        indexing_pass = app_password if app_password else ''
         indexing_manager.save_nextcloud_config(
             nextcloud_url,
             username,
-            '',  # Leeres Password, verwenden zu stattdessen OAuth2 Token
+            indexing_pass,
             '/'
         )
 
@@ -1904,14 +1918,19 @@ def nextcloud_oauth_callback():
             'nextcloud_url': nextcloud_url,
             'username': username,
             'display_name': username,
-            'auth_type': 'oauth2',
+            'auth_type': 'oauth2' if not app_password else 'oauth2_with_app_password',
             'configured': True
         })
 
-        # Kalender-Manager neu initialisieren (nachdem Config geschrieben wurde)
+        # Kalender-Manager neu initialisieren
         global simple_calendar_manager, calendar_enabled
         from backend.features.calendar.simple import create_simple_calendar_manager as make_calendar
-        new_cal = make_calendar(nextcloud_url=nextcloud_url, username=username, auth_provider=oauth_provider)
+        if app_password:
+            # App-Passwort für CalDAV verwenden (Basic Auth)
+            new_cal = make_calendar(nextcloud_url=nextcloud_url, username=username, password=app_password)
+        else:
+            # Fallback: OAuth2 Bearer Token
+            new_cal = make_calendar(nextcloud_url=nextcloud_url, username=username, auth_provider=oauth_provider)
         if new_cal:
             simple_calendar_manager = new_cal
             calendar_enabled = True
@@ -3743,7 +3762,114 @@ def ui_connectivity_status():
         logger.error(f"Connectivity status error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/ui/index-status', methods=['GET'])
+# ==================== API Registry Endpoints ====================
+
+registry = get_api_registry()
+
+
+@app.route('/api/registry/apis', methods=['GET'])
+def registry_list_apis():
+    """Get list of all registered API types with their configuration status"""
+    try:
+        apis = registry.get_all_configured_apis()
+        return jsonify({'success': True, 'apis': apis})
+    except Exception as e:
+        logger.error(f"Error listing APIs: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/registry/health', methods=['GET'])
+def registry_health():
+    """Get health status of all configured APIs"""
+    try:
+        health = registry.check_all_apis_health()
+        return jsonify({'success': True, 'health': health})
+    except Exception as e:
+        logger.error(f"Error checking API health: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/registry/<api_name>/config', methods=['GET', 'POST', 'DELETE'])
+def registry_api_config(api_name):
+    """Get, save, or delete configuration for a specific API"""
+    try:
+        if request.method == 'GET':
+            config = registry.load_config(api_name)
+            schema = registry.get_api_schema(api_name, config)
+            api_class = registry.get_api_class(api_name)
+            return jsonify({
+                'api_name': api_name,
+                'config': config,
+                'schema': schema,
+                'configured': bool(config),
+                'requires_config': api_class.requires_config() if api_class else True
+            })
+
+        elif request.method == 'POST':
+            data = request.get_json() or {}
+            config = data.get('config', {})
+            success = registry.save_config(api_name, config)
+            if success:
+                return jsonify({'success': True, 'message': f'Configuration saved for {api_name}'})
+            return jsonify({'success': False, 'error': 'Failed to save configuration'}), 500
+
+        elif request.method == 'DELETE':
+            success = registry.delete_config(api_name)
+            if success:
+                return jsonify({'success': True, 'message': f'Configuration deleted for {api_name}'})
+            return jsonify({'success': False, 'error': 'No configuration found'}), 404
+
+    except Exception as e:
+        logger.error(f"Error managing config for {api_name}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/registry/<api_name>/test', methods=['POST'])
+def registry_api_test(api_name):
+    """Test connection for a specific API"""
+    try:
+        data = request.get_json() or {}
+        config = data.get('config')
+
+        instance = registry.create_api_instance(api_name, config, use_cache=False)
+        if not instance:
+            api_class = registry.get_api_class(api_name)
+            if api_class and not api_class.requires_config():
+                instance = api_class(api_class.get_default_config())
+
+        if not instance:
+            return jsonify({
+                'success': False,
+                'health': {
+                    'status': 'not_configured',
+                    'error': f'API {api_name} is not configured or failed to initialize'
+                }
+            }), 400
+
+        health = instance.get_health_info()
+        return jsonify({
+            'success': health['status'] == 'healthy',
+            'health': health
+        })
+    except Exception as e:
+        logger.error(f"Error testing API {api_name}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/registry/<api_name>/schema', methods=['GET'])
+def registry_api_schema(api_name):
+    """Get configuration schema for a specific API"""
+    try:
+        schema = registry.get_api_schema(api_name)
+        if not schema:
+            return jsonify({'success': False, 'error': f'No schema found for {api_name}'}), 404
+        return jsonify({'success': True, 'api_name': api_name, 'schema': schema})
+    except Exception as e:
+        logger.error(f"Error getting schema for {api_name}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/ui/system-config', methods=['GET', 'POST'])
 def ui_index_status():
     """Get indexing status"""
     try:
