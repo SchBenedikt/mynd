@@ -1876,15 +1876,6 @@ def nextcloud_oauth_callback():
 
         logger.info(f"Authenticated as user: {username}")
 
-        # Generiere App-Passwort für Kalender-Zugriff (CalDAV benötigt Basic Auth)
-        app_password = None
-        try:
-            app_password = oauth_provider.generate_app_password()
-            if app_password:
-                logger.info("App password generated for calendar CalDAV access")
-        except Exception as e:
-            logger.warning(f"Could not generate app password: {e}")
-
         # Speichere OAuth2 Konfiguration
         oauth_config = {
             'nextcloud_url': nextcloud_url,
@@ -1896,19 +1887,16 @@ def nextcloud_oauth_callback():
             'auth_type': 'oauth2',
             'scope': 'files'
         }
-        if app_password:
-            oauth_config['app_password'] = app_password
 
         # Speichere in Indexing Manager
         config_file = os.path.join(CONFIG_DIR, 'nextcloud_oauth2.json')
         _safe_json_dump(config_file, oauth_config)
 
         # Speichere auch die Basis-Konfiguration für Indexing
-        indexing_pass = app_password if app_password else ''
         indexing_manager.save_nextcloud_config(
             nextcloud_url,
             username,
-            indexing_pass,
+            '',  # Leeres Password, verwenden stattdessen OAuth2 Token
             '/'
         )
 
@@ -1918,23 +1906,18 @@ def nextcloud_oauth_callback():
             'nextcloud_url': nextcloud_url,
             'username': username,
             'display_name': username,
-            'auth_type': 'oauth2' if not app_password else 'oauth2_with_app_password',
+            'auth_type': 'oauth2',
             'configured': True
         })
 
-        # Kalender-Manager neu initialisieren
+        # Kalender-Manager neu initialisieren (mit Session-Cookie + CSRF-Token)
         global simple_calendar_manager, calendar_enabled
         from backend.features.calendar.simple import create_simple_calendar_manager as make_calendar
-        if app_password:
-            # App-Passwort für CalDAV verwenden (Basic Auth)
-            new_cal = make_calendar(nextcloud_url=nextcloud_url, username=username, password=app_password)
-        else:
-            # Fallback: OAuth2 Bearer Token
-            new_cal = make_calendar(nextcloud_url=nextcloud_url, username=username, auth_provider=oauth_provider)
+        new_cal = make_calendar(nextcloud_url=nextcloud_url, username=username, auth_provider=oauth_provider)
         if new_cal:
             simple_calendar_manager = new_cal
             calendar_enabled = True
-            logger.info("Calendar manager re-initialized after OAuth callback")
+            logger.info("Calendar manager re-initialized after OAuth callback (session-based CalDAV)")
 
         # Datei-Indexierung automatisch starten (bei erstem Login oder immer)
         try:

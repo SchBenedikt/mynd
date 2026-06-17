@@ -15,6 +15,7 @@ from .nina_client import NINAClient
 from .autobahn_client import AutobahnClient
 from .dashboard_deutschland_client import DashboardDeutschlandClient
 from .deutschland_atlas_client import DeutschlandAtlasClient
+from .dwd_client import DWDClient
 from .email_client import EmailClient
 from .talk_client import NextcloudTalkClient
 
@@ -34,6 +35,7 @@ __all__ = [
     'AutobahnClient',
     'DashboardDeutschlandClient',
     'DeutschlandAtlasClient',
+    'DWDClient',
     'EmailClient',
     'NextcloudTalkClient'
 ]
@@ -49,6 +51,7 @@ def _register_api_types():
     APIRegistry.register_api_type('autobahn', AutobahnClient)
     APIRegistry.register_api_type('dashboard_deutschland', DashboardDeutschlandClient)
     APIRegistry.register_api_type('deutschland_atlas', DeutschlandAtlasClient)
+    APIRegistry.register_api_type('dwd', DWDClient)
     APIRegistry.register_api_type('email', EmailClient)
 
 _register_api_types()

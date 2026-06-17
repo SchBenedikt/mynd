@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 from backend.features.integration.auth_provider import AuthProvider
 from backend.features.integration.auth_manager import get_auth_manager
+from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
 
 load_dotenv()  # WICHTIG: .env Datei laden
 
@@ -42,16 +43,29 @@ class SimpleNextcloudCalendar:
         self.username = username
 
         # Set up authentication
-        if auth_provider:
-            self.auth_provider = auth_provider
+        self.auth_provider = auth_provider
+        self.requesttoken = None
+
+        if isinstance(auth_provider, OAuth2NextcloudProvider):
+            # OAuth2: Session-Cookie + CSRF-Token für CalDAV verwenden
+            dav_result = auth_provider.get_dav_session()
+            if dav_result:
+                self.session, self.requesttoken = dav_result
+                self.session.headers['requesttoken'] = self.requesttoken
+                logger.info("Calendar using OAuth2 session + CSRF token for CalDAV")
+            else:
+                logger.warning("Could not create DAV session, falling back to Bearer token")
+                self.session = self._build_session()
+        elif auth_provider:
+            # Anderer AuthProvider (z.B. Basic Auth)
+            self.session = self._build_session()
         elif username and password:
             # Backward compatibility: create basic auth provider
             auth_manager = get_auth_manager()
             self.auth_provider = auth_manager.create_basic_auth(username, password)
+            self.session = self._build_session()
         else:
             raise ValueError("Either auth_provider or username/password must be provided")
-
-        self.session = self._build_session()
 
         # Get username from auth provider if not provided
         if not self.username:
@@ -696,28 +710,19 @@ def create_simple_calendar_manager(nextcloud_url: str = None, username: str = No
                     with open(oauth_file) as f:
                         oauth_config = json.load(f)
                     if oauth_config.get('access_token'):
-                        app_password = oauth_config.get('app_password', '')
-                        if app_password and oauth_config.get('username'):
-                            # App-Passwort für CalDAV verwenden (Basic Auth)
-                            password = app_password
-                            if not username:
-                                username = oauth_config.get('username', '')
-                            logger.info("Calendar using app password (Basic Auth) for CalDAV")
-                        else:
-                            # Fallback: OAuth2 Bearer Token (funktioniert bei manchen Servern nicht für CalDAV)
-                            from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
-                            auth_provider = OAuth2NextcloudProvider(oauth_config)
-                            try:
-                                if auth_provider.refresh_token:
-                                    auth_provider.refresh_access_token()
-                                    oauth_config.update(auth_provider.to_config_dict())
-                                    with open(oauth_file, 'w') as f:
-                                        json.dump(oauth_config, f, indent=2)
-                            except Exception as refresh_err:
-                                logger.warning(f"Could not refresh OAuth token: {refresh_err}")
-                            if not username:
-                                username = oauth_config.get('username', '')
-                            logger.info("Calendar using OAuth2 provider")
+                        from backend.features.integration.oauth2_nextcloud import OAuth2NextcloudProvider
+                        auth_provider = OAuth2NextcloudProvider(oauth_config)
+                        try:
+                            if auth_provider.refresh_token:
+                                auth_provider.refresh_access_token()
+                                oauth_config.update(auth_provider.to_config_dict())
+                                with open(oauth_file, 'w') as f:
+                                    json.dump(oauth_config, f, indent=2)
+                        except Exception as refresh_err:
+                            logger.warning(f"Could not refresh OAuth token: {refresh_err}")
+                        if not username:
+                            username = oauth_config.get('username', '')
+                        logger.info("Calendar using OAuth2 provider (session-based CalDAV)")
             except Exception as e:
                 logger.warning(f"Could not init calendar OAuth2: {e}")
 
