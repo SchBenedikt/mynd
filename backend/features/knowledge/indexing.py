@@ -297,13 +297,18 @@ class IndexingManager:
             if exclude_paths:
                 self.logger.info(f"Excluding paths: {exclude_paths}")
 
-            # Dateien im Hintergrund auflisten, während wir den Fortschritt aktualisieren
-            files = []
+            # Dateien im Hintergrund auflisten mit geteilter Liste für Live-Fortschritt
+            progress_files = []
             listing_done = False
             def _do_listing():
-                nonlocal files, listing_done
+                nonlocal progress_files, listing_done
                 try:
-                    files = nc_client.list_files(self.nextcloud_config.get('path', '/'), recursive=True, exclude_paths=exclude_paths)
+                    nc_client.list_files(
+                        self.nextcloud_config.get('path', '/'),
+                        recursive=True,
+                        exclude_paths=exclude_paths,
+                        shared_files=progress_files
+                    )
                 except Exception as e:
                     self.logger.error(f"File listing error: {e}")
                 finally:
@@ -312,7 +317,8 @@ class IndexingManager:
             listing_thread.start()
 
             while not listing_done:
-                self.current_progress.total_files = len(files)
+                self.current_progress.total_files = len(progress_files)
+                self.current_progress.current_file = f"Scanning: {len(progress_files)} files found..."
                 self.notify_progress()
                 if self.stop_event.is_set():
                     self.logger.info("Indexing stopped during file listing")
@@ -322,7 +328,9 @@ class IndexingManager:
                     return
                 time.sleep(2)
 
+            files = progress_files
             self.current_progress.total_files = len(files)
+            self.current_progress.current_file = ""
             self.notify_progress()
             
             if not files:

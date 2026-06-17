@@ -84,15 +84,16 @@ class NextcloudClient:
             self.logger.error(f"Nextcloud connection failed: {str(e)}")
             return False
     
-    def list_files(self, remote_path: str = '/', recursive: bool = True, exclude_paths: list = None) -> List[Dict]:
+    def list_files(self, remote_path: str = '/', recursive: bool = True, exclude_paths: list = None, shared_files: list = None) -> List[Dict]:
         """Listet Dateien in einem Nextcloud-Verzeichnis auf - verbesserte Erkennung
         
         Args:
             remote_path: Starting path (default: '/')
             recursive: Traverse subdirectories (default: True)
             exclude_paths: List of path prefixes to skip (e.g., ['/Fotosharing', '/Videos'])
+            shared_files: Optional external list to populate incrementally for progress tracking
         """
-        files = []
+        files = shared_files if shared_files is not None else []
         if exclude_paths is None:
             exclude_paths = []
         # Normalize exclude paths
