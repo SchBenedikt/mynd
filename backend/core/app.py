@@ -2349,6 +2349,21 @@ def auth_nextcloud_login():
                     session['auth_user'] = user_info['id']
                     session.permanent = True
                     logger.info(f"Reused existing OAuth token for {user_info['id']}")
+                    # Kalender-Manager mit Session-Cookie + CSRF-Token neu initialisieren
+                    try:
+                        global simple_calendar_manager, calendar_enabled
+                        from backend.features.calendar.simple import create_simple_calendar_manager as make_calendar
+                        new_cal = make_calendar(
+                            nextcloud_url=nc_url,
+                            username=user_info['id'],
+                            auth_provider=existing_provider
+                        )
+                        if new_cal:
+                            simple_calendar_manager = new_cal
+                            calendar_enabled = True
+                            logger.info("Calendar re-initialized after token reuse")
+                    except Exception as cal_err:
+                        logger.warning(f"Could not re-init calendar after token reuse: {cal_err}")
                     if redirect_to:
                         return redirect(redirect_to)
                     return jsonify({'status': 'authenticated', 'user': user_info['id']})
