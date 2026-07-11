@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiFetch, getApiBase } from '../../lib/api';
 
-const API_BASE = '';
+const API_BASE = () => getApiBase();
 
 export default function ApiRefsTab({ tr, language }) {
   const [apiRefsContent, setApiRefsContent] = useState('');
@@ -11,7 +12,7 @@ export default function ApiRefsTab({ tr, language }) {
 
   const loadApiRefs = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/references`);
+      const res = await fetch(`${getApiBase()}/api/references`);
       const data = await res.json();
       setApiRefsContent(JSON.stringify(data, null, 2));
       setApiRefsError('');
@@ -30,7 +31,7 @@ export default function ApiRefsTab({ tr, language }) {
     setApiRefsError('');
     setApiRefsStatus(tr('Speichere...', 'Saving...'));
     try {
-      const res = await fetch(`${API_BASE}/api/references`, {
+      const res = await fetch(`${getApiBase()}/api/references`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: apiRefsContent

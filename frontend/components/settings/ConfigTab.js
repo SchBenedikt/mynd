@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiFetch, getApiBase } from '../../lib/api';
 
-const API_BASE = '';
 const TTS_PROVIDER_STORAGE_KEY = 'mynd_tts_provider_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
 
@@ -110,6 +110,15 @@ export default function ConfigTab({ tr, language }) {
   const [backupMsg, setBackupMsg] = useState('');
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupImportMsg, setBackupImportMsg] = useState('');
+  const [backendUrl, setBackendUrlState] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('backendUrl') || 'http://127.0.0.1:5001';
+    return 'http://127.0.0.1:5001';
+  });
+
+  const setBackendUrl = (url) => {
+    setBackendUrlState(url);
+    localStorage.setItem('backendUrl', url);
+  };
 
   const visibleVoices = language === 'de'
     ? availableVoices.filter((voice) => String(voice.lang || '').toLowerCase().startsWith('de'))
@@ -126,7 +135,7 @@ export default function ConfigTab({ tr, language }) {
 
   const loadAIConfig = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ai/config`, {credentials: 'include'});
+      const res = await fetch(`${getApiBase()}/api/ai/config`, {credentials: 'include'});
       const config = await res.json();
       const url = new URL(config.base_url);
       setAiProtocol(url.protocol.replace(':', ''));
@@ -168,7 +177,7 @@ export default function ConfigTab({ tr, language }) {
 
   const loadOllamaModels = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ollama/models`, {credentials: 'include'});
+      const res = await fetch(`${getApiBase()}/api/ollama/models`, {credentials: 'include'});
       const data = await res.json();
       setAiModels(Array.isArray(data.models) ? data.models : []);
     } catch (err) {
@@ -178,7 +187,7 @@ export default function ConfigTab({ tr, language }) {
 
   const loadEmbeddingStatus = async () => {
     try {
-      const kbRes = await fetch(`${API_BASE}/api/knowledge/status`);
+      const kbRes = await fetch(`${getApiBase()}/api/knowledge/status`);
       const kb = await kbRes.json();
       const totalChunks = Number(kb.chunks_loaded || 0);
       const generatedEmbeddings = Number(kb.generated_embeddings ?? kb.embeddings_count ?? 0);
@@ -201,7 +210,7 @@ export default function ConfigTab({ tr, language }) {
     setModelCheckLoading(true);
     setModelCheckResults(null);
     try {
-      const res = await fetch(`${API_BASE}/api/ai/check-models`, {
+      const res = await fetch(`${getApiBase()}/api/ai/check-models`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -220,7 +229,7 @@ export default function ConfigTab({ tr, language }) {
 
   const loadSecurityMode = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/security/mode`, {credentials: 'include'});
+      const res = await fetch(`${getApiBase()}/api/security/mode`, {credentials: 'include'});
       const data = await res.json();
       if (data.mode) setSecurityModeState(data.mode);
     } catch (err) {
@@ -231,7 +240,7 @@ export default function ConfigTab({ tr, language }) {
   const setSecurityMode = async (mode) => {
     setSecurityModeState(mode);
     try {
-      const res = await fetch(`${API_BASE}/api/security/mode`, {
+      const res = await fetch(`${getApiBase()}/api/security/mode`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode })
@@ -271,7 +280,7 @@ export default function ConfigTab({ tr, language }) {
         };
       }
       if (geminiTtsApiKey.trim()) payload.gemini_tts_api_key = geminiTtsApiKey.trim();
-      const res = await fetch(`${API_BASE}/api/ai/config`, {
+      const res = await fetch(`${getApiBase()}/api/ai/config`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       const data = await res.json();
@@ -293,7 +302,7 @@ export default function ConfigTab({ tr, language }) {
   const updateEmbeddings = async () => {
     try {
       setAiStatus(tr('Embeddings werden aktualisiert...', 'Updating embeddings...'));
-      const res = await fetch(`${API_BASE}/api/knowledge/update-embeddings`, { method: 'POST' });
+      const res = await fetch(`${getApiBase()}/api/knowledge/update-embeddings`, { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.status === 'success') {
         setAiStatus(tr('Embeddings erfolgreich aktualisiert', 'Embeddings updated successfully'));
@@ -324,7 +333,7 @@ export default function ConfigTab({ tr, language }) {
     setFactoryResetLoading(true);
     setFactoryResetMessage('');
     try {
-      const res = await fetch('/api/auth/factory-reset', {
+      const res = await apiFetch('/api/auth/factory-reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: factoryResetPassword })
@@ -392,6 +401,21 @@ export default function ConfigTab({ tr, language }) {
 
   return (
     <div className="settings-panel">
+      <div className="panel-section">
+        <div className="section-title">{tr('Verbindung', 'Connection')}</div>
+        <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1rem 0'}}>
+          {tr(
+            'Adresse des lokalen Backend-Servers (Flask). Bei statischem Export (Cloudflare) muss hier die URL des Mac mini eingetragen werden.',
+            'Address of the local backend server (Flask). For static export (Cloudflare), enter the Mac mini URL here.'
+          )}
+        </p>
+        <div className="input-group">
+          <label>{tr('Backend-URL', 'Backend URL')}</label>
+          <input type="text" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)}
+            placeholder="http://127.0.0.1:5001" />
+        </div>
+      </div>
+
       <div className="panel-section">
         <div className="section-title">{tr('KI-Modell', 'AI Model')}</div>
         <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0 1rem 0'}}>
@@ -636,7 +660,7 @@ export default function ConfigTab({ tr, language }) {
           <button className="btn primary" onClick={async () => {
             setBackupLoading(true); setBackupMsg('');
             try {
-              const r = await fetch('/api/backup/export'); const d = await r.json();
+              const r = await apiFetch('/api/backup/export'); const d = await r.json();
               if (!d.success) throw new Error(d.error);
               const blob = new Blob([JSON.stringify(d, null, 2)], {type:'application/json'});
               const url = URL.createObjectURL(blob);
@@ -659,7 +683,7 @@ export default function ConfigTab({ tr, language }) {
                 try {
                   const data = JSON.parse(ev.target.result);
                   if (!data?.files) { setBackupImportMsg(tr('Ungültiges Backup-Format.','Invalid backup format.')); return; }
-                  const r = await fetch('/api/backup/import', {
+                  const r = await apiFetch('/api/backup/import', {
                     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
                   });
                   const d = await r.json();

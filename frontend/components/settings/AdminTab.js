@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiFetch, getApiBase } from '../../lib/api';
 
 function getAuthHeaders() {
   try {
@@ -19,7 +20,7 @@ export default function AdminTab({ tr, language }) {
   const [userError, setUserError] = useState('');
 
   useEffect(() => {
-    fetch('/api/auth/config')
+    apiFetch('/api/auth/config')
       .then(r => r.json())
       .then(data => {
         if (data?.success) {
@@ -28,7 +29,7 @@ export default function AdminTab({ tr, language }) {
       })
       .catch(() => {});
     const headers = getAuthHeaders();
-    fetch('/api/admin/users', { headers })
+    apiFetch('/api/admin/users', { headers })
       .then(r => r.json())
       .then(data => {
         if (data?.success) setUsers(data.users || []);
@@ -42,7 +43,7 @@ export default function AdminTab({ tr, language }) {
     setAuthConfig(updated);
     setAuthConfigMsg('');
     try {
-      const res = await fetch('/api/auth/config', {
+      const res = await apiFetch('/api/auth/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated)
@@ -52,7 +53,7 @@ export default function AdminTab({ tr, language }) {
         setAuthConfigMsg(tr('Gespeichert', 'Saved'));
       } else {
         setAuthConfigMsg(data?.error || tr('Fehler', 'Error'));
-        fetch('/api/auth/config').then(r => r.json()).then(d => {
+        apiFetch('/api/auth/config').then(r => r.json()).then(d => {
           if (d?.success) setAuthConfig({ allowRegistration: !!d.allowRegistration, requireLogin: !!d.requireLogin });
         }).catch(() => {});
       }
@@ -70,7 +71,7 @@ export default function AdminTab({ tr, language }) {
       return;
     }
     try {
-      const res = await fetch('/api/admin/users/create', {
+      const res = await apiFetch('/api/admin/users/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(newUser)
@@ -93,7 +94,7 @@ export default function AdminTab({ tr, language }) {
     setUserMsg('');
     setUserError('');
     try {
-      const res = await fetch('/api/admin/users/delete', {
+      const res = await apiFetch('/api/admin/users/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ username })
@@ -116,7 +117,7 @@ export default function AdminTab({ tr, language }) {
     setUserMsg('');
     setUserError('');
     try {
-      const res = await fetch('/api/admin/users/reset', {
+      const res = await apiFetch('/api/admin/users/reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ username, password: password.trim() })
@@ -227,7 +228,7 @@ export default function AdminTab({ tr, language }) {
           if (!confirm(tr('WIRKLICH die gesamte App zurücksetzen? Alle Chats, Einstellungen und Benutzer werden gelöscht!', 'REALLY reset the entire app? All chats, settings and users will be deleted!'))) return;
           if (!confirm(tr('Wirklich sicher? Diese Aktion kann nicht rückgängig gemacht werden!', 'Are you really sure? This action cannot be undone!'))) return;
           try {
-            const res = await fetch('/api/admin/reset', {
+            const res = await apiFetch('/api/admin/reset', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
             });

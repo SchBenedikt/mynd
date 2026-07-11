@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiFetch, getApiBase } from '../../lib/api';
 
 export default function MemoryTab({ tr, language }) {
   const [items, setItems] = useState([]);
@@ -10,7 +11,7 @@ export default function MemoryTab({ tr, language }) {
 
   const loadMemory = async () => {
     try {
-      const res = await fetch('/api/memory');
+      const res = await apiFetch('/api/memory');
       const data = await res.json();
       if (res.ok) {
         setItems(data.items || []);
@@ -30,7 +31,7 @@ export default function MemoryTab({ tr, language }) {
       return;
     }
     try {
-      const res = await fetch('/api/memory', {
+      const res = await apiFetch('/api/memory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value })
@@ -52,7 +53,7 @@ export default function MemoryTab({ tr, language }) {
   const deleteMemory = async (key) => {
     if (!confirm(tr(`"${key}" wirklich löschen?`, `Really delete "${key}"?`))) return;
     try {
-      const res = await fetch(`/api/memory/${encodeURIComponent(key)}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/memory/${encodeURIComponent(key)}`, { method: 'DELETE' });
       if (res.ok) {
         setStatus(tr('✓ Gelöscht', '✓ Deleted'));
         loadMemory();

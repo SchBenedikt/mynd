@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { apiFetch, getApiBase } from '../lib/api';
 
 export default function StatusPill() {
   const [status, setStatus] = useState({ ollama: 'unknown', kb: 'unknown' });
@@ -11,9 +12,9 @@ export default function StatusPill() {
     const load = async () => {
       try {
         const [oRes, kRes, meRes] = await Promise.all([
-          fetch('/api/ollama/status').catch(() => null),
-          fetch('/api/knowledge/status').catch(() => null),
-          fetch('/api/auth/me').catch(() => null)
+          apiFetch('/api/ollama/status').catch(() => null),
+          apiFetch('/api/knowledge/status').catch(() => null),
+          apiFetch('/api/auth/me').catch(() => null)
         ]);
         const o = oRes && oRes.ok ? await oRes.json() : null;
         const k = kRes && kRes.ok ? await kRes.json() : null;
@@ -53,7 +54,7 @@ export default function StatusPill() {
   };
 
   const logout = async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch(e) {}
+    try { await apiFetch('/api/auth/logout', { method: 'POST' }); } catch(e) {}
     try { localStorage.removeItem('mynd_user_v1'); localStorage.removeItem('mynd_token_v1'); } catch(e){}
     window.location.reload();
   };

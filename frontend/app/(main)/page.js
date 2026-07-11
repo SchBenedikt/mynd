@@ -14,8 +14,8 @@ import MessageList from '../../components/MessageList';
 import Composer from '../../components/Composer';
 import PhotoPreviewModal from '../../components/PhotoPreviewModal';
 import ChatSummaryModal from '../../components/ChatSummaryModal';
+import { apiFetch, getApiBase } from '../../lib/api';
 
-const API_BASE = '';
 const CHAT_STORAGE_KEY = 'mynd_chat_history_v1';
 const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
 const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
@@ -304,7 +304,7 @@ export default function HomePage() {
     lastIndexingDuration: 0
   });
   const logout = async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+    try { await apiFetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
     try { localStorage.removeItem('mynd_user_v1'); localStorage.removeItem('mynd_token_v1'); } catch (e) {}
     window.location.reload();
   };
@@ -421,7 +421,7 @@ export default function HomePage() {
 
   const fetchGreeting = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ai/greeting`, {
+      const res = await fetch(`${getApiBase()}/api/ai/greeting`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ language, name: displayName })
@@ -648,7 +648,7 @@ export default function HomePage() {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
-          await fetch(`${API_BASE}/api/location/resolve`, {
+          await fetch(`${getApiBase()}/api/location/resolve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -834,7 +834,7 @@ export default function HomePage() {
 
   const loadAIConfig = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ai/config`);
+      const res = await fetch(`${getApiBase()}/api/ai/config`);
       const config = await safeReadJson(res);
       if (!res.ok || !config?.base_url) {
         throw new Error(config?.error || `Request failed with status ${res.status}`);
@@ -868,7 +868,7 @@ export default function HomePage() {
 
   const loadOllamaModels = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ollama/models`);
+      const res = await fetch(`${getApiBase()}/api/ollama/models`);
       const data = await safeReadJson(res);
       setAiModels(data.models || []);
     } catch (err) {
@@ -879,7 +879,7 @@ export default function HomePage() {
   const saveAIConfig = async () => {
     try {
       const baseUrl = `${aiProtocol}://${aiHost}:${aiPort}`;
-      const res = await fetch(`${API_BASE}/api/ai/config`, {
+      const res = await fetch(`${getApiBase()}/api/ai/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base_url: baseUrl, model: aiModel })
@@ -898,8 +898,8 @@ export default function HomePage() {
   const updateStatus = async () => {
     try {
       const [ollamaRes, kbRes] = await Promise.all([
-        fetch(`${API_BASE}/api/ollama/status`),
-        fetch(`${API_BASE}/api/knowledge/status`)
+        fetch(`${getApiBase()}/api/ollama/status`),
+        fetch(`${getApiBase()}/api/knowledge/status`)
       ]);
       const ollama = await safeReadJson(ollamaRes);
       const kb = await safeReadJson(kbRes);
@@ -916,7 +916,7 @@ export default function HomePage() {
       try {
         const storedToken = (() => { try { return localStorage.getItem('mynd_token_v1'); } catch(e) { return null; } })();
         const headers = storedToken ? { 'Authorization': `Bearer ${storedToken}` } : {};
-        const meRes = await fetch(`${API_BASE}/api/auth/me`, { headers });
+        const meRes = await fetch(`${getApiBase()}/api/auth/me`, { headers });
         const me = await safeReadJson(meRes);
         if (meRes.ok && me && me.authenticated) setUser(me.user);
         else setUser(null);
@@ -931,7 +931,7 @@ export default function HomePage() {
   const loadSecurityStatus = async () => {
     try {
       setSecurityLoading(true);
-      const res = await fetch(`${API_BASE}/api/security/status`);
+      const res = await fetch(`${getApiBase()}/api/security/status`);
       const data = await safeReadJson(res);
       if (!res.ok || data?.success === false) {
         setSecurityStatus({
@@ -956,8 +956,8 @@ export default function HomePage() {
   const loadProactiveBriefings = async (force = false) => {
     try {
       const briefingUrl = force
-        ? `${API_BASE}/api/assistant/briefing/current?force=true`
-        : `${API_BASE}/api/assistant/briefing/current`;
+        ? `${getApiBase()}/api/assistant/briefing/current?force=true`
+        : `${getApiBase()}/api/assistant/briefing/current`;
       const res = await fetch(briefingUrl);
       const data = await safeReadJson(res);
       if (!res.ok || data?.success === false) {
@@ -973,7 +973,7 @@ export default function HomePage() {
   const startIndexing = async () => {
     try {
       // First check if there's a configuration
-      const configRes = await fetch(`${API_BASE}/api/indexing/config`);
+      const configRes = await fetch(`${getApiBase()}/api/indexing/config`);
       if (configRes.ok) {
         const config = await configRes.json();
         if (!config.url || !config.username) {
@@ -982,7 +982,7 @@ export default function HomePage() {
         }
       }
       
-      const res = await fetch(`${API_BASE}/api/indexing/start`, {
+      const res = await fetch(`${getApiBase()}/api/indexing/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
@@ -992,7 +992,7 @@ export default function HomePage() {
         if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = setInterval(async () => {
           try {
-            const res = await fetch(`${API_BASE}/api/indexing/progress`);
+            const res = await fetch(`${getApiBase()}/api/indexing/progress`);
             if (res.ok) {
               const data = await res.json();
               setIndexingProgress(Math.round(data.progress_percentage || 0));
@@ -1093,7 +1093,7 @@ export default function HomePage() {
       const formData = new FormData();
       formData.append('file', file);
       try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        const res = await apiFetch('/api/upload', { method: 'POST', body: formData });
         const data = await res.json();
         if (data.success) {
           uploaded.push(data);
@@ -1161,7 +1161,7 @@ export default function HomePage() {
 
       let emailConfig = null;
       try {
-        const emailConfigRes = await fetch(`${API_BASE}/api/registry/email/config`);
+        const emailConfigRes = await fetch(`${getApiBase()}/api/registry/email/config`);
         const emailConfigData = await safeReadJson(emailConfigRes);
         if (emailConfigRes.ok && emailConfigData?.success !== false) {
           emailConfig = emailConfigData?.config || null;
@@ -1170,7 +1170,7 @@ export default function HomePage() {
         console.error('Error loading email config for chat:', err);
       }
 
-      const res = await fetch(`${API_BASE}/api/agent/query/stream`, {
+      const res = await fetch(`${getApiBase()}/api/agent/query/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: abortController.signal,
@@ -1521,7 +1521,7 @@ export default function HomePage() {
           return;
         }
 
-        const response = await fetch('/internal/tts/synthesize', {
+        const response = await fetch(getApiBase() + '/api/tts/synthesize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1562,7 +1562,7 @@ export default function HomePage() {
         setIsSpeaking(true);
         setVoiceError('');
 
-        const response = await fetch('/internal/tts/live', {
+        const response = await fetch(getApiBase() + '/api/tts/live', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1877,7 +1877,7 @@ export default function HomePage() {
       }
 
       const query = params.toString();
-      return `${API_BASE}/api/immich/download/${assetId}${query ? `?${query}` : ''}`;
+      return `${getApiBase()}/api/immich/download/${assetId}${query ? `?${query}` : ''}`;
     } catch (_) {
       return '';
     }
@@ -2000,7 +2000,7 @@ export default function HomePage() {
         description: calendarForm.description.trim() || null
       };
 
-      const res = await fetch(`${API_BASE}/api/calendar/create-with-details`, {
+      const res = await fetch(`${getApiBase()}/api/calendar/create-with-details`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -2074,7 +2074,7 @@ export default function HomePage() {
         description: taskForm.description?.trim() || null
       };
 
-      const res = await fetch(`${API_BASE}/api/tasks/create-with-details`, {
+      const res = await fetch(`${getApiBase()}/api/tasks/create-with-details`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -2149,7 +2149,7 @@ export default function HomePage() {
     }));
 
     try {
-      const startRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/start`, {
+      const startRes = await fetch(`${getApiBase()}/api/nextcloud/loginflow/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nextcloud_url: nextcloudUrl })
@@ -2175,7 +2175,7 @@ export default function HomePage() {
         const pollInterval = setInterval(async () => {
           attempts += 1;
           try {
-            const pollRes = await fetch(`${API_BASE}/api/nextcloud/loginflow/poll`);
+            const pollRes = await fetch(`${getApiBase()}/api/nextcloud/loginflow/poll`);
             const pollData = await safeReadJson(pollRes);
 
             if (!pollRes.ok) {
@@ -2278,7 +2278,7 @@ export default function HomePage() {
         return;
       }
 
-      const res = await fetch(`${API_BASE}${endpoint}`, {
+      const res = await fetch(`${getApiBase()}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -2446,7 +2446,7 @@ export default function HomePage() {
     });
 
     try {
-      const res = await fetch(`${API_BASE}/api/chat/summarize`, {
+      const res = await fetch(`${getApiBase()}/api/chat/summarize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2766,7 +2766,7 @@ export default function HomePage() {
                     content: (msg.content || '') + `\n\n⚠️ **KI fragt:** ${pendingUserInput.message}\n👤 **Antwort:** ${input}`,
                   }));
                   try {
-                    const res = await fetch('/api/agent/input', {
+                    const res = await apiFetch('/api/agent/input', {
                       method: 'POST',
                       headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({ input })
@@ -2823,7 +2823,7 @@ export default function HomePage() {
                   const toolInfo = pendingToolConfirm;
                   setPendingToolConfirm(null);
                   try {
-                    const res = await fetch('/api/tool/run', {
+                    const res = await apiFetch('/api/tool/run', {
                       method: 'POST',
                       headers: {'Content-Type': 'application/json'},
                       body: JSON.stringify({ confirmed: true })

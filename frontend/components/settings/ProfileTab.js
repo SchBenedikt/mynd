@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiFetch, getApiBase } from '../../lib/api';
 
 function getAuthHeaders() {
   try {
@@ -17,7 +18,7 @@ export default function ProfileTab({ tr, language }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('/api/auth/profile', { headers: getAuthHeaders() })
+    apiFetch('/api/auth/profile', { headers: getAuthHeaders() })
       .then(r => r.json())
       .then(data => {
         if (data?.success) setProfile({ name: data.user.name || '', username: data.user.username });
@@ -35,7 +36,7 @@ export default function ProfileTab({ tr, language }) {
     if (Object.keys(body).length === 0) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/auth/profile', {
+      const res = await apiFetch('/api/auth/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(body)

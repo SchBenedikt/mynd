@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-
-const API = '';
+import { apiFetch, getApiBase } from '../../lib/api';
 
 const INTEGRATIONS = [
   { id: 'email',     icon: 'fas fa-envelope',   labelDe: 'E-Mail (IMAP/SMTP)',  labelEn: 'Email (IMAP/SMTP)' },
@@ -57,7 +56,7 @@ export default function IntegrationsTab({ tr, language }) {
 
   const loadAll = async () => {
     try {
-      const r = await fetch(`${API}/api/vault/entries`);
+      const r = await fetch(`${getApiBase()}/api/vault/entries`);
       const d = await r.json();
       if (d?.success === false) return;
       const entries = d.entries || [];
@@ -70,7 +69,7 @@ export default function IntegrationsTab({ tr, language }) {
 
   const loadPlugins = async () => {
     try {
-      const r = await fetch(`${API}/api/plugins`);
+      const r = await fetch(`${getApiBase()}/api/plugins`);
       const d = await r.json();
       if (d.success) {
         setPlugins(d.plugins || []);
@@ -94,7 +93,7 @@ export default function IntegrationsTab({ tr, language }) {
       if (raw === '__SET__') continue;
       if (raw !== undefined && raw !== '') {
         try {
-          const r = await fetch(`${API}/api/vault/entries`, {
+          const r = await fetch(`${getApiBase()}/api/vault/entries`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: f.key, value: raw }),
@@ -113,7 +112,7 @@ export default function IntegrationsTab({ tr, language }) {
 
   const handleToggle = async (name, enabled) => {
     try {
-      await fetch(`${API}/api/plugins/${name}/toggle`, {
+      await fetch(`${getApiBase()}/api/plugins/${name}/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
@@ -125,7 +124,7 @@ export default function IntegrationsTab({ tr, language }) {
   const handleUninstall = async (name) => {
     if (!window.confirm(t(`Plugin "${name}" wirklich deinstallieren?`, `Really uninstall "${name}"?`))) return;
     try {
-      const r = await fetch(`${API}/api/plugins/${name}`, { method: 'DELETE' });
+      const r = await fetch(`${getApiBase()}/api/plugins/${name}`, { method: 'DELETE' });
       const d = await r.json();
       if (d.success) {
         setPlugins(plugins.filter(p => p.name !== name));
@@ -139,7 +138,7 @@ export default function IntegrationsTab({ tr, language }) {
     if (!installUrl.trim()) return;
     setInstalling(true); setInstallMsg('');
     try {
-      const r = await fetch(`${API}/api/plugins/install`, {
+      const r = await fetch(`${getApiBase()}/api/plugins/install`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: installUrl.trim() }),
@@ -351,7 +350,6 @@ const EMAIL_FIELDS = [
 
 function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
   const t = (de, en) => language === 'de' ? de : en;
-  const API = '';
   const [accounts, setAccounts] = useState([]);
   const [editing, setEditing] = useState(null);
   const [newName, setNewName] = useState('');
@@ -361,7 +359,7 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
 
   const loadAccounts = async () => {
     try {
-      const r = await fetch(`${API}/api/email/accounts`);
+      const r = await fetch(`${getApiBase()}/api/email/accounts`);
       const d = await r.json();
       if (d.success) setAccounts(Object.entries(d.accounts || {}).map(([k,v]) => ({ name: k, ...v })));
     } catch(e) { console.error(e); }
@@ -373,7 +371,7 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
     setSaving(true); setMsg('');
     try {
       const payload = { name, ...form };
-      await fetch(`${API}/api/email/accounts`, {
+      await fetch(`${getApiBase()}/api/email/accounts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -382,7 +380,7 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
       if (name === 'default') {
         for (const f of EMAIL_FIELDS) {
           if (form[f.key]) {
-            await fetch(`${API}/api/vault/entries`, {
+            await fetch(`${getApiBase()}/api/vault/entries`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ key: `email/${f.key}`, value: form[f.key] }),
@@ -400,7 +398,7 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
   const deleteAccount = async (name) => {
     if (!window.confirm(t(`Konto "${name}" löschen?`, `Delete account "${name}"?`))) return;
     try {
-      await fetch(`${API}/api/email/accounts/${name}`, { method: 'DELETE' });
+      await fetch(`${getApiBase()}/api/email/accounts/${name}`, { method: 'DELETE' });
       await loadAccounts();
     } catch(e) { console.error(e); }
   };

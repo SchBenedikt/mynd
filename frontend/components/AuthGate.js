@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { usePathname, useRouter } from 'next/navigation';
 import './AuthGate.css';
+import { apiFetch, getApiBase } from '../lib/api';
 
 const LANGUAGE_KEY = 'mynd_language';
 const TOKEN_KEY = 'mynd_token_v1';
@@ -39,7 +40,7 @@ export default function AuthGate({ children }) {
       try { localStorage.removeItem('mynd_user_v1'); } catch (err) {}
       const storedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } })();
       const headers = storedToken ? { 'Authorization': `Bearer ${storedToken}` } : {};
-      fetch('/api/auth/me', { headers })
+      apiFetch('/api/auth/me', { headers })
         .then((r) => r.json())
         .then((data) => {
           if (data && data.authenticated && data.user) {
@@ -62,7 +63,7 @@ export default function AuthGate({ children }) {
           if (fragToken) {
             localStorage.setItem(TOKEN_KEY, fragToken);
             try { window.history.replaceState({}, document.title, window.location.pathname + window.location.search); } catch (err) {}
-            fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${fragToken}` } })
+            apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${fragToken}` } })
               .then((r) => r.json())
               .then((data) => {
                 if (data && data.authenticated && data.user) {
@@ -75,7 +76,7 @@ export default function AuthGate({ children }) {
         }
       } catch (err) {}
 
-        fetch('/api/setup/status')
+        apiFetch('/api/setup/status')
           .then((r) => r.json())
           .then((data) => {
             if (cancelled) return;
@@ -94,7 +95,7 @@ export default function AuthGate({ children }) {
             }
           })
           .catch(() => {});
-        fetch('/api/auth/config')
+        apiFetch('/api/auth/config')
           .then((r) => r.json())
           .then((data) => {
             if (cancelled) return;
@@ -150,12 +151,12 @@ export default function AuthGate({ children }) {
     ev && ev.preventDefault();
     setLoginError('');
     try {
-      const resp = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: loginUser, password: loginPass }) });
+      const resp = await apiFetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: loginUser, password: loginPass }) });
       const data = await resp.json();
       if (resp.ok && data.token) {
         try { localStorage.setItem(TOKEN_KEY, data.token); } catch (e) {}
         try {
-          const me = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${data.token}` } });
+          const me = await apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${data.token}` } });
           const meData = await me.json();
           if (me.ok && meData.authenticated) { setUser({ name: meData.user.name, username: meData.user.username, token: data.token }); setForceOpen(false); return; }
         } catch (err) { setUser({ name: data.user?.name || loginUser, username: data.user?.username || loginUser, token: data.token }); setForceOpen(false); return; }
@@ -166,7 +167,7 @@ export default function AuthGate({ children }) {
 
   const startNextcloudFlow = () => {
     const redirect = window.location.origin + window.location.pathname;
-    const loginUrl = `/api/auth/nextcloud/login?redirect_to=${encodeURIComponent(redirect)}`;
+    const loginUrl = `${getApiBase()}/api/auth/nextcloud/login?redirect_to=${encodeURIComponent(redirect)}`;
     window.location.assign(loginUrl);
   };
 

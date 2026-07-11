@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiFetch, getApiBase } from '../../lib/api';
 
-const API_BASE = '';
+const API_BASE = () => getApiBase();
 
 export default function VaultTab({ tr, language }) {
   const [vaultEntries, setVaultEntries] = useState([]);
@@ -13,7 +14,7 @@ export default function VaultTab({ tr, language }) {
 
   const loadVaultEntries = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/vault/entries`);
+      const res = await fetch(`${getApiBase()}/api/vault/entries`);
       const data = await res.json();
       if (res.ok) {
         setVaultEntries(data.entries || []);
@@ -33,7 +34,7 @@ export default function VaultTab({ tr, language }) {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/api/vault/entries`, {
+      const res = await fetch(`${getApiBase()}/api/vault/entries`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value })
@@ -55,7 +56,7 @@ export default function VaultTab({ tr, language }) {
   const deleteVaultEntry = async (key) => {
     if (!confirm(tr(`"${key}" wirklich löschen?`, `Really delete "${key}"?`))) return;
     try {
-      const res = await fetch(`${API_BASE}/api/vault/entries/${encodeURIComponent(key)}`, { method: 'DELETE' });
+      const res = await fetch(`${getApiBase()}/api/vault/entries/${encodeURIComponent(key)}`, { method: 'DELETE' });
       if (res.ok) {
         setVaultStatus(tr('✓ Gelöscht', '✓ Deleted'));
         loadVaultEntries();

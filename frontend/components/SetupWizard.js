@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import './setup/SetupWizard.css';
+import { apiFetch, getApiBase } from '../lib/api';
 
 const SETUP_FLOW_KEY = 'mynd_setup_flow_v1';
 
@@ -40,7 +41,7 @@ export default function SetupWizard() {
   const isEmbed = (m) => ['embed','embedding','all-minilm','bge','mxbai','snowflake-arctic-embed','nomic-embed','gte','e5','jina-embeddings','paraphrase-multilingual'].some((h) => String(m||'').toLowerCase().includes(h));
 
   useEffect(() => {
-    fetch('/api/setup/status')
+    apiFetch('/api/setup/status')
       .then((r) => r.json())
       .then((data) => {
         if (data && data.success) {
@@ -60,7 +61,7 @@ export default function SetupWizard() {
 
   useEffect(() => {
     if (setupMode === 'nextcloud' && !nextcloudConfigLoaded) {
-      fetch('/api/nextcloud/oauth/config')
+      apiFetch('/api/nextcloud/oauth/config')
         .then((r) => r.json())
         .then((data) => {
           if (data?.configured) {
@@ -74,11 +75,11 @@ export default function SetupWizard() {
 
   useEffect(() => {
     if (setupMode === 'ai' && aiModels.length === 0 && !aiDone) {
-      fetch('/api/ollama/models')
+      apiFetch('/api/ollama/models')
         .then(r => r.json())
         .then(data => setAiModels(Array.isArray(data?.models) ? data.models : []))
         .catch(() => {});
-      fetch('/api/ui/system-config')
+      apiFetch('/api/ui/system-config')
         .then(r => r.json())
         .then(data => {
           if (data?.success && data.config) {
@@ -93,7 +94,7 @@ export default function SetupWizard() {
   useEffect(() => { if (setupAlreadyFinished) router.replace('/'); }, [setupAlreadyFinished, router]);
 
   const postSetup = async (payload) => {
-    const resp = await fetch('/api/setup/bootstrap', {
+    const resp = await apiFetch('/api/setup/bootstrap', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     });
     const data = await resp.json();
@@ -102,7 +103,7 @@ export default function SetupWizard() {
   };
 
   const refreshSetupStatus = async () => {
-    try { const r = await fetch('/api/setup/status'); const d = await r.json(); if (d?.success) { setSetupStatus(d); return d; } } catch (e) {}
+    try { const r = await apiFetch('/api/setup/status'); const d = await r.json(); if (d?.success) { setSetupStatus(d); return d; } } catch (e) {}
     return null;
   };
 

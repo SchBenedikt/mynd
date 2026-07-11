@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { apiFetch, getApiBase } from '../lib/api';
 
 const TOKEN_KEY = 'mynd_token_v1';
 const STORAGE_KEY = 'mynd_user_v1';
@@ -11,7 +12,7 @@ export default function UserBar() {
   useEffect(() => {
     try {
       // Prefer server-side cookie session
-      fetch('/api/auth/me')
+      apiFetch('/api/auth/me')
         .then((r) => r.json())
         .then((data) => {
           if (data && data.authenticated && data.user) {
@@ -32,7 +33,7 @@ export default function UserBar() {
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch (err) {
       // ignore
     }

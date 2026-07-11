@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { apiFetch, getApiBase } from '../lib/api';
 
 const safeReadJson = async (response) => {
   const text = await response.text();
@@ -63,7 +64,7 @@ export default function SuggestionsPanel({
     try {
       setLoading(true);
 
-      const response = await fetch('/api/suggestions/query', {
+      const response = await apiFetch('/api/suggestions/query', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

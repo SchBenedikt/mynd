@@ -7,6 +7,7 @@ import { useSidebar } from '../hooks/useSidebar';
 import { useLanguage } from '../hooks/useLanguage';
 import SearchPopup from './SearchModal';
 import ChatContextMenu from './ChatContextMenu';
+import { apiFetch, getApiBase } from '../lib/api';
 
 const DAY_MS = 86400000;
 const WEEK_MS = 7 * DAY_MS;
@@ -72,6 +73,16 @@ export default function Sidebar() {
     setMenuPos(null);
   }, []);
 
+  const handleNewChat = useCallback(() => {
+    startNewChat();
+    router.push('/');
+  }, [startNewChat, router]);
+
+  const handleOpenChat = useCallback((chatId) => {
+    openChat(chatId);
+    router.push('/');
+  }, [openChat, router]);
+
   const handleRename = useCallback((chatId) => {
     const chat = chats.find(item => item.id === chatId);
     if (!chat) return;
@@ -94,7 +105,7 @@ export default function Sidebar() {
   }, [chats, language, deleteChat]);
 
   const logout = async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+    try { await apiFetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
     try { localStorage.removeItem('mynd_user_v1'); localStorage.removeItem('mynd_token_v1'); } catch (e) {}
     window.location.reload();
   };
@@ -108,14 +119,14 @@ export default function Sidebar() {
       </div>
 
       <div className="primary-nav">
-        <button className="nav-item" onClick={startNewChat} title={t('newChat')}>
+        <button className="nav-item" onClick={handleNewChat} title={t('newChat')}>
           <i className="fas fa-pen"></i><span>{t('newChat')}</span>
         </button>
         <div className="search-btn-wrap">
           <button className="nav-item" onClick={() => setSearchOpen(true)} title={tr('Chats durchsuchen', 'Search chats')}>
             <i className="fas fa-search"></i><span>{tr('Chats durchsuchen', 'Search chats')}</span>
           </button>
-          <SearchPopup open={searchOpen} onClose={() => setSearchOpen(false)} chats={chats} projects={projects} onOpenChat={openChat} language={language} tr={tr} />
+          <SearchPopup open={searchOpen} onClose={() => setSearchOpen(false)} chats={chats} projects={projects} onOpenChat={handleOpenChat} language={language} tr={tr} />
         </div>
         <button className="nav-item" onClick={() => router.push('/projects')} title={tr('Projekte', 'Projects')}>
           <i className="fas fa-folder"></i><span>{tr('Projekte', 'Projects')}</span>
@@ -130,7 +141,7 @@ export default function Sidebar() {
                 {!isSidebarCollapsed && <div className="section-label">{tr('Angeheftet', 'Pinned')}</div>}
                 {group.items.map((chat) => (
                   <div key={chat.id} className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}
-                    onClick={() => openChat(chat.id)} role="button" tabIndex={0} title={chat.title}>
+                    onClick={() => handleOpenChat(chat.id)} role="button" tabIndex={0} title={chat.title}>
                     <i className="fas fa-comment"></i><span className="history-title">{chat.title}</span>
                     <div className="history-actions">
                       <button type="button" className="history-action dots" onClick={(e) => openMenu(e, chat.id)} title={tr('Mehr', 'More')}><i className="fas fa-ellipsis-h"></i></button>
@@ -144,7 +155,7 @@ export default function Sidebar() {
                 {!isSidebarCollapsed && <div className="section-label">{group.label}</div>}
                 {group.items.map((chat) => (
                   <div key={chat.id} className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}
-                    onClick={() => openChat(chat.id)} role="button" tabIndex={0} title={chat.title}>
+                    onClick={() => handleOpenChat(chat.id)} role="button" tabIndex={0} title={chat.title}>
                     {!isSidebarCollapsed && <i className="fas fa-comment"></i>}
                     <span className="history-title">{chat.title}</span>
                     {!isSidebarCollapsed && chat.project && <span className="project-badge">{projects.find(p => p.id === chat.project)?.name || '?'}</span>}

@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import styles from './KnowledgeGraph.module.css';
+import { apiFetch, getApiBase } from '../lib/api';
 
 const NodeTypeColors = {
   person: '#4F46E5',
@@ -73,7 +74,7 @@ export default function KnowledgeGraphComponent() {
       }
 
       const url = refresh ? `${GRAPH_ENDPOINT}?refresh=true` : GRAPH_ENDPOINT;
-      const response = await fetch(url, { cache: 'no-store' });
+      const response = await apiFetch(url, { cache: 'no-store' });
       const result = await readGraphResponse(response);
 
       if (!response.ok || !result?.success) {
@@ -115,7 +116,7 @@ export default function KnowledgeGraphComponent() {
   // Fetch related node data
   const fetchRelatedNode = async (nodeId) => {
     try {
-      const response = await fetch(`/api/knowledge/graph/node/${nodeId}`);
+      const response = await apiFetch(`/api/knowledge/graph/node/${nodeId}`);
       const result = await readGraphResponse(response);
       
       if (response.ok && result.success) {

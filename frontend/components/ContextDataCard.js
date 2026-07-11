@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-
-const API_BASE = '';
+import { apiFetch, getApiBase } from '../lib/api';
 
 const toIsoDate = (dateObj) => dateObj.toISOString().slice(0, 10);
 
@@ -96,11 +95,11 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
   const fetchUrl = useMemo(() => {
     if (isCalendar) {
       const params = new URLSearchParams({ view: calendarView, date: anchorDate });
-      return `${API_BASE}/api/calendar/ui?${params.toString()}`;
+      return `${getApiBase()}/api/calendar/ui?${params.toString()}`;
     }
 
     const params = new URLSearchParams({ scope: taskScope, date: anchorDate });
-    return `${API_BASE}/api/tasks/ui?${params.toString()}`;
+    return `${getApiBase()}/api/tasks/ui?${params.toString()}`;
   }, [isCalendar, calendarView, taskScope, anchorDate]);
 
   useEffect(() => {
@@ -225,7 +224,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
 
     try {
       if (isCalendar) {
-        const res = await fetch(`${API_BASE}/api/calendar/update`, {
+        const res = await fetch(`${getApiBase()}/api/calendar/update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -242,7 +241,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
           throw new Error(data?.error || 'Could not update event.');
         }
       } else {
-        const res = await fetch(`${API_BASE}/api/tasks/update/${encodeURIComponent(editForm.uid)}`, {
+        const res = await fetch(`${getApiBase()}/api/tasks/update/${encodeURIComponent(editForm.uid)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -270,7 +269,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
 
   const completeTask = async (taskItem) => {
     try {
-      const res = await fetch(`${API_BASE}/api/tasks/complete/${encodeURIComponent(taskItem.uid)}`, {
+      const res = await fetch(`${getApiBase()}/api/tasks/complete/${encodeURIComponent(taskItem.uid)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ list_name: taskItem.list_name || 'tasks' })
@@ -294,7 +293,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
     setError('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/email/send`, {
+      const res = await fetch(`${getApiBase()}/api/email/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
