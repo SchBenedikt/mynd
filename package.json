@@ -1,0 +1,15 @@
+{
+  "name": "mynd",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c yellow,cyan \"python3 app.py\" \"cd frontend && npm run dev\"",
+    "build": "cd frontend && npm run build",
+    "start": "concurrently -n backend,frontend -c yellow,cyan \"python3 app.py\" \"cd frontend && npm start\"",
+    "install:all": "pip3 install -r requirements-backend.txt && cd frontend && npm install",
+    "setup": "pip3 install -r requirements-backend.txt && cd frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -1,0 +1,81 @@
+.lang-page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(11,106,191,0.15), transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(22,163,74,0.08), transparent 40%),
+    radial-gradient(ellipse at 50% 80%, rgba(124,58,237,0.06), transparent 40%),
+    linear-gradient(180deg, #f0f5ff 0%, #f8fafc 100%);
+}
+
+.lang-card {
+  width: min(520px, 100%);
+  background: rgba(255,255,255,0.85);
+  border-radius: 24px;
+  overflow: hidden;
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.6);
+  padding: 48px 40px 40px;
+  text-align: center;
+}
+
+.lang-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0b6abf, #1d4ed8);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lang-title {
+  margin: 20px 0 4px;
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.lang-sub {
+  margin: 0 0 28px;
+  color: #64748b;
+  font-size: 15px;
+}
+
+.lang-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.lang-chip {
+  padding: 10px 20px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  transition: all 0.15s ease;
+}
+
+.lang-chip:hover {
+  border-color: #2f63ff;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.lang-chip:active {
+  transform: scale(0.97);
+}

@@ -1,0 +1,451 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2870
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 ======================================================================\
+IMMICH API ENDPOINTS OVERVIEW\
+======================================================================\
+\
+----------------------------------------------------------------------\
+API KEYS\
+An API key can be used to programmatically access the Immich API.\
+----------------------------------------------------------------------\
+GET    /api-keys                     List all API keys (getApiKeys) [Stable]\
+POST   /api-keys                     Create an API key (createApiKey) [Stable]\
+GET    /api-keys/me                  Retrieve the current API key (getMyApiKey) [Stable]\
+GET    /api-keys/\{id\}                Retrieve an API key (getApiKey) [Stable]\
+PUT    /api-keys/\{id\}                Update an API key (updateApiKey) [Deprecated]\
+DELETE /api-keys/\{id\}                Delete an API key (deleteApiKey) [Stable]\
+\
+----------------------------------------------------------------------\
+ACTIVITIES\
+An activity is a like or a comment made by a user on an asset or album.\
+----------------------------------------------------------------------\
+GET    /activities                   List all activities (getActivities) [Stable]\
+POST   /activities                   Create an activity (createActivity) [Stable]\
+GET    /activities/statistics        Retrieve activity statistics (getActivityStatistics) [Stable]\
+DELETE /activities/\{id\}              Delete an activity (deleteActivity) [Stable]\
+\
+----------------------------------------------------------------------\
+ALBUMS\
+An album is a collection of assets shared with other users or via links.\
+----------------------------------------------------------------------\
+GET    /albums                       List all albums (getAllAlbums) [Stable]\
+POST   /albums                       Create an album (createAlbum) [Stable]\
+PUT    /albums/assets                Add assets to albums (addAssetsToAlbums) [Stable]\
+GET    /albums/statistics            Retrieve album statistics (getAlbumStatistics) [Stable]\
+GET    /albums/\{id\}                  Retrieve an album (getAlbumInfo) [Stable]\
+DELETE /albums/\{id\}                  Delete an album (deleteAlbum) [Stable]\
+PATCH  /albums/\{id\}                  Update an album (updateAlbumInfo) [Stable]\
+PUT    /albums/\{id\}/assets           Add assets to an album (addAssetsToAlbum) [Stable]\
+DELETE /albums/\{id\}/assets           Remove assets from an album (removeAssetFromAlbum) [Stable]\
+GET    /albums/\{id\}/map-markers      Retrieve album map markers (getAlbumMapMarkers)\
+PUT    /albums/\{id\}/user/\{userId\}    Update user role (updateAlbumUser) [Stable]\
+DELETE /albums/\{id\}/user/\{userId\}    Remove user from album (removeUserFromAlbum) [Stable]\
+PUT    /albums/\{id\}/users            Share album with users (addUsersToAlbum) [Stable]\
+\
+----------------------------------------------------------------------\
+ASSETS\
+An asset is an image or video that has been uploaded to Immich.\
+----------------------------------------------------------------------\
+PUT    /assets                       Update assets (updateAssets) [Deprecated]\
+POST   /assets                       Upload asset (uploadAsset) [Stable]\
+DELETE /assets                       Delete assets (deleteAssets) [Stable]\
+POST   /assets/bulk-upload-check     Check bulk upload (checkBulkUpload) [Stable]\
+PUT    /assets/copy                  Copy asset (copyAsset) [Stable]\
+POST   /assets/jobs                  Run an asset job (runAssetJobs) [Stable]\
+PUT    /assets/metadata              Upsert asset metadata (updateBulkAssetMetadata) [Beta]\
+DELETE /assets/metadata              Delete asset metadata (deleteBulkAssetMetadata) [Beta]\
+GET    /assets/statistics            Get asset statistics (getAssetStatistics) [Stable]\
+GET    /assets/\{id\}                  Retrieve an asset (getAssetInfo) [Stable]\
+PUT    /assets/\{id\}                  Update an asset (updateAsset) [Deprecated]\
+GET    /assets/\{id\}/edits            Retrieve edits for an existing asset (getAssetEdits) [Beta]\
+PUT    /assets/\{id\}/edits            Apply edits to an existing asset (editAsset) [Beta]\
+DELETE /assets/\{id\}/edits            Remove edits from an existing asset (removeAssetEdits) [Beta]\
+GET    /assets/\{id\}/metadata         Get asset metadata (getAssetMetadata) [Stable]\
+PUT    /assets/\{id\}/metadata         Update asset metadata (updateAssetMetadata) [Stable]\
+GET    /assets/\{id\}/metadata/\{key\}   Retrieve asset metadata by key (getAssetMetadataByKey) [Stable]\
+DELETE /assets/\{id\}/metadata/\{key\}   Delete asset metadata by key (deleteAssetMetadata) [Stable]\
+GET    /assets/\{id\}/ocr              Retrieve asset OCR data (getAssetOcr) [Stable]\
+GET    /assets/\{id\}/original         Download original asset (downloadAsset) [Stable]\
+GET    /assets/\{id\}/thumbnail        View asset thumbnail (viewAsset) [Stable]\
+GET    /assets/\{id\}/video/playback   Play asset video (playAssetVideo) [Stable]\
+GET    /assets/\{id\}/video/stream/main.m3u8  Get HLS main playlist (getMainPlaylist) [Alpha]\
+DELETE /assets/\{id\}/video/stream/\{sessionId\} End HLS streaming session (endSession) [Alpha]\
+GET    /assets/\{id\}/video/stream/\{sessionId\}/\{variantIndex\}/playlist.m3u8 Get HLS media playlist [Alpha]\
+GET    /assets/\{id\}/video/stream/\{sessionId\}/\{variantIndex\}/\{filename\}    Get HLS segment [Alpha]\
+\
+----------------------------------------------------------------------\
+AUTHENTICATION\
+Endpoints related to user authentication, including OAuth.\
+----------------------------------------------------------------------\
+POST   /auth/admin-sign-up           Register admin (signUpAdmin) [Stable]\
+POST   /auth/change-password         Change password (changePassword) [Stable]\
+POST   /auth/login                   Login (login) [Stable]\
+POST   /auth/logout                  Logout (logout) [Stable]\
+PUT    /auth/pin-code                Change pin code (changePinCode) [Stable]\
+POST   /auth/pin-code                Setup pin code (setupPinCode) [Stable]\
+DELETE /auth/pin-code                Reset pin code (resetPinCode) [Stable]\
+POST   /auth/session/lock            Lock auth session (lockAuthSession) [Stable]\
+POST   /auth/session/unlock          Unlock auth session (unlockAuthSession) [Stable]\
+GET    /auth/status                  Retrieve auth status (getAuthStatus) [Stable]\
+POST   /auth/validateToken           Validate access token (validateAccessToken) [Stable]\
+POST   /oauth/authorize              Start OAuth (startOAuth) [Stable]\
+POST   /oauth/backchannel-logout     Backchannel OAuth logout (logoutOAuth)\
+POST   /oauth/callback               Finish OAuth (finishOAuth) [Stable]\
+POST   /oauth/link                   Link OAuth account (linkOAuthAccount) [Stable]\
+GET    /oauth/mobile-redirect        Redirect OAuth to mobile (redirectOAuthToMobile) [Stable]\
+POST   /oauth/unlink                 Unlink OAuth account (unlinkOAuthAccount) [Stable]\
+\
+----------------------------------------------------------------------\
+AUTHENTICATION (ADMIN)\
+Administrative endpoints related to authentication.\
+----------------------------------------------------------------------\
+POST   /admin/auth/unlink-all        Unlink all OAuth accounts (unlinkAllOAuthAccountsAdmin) [Stable]\
+\
+----------------------------------------------------------------------\
+DATABASE BACKUPS (ADMIN)\
+Manage backups of the Immich database.\
+----------------------------------------------------------------------\
+GET    /admin/database-backups       List database backups (listDatabaseBackups) [Alpha]\
+DELETE /admin/database-backups       Delete database backup (deleteDatabaseBackup) [Alpha]\
+POST   /admin/database-backups/start-restore Start database backup restore flow [Alpha]\
+POST   /admin/database-backups/upload Upload database backup (uploadDatabaseBackup) [Alpha]\
+GET    /admin/database-backups/\{filename\} Download database backup (downloadDatabaseBackup) [Alpha]\
+\
+----------------------------------------------------------------------\
+DEPRECATED\
+Endpoints planned for removal in the next major release.\
+----------------------------------------------------------------------\
+PUT    /admin/users/\{id\}             Update a user (updateUserAdmin) [Deprecated]\
+PUT    /admin/users/\{id\}/preferences Update user preferences (updateUserPreferencesAdmin) [Deprecated]\
+PUT    /api-keys/\{id\}                Update an API key (updateApiKey) [Deprecated]\
+PUT    /assets                       Update assets (updateAssets) [Deprecated]\
+PUT    /assets/\{id\}                  Update an asset (updateAsset) [Deprecated]\
+GET    /jobs                         Retrieve queue counts and status (getQueuesLegacy) [Deprecated]\
+PUT    /jobs/\{name\}                  Run jobs (runQueueCommandLegacy) [Deprecated]\
+PUT    /libraries/\{id\}               Update a library (updateLibrary) [Deprecated]\
+PUT    /memories/\{id\}                Update a memory (updateMemory) [Deprecated]\
+POST   /partners/\{id\}                Create a partner (createPartnerDeprecated) [Deprecated]\
+PUT    /people/\{id\}                  Update person (updatePerson) [Deprecated]\
+PUT    /sessions/\{id\}                Update a session (updateSession) [Deprecated]\
+PUT    /stacks/\{id\}                  Update a stack (updateStack) [Deprecated]\
+PUT    /tags/\{id\}                    Update a tag (updateTag) [Deprecated]\
+PUT    /users/me                     Update current user (updateMyUser) [Deprecated]\
+PUT    /users/me/preferences         Update my preferences (updateMyPreferences) [Deprecated]\
+PUT    /workflows/\{id\}               Update a workflow (updateWorkflow) [Deprecated]\
+\
+----------------------------------------------------------------------\
+DOWNLOAD\
+Endpoints for downloading assets or collections of assets.\
+----------------------------------------------------------------------\
+POST   /download/archive             Download asset archive (downloadArchive) [Stable]\
+POST   /download/info                Retrieve download information (getDownloadInfo) [Stable]\
+\
+----------------------------------------------------------------------\
+DUPLICATES\
+Endpoints for managing and identifying duplicate assets.\
+----------------------------------------------------------------------\
+GET    /duplicates                   Retrieve duplicates (getAssetDuplicates) [Stable]\
+DELETE /duplicates                   Delete duplicates (deleteDuplicates) [Stable]\
+POST   /duplicates/resolve           Resolve duplicate groups (resolveDuplicates) [Alpha]\
+DELETE /duplicates/\{id\}              Dismiss a duplicate group (deleteDuplicate) [Stable]\
+\
+----------------------------------------------------------------------\
+FACES\
+Human faces detected within assets, normally via ML or manually.\
+----------------------------------------------------------------------\
+GET    /faces                        Retrieve faces for asset (getFaces) [Stable]\
+POST   /faces                        Create a face (createFace) [Stable]\
+PUT    /faces/\{id\}                   Re-assign a face to another person (reassignFacesById) [Stable]\
+DELETE /faces/\{id\}                   Delete a face (deleteFace) [Stable]\
+\
+----------------------------------------------------------------------\
+JOBS / QUEUES\
+Queues and background jobs used for processing tasks asynchronously.\
+----------------------------------------------------------------------\
+GET    /jobs                         Retrieve queue counts and status (getQueuesLegacy) [Deprecated]\
+POST   /jobs                         Create a manual job (createJob) [Stable]\
+PUT    /jobs/\{name\}                  Run jobs (runQueueCommandLegacy) [Deprecated]\
+GET    /queues                       List all queues (getQueues) [Alpha]\
+GET    /queues/\{name\}                Retrieve a queue (getQueue) [Alpha]\
+PUT    /queues/\{name\}                Update a queue (updateQueue) [Alpha]\
+GET    /queues/\{name\}/jobs           Retrieve queue jobs (getQueueJobs) [Alpha]\
+DELETE /queues/\{name\}/jobs           Empty a queue (emptyQueue) [Alpha]\
+\
+----------------------------------------------------------------------\
+LIBRARIES\
+External or default upload directories scanned for assets.\
+----------------------------------------------------------------------\
+GET    /libraries                    Retrieve libraries (getAllLibraries) [Stable]\
+POST   /libraries                    Create a library (createLibrary) [Stable]\
+GET    /libraries/\{id\}               Retrieve a library (getLibrary) [Stable]\
+PUT    /libraries/\{id\}               Update a library (updateLibrary) [Deprecated]\
+DELETE /libraries/\{id\}               Delete a library (deleteLibrary) [Stable]\
+POST   /libraries/\{id\}/scan          Scan a library (scanLibrary) [Stable]\
+GET    /libraries/\{id\}/statistics    Retrieve library statistics (getLibraryStatistics) [Stable]\
+POST   /libraries/\{id\}/validate      Validate library settings (validate) [Stable]\
+\
+----------------------------------------------------------------------\
+INTEGRITY & MAINTENANCE (ADMIN)\
+Operations for checking files and managing read-only states.\
+----------------------------------------------------------------------\
+GET    /admin/integrity/report       Get integrity report by type (getIntegrityReport) [Alpha]\
+DELETE /admin/integrity/report/\{id\}  Delete integrity report item (deleteIntegrityReport) [Alpha]\
+GET    /admin/integrity/report/\{id\}/file Download flagged file (getIntegrityReportFile) [Alpha]\
+GET    /admin/integrity/report/\{type\}/csv Export integrity report as CSV (getIntegrityReportCsv) [Alpha]\
+GET    /admin/integrity/summary      Get integrity report summary (getIntegrityReportSummary) [Alpha]\
+POST   /admin/maintenance            Set maintenance mode (setMaintenanceMode) [Alpha]\
+GET    /admin/maintenance/detect-install Detect existing install (detectPriorInstall) [Alpha]\
+POST   /admin/maintenance/login      Log into maintenance mode (maintenanceLogin) [Alpha]\
+GET    /admin/maintenance/status     Get maintenance mode status (getMaintenanceStatus) [Alpha]\
+\
+----------------------------------------------------------------------\
+MAP\
+Geolocation features including reverse geocoding and map markers.\
+----------------------------------------------------------------------\
+GET    /map/markers                  Retrieve map markers (getMapMarkers) [Stable]\
+GET    /map/reverse-geocode          Reverse geocode coordinates (reverseGeocode) [Stable]\
+\
+----------------------------------------------------------------------\
+MEMORIES\
+Specialized auto-generated collections of assets with custom views.\
+----------------------------------------------------------------------\
+GET    /memories                     Retrieve memories (searchMemories) [Stable]\
+POST   /memories                     Create a memory (createMemory) [Stable]\
+GET    /memories/statistics          Retrieve memories statistics (memoriesStatistics) [Stable]\
+GET    /memories/\{id\}                Retrieve a memory (getMemory) [Stable]\
+PUT    /memories/\{id\}                Update a memory (updateMemory) [Deprecated]\
+DELETE /memories/\{id\}                Delete a memory (deleteMemory) [Stable]\
+PUT    /memories/\{id\}/assets         Add assets to a memory (addMemoryAssets) [Stable]\
+DELETE /memories/\{id\}/assets         Remove assets from a memory (removeMemoryAssets) [Stable]\
+\
+----------------------------------------------------------------------\
+NOTIFICATIONS\
+Messages shown to users in the app, or administrative email templates.\
+----------------------------------------------------------------------\
+GET    /notifications                Retrieve notifications (getNotifications) [Stable]\
+PUT    /notifications                Update notifications (updateNotifications) [Stable]\
+DELETE /notifications                Delete notifications (deleteNotifications) [Stable]\
+GET    /notifications/\{id\}           Get a notification (getNotification) [Stable]\
+PUT    /notifications/\{id\}           Update a notification (updateNotification) [Stable]\
+DELETE /notifications/\{id\}           Delete a notification (deleteNotification) [Stable]\
+POST   /admin/notifications          Create a notification (createNotification) [Stable]\
+POST   /admin/notifications/templates/\{name\} Render email template (getNotificationTemplateAdmin) [Stable]\
+POST   /admin/notifications/test-email Send test email (sendTestEmailAdmin) [Stable]\
+\
+----------------------------------------------------------------------\
+PARTNERS\
+A partner link that allows direct asset sharing between two users.\
+----------------------------------------------------------------------\
+GET    /partners                     Retrieve partners (getPartners) [Stable]\
+POST   /partners                     Create a partner (createPartner) [Stable]\
+PUT    /partners/\{id\}                Update a partner (updatePartner) [Stable]\
+POST   /partners/\{id\}                Create a partner (createPartnerDeprecated) [Deprecated]\
+DELETE /partners/\{id\}                Remove a partner (removePartner) [Stable]\
+\
+----------------------------------------------------------------------\
+PEOPLE\
+A collection of faces, automatically managed or manually merged.\
+----------------------------------------------------------------------\
+GET    /people                       Get all people (getAllPeople) [Stable]\
+PUT    /people                       Update people (updatePeople) [Stable]\
+POST   /people                       Create a person (createPerson) [Stable]\
+DELETE /people                       Delete people (deletePeople) [Stable]\
+GET    /people/\{id\}                  Get a person (getPerson) [Stable]\
+PUT    /people/\{id\}                  Update person (updatePerson) [Deprecated]\
+DELETE /people/\{id\}                  Delete person (deletePerson) [Stable]\
+POST   /people/\{id\}/merge            Merge people (mergePerson) [Stable]\
+PUT    /people/\{id\}/reassign         Reassign faces (reassignFaces) [Stable]\
+GET    /people/\{id\}/statistics       Get person statistics (getPersonStatistics) [Stable]\
+GET    /people/\{id\}/thumbnail        Get person thumbnail (getPersonThumbnail) [Stable]\
+\
+----------------------------------------------------------------------\
+PLUGINS\
+Modules adding filters and actions for workflow features.\
+----------------------------------------------------------------------\
+GET    /plugins                      List all plugins (searchPlugins)\
+GET    /plugins/methods              Retrieve plugin methods (searchPluginMethods)\
+GET    /plugins/templates            Retrieve workflow templates (searchPluginTemplates)\
+GET    /plugins/\{id\}                 Retrieve a plugin (getPlugin)\
+\
+----------------------------------------------------------------------\
+SEARCH\
+Search assets via text, smart search, OCR, or specific metadata.\
+----------------------------------------------------------------------\
+GET    /search/cities                Retrieve assets by city (getAssetsByCity) [Stable]\
+GET    /search/explore               Retrieve explore data (getExploreData) [Stable]\
+POST   /search/large-assets          Search large assets (searchLargeAssets) [Stable]\
+POST   /search/metadata              Search assets by metadata (searchAssets) [Stable]\
+GET    /search/person                Search people (searchPerson) [Stable]\
+GET    /search/places                Search places (searchPlaces) [Stable]\
+POST   /search/random                Search random assets (searchRandom) [Stable]\
+POST   /search/smart                 Smart asset search (searchSmart) [Stable]\
+POST   /search/statistics            Search asset statistics (searchAssetStatistics) [Stable]\
+GET    /search/suggestions           Retrieve search suggestions (getSearchSuggestions) [Stable]\
+\
+----------------------------------------------------------------------\
+SERVER\
+System info, versions, active licenses, and resource statistics.\
+----------------------------------------------------------------------\
+GET    /server/about                 Get server information (getAboutInfo) [Stable]\
+GET    /server/apk-links             Get APK links (getApkLinks) [Stable]\
+GET    /server/config                Get config (getServerConfig) [Stable]\
+GET    /server/features              Get features (getServerFeatures) [Stable]\
+GET    /server/license               Get product key (getServerLicense) [Stable]\
+PUT    /server/license               Set server product key (setServerLicense) [Stable]\
+DELETE /server/license               Delete server product key (deleteServerLicense) [Stable]\
+GET    /server/media-types           Get supported media types (getSupportedMediaTypes) [Stable]\
+GET    /server/ping                  Ping (pingServer) [Stable]\
+GET    /server/statistics            Get statistics (getServerStatistics) [Stable]\
+GET    /server/storage               Get storage (getStorage) [Stable]\
+GET    /server/version               Get server version (getServerVersion) [Stable]\
+GET    /server/version-check         Get version check status (getVersionCheck) [Stable]\
+GET    /server/version-history       Get version history (getVersionHistory) [Stable]\
+\
+----------------------------------------------------------------------\
+SESSIONS\
+Active user logins, showing up as "Authorized devices" in the UI.\
+----------------------------------------------------------------------\
+GET    /sessions                     Retrieve sessions (getSessions) [Stable]\
+POST   /sessions                     Create a session (createSession) [Stable]\
+DELETE /sessions                     Delete all sessions (deleteAllSessions) [Stable]\
+PUT    /sessions/\{id\}                Update a session (updateSession) [Deprecated]\
+DELETE /sessions/\{id\}                Delete a session (deleteSession) [Stable]\
+POST   /sessions/\{id\}/lock            Lock a session (lockSession) [Stable]\
+\
+----------------------------------------------------------------------\
+SHARED LINKS\
+Public URLs providing access to assets or albums.\
+----------------------------------------------------------------------\
+GET    /shared-links                 Retrieve all shared links (getAllSharedLinks) [Stable]\
+POST   /shared-links                 Create a shared link (createSharedLink) [Stable]\
+POST   /shared-links/login           Shared link login (sharedLinkLogin) [Beta]\
+GET    /shared-links/me              Retrieve current shared link (getMySharedLink) [Stable]\
+GET    /shared-links/\{id\}            Retrieve a shared link (getSharedLinkById) [Stable]\
+DELETE /shared-links/\{id\}            Delete a shared link (removeSharedLink) [Stable]\
+PATCH  /shared-links/\{id\}            Update a shared link (updateSharedLink) [Stable]\
+PUT    /shared-links/\{id\}/assets     Add assets to a shared link (addSharedLinkAssets) [Stable]\
+DELETE /shared-links/\{id\}/assets     Remove assets from a shared link (removeSharedLinkAssets) [Stable]\
+\
+----------------------------------------------------------------------\
+STACKS\
+Groups of related items under one primary asset.\
+----------------------------------------------------------------------\
+GET    /stacks                       Retrieve stacks (searchStacks) [Stable]\
+POST   /stacks                       Create a stack (createStack) [Stable]\
+DELETE /stacks                       Delete stacks (deleteStacks) [Stable]\
+GET    /stacks/\{id\}                  Retrieve a stack (getStack) [Stable]\
+PUT    /stacks/\{id\}                  Update a stack (updateStack) [Deprecated]\
+DELETE /stacks/\{id\}                  Delete a stack (deleteStack) [Stable]\
+DELETE /stacks/\{id\}/assets/\{assetId\} Remove an asset from a stack (removeAssetFromStack) [Stable]\
+\
+----------------------------------------------------------------------\
+SYNC\
+Endpoints backing the new mobile synchronization protocol.\
+----------------------------------------------------------------------\
+GET    /sync/ack                     Retrieve acknowledgements (getSyncAck) [Stable]\
+POST   /sync/ack                     Acknowledge changes (sendSyncAck) [Stable]\
+DELETE /sync/ack                     Delete acknowledgements (deleteSyncAck) [Stable]\
+POST   /sync/stream                  Stream sync changes (getSyncStream) [Stable]\
+\
+----------------------------------------------------------------------\
+SYSTEM CONFIG & METADATA\
+Settings, storage templates, and first-time admin onboarding state.\
+----------------------------------------------------------------------\
+GET    /system-config                Get system configuration (getConfig) [Stable]\
+PUT    /system-config                Update system configuration (updateConfig) [Stable]\
+GET    /system-config/defaults       Get system configuration defaults (getConfigDefaults) [Stable]\
+GET    /system-config/storage-template-options Get template options (getStorageTemplateOptions) [Stable]\
+GET    /system-metadata/admin-onboarding Get onboarding status (getAdminOnboarding) [Stable]\
+POST   /system-metadata/admin-onboarding Update onboarding status (updateAdminOnboarding) [Stable]\
+GET    /system-metadata/reverse-geocoding-state Get geocoding state (getReverseGeocodingState) [Stable]\
+GET    /system-metadata/version-check-state Get version check state (getVersionCheckState) [Stable]\
+\
+----------------------------------------------------------------------\
+TAGS\
+User-defined (hierarchical) tags that can be applied to assets.\
+----------------------------------------------------------------------\
+GET    /tags                         Retrieve tags (getAllTags) [Stable]\
+PUT    /tags                         Upsert tags (upsertTags) [Stable]\
+POST   /tags                         Create a tag (createTag) [Stable]\
+PUT    /tags/assets                  Tag assets (bulkTagAssets) [Stable]\
+GET    /tags/\{id\}                    Retrieve a tag (getTagById) [Stable]\
+PUT    /tags/\{id\}                    Update a tag (updateTag) [Deprecated]\
+DELETE /tags/\{id\}                    Delete a tag (deleteTag) [Stable]\
+PUT    /tags/\{id\}/assets             Tag assets (tagAssets) [Stable]\
+DELETE /tags/\{id\}/assets             Untag assets (untagAssets) [Stable]\
+\
+----------------------------------------------------------------------\
+TIMELINE\
+Specialized internal routes utilized for frontend web rendering.\
+----------------------------------------------------------------------\
+GET    /timeline/bucket              Get time bucket (getTimeBucket) [Internal]\
+GET    /timeline/buckets             Get time buckets (getTimeBuckets) [Internal]\
+\
+----------------------------------------------------------------------\
+TRASH\
+Manage discarded items before they get purged permanently.\
+----------------------------------------------------------------------\
+POST   /trash/empty                  Empty trash (emptyTrash) [Stable]\
+POST   /trash/restore                Restore trash (restoreTrash) [Stable]\
+POST   /trash/restore/assets         Restore assets (restoreAssets) [Stable]\
+\
+----------------------------------------------------------------------\
+USERS\
+Profile information, calendar activity, onboarding, and preferences.\
+----------------------------------------------------------------------\
+GET    /users                        Get all users (searchUsers) [Stable]\
+GET    /users/me                     Get current user (getMyUser) [Stable]\
+PUT    /users/me                     Update current user (updateMyUser) [Deprecated]\
+GET    /users/me/calendar-heatmap    Retrieve calendar heatmap activity (getMyCalendarHeatmap) [Stable]\
+GET    /users/me/license             Retrieve user product key (getUserLicense) [Stable]\
+PUT    /users/me/license             Set user product key (setUserLicense) [Stable]\
+DELETE /users/me/license             Delete user product key (deleteUserLicense) [Stable]\
+GET    /users/me/onboarding          Retrieve user onboarding (getUserOnboarding) [Stable]\
+PUT    /users/me/onboarding          Update user onboarding (setUserOnboarding) [Stable]\
+DELETE /users/me/onboarding          Delete user onboarding (deleteUserOnboarding) [Stable]\
+GET    /users/me/preferences         Get my preferences (getMyPreferences) [Stable]\
+PUT    /users/me/preferences         Update my preferences (updateMyPreferences) [Deprecated]\
+POST   /users/profile-image          Create user profile image (createProfileImage) [Stable]\
+DELETE /users/profile-image          Delete user profile image (deleteProfileImage) [Stable]\
+GET    /users/\{id\}                   Retrieve a user (getUser) [Stable]\
+GET    /users/\{id\}/profile-image     Retrieve user profile image (getProfileImage) [Stable]\
+\
+----------------------------------------------------------------------\
+USERS (ADMIN)\
+Administrative endpoints for adding, shifting preferences, and resetting.\
+----------------------------------------------------------------------\
+GET    /admin/users                  Search users (searchUsersAdmin) [Stable]\
+POST   /admin/users                  Create a user (createUserAdmin) [Stable]\
+GET    /admin/users/\{id\}             Retrieve a user (getUserAdmin) [Stable]\
+PUT    /admin/users/\{id\}             Update a user (updateUserAdmin) [Deprecated]\
+DELETE /admin/users/\{id\}             Delete a user (deleteUserAdmin) [Stable]\
+GET    /admin/users/\{id\}/calendar-heatmap Get calendar heatmap (getUserCalendarHeatmapAdmin) [Stable]\
+GET    /admin/users/\{id\}/preferences Retrieve user preferences (getUserPreferencesAdmin) [Stable]\
+PUT    /admin/users/\{id\}/preferences Update user preferences (updateUserPreferencesAdmin) [Deprecated]\
+POST   /admin/users/\{id\}/restore     Restore a deleted user (restoreUserAdmin) [Stable]\
+GET    /admin/users/\{id\}/sessions    Retrieve user sessions (getUserSessionsAdmin) [Stable]\
+GET    /admin/users/\{id\}/statistics  Retrieve user statistics (getUserStatisticsAdmin) [Stable]\
+\
+----------------------------------------------------------------------\
+VIEWS\
+Alternative navigation filters (e.g. folder/original structures).\
+----------------------------------------------------------------------\
+GET    /view/folder                  Retrieve assets by original path (getAssetsByOriginalPath) [Stable]\
+GET    /view/folder/unique-paths     Retrieve unique paths (getUniqueOriginalPaths) [Stable]\
+\
+----------------------------------------------------------------------\
+WORKFLOWS\
+Event-driven actions coupled to customized plugins and filters.\
+----------------------------------------------------------------------\
+GET    /workflows                    List all workflows (searchWorkflows)\
+POST   /workflows                    Create a workflow (createWorkflow)\
+GET    /workflows/triggers           List all workflow triggers (getWorkflowTriggers)\
+GET    /workflows/\{id\}               Retrieve a workflow (getWorkflow)\
+PUT    /workflows/\{id\}               Update a workflow (updateWorkflow) [Deprecated]\
+DELETE /workflows/\{id\}               Delete a workflow (deleteWorkflow)\
+======================================================================}

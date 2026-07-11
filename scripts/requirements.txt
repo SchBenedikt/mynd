@@ -1,0 +1,22 @@
+# Core
+requests>=2.31.0
+watchdog>=3.0.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# Document parsing
+python-docx>=1.1.0
+markdown>=3.5.0
+
+# LightRAG dependencies
+lightrag-hku>=1.4.0
+qdrant-client>=1.9.0
+networkx>=3.2.0
+tiktoken>=0.6.0
+numpy>=1.24.0
+
+# PDF parsing (optional - install Docling separately for scanned PDFs)
+# docling>=2.0.0  # uncomment for PDF support
+
+# Reranker (optional)
+# sentence-transformers>=2.2.0

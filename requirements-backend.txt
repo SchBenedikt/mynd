@@ -1,0 +1,36 @@
+# mynd-2new Backend Requirements
+# Install: pip3 install -r requirements-backend.txt
+
+# Core
+flask>=3.0.0
+flask-socketio>=5.6.0
+werkzeug>=3.0.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# AI / Embeddings
+numpy>=1.24.0
+sentence-transformers>=5.0.0
+transformers>=5.0.0
+torch>=2.0.0
+tiktoken>=0.5.0
+
+# Document processing
+pillow>=10.0.0
+python-docx>=1.0.0
+openpyxl>=3.1.0
+lxml>=5.0.0
+lxml_html_clean>=0.4.0
+beautifulsoup4>=4.12.0
+markdown>=3.5.0
+chromadb>=1.5.0
+
+# Web search
+ddgs>=1.0.0
+requests-html>=0.10.0
+
+# Scheduling
+APScheduler>=3.10.0
+
+# OAuth / Auth
+requests-oauthlib>=2.0.0
