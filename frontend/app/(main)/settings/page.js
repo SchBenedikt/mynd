@@ -66,7 +66,7 @@ export default function SettingsPage() {
             {activeTab === 'integrations' && <IntegrationsTab tr={(d, e) => tr(d, e, language)} language={language} />}
             {activeTab === 'indexing' && <IndexingTab tr={(d, e) => tr(d, e, language)} language={language} />}
             {activeTab === 'memory' && <MemoryTab tr={(d, e) => tr(d, e, language)} language={language} />}
-            {activeTab === 'design' && <DesignTab tr={(d, e) => tr(d, e, language)} language={language} />}
+            {activeTab === 'design' && <DesignTab tr={(d, e) => tr(d, e, language)} />}
             {activeTab === 'admin' && <AdminTab tr={(d, e) => tr(d, e, language)} language={language} />}
           </div>
         </div>

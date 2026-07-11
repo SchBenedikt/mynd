@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState, useEffect } from 'react';
+import { createContext, useContext, useMemo, useState, useEffect, useCallback } from 'react';
 
 const LANGUAGE_STORAGE_KEY = 'mynd_language';
+const LanguageContext = createContext(null);
 
 export const SUPPORTED_LANGUAGES = [
   { code: 'de', label: 'Deutsch' },
@@ -662,7 +663,7 @@ function interpolate(template, vars) {
   return String(template).replace(/\{(\w+)\}/g, (_, key) => vars?.[key] ?? `{${key}}`);
 }
 
-export function useLanguage() {
+export function LanguageProvider({ children }) {
   const [language, setLanguageState] = useState('de');
 
   useEffect(() => {
@@ -673,13 +674,24 @@ export function useLanguage() {
     document.documentElement.setAttribute('lang', next);
   }, []);
 
-  const setLanguage = (nextLanguage) => {
+  const setLanguage = useCallback((nextLanguage) => {
     const valid = SUPPORTED_LANGUAGES.some((l) => l.code === nextLanguage);
     const safe = valid ? nextLanguage : 'de';
     setLanguageState(safe);
     localStorage.setItem(LANGUAGE_STORAGE_KEY, safe);
     document.documentElement.setAttribute('lang', safe);
-  };
+  }, []);
+
+  const value = useMemo(() => ({ language, setLanguage }), [language, setLanguage]);
+
+  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+}
+
+export function useLanguage() {
+  const ctx = useContext(LanguageContext);
+  if (!ctx) throw new Error('useLanguage must be used within LanguageProvider');
+
+  const { language, setLanguage } = ctx;
 
   const t = useMemo(() => {
     return (key, vars) => {

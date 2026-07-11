@@ -4,6 +4,7 @@ import "katex/dist/katex.min.css";
 import AuthGate from '../components/AuthGate';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { AppProvider } from '../lib/AppContext';
+import { LanguageProvider } from '../hooks/useLanguage';
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -32,9 +33,11 @@ export default function RootLayout({ children }) {
       <body className={`${spaceGrotesk.variable} ${ibmPlexMono.variable}`}>
         <ErrorBoundary>
           <AuthGate>
-            <AppProvider>
-              {children}
-            </AppProvider>
+            <LanguageProvider>
+              <AppProvider>
+                {children}
+              </AppProvider>
+            </LanguageProvider>
           </AuthGate>
         </ErrorBoundary>
       </body>

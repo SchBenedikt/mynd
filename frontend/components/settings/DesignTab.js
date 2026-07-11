@@ -4,9 +4,9 @@ import { useTheme } from '../../hooks/useTheme';
 import { useLanguage } from '../../hooks/useLanguage';
 import { ThemeSelector } from '../../components/ThemeSelector';
 
-export default function DesignTab({ tr, language }) {
+export default function DesignTab({ tr }) {
   const { theme, darkMode, contrastColor, setTheme, setDarkMode, setContrastColor } = useTheme();
-  const { setLanguage, t, languages } = useLanguage();
+  const { language, setLanguage, t, languages } = useLanguage();
 
   return (
     <div className="settings-panel">
