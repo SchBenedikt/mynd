@@ -4,7 +4,6 @@ import { useEffect, useState, useRef } from "react";
 import { usePathname, useRouter } from 'next/navigation';
 import './AuthGate.css';
 import { apiFetch, getApiBase } from '../lib/api';
-import LandingPage from './LandingPage';
 
 const LANGUAGE_KEY = 'mynd_language';
 const TOKEN_KEY = 'mynd_token_v1';
@@ -128,10 +127,6 @@ export default function AuthGate({ children }) {
   if (user && !forceOpen) return children;
   if (hasToken && !forceOpen) return children;
   if (!requireLoginSetting && !forceOpen) return children;
-
-  if (pathname === '/') {
-    return <LandingPage />;
-  }
 
   if (typeof window !== 'undefined') {
     router.replace('/login');
