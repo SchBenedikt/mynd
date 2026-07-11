@@ -567,9 +567,20 @@ export default function HomePage() {
     });
   }, []);
 
+  const fetchUser = async () => {
+    try {
+      const storedToken = localStorage.getItem('mynd_token_v1');
+      if (!storedToken) return;
+      const res = await fetch(`${getApiBase()}/api/auth/me`, { headers: { 'Authorization': `Bearer ${storedToken}` } });
+      const data = await safeReadJson(res);
+      if (res.ok && data && data.authenticated && data.user) setUser(data.user);
+    } catch {}
+  };
+
   useEffect(() => {
     loadAIConfig();
     loadOllamaModels();
+    fetchUser();
     updateStatus();
     loadSecurityStatus();
     loadProactiveBriefings();
@@ -912,19 +923,18 @@ export default function HomePage() {
         kb: kb.database_path ? 'ok' : 'error',
         embeddings: kb.semantic_search_available ? (embeddingsComplete ? 'ok' : 'loading') : 'error'
       });
-      // also fetch current user (if any) to display in sidebar
-      try {
-        const storedToken = (() => { try { return localStorage.getItem('mynd_token_v1'); } catch(e) { return null; } })();
-        const headers = storedToken ? { 'Authorization': `Bearer ${storedToken}` } : {};
-        const meRes = await fetch(`${getApiBase()}/api/auth/me`, { headers });
-        const me = await safeReadJson(meRes);
-        if (meRes.ok && me && me.authenticated) setUser(me.user);
-        else setUser(null);
-      } catch (err) {
-        setUser(null);
-      }
     } catch (err) {
       setHealth({ ollama: 'error', kb: 'error', embeddings: 'error' });
+    }
+    try {
+      const storedToken = (() => { try { return localStorage.getItem('mynd_token_v1'); } catch(e) { return null; } })();
+      const headers = storedToken ? { 'Authorization': `Bearer ${storedToken}` } : {};
+      const meRes = await fetch(`${getApiBase()}/api/auth/me`, { headers });
+      const me = await safeReadJson(meRes);
+      if (meRes.ok && me && me.authenticated) setUser(me.user);
+      else setUser(null);
+    } catch (err) {
+      setUser(null);
     }
   };
 
