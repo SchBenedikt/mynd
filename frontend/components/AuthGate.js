@@ -26,6 +26,23 @@ export default function AuthGate({ children }) {
   const [requireLoginSetting, setRequireLoginSetting] = useState(true);
   const lastReplaceRef = useRef(0);
   const [setupStatusRefresh, setSetupStatusRefresh] = useState(0);
+  const [authBackendUrl, setAuthBackendUrl] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('backendUrl') || 'http://127.0.0.1:5001';
+    return 'http://127.0.0.1:5001';
+  });
+  const [backendStatus, setBackendStatus] = useState('checking');
+
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      fetch(`${authBackendUrl}/api/health`, { signal: AbortSignal.timeout(5000) })
+        .then(r => { if (!cancelled) setBackendStatus(r.ok ? 'ok' : 'error'); })
+        .catch(() => { if (!cancelled) setBackendStatus('error'); });
+    };
+    check();
+    const interval = setInterval(check, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [authBackendUrl]);
 
   const guardedReplace = (url) => {
     const now = Date.now();
@@ -177,6 +194,11 @@ export default function AuthGate({ children }) {
     } catch (e) { return url; }
   };
 
+  const changeBackendUrl = (url) => {
+    setAuthBackendUrl(url);
+    localStorage.setItem('backendUrl', url);
+  };
+
   return (
     <div className="auth-overlay">
       <div className="auth-card">
@@ -266,6 +288,36 @@ export default function AuthGate({ children }) {
         </div>
 
         <div className="auth-footer">
+          <div className="auth-backend-config">
+            <details>
+              <summary style={{cursor:'pointer',fontSize:'0.8rem',color:'var(--muted)',opacity:0.7}}>
+                Server-Verbindung
+                <span style={{marginLeft:'0.4rem',display:'inline-flex',alignItems:'center',gap:'0.25rem'}}>
+                  <span style={{
+                    display:'inline-block',width:7,height:7,borderRadius:'50%',
+                    background: backendStatus === 'ok' ? '#22c55e' : backendStatus === 'error' ? '#ef4444' : '#f59e0b'
+                  }} />
+                  {backendStatus === 'ok' ? 'verbunden' : backendStatus === 'error' ? 'nicht erreichbar' : 'prüfe...'}
+                </span>
+              </summary>
+              <div style={{marginTop:'0.5rem'}}>
+                <input
+                  type="text"
+                  value={authBackendUrl}
+                  onChange={(e) => changeBackendUrl(e.target.value)}
+                  placeholder="http://127.0.0.1:5001"
+                  style={{
+                    width:'100%',padding:'0.4rem 0.6rem',borderRadius:'6px',
+                    border:'1px solid var(--line)',background:'var(--input-bg, #1a1a2e)',
+                    color:'var(--text)',fontSize:'0.8rem',boxSizing:'border-box'
+                  }}
+                />
+                <small style={{display:'block',marginTop:'0.25rem',color:'var(--muted)',fontSize:'0.7rem'}}>
+                  Adresse des lokalen Backend-Servers (z.B. http://192.168.178.50:5001)
+                </small>
+              </div>
+            </details>
+          </div>
           <small>Die Anmeldung erfolgt ausschließlich auf deinem lokalen Server. Es werden keine Daten an Dritte weitergegeben.</small>
         </div>
       </div>

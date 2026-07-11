@@ -1368,6 +1368,10 @@ def api_health():
         'ollama': 'unknown', 'kb': 'unknown', 'embeddings': 'unknown'
     })
 
+@app.route('/')
+def root_status():
+    return '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mynd Backend</title><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f0f1a;color:#e2e8f0}div{text-align:center}h1{font-size:2.5rem;margin:0 0 0.5rem}.ok{color:#22c55e}.info{color:#94a3b8;font-size:0.9rem}</style></head><body><div><h1 class="ok">✓ api ok</h1><p class="info">mynd Backend – Port 5001</p></div></body></html>'
+
 @app.route('/api/setup/status', methods=['GET'])
 def setup_status():
     needs_setup = not SETUP_DONE_FILE.exists()

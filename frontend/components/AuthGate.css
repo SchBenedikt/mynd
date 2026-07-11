@@ -267,6 +267,23 @@
   line-height: 1.5;
 }
 
+.auth-backend-config {
+  margin-bottom: 0.75rem;
+}
+
+.auth-backend-config details {
+  max-width: 320px;
+}
+
+.auth-backend-config input {
+  transition: border-color 0.2s;
+}
+
+.auth-backend-config input:focus {
+  outline: none;
+  border-color: var(--accent, #6366f1) !important;
+}
+
 @media (max-width: 760px) {
   .auth-body {
     flex-direction: column;

@@ -10,7 +10,7 @@ export function useSidebar() {
       const raw = localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
       if (raw === 'true' || raw === 'false') return raw === 'true';
     }
-    return true;
+    return false;
   });
 
   const [canAnimate, setCanAnimate] = useState(false);

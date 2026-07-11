@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiFetch, getApiBase } from '../../lib/api';
 
 function getAuthHeaders() {
@@ -11,6 +12,7 @@ function getAuthHeaders() {
 }
 
 export default function ProfileTab({ tr, language }) {
+  const router = useRouter();
   const [profile, setProfile] = useState({ name: '', username: '' });
   const [password, setPassword] = useState('');
   const [msg, setMsg] = useState('');
@@ -126,6 +128,17 @@ export default function ProfileTab({ tr, language }) {
           {msg && <div className="profile-msg success"><i className="fas fa-check-circle"></i> {msg}</div>}
           {error && <div className="profile-msg error"><i className="fas fa-exclamation-circle"></i> {error}</div>}
         </form>
+      </div>
+
+      <div className="panel-section" style={{marginTop:'2rem',borderTop:'1px solid var(--line)',paddingTop:'1.5rem'}}>
+        <button className="btn danger" onClick={() => {
+          try { localStorage.removeItem('mynd_token_v1'); } catch (e) {}
+          try { localStorage.removeItem('mynd_user_v1'); } catch (e) {}
+          router.push('/');
+        }} style={{width:'100%',padding:'0.6rem'}}>
+          <i className="fas fa-sign-out-alt" style={{marginRight:'0.4rem'}}></i>
+          {tr('Abmelden', 'Log out')}
+        </button>
       </div>
     </div>
   );
