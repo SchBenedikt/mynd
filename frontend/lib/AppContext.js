@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import { apiFetch } from './api';
 
 const CHAT_STORAGE_KEY = 'mynd_chat_history_v1';
 const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
@@ -45,6 +46,15 @@ export function AppProvider({ children }) {
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown', embeddings: 'unknown' });
   const [projects, setProjects] = useState(loadProjects);
   const [activeProject, setActiveProject] = useState(null);
+
+  useEffect(() => {
+    const token = (() => { try { return localStorage.getItem('mynd_token_v1'); } catch(e) { return null; } })();
+    if (!token) return;
+    apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => { if (data?.authenticated && data.user) setUser(data.user); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const nonEmpty = chats.filter(c => (c.messages?.length || 0) > 0 || c.title !== 'Neuer Chat');
