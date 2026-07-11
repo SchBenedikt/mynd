@@ -55,6 +55,7 @@ _app_lock = threading.Lock()
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / 'data'
 FRONTEND_DIR = BASE_DIR / 'frontend'
+STATIC_EXPORT_DIR = FRONTEND_DIR / 'out'
 AI_CONFIG_FILE = DATA_DIR / 'ai_config.json'
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -1376,7 +1377,21 @@ def api_health():
 
 @app.route('/')
 def root_status():
+    if STATIC_EXPORT_DIR.is_dir():
+        return send_from_directory(STATIC_EXPORT_DIR, 'index.html')
     return '<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>mynd Backend</title><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f0f1a;color:#e2e8f0}div{text-align:center}h1{font-size:2.5rem;margin:0 0 0.5rem}.ok{color:#22c55e}.info{color:#94a3b8;font-size:0.9rem}</style></head><body><div><h1 class="ok">✓ api ok</h1><p class="info">mynd Backend – Port 5001</p></div></body></html>'
+
+@app.route('/<path:path>')
+def frontend_static(path):
+    if not STATIC_EXPORT_DIR.is_dir():
+        return jsonify({'error': 'not found'}), 404
+    file_path = STATIC_EXPORT_DIR / path
+    if file_path.exists() and file_path.is_file():
+        return send_from_directory(STATIC_EXPORT_DIR, path)
+    index = file_path / 'index.html'
+    if index.exists():
+        return send_from_directory(file_path, 'index.html')
+    return send_from_directory(STATIC_EXPORT_DIR, 'index.html')
 
 @app.route('/api/setup/status', methods=['GET'])
 def setup_status():
