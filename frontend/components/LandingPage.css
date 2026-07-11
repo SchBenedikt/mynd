@@ -6,47 +6,43 @@ html:has(.lp) body {
 }
 
 .lp {
-  --lp-bg: #0a0a14;
-  --lp-surface: #12121e;
-  --lp-card: #1a1a2e;
-  --lp-border: #242438;
-  --lp-text: #e2e8f0;
-  --lp-muted: #6b7a90;
-  --lp-brand: var(--brand, #c97d3a);
-  --lp-brand-sub: color-mix(in srgb, var(--brand, #c97d3a) 70%, white);
-  --lp-glow: color-mix(in srgb, var(--brand, #c97d3a) 12%, transparent);
+  --bg: #0a0a14;
+  --card: #12121e;
+  --card-border: #242438;
+  --card-radius: 16px;
+  --input-bg: #1a1a2e;
+  --text: #e2e8f0;
+  --muted: #8892a8;
+  --brand: var(--brand, #c97d3a);
+  --brand-glow: color-mix(in srgb, var(--brand, #c97d3a) 10%, transparent);
+  --glow: radial-gradient(ellipse 60% 40% at 50% 50%, var(--brand-glow), transparent);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-family: var(--font-space-grotesk, -apple-system, BlinkMacSystemFont, sans-serif);
 }
 
 @media (prefers-color-scheme: light) {
   .lp {
-    --lp-bg: #fafafa;
-    --lp-surface: #ffffff;
-    --lp-card: #ffffff;
-    --lp-border: #e5e7eb;
-    --lp-text: #111827;
-    --lp-muted: #6b7280;
-    --lp-glow: color-mix(in srgb, var(--brand, #c97d3a) 8%, transparent);
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --card-border: #e5e7eb;
+    --input-bg: #f9fafb;
+    --text: #111827;
+    --muted: #6b7280;
+    --brand-glow: color-mix(in srgb, var(--brand, #c97d3a) 6%, transparent);
   }
-}
-
-.lp {
-  font-family: var(--font-space-grotesk, -apple-system, BlinkMacSystemFont, sans-serif);
-  background: var(--lp-bg);
-  color: var(--lp-text);
-  min-height: 100vh;
 }
 
 /* ── Nav ──────────────────────────────────── */
 .lp-nav {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 0; left: 0; right: 0;
   z-index: 100;
-  background: color-mix(in srgb, var(--lp-bg) 80%, transparent);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--lp-border);
+  border-bottom: 1px solid var(--card-border);
 }
 
 .lp-nav-inner {
@@ -61,14 +57,14 @@ html:has(.lp) body {
 .lp-logo {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 1.15rem;
+  gap: 0.4rem;
+  font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 .lp-logo-icon {
-  color: var(--lp-brand);
+  color: var(--brand);
   font-size: 1.3rem;
 }
 
@@ -81,7 +77,7 @@ html:has(.lp) body {
 .lp-nav-links button {
   background: none;
   border: none;
-  color: var(--lp-muted);
+  color: var(--muted);
   font-size: 0.85rem;
   cursor: pointer;
   font-family: inherit;
@@ -90,7 +86,7 @@ html:has(.lp) body {
 }
 
 .lp-nav-links button:hover {
-  color: var(--lp-text);
+  color: var(--text);
 }
 
 .lp-nav-right {
@@ -100,9 +96,9 @@ html:has(.lp) body {
 }
 
 .lp-lang-toggle {
-  background: var(--lp-card);
-  border: 1px solid var(--lp-border);
-  color: var(--lp-muted);
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  color: var(--muted);
   padding: 0.5rem 0.75rem;
   border-radius: 8px;
   font-size: 0.78rem;
@@ -116,59 +112,48 @@ html:has(.lp) body {
 }
 
 .lp-lang-toggle:hover {
-  border-color: var(--lp-brand);
-  color: var(--lp-text);
+  border-color: var(--brand);
+  color: var(--text);
 }
 
-/* ── Buttons – all same height ─────────────── */
+/* ── Buttons ───────────────────────────────── */
 .lp-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.45rem;
-  padding: 0.65rem 1.25rem;
+  gap: 0.4rem;
+  padding: 0.6rem 1.2rem;
   border-radius: 8px;
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   text-decoration: none;
   font-family: inherit;
-  transition: all 0.2s ease;
+  transition: all 0.2s;
   border: 1px solid transparent;
   line-height: 1;
   white-space: nowrap;
-  min-height: 40px;
+  min-height: 38px;
 }
 
 .lp-btn-primary {
-  background: var(--lp-brand);
+  background: var(--brand);
   color: #fff;
+  border: none;
 }
 
 .lp-btn-primary:hover {
   filter: brightness(1.1);
-  box-shadow: 0 0 0 1px var(--lp-brand);
 }
 
 .lp-btn-secondary {
   background: transparent;
-  border-color: var(--lp-border);
-  color: var(--lp-text);
+  border-color: var(--card-border);
+  color: var(--text);
 }
 
 .lp-btn-secondary:hover {
-  border-color: var(--lp-muted);
-}
-
-.lp-btn-ghost {
-  background: transparent;
-  color: var(--lp-muted);
-  border-color: transparent;
-}
-
-.lp-btn-ghost:hover {
-  background: var(--lp-card);
-  color: var(--lp-text);
+  border-color: var(--muted);
 }
 
 /* ── Hero ──────────────────────────────────── */
@@ -178,48 +163,42 @@ html:has(.lp) body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 6rem 2rem 4rem;
+  padding: 6rem 2rem 3rem;
+}
+
+.lp-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--glow);
+  pointer-events: none;
 }
 
 .lp-hero-content {
+  position: relative;
   text-align: center;
-  max-width: 680px;
-  animation: lpFadeIn 0.6s ease-out;
-}
-
-.lp-hero-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.8rem;
-  border-radius: 100px;
-  background: var(--lp-glow);
-  color: var(--lp-brand);
-  font-size: 0.78rem;
-  font-weight: 500;
-  margin-bottom: 1.5rem;
-  border: none;
+  max-width: 600px;
+  animation: lpFadeIn 0.5s ease-out;
 }
 
 .lp-hero-title {
-  font-size: clamp(2.5rem, 7vw, 4.5rem);
+  font-size: clamp(2.2rem, 6vw, 3.8rem);
   font-weight: 800;
   letter-spacing: -0.03em;
-  line-height: 1.1;
-  margin: 0 0 1rem 0;
-  color: var(--lp-text);
+  line-height: 1.12;
+  margin: 0 0 0.75rem;
 }
 
 .lp-hero-title em {
   font-style: normal;
-  color: var(--lp-brand);
+  color: var(--brand);
 }
 
 .lp-hero-sub {
-  font-size: clamp(0.95rem, 1.8vw, 1.1rem);
-  color: var(--lp-muted);
+  font-size: 0.95rem;
+  color: var(--muted);
   line-height: 1.7;
-  margin: 0 0 2rem 0;
+  margin: 0 0 1.75rem;
 }
 
 .lp-hero-actions {
@@ -229,70 +208,109 @@ html:has(.lp) body {
   flex-wrap: wrap;
 }
 
-/* ── Section ───────────────────────────────── */
-.lp-section {
-  padding: 5rem 2rem;
+/* ── Cards (shared section style) ──────────── */
+.lp-card-section {
+  padding: 4rem 2rem;
+}
+
+.lp-card-section-inner {
   max-width: 1100px;
   margin: 0 auto;
 }
 
-.lp-section-header {
+.lp-card-section-header {
   text-align: center;
-  margin-bottom: 3rem;
+  margin-bottom: 2.5rem;
 }
 
-.lp-section-header h2 {
-  font-size: clamp(1.5rem, 3.5vw, 2rem);
+.lp-card-section-header h2 {
+  font-size: clamp(1.3rem, 3vw, 1.7rem);
   font-weight: 700;
   letter-spacing: -0.02em;
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.35rem;
 }
 
-.lp-section-header p {
-  color: var(--lp-muted);
-  font-size: 0.95rem;
+.lp-card-section-header p {
+  color: var(--muted);
+  font-size: 0.85rem;
   margin: 0;
-  max-width: 480px;
-  margin-left: auto;
-  margin-right: auto;
 }
 
-/* ── Features Grid ─────────────────────────── */
-.lp-features {
+/* ── Feature Cards ─────────────────────────── */
+.lp-card-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 0.75rem;
 }
 
-.lp-feature-card {
+.lp-card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
   padding: 1.5rem;
-  border-radius: 10px;
-  background: var(--lp-card);
-  border: 1px solid var(--lp-border);
   transition: border-color 0.2s;
-  animation: lpFadeIn 0.4s ease-out both;
 }
 
-.lp-feature-card:hover {
-  border-color: color-mix(in srgb, var(--lp-brand) 30%, var(--lp-border));
+.lp-card:hover {
+  border-color: color-mix(in srgb, var(--brand) 25%, var(--card-border));
 }
 
-.lp-feature-icon {
-  color: var(--lp-brand);
+.lp-card-icon {
   font-size: 1.1rem;
+  color: var(--brand);
   margin-bottom: 0.75rem;
 }
 
-.lp-feature-card h3 {
-  font-size: 0.88rem;
+.lp-card h3 {
+  font-size: 0.85rem;
   font-weight: 600;
-  margin: 0 0 0.35rem 0;
+  margin: 0 0 0.3rem;
 }
 
-.lp-feature-card p {
-  font-size: 0.8rem;
-  color: var(--lp-muted);
+.lp-card p {
+  font-size: 0.78rem;
+  color: var(--muted);
   line-height: 1.6;
+  margin: 0;
+}
+
+/* ── Steps ─────────────────────────────────── */
+.lp-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.lp-step {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.lp-step-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 0.95rem;
+  color: var(--brand);
+  background: var(--input-bg);
+  margin: 0 auto 0.75rem;
+}
+
+.lp-step h3 {
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.lp-step p {
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.5;
   margin: 0;
 }
 
@@ -301,121 +319,90 @@ html:has(.lp) body {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0.75rem;
-  margin-bottom: 4rem;
+  margin-bottom: 2.5rem;
 }
 
 .lp-number-item {
   text-align: center;
-  padding: 2rem 1rem;
-  border-radius: 10px;
-  background: var(--lp-card);
-  border: 1px solid var(--lp-border);
+  padding: 1.75rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
 }
 
 .lp-number-value {
-  font-size: 2rem;
+  font-size: 1.8rem;
   font-weight: 800;
-  color: var(--lp-brand);
+  color: var(--brand);
   letter-spacing: -0.02em;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.15rem;
 }
 
 .lp-number-label {
-  font-size: 0.78rem;
-  color: var(--lp-muted);
-}
-
-/* ── Integrations ──────────────────────────── */
-.lp-intro {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.5rem;
-  max-width: 600px;
-  margin: 0 auto;
-}
-
-.lp-intro-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.35rem 0.75rem;
-  border-radius: 6px;
-  background: var(--lp-card);
-  border: 1px solid var(--lp-border);
   font-size: 0.75rem;
-  color: var(--lp-muted);
+  color: var(--muted);
 }
 
-.lp-intro-item i {
-  color: var(--lp-brand);
-  font-size: 0.65rem;
-}
-
-/* ── Steps ─────────────────────────────────── */
-.lp-steps {
+/* ── Integrations Overview ─────────────────── */
+.lp-integrations {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
-.lp-step {
-  text-align: center;
-  padding: 1.5rem 1rem;
+.lp-integration-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  transition: border-color 0.2s;
 }
 
-.lp-step-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+.lp-integration-item:hover {
+  border-color: color-mix(in srgb, var(--brand) 25%, var(--card-border));
+}
+
+.lp-integration-item i {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
   display: grid;
   place-items: center;
-  font-size: 1rem;
-  color: var(--lp-brand);
-  background: var(--lp-glow);
-  margin: 0 auto 0.75rem;
+  font-size: 0.75rem;
+  color: var(--brand);
+  background: var(--input-bg);
+  flex-shrink: 0;
 }
 
-.lp-step h3 {
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin: 0 0 0.3rem 0;
-}
-
-.lp-step p {
-  font-size: 0.78rem;
-  color: var(--lp-muted);
-  line-height: 1.6;
-  margin: 0;
+.lp-integration-item span {
+  font-size: 0.82rem;
+  font-weight: 500;
 }
 
 /* ── CTA ───────────────────────────────────── */
 .lp-cta {
   text-align: center;
   padding: 5rem 2rem;
-  border-top: 1px solid var(--lp-border);
 }
 
 .lp-cta h2 {
-  font-size: clamp(1.3rem, 3vw, 1.8rem);
+  font-size: clamp(1.2rem, 2.5vw, 1.6rem);
   font-weight: 700;
-  letter-spacing: -0.02em;
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.35rem;
 }
 
 .lp-cta p {
-  color: var(--lp-muted);
-  font-size: 0.9rem;
-  margin: 0 0 1.5rem 0;
-}
-
-.lp-cta .lp-btn {
-  min-width: 180px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 1.5rem;
 }
 
 /* ── Footer ────────────────────────────────── */
 .lp-footer {
-  border-top: 1px solid var(--lp-border);
+  border-top: 1px solid var(--card-border);
   padding: 2.5rem 2rem;
   text-align: center;
 }
@@ -426,15 +413,15 @@ html:has(.lp) body {
 }
 
 .lp-footer p {
-  color: var(--lp-muted);
-  font-size: 0.78rem;
+  color: var(--muted);
+  font-size: 0.75rem;
   margin: 0.25rem 0 0;
   opacity: 0.6;
 }
 
 /* ── Animation ─────────────────────────────── */
 @keyframes lpFadeIn {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -442,14 +429,15 @@ html:has(.lp) body {
 @media (max-width: 768px) {
   .lp-nav-links { display: none; }
   .lp-nav-inner { padding: 0.6rem 1.25rem; }
-  .lp-hero { padding: 5rem 1.25rem 3rem; min-height: 80vh; }
-  .lp-section { padding: 3rem 1.25rem; }
-  .lp-features { grid-template-columns: 1fr; }
-  .lp-numbers { grid-template-columns: repeat(2, 1fr); }
+  .lp-hero { padding: 5rem 1.25rem 2.5rem; min-height: 80vh; }
+  .lp-card-section { padding: 3rem 1.25rem; }
+  .lp-card-grid { grid-template-columns: 1fr; }
   .lp-steps { grid-template-columns: repeat(2, 1fr); }
+  .lp-numbers { grid-template-columns: repeat(2, 1fr); }
+  .lp-integrations { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 480px) {
-  .lp-numbers { grid-template-columns: repeat(2, 1fr); }
   .lp-steps { grid-template-columns: 1fr; }
+  .lp-integrations { grid-template-columns: 1fr; }
 }

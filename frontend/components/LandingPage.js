@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import './LandingPage.css';
 
 const FEATURES = [
-  { icon: 'fa-brain', title: 'KI-Chat', desc: 'Frag deine Dokumente, E-Mails und Dateien – MYND versteht Kontext und liefert präzise Antworten.' },
+  { icon: 'fa-brain', title: 'KI-Chat', desc: 'Frag deine Dokumente, E-Mails und Dateien – MYND versteht Kontext und liefert Antworten.' },
   { icon: 'fa-search', title: 'Semantische Suche', desc: 'Durchsuche tausende Fotos, PDFs und Notizen in Sekunden.' },
   { icon: 'fa-home', title: 'Smart Home', desc: 'Steuere Lichter, Heizung und Geräte per Sprachbefehl.' },
   { icon: 'fa-cloud', title: 'Nextcloud', desc: 'Kalender, Aufgaben, Kontakte und Dateien zentral angebunden.' },
@@ -20,14 +20,18 @@ const STEPS = [
 ];
 
 const INTEGRATIONS = [
-  { icon: 'fa-home', label: 'Home Assistant' },
-  { icon: 'fa-camera', label: 'Immich' },
-  { icon: 'fa-cloud', label: 'Nextcloud' },
-  { icon: 'fa-database', label: 'TrueNAS' },
-  { icon: 'fa-video', label: 'Reolink' },
-  { icon: 'fa-envelope', label: 'E-Mail' },
-  { icon: 'fa-code', label: 'Python' },
-  { icon: 'fa-docker', label: 'Docker' }
+  { icon: 'fa-home', name: 'Home Assistant' },
+  { icon: 'fa-camera', name: 'Immich' },
+  { icon: 'fa-cloud', name: 'Nextcloud' },
+  { icon: 'fa-database', name: 'TrueNAS' },
+  { icon: 'fa-video', name: 'Reolink' },
+  { icon: 'fa-envelope', name: 'E-Mail' },
+  { icon: 'fa-code', name: 'Python' },
+  { icon: 'fa-docker', name: 'Docker' },
+  { icon: 'fa-robot', name: 'Ollama' },
+  { icon: 'fa-bolt', name: 'Homebridge' },
+  { icon: 'fa-calendar', name: 'CalDAV' },
+  { icon: 'fa-file-alt', name: 'Dateisystem' }
 ];
 
 const LANGUAGES = ['de', 'en'];
@@ -66,8 +70,8 @@ export default function LandingPage() {
           </div>
           <div className="lp-nav-links">
             <button onClick={() => scrollTo('features')}>{_('Features', 'Features')}</button>
-            <button onClick={() => scrollTo('how')}>{_('Ablauf', 'Setup')}</button>
-            <button onClick={() => scrollTo('tech')}>{_('Technik', 'Tech')}</button>
+            <button onClick={() => scrollTo('setup')}>{_('Ablauf', 'Setup')}</button>
+            <button onClick={() => scrollTo('integrations')}>{_('Integrationen', 'Integrations')}</button>
           </div>
           <div className="lp-nav-right">
             <button className="lp-lang-toggle" onClick={toggleLang}>
@@ -80,14 +84,13 @@ export default function LandingPage() {
 
       <section className="lp-hero">
         <div className="lp-hero-content">
-          <div className="lp-hero-badge">{_('Lokal & Privat', 'Local & Private')}</div>
           <h1 className="lp-hero-title">
             {_('Dein', 'Your')} <em>{_('Second Brain', 'Second Brain')}</em>
           </h1>
           <p className="lp-hero-sub">
             {_(
-              'KI-Chat, Smart Home und Wissensmanagement in einer lokalen Plattform – ohne Cloud.',
-              'AI chat, smart home and knowledge management – all local, no cloud.'
+              'KI-Chat, Smart Home und Wissensmanagement in einer lokalen Plattform.',
+              'AI chat, smart home and knowledge management – all local.'
             )}
           </p>
           <div className="lp-hero-actions">
@@ -101,86 +104,95 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="lp-section" id="features">
-        <div className="lp-section-header">
-          <h2>{_('Features', 'Features')}</h2>
-          <p>{_('Lokal, sicher, intelligent.', 'Local, secure, intelligent.')}</p>
-        </div>
-        <div className="lp-features">
-          {FEATURES.map((f, i) => (
-            <div key={i} className="lp-feature-card" style={{ animationDelay: `${i * 0.06}s` }}>
-              <div className="lp-feature-icon">
-                <i className={`fas ${f.icon}`} />
+      <div className="lp-card-section" id="features">
+        <div className="lp-card-section-inner">
+          <div className="lp-card-section-header">
+            <h2>{_('Features', 'Features')}</h2>
+            <p>{_('Lokal, sicher, intelligent.', 'Local, secure, intelligent.')}</p>
+          </div>
+          <div className="lp-card-grid">
+            {FEATURES.map((f, i) => (
+              <div key={i} className="lp-card" style={{ animation: `lpFadeIn 0.4s ease-out ${i * 0.06}s both` }}>
+                <div className="lp-card-icon"><i className={`fas ${f.icon}`} /></div>
+                <h3>{f.title}</h3>
+                <p>{f.desc}</p>
               </div>
-              <h3>{f.title}</h3>
-              <p>{f.desc}</p>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </section>
+      </div>
 
-      <section className="lp-section" id="how">
-        <div className="lp-section-header">
-          <h2>{_('Setup', 'Setup')}</h2>
-          <p>{_('In Minuten einsatzbereit.', 'Ready in minutes.')}</p>
-        </div>
-        <div className="lp-steps">
-          {STEPS.map((s, i) => (
-            <div key={i} className="lp-step">
-              <div className="lp-step-icon">
-                <i className={`fas ${s.icon}`} />
+      <div className="lp-card-section" id="setup">
+        <div className="lp-card-section-inner">
+          <div className="lp-card-section-header">
+            <h2>{_('Setup', 'Setup')}</h2>
+            <p>{_('In Minuten einsatzbereit.', 'Ready in minutes.')}</p>
+          </div>
+          <div className="lp-steps">
+            {STEPS.map((s, i) => (
+              <div key={i} className="lp-step">
+                <div className="lp-step-icon"><i className={`fas ${s.icon}`} /></div>
+                <h3>{s.title}</h3>
+                <p>{s.desc}</p>
               </div>
-              <h3>{s.title}</h3>
-              <p>{s.desc}</p>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </section>
+      </div>
 
-      <section className="lp-section" id="tech">
-        <div className="lp-section-header">
-          <h2>{_('Technik', 'Tech')}</h2>
-          <p>{_('Modernste Technologie, maximale Kontrolle.', 'Cutting-edge tech, maximum control.')}</p>
-        </div>
-        <div className="lp-numbers">
-          <div className="lp-number-item">
-            <div className="lp-number-value">76+</div>
-            <div className="lp-number-label">{_('Tools', 'Tools')}</div>
+      <div className="lp-card-section" id="tech">
+        <div className="lp-card-section-inner">
+          <div className="lp-card-section-header">
+            <h2>{_('Technik', 'Tech')}</h2>
+            <p>{_('Modernste Technologie, maximale Kontrolle.', 'Cutting-edge tech, maximum control.')}</p>
           </div>
-          <div className="lp-number-item">
-            <div className="lp-number-value">8</div>
-            <div className="lp-number-label">{_('Dienste', 'Services')}</div>
-          </div>
-          <div className="lp-number-item">
-            <div className="lp-number-value">306k</div>
-            <div className="lp-number-label">{_('Fotos', 'Photos')}</div>
-          </div>
-          <div className="lp-number-item">
-            <div className="lp-number-value">24/7</div>
-            <div className="lp-number-label">{_('Verfügbar', 'Available')}</div>
-          </div>
-        </div>
-        <div className="lp-intro">
-          {INTEGRATIONS.map((int, i) => (
-            <div key={i} className="lp-intro-item">
-              <i className={`fas ${int.icon}`} />
-              {int.label}
+          <div className="lp-numbers">
+            <div className="lp-number-item">
+              <div className="lp-number-value">76+</div>
+              <div className="lp-number-label">{_('Tools', 'Tools')}</div>
             </div>
-          ))}
+            <div className="lp-number-item">
+              <div className="lp-number-value">8</div>
+              <div className="lp-number-label">{_('Dienste', 'Services')}</div>
+            </div>
+            <div className="lp-number-item">
+              <div className="lp-number-value">306k</div>
+              <div className="lp-number-label">{_('Fotos', 'Photos')}</div>
+            </div>
+            <div className="lp-number-item">
+              <div className="lp-number-value">24/7</div>
+              <div className="lp-number-label">{_('Verfügbar', 'Available')}</div>
+            </div>
+          </div>
         </div>
-      </section>
+      </div>
+
+      <div className="lp-card-section" id="integrations">
+        <div className="lp-card-section-inner">
+          <div className="lp-card-section-header">
+            <h2>{_('Integrationen', 'Integrations')}</h2>
+            <p>{_('Alle Dienste auf einen Blick.', 'All services at a glance.')}</p>
+          </div>
+          <div className="lp-integrations">
+            {INTEGRATIONS.map((int, i) => (
+              <div key={i} className="lp-integration-item">
+                <i className={`fas ${int.icon}`} />
+                <span>{int.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
       <div className="lp-cta">
         <h2>{_('Bereit für dein Second Brain?', 'Ready for your Second Brain?')}</h2>
         <p>{_('Starte jetzt.', 'Start now.')}</p>
-        <a href="/login" className="lp-btn lp-btn-primary">
-          {_('Jetzt starten', 'Get Started')}
-        </a>
+        <a href="/login" className="lp-btn lp-btn-primary">{_('Jetzt starten', 'Get Started')}</a>
       </div>
 
       <footer className="lp-footer">
         <div className="lp-footer-inner">
-          <div className="lp-logo" style={{ justifyContent: 'center', marginBottom: '0.5rem' }}>
+          <div className="lp-logo" style={{ justifyContent: 'center', marginBottom: '0.35rem' }}>
             <span className="lp-logo-icon">◆</span>
             <span>MYND</span>
           </div>
