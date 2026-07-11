@@ -1,0 +1,160 @@
+.landing {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+  gap: 2rem;
+}
+
+.landing-hero {
+  text-align: center;
+  max-width: 700px;
+  animation: landingFadeIn 0.6s ease-out;
+}
+
+.landing-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 1rem;
+  border-radius: 100px;
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  color: var(--brand);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent);
+}
+
+.landing-hero h1 {
+  font-size: clamp(2.4rem, 7vw, 3.8rem);
+  font-weight: 800;
+  margin: 0 0 0.25rem 0;
+  color: var(--ink);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.landing-hero h1 span {
+  background: linear-gradient(135deg, var(--brand), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.landing-hero .landing-tagline {
+  font-size: clamp(1rem, 2.5vw, 1.25rem);
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0.5rem 0 0.75rem 0;
+  letter-spacing: -0.01em;
+}
+
+.landing-hero .landing-sub {
+  font-size: 0.9rem;
+  color: var(--muted);
+  line-height: 1.7;
+  margin: 0;
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.landing-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  width: 100%;
+  max-width: 900px;
+  animation: landingFadeIn 0.6s ease-out 0.15s both;
+}
+
+.landing-feature-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.25rem 1rem;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.landing-feature-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  border-color: color-mix(in srgb, var(--brand) 30%, var(--border));
+}
+
+.landing-feature-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  margin-bottom: 0.6rem;
+}
+
+.landing-feature-card h3 {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 0.25rem 0;
+  letter-spacing: -0.01em;
+}
+
+.landing-feature-card p {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.landing-input-section {
+  width: 100%;
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: landingFadeIn 0.6s ease-out 0.3s both;
+}
+
+.landing .source-toggle-row {
+  width: 100%;
+}
+
+.landing .input-wrapper {
+  width: 100%;
+}
+
+@keyframes landingFadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 600px) {
+  .landing {
+    padding: 1.5rem;
+    gap: 1.5rem;
+  }
+  .landing-features {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+  .landing-feature-card {
+    padding: 1rem 0.75rem;
+  }
+  .landing-hero h1 {
+    font-size: clamp(1.8rem, 8vw, 2.4rem);
+  }
+}

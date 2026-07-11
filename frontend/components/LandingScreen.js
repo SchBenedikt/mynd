@@ -1,12 +1,20 @@
 'use client';
 
 import SuggestionsPanel from './SuggestionsPanel';
+import './LandingScreen.css';
 
 const SOURCE_OPTIONS = [
   { value: 'auto', icon: 'fa-globe', label: 'Auto' },
   { value: 'web', icon: 'fa-globe', label: 'Web' },
   { value: 'deep', icon: 'fa-magnifying-glass', label: 'Deep' },
   { value: 'local', icon: 'fa-database', label: 'Lokal' }
+];
+
+const FEATURES = [
+  { icon: 'fa-brain', titleKey: 'KI-Chat', descKey: 'Kontextbezogene Antworten aus deiner Wissensbasis' },
+  { icon: 'fa-search', titleKey: 'Smarte Suche', descKey: 'Durchsuche tausende Fotos & Dokumente in Sekunden' },
+  { icon: 'fa-home', titleKey: 'Smart Home', descKey: 'Steuere dein Zuhause per Sprachbefehl' },
+  { icon: 'fa-plug', titleKey: 'Integrationen', descKey: 'Nextcloud, TrueNAS, Immich & mehr' }
 ];
 
 export default function LandingScreen({
@@ -20,65 +28,93 @@ export default function LandingScreen({
 }) {
   return (
     <div className="landing">
-      <div className="landing-header">
-        <h2>{personalGreeting}</h2>
-        <p>{t('askSubheading')}</p>
-      </div>
-      <div className="source-toggle-row">
-        {SOURCE_OPTIONS.map(opt => (
-          <button key={opt.value}
-            className={`source-btn ${source === opt.value ? 'active' : ''}`}
-            onClick={() => setSource(opt.value)}
-            title={opt.label}>
-            <i className={`fas ${opt.icon}`}></i>
-            {opt.label}
-          </button>
-        ))}
-        <div className="composer-model-wrapper">
-          <i className="fas fa-microchip"></i>
-          <select className="composer-model-select" value={model} onChange={e => setModel(e.target.value)}>
-            {aiModels.length > 0 ? aiModels.map(m => (
-              <option key={m.name || m} value={m.name || m}>{m.name || m}</option>
-            )) : (
-              <option value={model}>{model || 'Modell'}</option>
-            )}
-          </select>
+      <div className="landing-hero">
+        <div className="landing-hero-badge">
+          <i className="fas fa-sparkles"></i>
+          {language === 'de' ? 'Dein persönlicher KI-Assistent' : 'Your personal AI assistant'}
         </div>
-      </div>
-      <div className="input-wrapper">
-        <input
-          type="text"
-          ref={inputRef}
-          value={inputValue}
-          placeholder={t('askPlaceholder')}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && onSend(e.target.value)}
-        />
-        <button type="button" className={`voice-btn ${isListening ? 'listening' : ''}`}
-          onClick={onStartVoiceInput}
-          disabled={false}
-          title={isListening ? 'Aufnahme stoppen' : 'Mit Sprache sprechen'}>
-          <i className={`fas ${isListening ? 'fa-wave-square' : 'fa-microphone'}`}></i>
-        </button>
-        <button onClick={() => onSend(inputRef.current?.value || '')} disabled={!canSend}
-          className={''} title={undefined}>
-          <i className="fas fa-arrow-right"></i>
-        </button>
+        <h1>
+          <span>MYND</span>
+        </h1>
+        <p className="landing-tagline">
+          {language === 'de' ? 'Dein Second Brain' : 'Your Second Brain'}
+        </p>
+        <p className="landing-sub">
+          {language === 'de'
+            ? 'Stell Fragen, durchsuche deine digitalen Schätze und steuere dein Smart Home – alles lokal und privat.'
+            : 'Ask questions, search your digital treasures and control your smart home – all local and private.'}
+        </p>
       </div>
 
-      <SuggestionsPanel
-        language={language}
-        username="default"
-        chatHistory={chats}
-        onSuggestionClick={(suggestion) => {
-          if (inputRef.current) {
-            inputRef.current.value = suggestion;
-            setInputValue(suggestion);
-            onSend(suggestion);
-          }
-        }}
-        t={t}
-      />
+      <div className="landing-features">
+        {FEATURES.map((f, i) => (
+          <div key={i} className="landing-feature-card">
+            <div className="landing-feature-icon">
+              <i className={`fas ${f.icon}`}></i>
+            </div>
+            <h3>{f.titleKey}</h3>
+            <p>{f.descKey}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="landing-input-section">
+        <div className="source-toggle-row">
+          {SOURCE_OPTIONS.map(opt => (
+            <button key={opt.value}
+              className={`source-btn ${source === opt.value ? 'active' : ''}`}
+              onClick={() => setSource(opt.value)}
+              title={opt.label}>
+              <i className={`fas ${opt.icon}`}></i>
+              {opt.label}
+            </button>
+          ))}
+          <div className="composer-model-wrapper">
+            <i className="fas fa-microchip"></i>
+            <select className="composer-model-select" value={model} onChange={e => setModel(e.target.value)}>
+              {aiModels.length > 0 ? aiModels.map(m => (
+                <option key={m.name || m} value={m.name || m}>{m.name || m}</option>
+              )) : (
+                <option value={model}>{model || 'Modell'}</option>
+              )}
+            </select>
+          </div>
+        </div>
+        <div className="input-wrapper">
+          <input
+            type="text"
+            ref={inputRef}
+            value={inputValue}
+            placeholder={t('askPlaceholder')}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && onSend(e.target.value)}
+          />
+          <button type="button" className={`voice-btn ${isListening ? 'listening' : ''}`}
+            onClick={onStartVoiceInput}
+            disabled={false}
+            title={isListening ? 'Aufnahme stoppen' : 'Mit Sprache sprechen'}>
+            <i className={`fas ${isListening ? 'fa-wave-square' : 'fa-microphone'}`}></i>
+          </button>
+          <button onClick={() => onSend(inputRef.current?.value || '')} disabled={!canSend}
+            className={''} title={undefined}>
+            <i className="fas fa-arrow-right"></i>
+          </button>
+        </div>
+
+        <SuggestionsPanel
+          language={language}
+          username="default"
+          chatHistory={chats}
+          onSuggestionClick={(suggestion) => {
+            if (inputRef.current) {
+              inputRef.current.value = suggestion;
+              setInputValue(suggestion);
+              onSend(suggestion);
+            }
+          }}
+          t={t}
+        />
+      </div>
 
       {(indexingStatus !== 'idle' || indexingDetails.processedFiles > 0) && (
         <div className="indexing-panel" style={{marginTop: '2rem', padding: '1rem', background: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--border)'}}>
