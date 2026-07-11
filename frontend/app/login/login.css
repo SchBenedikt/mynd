@@ -1,12 +1,35 @@
 .login-page {
+  --bg: #0a0a14;
+  --card-bg: #12121e;
+  --card-border: #242438;
+  --card-radius: 16px;
+  --input-bg: #1a1a2e;
+  --input-border: #242438;
+  --text: #e2e8f0;
+  --muted: #8892a8;
+  --placeholder: #4a4a5a;
+  --brand: var(--brand, #c97d3a);
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0a0a14;
+  background: var(--bg);
   padding: 1rem;
   position: relative;
   font-family: var(--font-space-grotesk, -apple-system, BlinkMacSystemFont, sans-serif);
+}
+
+@media (prefers-color-scheme: light) {
+  .login-page {
+    --bg: #f1f5f9;
+    --card-bg: #ffffff;
+    --card-border: #e2e8f0;
+    --input-bg: #f1f5f9;
+    --input-border: #d1d5db;
+    --text: #0f172a;
+    --muted: #64748b;
+    --placeholder: #94a3b8;
+  }
 }
 
 .login-bg {
@@ -21,9 +44,9 @@
   position: relative;
   width: 100%;
   max-width: 400px;
-  background: #12121e;
-  border: 1px solid #242438;
-  border-radius: 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
   padding: 2.5rem 2rem;
   animation: loginFadeIn 0.5s ease-out;
 }
@@ -44,11 +67,11 @@
   font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0 0 0.35rem 0;
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 .login-subtitle {
-  color: #8892a8;
+  color: var(--muted);
   font-size: 0.85rem;
   margin: 0;
 }
@@ -68,15 +91,15 @@
 .login-field label {
   font-size: 0.8rem;
   font-weight: 500;
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 .login-field input {
   padding: 0.65rem 0.75rem;
   border-radius: 8px;
-  border: 1px solid #242438;
-  background: #1a1a2e;
-  color: #e2e8f0;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text);
   font-size: 0.9rem;
   font-family: inherit;
   transition: border-color 0.2s;
@@ -88,7 +111,7 @@
 }
 
 .login-field input::placeholder {
-  color: #4a4a5a;
+  color: var(--placeholder);
 }
 
 .login-btn {
@@ -132,17 +155,17 @@
 .login-details-toggle {
   background: none;
   border: none;
-  color: #8892a8;
+  color: var(--muted);
   font-size: 0.78rem;
   cursor: pointer;
   font-family: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
-  text-decoration-color: #242438;
+  text-decoration-color: var(--card-border);
 }
 
 .login-details-toggle:hover {
-  color: #e2e8f0;
+  color: var(--text);
 }
 
 .login-details {
@@ -154,9 +177,9 @@
   width: 100%;
   padding: 0.5rem 0.65rem;
   border-radius: 6px;
-  border: 1px solid #242438;
-  background: #1a1a2e;
-  color: #e2e8f0;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text);
   font-size: 0.8rem;
   font-family: inherit;
   box-sizing: border-box;
@@ -170,53 +193,11 @@
 .login-details small {
   display: block;
   margin-top: 0.25rem;
-  color: #4a4a5a;
+  color: var(--placeholder);
   font-size: 0.7rem;
 }
 
 @keyframes loginFadeIn {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
-}
-
-@media (prefers-color-scheme: light) {
-  .login-page {
-    background: #f1f5f9;
-  }
-  .login-card {
-    background: #ffffff;
-    border-color: #e2e8f0;
-  }
-  .login-header h1 {
-    color: #0f172a;
-  }
-  .login-subtitle {
-    color: #64748b;
-  }
-  .login-field label {
-    color: #0f172a;
-  }
-  .login-field input {
-    background: #f8fafc;
-    border-color: #e2e8f0;
-    color: #0f172a;
-  }
-  .login-field input::placeholder {
-    color: #94a3b8;
-  }
-  .login-details input {
-    background: #f8fafc;
-    border-color: #e2e8f0;
-    color: #0f172a;
-  }
-  .login-details small {
-    color: #94a3b8;
-  }
-  .login-details-toggle {
-    color: #64748b;
-    text-decoration-color: #e2e8f0;
-  }
-  .login-details-toggle:hover {
-    color: #0f172a;
-  }
 }
