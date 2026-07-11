@@ -11,11 +11,11 @@
 }
 
 .landing-brand {
-  font-size: 1.2rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 2.8rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
   color: var(--brand);
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
   animation: landingFadeIn 0.3s ease-out;
 }
 

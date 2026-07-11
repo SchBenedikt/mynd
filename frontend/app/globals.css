@@ -603,10 +603,10 @@ body {
 }
 
 .brand {
-  font-size: 1.6rem;
-  font-weight: 800;
+  font-size: 1.1rem;
+  font-weight: 700;
   color: var(--ink);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   border: none;
   background: transparent;
   cursor: pointer;
