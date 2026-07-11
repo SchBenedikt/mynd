@@ -178,3 +178,45 @@
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+@media (prefers-color-scheme: light) {
+  .login-page {
+    background: #f1f5f9;
+  }
+  .login-card {
+    background: #ffffff;
+    border-color: #e2e8f0;
+  }
+  .login-header h1 {
+    color: #0f172a;
+  }
+  .login-subtitle {
+    color: #64748b;
+  }
+  .login-field label {
+    color: #0f172a;
+  }
+  .login-field input {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #0f172a;
+  }
+  .login-field input::placeholder {
+    color: #94a3b8;
+  }
+  .login-details input {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+    color: #0f172a;
+  }
+  .login-details small {
+    color: #94a3b8;
+  }
+  .login-details-toggle {
+    color: #64748b;
+    text-decoration-color: #e2e8f0;
+  }
+  .login-details-toggle:hover {
+    color: #0f172a;
+  }
+}

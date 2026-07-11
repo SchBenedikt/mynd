@@ -1,14 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { apiFetch, getApiBase } from '../../lib/api';
 import './login.css';
 
 const TOKEN_KEY = 'mynd_token_v1';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -36,8 +34,7 @@ export default function LoginPage() {
       const data = await resp.json();
       if (resp.ok && data.token) {
         try { localStorage.setItem(TOKEN_KEY, data.token); } catch {}
-        try { window.dispatchEvent(new Event('auth-login')); } catch {}
-        router.replace('/');
+        window.location.href = '/';
         return;
       }
       setLoginError((data && data.error) ? String(data.error) : 'Login fehlgeschlagen');

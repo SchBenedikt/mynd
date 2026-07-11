@@ -284,6 +284,28 @@
   border-color: var(--accent, #6366f1) !important;
 }
 
+.auth-loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a14;
+}
+
+.auth-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid #242438;
+  border-top-color: var(--brand, #c97d3a);
+  border-radius: 50%;
+  animation: authSpin 0.7s linear infinite;
+}
+
+@keyframes authSpin {
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 760px) {
   .auth-body {
     flex-direction: column;

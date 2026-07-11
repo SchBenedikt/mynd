@@ -24,13 +24,19 @@ html:has(.lp) body {
 
 @media (prefers-color-scheme: light) {
   .lp {
-    --bg: #f5f5f7;
+    --bg: #f1f5f9;
     --card: #ffffff;
-    --card-border: #e5e7eb;
-    --input-bg: #f9fafb;
-    --text: #111827;
-    --muted: #6b7280;
-    --brand-glow: color-mix(in srgb, var(--brand, #c97d3a) 6%, transparent);
+    --card-border: #e2e8f0;
+    --input-bg: #e2e8f0;
+    --text: #0f172a;
+    --muted: #64748b;
+    --brand-glow: color-mix(in srgb, var(--brand, #c97d3a) 5%, transparent);
+  }
+  .lp-step-icon i, .lp-integration-item i {
+    color: #475569;
+  }
+  .lp-footer {
+    border-top-color: var(--card-border);
   }
 }
 

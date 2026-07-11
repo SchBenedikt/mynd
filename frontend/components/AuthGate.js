@@ -29,71 +29,68 @@ export default function AuthGate({ children }) {
 
   useEffect(() => {
     let cancelled = false;
-    try {
-      try { localStorage.removeItem('mynd_user_v1'); } catch (err) {}
-      const storedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } })();
-      const headers = storedToken ? { 'Authorization': `Bearer ${storedToken}` } : {};
-      apiFetch('/api/auth/me', { headers })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data && data.authenticated && data.user) {
+
+    const checkAuth = async () => {
+      try {
+        try { localStorage.removeItem('mynd_user_v1'); } catch (err) {}
+
+        try {
+          if (typeof window !== 'undefined' && window.location && window.location.hash) {
+            const hash = window.location.hash.replace(/^#/, '');
+            const parts = new URLSearchParams(hash);
+            const fragToken = parts.get('token') || parts.get('access_token');
+            if (fragToken) {
+              localStorage.setItem(TOKEN_KEY, fragToken);
+              try { window.history.replaceState({}, document.title, window.location.pathname + window.location.search); } catch (err) {}
+              const res = await apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${fragToken}` } });
+              const data = await res.json();
+              if (!cancelled && data && data.authenticated && data.user) {
+                setUser({ name: data.user.name, username: data.user.username, token: fragToken });
+                setForceOpen(false);
+              }
+            }
+          }
+        } catch (err) {}
+
+        const storedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } })();
+        if (storedToken) {
+          const headers = { 'Authorization': `Bearer ${storedToken}` };
+          const res = await apiFetch('/api/auth/me', { headers });
+          const data = await res.json();
+          if (!cancelled && data && data.authenticated && data.user) {
             setUser({ name: data.user.name, username: data.user.username, token: storedToken });
           }
-        })
-        .catch(() => {});
-
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const err = params.get('error') || params.get('auth_error');
-      } catch (e) {}
-
-      try {
-        if (typeof window !== 'undefined' && window.location && window.location.hash) {
-          const hash = window.location.hash.replace(/^#/, '');
-          const parts = new URLSearchParams(hash);
-          const fragToken = parts.get('token') || parts.get('access_token');
-          if (fragToken) {
-            localStorage.setItem(TOKEN_KEY, fragToken);
-            try { window.history.replaceState({}, document.title, window.location.pathname + window.location.search); } catch (err) {}
-            apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${fragToken}` } })
-              .then((r) => r.json())
-              .then((data) => {
-                if (data && data.authenticated && data.user) {
-                  setUser({ name: data.user.name, username: data.user.username, token: fragToken });
-                  setForceOpen(false);
-                }
-              })
-              .catch(() => {});
-          }
         }
-      } catch (err) {}
+      } catch (e) {}
+      if (!cancelled) setReady(true);
+    };
 
-        apiFetch('/api/setup/status')
-          .then((r) => r.json())
-          .then((data) => {
-            if (cancelled) return;
-            const needsSetup = Boolean(data && data.success && data.needs_setup);
-            setSetupRequired(needsSetup);
-            if (needsSetup && pathname !== '/setup') {
-              guardedReplace('/setup');
-            }
-          })
-          .catch(() => {});
-        apiFetch('/api/auth/config')
-          .then((r) => r.json())
-          .then((data) => {
-            if (cancelled) return;
-            if (data?.success) {
-              setRequireLoginSetting(data.requireLogin !== false);
-            }
-          })
-          .catch(() => {});
-    } catch (err) {}
-    setReady(true);
+    checkAuth();
 
-      return () => {
-        cancelled = true;
-      };
+    apiFetch('/api/setup/status')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const needsSetup = Boolean(data && data.success && data.needs_setup);
+        setSetupRequired(needsSetup);
+        if (needsSetup && pathname !== '/setup') {
+          guardedReplace('/setup');
+        }
+      })
+      .catch(() => {});
+    apiFetch('/api/auth/config')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.success) {
+          setRequireLoginSetting(data.requireLogin !== false);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -141,7 +138,11 @@ export default function AuthGate({ children }) {
     return () => window.removeEventListener('auth-login', handleLogin);
   }, []);
 
-  if (!ready) return null;
+  if (!ready) return (
+    <div className="auth-loading">
+      <div className="auth-loading-spinner" />
+    </div>
+  );
   if (pathname === '/language') return children;
   if (pathname?.startsWith('/setup')) return children;
   if (pathname === '/login') return children;
