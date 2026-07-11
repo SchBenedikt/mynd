@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { useLanguage } from '../../../hooks/useLanguage';
 import { useApp } from '../../../lib/AppContext';
 import IntegrationsTab from '../../../components/settings/IntegrationsTab';
@@ -28,7 +27,6 @@ const NAV_GROUPS = [
 const tr = (de, en, lang) => lang === 'de' ? de : en;
 
 export default function SettingsPage() {
-  const router = useRouter();
   const { language, t } = useLanguage();
   const [activeTab, setActiveTab] = useState('profile');
 
@@ -37,9 +35,6 @@ export default function SettingsPage() {
       <div className="settings-page-layout">
         <div className="settings-page-header">
           <div className="settings-page-header-left">
-            <button className="btn btn-secondary settings-back-btn" onClick={() => router.push('/')}>
-              <i className="fas fa-arrow-left"></i>
-            </button>
             <h2><i className="fas fa-cog"></i> {t('settings')}</h2>
           </div>
         </div>
