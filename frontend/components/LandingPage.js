@@ -15,8 +15,25 @@ const FEATURES = [
 const STEPS = [
   { icon: 'fa-server', title: '1. Backend starten', desc: 'MYND läuft auf deinem Mac mini oder Server – einfach per Docker oder Python starten.' },
   { icon: 'fa-wifi', title: '2. Verbinden', desc: 'Greife per Browser, Tailscale oder Cloudflare Tunnel von überall auf dein MYND zu.' },
-  { icon: 'fa-plug', title: '3. Dienste anbinden', desc: 'Verbinde Immich, Nextcloud, Home Assistant und TrueNAS – ganz einfach konfiguriert.' },
+  { icon: 'fa-puzzle-piece', title: '3. Dienste anbinden', desc: 'Verbinde Immich, Nextcloud, Home Assistant und TrueNAS – ganz einfach konfiguriert.' },
   { icon: 'fa-comment', title: '4. Loslegen', desc: 'Stell Fragen, erstelle Zusammenfassungen, steuere dein Smart Home – alles per Chat.' }
+];
+
+const INTEGRATIONS = [
+  { icon: 'fa-home', label: 'Home Assistant' },
+  { icon: 'fa-camera', label: 'Immich' },
+  { icon: 'fa-cloud', label: 'Nextcloud' },
+  { icon: 'fa-database', label: 'TrueNAS' },
+  { icon: 'fa-camera', label: 'Reolink' },
+  { icon: 'fa-envelope', label: 'E-Mail' },
+  { icon: 'fa-code', label: 'Python' },
+  { icon: 'fa-docker', label: 'Docker' }
+];
+
+const TESTIMONIALS = [
+  { text: 'MYND hat meinen kompletten digitalen Workflow vereinfacht. Von der Kalenderabfrage bis zur Smart Home Steuerung – alles aus einem Chat.', author: 'Benedikt S.', role: 'Entwickler' },
+  { text: 'Die semantische Suche in meiner Foto-Bibliothek ist unglaublich. Ich finde jedes Bild in Sekunden, ohne taggen zu müssen.', author: 'Maria K.', role: 'fotografie' },
+  { text: 'Endlich eine lokale KI-Lösung, die mit meinem NAS, Cloud und Smart Home spricht. Keine Daten zu Drittanbietern – genau das wollte ich.', author: 'Tim W.', role: 'IT-Administrator' }
 ];
 
 export default function LandingPage() {
@@ -37,6 +54,12 @@ export default function LandingPage() {
 
   return (
     <div className="lp">
+      <div className="lp-particles">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="lp-particle" />
+        ))}
+      </div>
+
       <nav className="lp-nav">
         <div className="lp-nav-inner">
           <div className="lp-logo">
@@ -104,9 +127,17 @@ export default function LandingPage() {
             </div>
           ))}
         </div>
+        <div className="lp-integrations">
+          {INTEGRATIONS.map((int, i) => (
+            <div key={i} className="lp-int-badge">
+              <i className={`fas ${int.icon}`} />
+              {int.label}
+            </div>
+          ))}
+        </div>
       </section>
 
-      <section className="lp-section lp-section-dark" id="how">
+      <section className="lp-section lp-section-alt" id="how">
         <div className="lp-section-header">
           <h2>{_('So funktioniert es', 'How it works')}</h2>
           <p>{_('In wenigen Minuten einsatzbereit.', 'Ready in minutes.')}</p>
@@ -147,6 +178,19 @@ export default function LandingPage() {
             <div className="lp-tech-value">24/7</div>
             <div className="lp-tech-label">{_('Verfügbarkeit', 'Availability')}</div>
           </div>
+        </div>
+
+        <div className="lp-section-header" style={{ marginTop: '3rem' }}>
+          <h2>{_('Was Nutzer sagen', 'What users say')}</h2>
+        </div>
+        <div className="lp-testimonials">
+          {TESTIMONIALS.map((t, i) => (
+            <div key={i} className="lp-testimonial">
+              <p>{t.text}</p>
+              <div className="lp-testimonial-author">{t.author}</div>
+              <div className="lp-testimonial-role">{t.role}</div>
+            </div>
+          ))}
         </div>
       </section>
 
