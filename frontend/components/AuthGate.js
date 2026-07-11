@@ -16,6 +16,7 @@ export default function AuthGate({ children }) {
   const [ready, setReady] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
   const [user, setUser] = useState(null);
+  const [hasToken, setHasToken] = useState(false);
   const [forceOpen, setForceOpen] = useState(false);
   const [requireLoginSetting, setRequireLoginSetting] = useState(true);
   const lastReplaceRef = useRef(0);
@@ -30,42 +31,21 @@ export default function AuthGate({ children }) {
   useEffect(() => {
     let cancelled = false;
 
-    const checkAuth = async () => {
-      try {
-        try { localStorage.removeItem('mynd_user_v1'); } catch (err) {}
+    try {
+      const storedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } })();
+      setHasToken(!!storedToken);
 
-        try {
-          if (typeof window !== 'undefined' && window.location && window.location.hash) {
-            const hash = window.location.hash.replace(/^#/, '');
-            const parts = new URLSearchParams(hash);
-            const fragToken = parts.get('token') || parts.get('access_token');
-            if (fragToken) {
-              localStorage.setItem(TOKEN_KEY, fragToken);
-              try { window.history.replaceState({}, document.title, window.location.pathname + window.location.search); } catch (err) {}
-              const res = await apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${fragToken}` } });
-              const data = await res.json();
-              if (!cancelled && data && data.authenticated && data.user) {
-                setUser({ name: data.user.name, username: data.user.username, token: fragToken });
-                setForceOpen(false);
-              }
+      if (storedToken) {
+        apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${storedToken}` } })
+          .then((r) => r.json())
+          .then((data) => {
+            if (!cancelled && data && data.authenticated && data.user) {
+              setUser({ name: data.user.name, username: data.user.username, token: storedToken });
             }
-          }
-        } catch (err) {}
-
-        const storedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } })();
-        if (storedToken) {
-          const headers = { 'Authorization': `Bearer ${storedToken}` };
-          const res = await apiFetch('/api/auth/me', { headers });
-          const data = await res.json();
-          if (!cancelled && data && data.authenticated && data.user) {
-            setUser({ name: data.user.name, username: data.user.username, token: storedToken });
-          }
-        }
-      } catch (e) {}
-      if (!cancelled) setReady(true);
-    };
-
-    checkAuth();
+          })
+          .catch(() => {});
+      }
+    } catch (e) {}
 
     apiFetch('/api/setup/status')
       .then((r) => r.json())
@@ -87,6 +67,8 @@ export default function AuthGate({ children }) {
         }
       })
       .catch(() => {});
+
+    setReady(true);
 
     return () => {
       cancelled = true;
@@ -123,6 +105,7 @@ export default function AuthGate({ children }) {
       try {
         const storedToken = localStorage.getItem(TOKEN_KEY);
         if (!storedToken) return;
+        setHasToken(true);
         apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${storedToken}` } })
           .then(r => r.json())
           .then(data => {
@@ -138,15 +121,12 @@ export default function AuthGate({ children }) {
     return () => window.removeEventListener('auth-login', handleLogin);
   }, []);
 
-  if (!ready) return (
-    <div className="auth-loading">
-      <div className="auth-loading-spinner" />
-    </div>
-  );
+  if (!ready) return null;
   if (pathname === '/language') return children;
   if (pathname?.startsWith('/setup')) return children;
   if (pathname === '/login') return children;
   if (user && !forceOpen) return children;
+  if (hasToken && !forceOpen) return children;
   if (!requireLoginSetting && !forceOpen) return children;
 
   if (pathname === '/') {
