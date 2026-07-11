@@ -120,6 +120,15 @@ export default function AuthGate({ children }) {
     return () => window.removeEventListener('auth-login', handleLogin);
   }, []);
 
+  useEffect(() => {
+    if (!ready) return;
+    if (pathname === '/language' || pathname?.startsWith('/setup') || pathname === '/login') return;
+    if (user && !forceOpen) return;
+    if (hasToken && !forceOpen) return;
+    if (!requireLoginSetting && !forceOpen) return;
+    guardedReplace('/login');
+  }, [ready, pathname, user, forceOpen, hasToken, requireLoginSetting]);
+
   if (!ready) return null;
   if (pathname === '/language') return children;
   if (pathname?.startsWith('/setup')) return children;
@@ -128,8 +137,5 @@ export default function AuthGate({ children }) {
   if (hasToken && !forceOpen) return children;
   if (!requireLoginSetting && !forceOpen) return children;
 
-  if (typeof window !== 'undefined') {
-    router.replace('/login');
-  }
   return null;
 }
