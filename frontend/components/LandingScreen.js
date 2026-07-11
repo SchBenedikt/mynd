@@ -20,6 +20,7 @@ export default function LandingScreen({
 }) {
   return (
     <div className="landing">
+      <div className="landing-brand">◆ MYND</div>
       <div className="landing-input-section">
         <div className="source-toggle-row">
           {SOURCE_OPTIONS.map(opt => (
