@@ -2675,14 +2675,6 @@ export default function HomePage() {
         )}
       </div>
 
-      {!conversationActive && weatherInfo?.temperature_display && (
-        <div className="weather-mini-widget weather-mini-widget--landing"
-          title={weatherInfo.summary || weatherInfo.description || 'Lokales Wetter'}>
-          {renderWeatherMiniIcon(weatherInfo.icon)}
-          <span className="weather-mini-temp">{weatherInfo.temperature_display}</span>
-        </div>
-      )}
-
       <PhotoPreviewModal photoPreview={photoPreview} onClose={closePhotoPreview} />
 
       <ChatSummaryModal

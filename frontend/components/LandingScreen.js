@@ -1,6 +1,5 @@
 'use client';
 
-import SuggestionsPanel from './SuggestionsPanel';
 import './LandingScreen.css';
 
 const SOURCE_OPTIONS = [
@@ -8,13 +7,6 @@ const SOURCE_OPTIONS = [
   { value: 'web', icon: 'fa-globe', label: 'Web' },
   { value: 'deep', icon: 'fa-magnifying-glass', label: 'Deep' },
   { value: 'local', icon: 'fa-database', label: 'Lokal' }
-];
-
-const FEATURES = [
-  { icon: 'fa-brain', titleKey: 'KI-Chat', descKey: 'Kontextbezogene Antworten aus deiner Wissensbasis' },
-  { icon: 'fa-search', titleKey: 'Smarte Suche', descKey: 'Durchsuche tausende Fotos & Dokumente in Sekunden' },
-  { icon: 'fa-home', titleKey: 'Smart Home', descKey: 'Steuere dein Zuhause per Sprachbefehl' },
-  { icon: 'fa-plug', titleKey: 'Integrationen', descKey: 'Nextcloud, TrueNAS, Immich & mehr' }
 ];
 
 export default function LandingScreen({
@@ -28,36 +20,6 @@ export default function LandingScreen({
 }) {
   return (
     <div className="landing">
-      <div className="landing-hero">
-        <div className="landing-hero-badge">
-          <i className="fas fa-sparkles"></i>
-          {language === 'de' ? 'Dein persönlicher KI-Assistent' : 'Your personal AI assistant'}
-        </div>
-        <h1>
-          <span>MYND</span>
-        </h1>
-        <p className="landing-tagline">
-          {language === 'de' ? 'Dein Second Brain' : 'Your Second Brain'}
-        </p>
-        <p className="landing-sub">
-          {language === 'de'
-            ? 'Stell Fragen, durchsuche deine digitalen Schätze und steuere dein Smart Home – alles lokal und privat.'
-            : 'Ask questions, search your digital treasures and control your smart home – all local and private.'}
-        </p>
-      </div>
-
-      <div className="landing-features">
-        {FEATURES.map((f, i) => (
-          <div key={i} className="landing-feature-card">
-            <div className="landing-feature-icon">
-              <i className={`fas ${f.icon}`}></i>
-            </div>
-            <h3>{f.titleKey}</h3>
-            <p>{f.descKey}</p>
-          </div>
-        ))}
-      </div>
-
       <div className="landing-input-section">
         <div className="source-toggle-row">
           {SOURCE_OPTIONS.map(opt => (
@@ -100,20 +62,6 @@ export default function LandingScreen({
             <i className="fas fa-arrow-right"></i>
           </button>
         </div>
-
-        <SuggestionsPanel
-          language={language}
-          username="default"
-          chatHistory={chats}
-          onSuggestionClick={(suggestion) => {
-            if (inputRef.current) {
-              inputRef.current.value = suggestion;
-              setInputValue(suggestion);
-              onSend(suggestion);
-            }
-          }}
-          t={t}
-        />
       </div>
 
       {(indexingStatus !== 'idle' || indexingDetails.processedFiles > 0) && (
