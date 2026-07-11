@@ -101,7 +101,7 @@ export default function IndexingTab({ tr, language }) {
 
   const startIndexing = async () => {
     try {
-      const configRes = await fetch(`${getApiBase()}/api/indexing/config`, {credentials: 'include'});
+      const configRes = await apiFetch('/api/indexing/config');
       if (configRes.ok) {
         const config = await configRes.json();
         if (!config.url || !config.username) {
@@ -116,7 +116,7 @@ export default function IndexingTab({ tr, language }) {
         setIndexingStatus('running');
         const progressInterval = setInterval(async () => {
           try {
-            const res = await fetch(`${getApiBase()}/api/indexing/progress`, {credentials: 'include'});
+            const res = await apiFetch('/api/indexing/progress');
             if (res.ok) {
               const data = await res.json();
               setIndexingProgress(Math.round(data.progress_percentage || 0));

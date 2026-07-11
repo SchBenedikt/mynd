@@ -135,7 +135,7 @@ export default function ConfigTab({ tr, language }) {
 
   const loadAIConfig = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/ai/config`, {credentials: 'include'});
+      const res = await apiFetch('/api/ai/config');
       const config = await res.json();
       const url = new URL(config.base_url);
       setAiProtocol(url.protocol.replace(':', ''));
@@ -177,7 +177,7 @@ export default function ConfigTab({ tr, language }) {
 
   const loadOllamaModels = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/ollama/models`, {credentials: 'include'});
+      const res = await apiFetch('/api/ollama/models');
       const data = await res.json();
       setAiModels(Array.isArray(data.models) ? data.models : []);
     } catch (err) {
@@ -210,9 +210,8 @@ export default function ConfigTab({ tr, language }) {
     setModelCheckLoading(true);
     setModelCheckResults(null);
     try {
-      const res = await fetch(`${getApiBase()}/api/ai/check-models`, {
+      const res = await apiFetch('/api/ai/check-models', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           base_url: `${aiProtocol}://${aiHost}:${aiPort}`
@@ -229,7 +228,7 @@ export default function ConfigTab({ tr, language }) {
 
   const loadSecurityMode = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/security/mode`, {credentials: 'include'});
+      const res = await apiFetch('/api/security/mode');
       const data = await res.json();
       if (data.mode) setSecurityModeState(data.mode);
     } catch (err) {
