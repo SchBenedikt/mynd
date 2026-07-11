@@ -7,7 +7,7 @@ name = "mynd-2new"
 version = "0.1.0"
 description = "KI-Assistent mit Smart-Home-Steuerung, Foto-Suche und persönlichem Wissensgraphen"
 authors = [{ name = "Benedikt Schächner" }]
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "flask>=3.0.0",
@@ -26,6 +26,11 @@ dependencies = [
     "APScheduler>=3.10.0",
     "tiktoken>=0.5.0",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "data*"]
+exclude = ["frontend*", "node_modules*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
