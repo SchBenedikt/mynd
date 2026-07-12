@@ -287,7 +287,7 @@ export function useVoice({ language, onTranscriptRef }) {
       if (transcript && onTranscriptRef?.current) onTranscriptRef.current(transcript, { fromVoice: true });
     };
     recognition.start();
-  }, [language, isListening, onTranscript, speechCapabilities.input, stopVoiceInput]);
+  }, [language, isListening, onTranscriptRef, speechCapabilities.input, stopVoiceInput]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
