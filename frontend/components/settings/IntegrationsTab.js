@@ -288,8 +288,8 @@ export default function IntegrationsTab({ tr, language }) {
             {t(intLabel?.labelDe, intLabel?.labelEn)}
           </div>
           <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1.25rem' }}>
-            {t('Alle Werte werden sicher im Tresor gespeichert (Verschlüsselung). Bestehende Passwörter bleiben erhalten, wenn du das Feld leer lässt.',
-              'All values are stored securely in the vault (encrypted). Existing passwords are preserved when left empty.')}
+            {t('Alle Werte werden lokal im Tresor gespeichert. Bestehende Passwörter bleiben erhalten, wenn du das Feld leer lässt.',
+              'All values are stored locally in the vault. Existing passwords are preserved when left empty.')}
           </p>
 
           {activeInt === 'email' ? <EmailAccountsSection tr={tr} language={language} values={values} setVal={setVal} isSet={isSet} /> : (

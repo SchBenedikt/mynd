@@ -3,6 +3,12 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch, getApiBase } from '../../lib/api';
+import {
+  getModelBaseName,
+  normalizeModelName,
+  splitModelOptions,
+  uniqueSortedModels
+} from '../../lib/modelUtils';
 
 const TTS_PROVIDER_STORAGE_KEY = 'mynd_tts_provider_v1';
 const DISPLAY_NAME_STORAGE_KEY = 'mynd_display_name';
@@ -18,24 +24,6 @@ const formatVoiceLabel = (voice) => {
   return name || lang || 'System Voice';
 };
 
-const EMBEDDING_MODEL_HINTS = [
-  'embed',
-  'embedding',
-  'all-minilm',
-  'bge',
-  'mxbai',
-  'snowflake-arctic-embed',
-  'nomic-embed',
-  'gte',
-  'e5',
-  'jina-embeddings',
-  'paraphrase-multilingual'
-];
-
-const normalizeModelName = (model) => String(model || '').trim();
-
-const getModelBaseName = (model) => normalizeModelName(model).toLowerCase().split(':')[0];
-
 const resolveModelOption = (models, preferredModel) => {
   const uniqueModels = uniqueSortedModels(models);
   const preferredName = normalizeModelName(preferredModel);
@@ -47,24 +35,6 @@ const resolveModelOption = (models, preferredModel) => {
   const preferredBase = getModelBaseName(preferredName);
   const baseMatch = uniqueModels.find((model) => getModelBaseName(model) === preferredBase);
   return baseMatch || preferredName;
-};
-
-const isEmbeddingModel = (model) => {
-  const normalized = normalizeModelName(model).toLowerCase();
-  return EMBEDDING_MODEL_HINTS.some((hint) => normalized.includes(hint));
-};
-
-const uniqueSortedModels = (models) => {
-  return Array.from(new Set((models || []).map(normalizeModelName).filter(Boolean)))
-    .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
-};
-
-const splitModelOptions = (models) => {
-  const uniqueModels = uniqueSortedModels(models);
-  return {
-    chatModels: uniqueModels.filter((model) => !isEmbeddingModel(model)),
-    embeddingModels: uniqueModels.filter((model) => isEmbeddingModel(model))
-  };
 };
 
 const geminiVoices = [

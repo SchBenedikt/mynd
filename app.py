@@ -1289,6 +1289,16 @@ def auth_login():
         })
     return jsonify({'authenticated': False, 'error': 'Invalid credentials'}), 401
 
+
+@app.route('/api/auth/refresh', methods=['POST'])
+@require_auth
+def auth_refresh():
+    username = request.current_user
+    token = secrets.token_hex(32)
+    AUTH_USERS[username]['token'] = token
+    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    return jsonify({'success': True, 'token': token})
+
 @app.route('/api/auth/register', methods=['POST'])
 def auth_register():
     data = request.json or {}

@@ -41,6 +41,31 @@ class TestAuthAPI:
         # Should return 401 or 200 with no user
         assert resp.status_code in (200, 401)
 
+    def test_refresh_rotates_token(self, client, monkeypatch, tmp_path):
+        auth_file = tmp_path / "auth_users.json"
+        monkeypatch.setattr(app_module, "AUTH_FILE", auth_file)
+        monkeypatch.setitem(
+            app_module.AUTH_USERS,
+            "refresh-user",
+            {"name": "Refresh User", "role": "user", "token": "old-token"},
+        )
+
+        response = client.post(
+            "/api/auth/refresh",
+            headers={"Authorization": "Bearer old-token"},
+        )
+
+        assert response.status_code == 200
+        new_token = response.get_json()["token"]
+        assert new_token != "old-token"
+        assert len(new_token) == 64
+        assert client.get(
+            "/api/auth/me", headers={"Authorization": "Bearer old-token"}
+        ).get_json()["authenticated"] is False
+        assert client.get(
+            "/api/auth/me", headers={"Authorization": f"Bearer {new_token}"}
+        ).get_json()["authenticated"] is True
+
 
 class TestOllamaAPI:
     def test_ollama_status(self, client):

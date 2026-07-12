@@ -17,6 +17,7 @@ import Composer from '../../components/Composer';
 import PhotoPreviewModal from '../../components/PhotoPreviewModal';
 import ChatSummaryModal from '../../components/ChatSummaryModal';
 import { apiFetch, getApiBase } from '../../lib/api';
+import { isChatModel, uniqueSortedModels } from '../../lib/modelUtils';
 import {
   CHAT_STORAGE_KEY, ACTIVE_CHAT_STORAGE_KEY, DISPLAY_NAME_STORAGE_KEY,
   BRIEFING_SEEN_KEY, TTS_PROVIDER_STORAGE_KEY, LOCATION_AUTO_RESOLVE_KEY,
@@ -570,7 +571,7 @@ export default function HomePage() {
     try {
       const res = await apiFetch('/api/ollama/models');
       const data = await safeReadJson(res);
-      setAiModels(data.models || []);
+      setAiModels(uniqueSortedModels(data.models).filter(isChatModel));
     } catch (err) { console.error('Error loading models:', err); }
   }, []);
 
