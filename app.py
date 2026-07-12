@@ -2216,7 +2216,7 @@ def api_ai_check_models():
         r.raise_for_status()
         all_models = sorted(set(m['name'] for m in r.json().get('models', [])))
     except Exception as e:
-        return jsonify({'error': f'Cannot fetch models from {base_url}: {e}'}), 502
+        return jsonify({'error': 'Cannot fetch models from ' + base_url}), 502
     results = []
     for model in all_models:
         supported = check_tool_support(model, base_url)
@@ -2402,8 +2402,8 @@ def _nextcloud_status():
     try:
         url, dav, user, pw = nextcloud_plugin._nc()
         return True, {"url": url, "dav": dav, "user": user, "configured": bool(url and user and pw)}
-    except Exception as e:
-        return False, str(e)
+    except Exception:
+        return False, "Nextcloud connection failed"
 
 def _calendar_range(kind, day_name=None):
     today = date.today()
@@ -2437,10 +2437,10 @@ def _calendar_range(kind, day_name=None):
 def _calendar_query_response(start, end):
     ok, info = _nextcloud_status()
     if not ok:
-        return {'success': False, 'enabled': False, 'events': [], 'event_count': 0, 'error': info}, 503
+        return {'success': False, 'enabled': False, 'events': [], 'event_count': 0, 'error': 'Nextcloud nicht verbunden'}, 503
     text = nextcloud_plugin.nextcloud_caldav_query(start.strftime('%Y%m%d'), end.strftime('%Y%m%d'))
     if str(text).startswith("❌"):
-        return {'success': False, 'enabled': True, 'events': [], 'event_count': 0, 'error': text}, 502
+        return {'success': False, 'enabled': True, 'events': [], 'event_count': 0, 'error': 'Calendar query failed'}, 502
     lines = [line.strip() for line in str(text).splitlines() if line.strip() and not line.strip().startswith('📅')]
     events = [{'text': line.lstrip('• ').strip()} for line in lines if line.lstrip('• ').strip()]
     return {
@@ -2791,8 +2791,8 @@ def email_test():
                 c.login(imap_user, imap_pass)
                 c.logout()
                 imap_ok = True
-            except Exception as e:
-                errors.append(f'IMAP: {e}')
+            except Exception:
+                errors.append('IMAP connection failed')
         else:
             errors.append('IMAP unconfigured')
         smtp_server = _vg('email/smtp_server')
@@ -2806,8 +2806,8 @@ def email_test():
                 s.login(smtp_user, smtp_pass)
                 s.quit()
                 smtp_ok = True
-            except Exception as e:
-                errors.append(f'SMTP: {e}')
+            except Exception:
+                errors.append('SMTP connection failed')
         else:
             errors.append('SMTP unconfigured')
         return jsonify({'success': imap_ok or smtp_ok, 'imap': imap_ok, 'smtp': smtp_ok, 'errors': errors})
@@ -3301,8 +3301,8 @@ def backup_import():
                 errors.append(f"{fname}: unsupported encoding")
                 continue
             restored += 1
-        except Exception as e:
-            errors.append(f"{fname}: {e}")
+        except Exception:
+            errors.append(f"{fname}: restore failed")
     return jsonify({'success': True, 'restored': restored, 'errors': errors})
 
 # ── Tool confirmation ─────────────────────────────────────
