@@ -1235,6 +1235,32 @@ def auth_login():
         })
     return jsonify({'authenticated': False, 'error': 'Invalid credentials'}), 401
 
+@app.route('/api/auth/register', methods=['POST'])
+def auth_register():
+    data = request.json or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '').strip()
+    name = data.get('name', '').strip() or username
+    cfg = {'allowRegistration': False}
+    if AUTH_CONFIG_FILE.exists():
+        try:
+            cfg.update(json.loads(AUTH_CONFIG_FILE.read_text()))
+        except Exception:
+            pass
+    if not cfg.get('allowRegistration'):
+        return jsonify({'success': False, 'error': 'Registration is disabled'}), 403
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Username and password required'}), 400
+    if username in AUTH_USERS:
+        return jsonify({'success': False, 'error': 'User already exists'}), 409
+    token = os.urandom(32).hex()
+    AUTH_USERS[username] = {'password': password, 'name': name, 'token': token}
+    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    return jsonify({
+        'success': True, 'authenticated': True,
+        'user': {'name': name, 'username': username}, 'token': token
+    })
+
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
     return jsonify({'success': True})

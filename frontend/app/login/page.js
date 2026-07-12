@@ -9,8 +9,10 @@ const TOKEN_KEY = 'mynd_token_v1';
 export default function LoginPage() {
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
+  const [loginName, setLoginName] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [registerMode, setRegisterMode] = useState(false);
   const [backendUrl, setBackendUrl] = useState('http://127.0.0.1:5001');
   const [showDetails, setShowDetails] = useState(false);
 
@@ -21,15 +23,27 @@ export default function LoginPage() {
     } catch {}
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    apiFetch('/api/auth/config')
+      .then(r => r.json())
+      .then(data => { if (data?.allowRegistration) setRegisterMode(true); })
+      .catch(() => {});
+  }, []);
+
   const submitCredentials = async (e) => {
     e.preventDefault();
     setLoading(true);
     setLoginError('');
     try {
-      const resp = await apiFetch('/api/auth/login', {
+      const endpoint = registerMode ? '/api/auth/register' : '/api/auth/login';
+      const body = registerMode
+        ? { username: loginUser, password: loginPass, name: loginName || loginUser }
+        : { username: loginUser, password: loginPass };
+      const resp = await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginUser, password: loginPass })
+        body: JSON.stringify(body)
       });
       const data = await resp.json();
       if (resp.ok && data.token) {
@@ -37,7 +51,7 @@ export default function LoginPage() {
         window.location.href = '/';
         return;
       }
-      setLoginError((data && data.error) ? String(data.error) : 'Login fehlgeschlagen');
+      setLoginError((data && data.error) ? String(data.error) : (registerMode ? 'Registrierung fehlgeschlagen' : 'Login fehlgeschlagen'));
     } catch (err) {
       setLoginError('Netzwerkfehler – Backend nicht erreichbar');
     }
@@ -56,7 +70,9 @@ export default function LoginPage() {
         <div className="login-header">
           <div className="login-logo">◆</div>
           <h1>MYND</h1>
-          <p className="login-subtitle">Melde dich an, um fortzufahren</p>
+          <p className="login-subtitle">
+            {registerMode ? 'Neuen Account erstellen' : 'Melde dich an, um fortzufahren'}
+          </p>
         </div>
 
         <form onSubmit={submitCredentials} className="login-form">
@@ -70,6 +86,17 @@ export default function LoginPage() {
               autoFocus
             />
           </div>
+          {registerMode && (
+            <div className="login-field">
+              <label htmlFor="login-name">Anzeigename (optional)</label>
+              <input
+                id="login-name"
+                value={loginName}
+                onChange={(e) => setLoginName(e.target.value)}
+                placeholder="Anzeigename"
+              />
+            </div>
+          )}
           <div className="login-field">
             <label htmlFor="login-pass">Passwort</label>
             <input
@@ -81,9 +108,14 @@ export default function LoginPage() {
             />
           </div>
           <button type="submit" className="login-btn" disabled={loading || !loginUser || !loginPass}>
-            {loading ? 'Anmelden...' : 'Anmelden'}
+            {loading ? (registerMode ? 'Wird registriert...' : 'Anmelden...') : (registerMode ? 'Registrieren' : 'Anmelden')}
           </button>
           {loginError && <div className="login-error">{loginError}</div>}
+          <div className="login-switch">
+            <button type="button" onClick={() => { setRegisterMode(!registerMode); setLoginError(''); }}>
+              {registerMode ? 'Bereits registriert? → Anmelden' : 'Noch kein Account? → Registrieren'}
+            </button>
+          </div>
         </form>
 
         <div className="login-footer">
