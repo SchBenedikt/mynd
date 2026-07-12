@@ -173,7 +173,7 @@ def uninstall_plugin(name):
         f.unlink()
     reload_plugins()
 
-GITHUB_RAW_RE = re.compile(r'github\.com[:/]([^/]+/[^/]+?)(?:\.git)?(?:/tree/[^/]+)?(?:/plugin\.py)?$')
+GITHUB_RAW_RE = re.compile(r'github\.com[:/]([^/]+/[^/]+?)(?:\.git)?(?:/tree/[^/]+)?$')
 
 def install_from_github(url):
     m = GITHUB_RAW_RE.search(url)

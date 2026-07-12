@@ -228,7 +228,11 @@ def load_ai_config():
             cfg['provider'] = str(fc.get('provider', cfg['provider']))
             cfg['base_url'] = str(fc.get('base_url', cfg['base_url'])).rstrip('/')
             cfg['model'] = str(fc.get('model', cfg['model']))
-            cfg['api_key'] = str(fc.get('api_key', ''))
+            stored_key = str(fc.get('api_key', ''))
+            if stored_key and stored_key != '***':
+                cfg['api_key'] = stored_key
+            elif stored_key == '***':
+                cfg['api_key'] = _vg('ai/api_key') or ''
         except Exception:
             pass
     if cfg['provider'] == 'ollama':
@@ -242,7 +246,12 @@ def save_ai_config(provider, base_url, model, api_key=''):
         'model': model,
         'api_key': api_key or ''
     }
-    AI_CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    if cfg.get('api_key'):
+        vault_set('ai/api_key', cfg['api_key'])
+    display_cfg = {**cfg}
+    if display_cfg.get('api_key'):
+        display_cfg['api_key'] = '***'
+    AI_CONFIG_FILE.write_text(json.dumps(display_cfg, indent=2, ensure_ascii=False))
     if cfg['provider'] == 'ollama':
         ollama_client.update_config(cfg['base_url'], cfg['model'])
 
@@ -317,17 +326,18 @@ def _extract_numbered_sources(content):
     sources = []
     seen_urls = set()
     for line in str(content or "").splitlines():
-        m = re.match(r'^\((\d+)\)\s*\[(.*?)\]\((.*?)\)\s*$', line.strip())
+        line_s = line.strip()
+        m = re.match(r'^\((\d+)\)\s*\[([^\]]*)\]\(([^)]*)\)\s*$', line_s)
         if m:
             domain = (m.group(2) or '').strip()
             url = (m.group(3) or '').strip()
         else:
-            m2 = re.match(r'^\s*[-*]\s*\[(.*?)\]\((.*?)\)', line.strip())
+            m2 = re.match(r'^\s*[-*]\s*\[([^\]]*)\]\(([^)]*)\)', line_s)
             if m2:
                 domain = (m2.group(1) or '').strip()
                 url = (m2.group(2) or '').strip()
             else:
-                m3 = re.match(r'^\s*(?:https?://\S+)', line.strip())
+                m3 = re.match(r'^\s*(?:https?://\S+)', line_s)
                 if m3:
                     url = m3.group(0).rstrip('.,;:!?)')
                     domain = urlparse(url).netloc
@@ -339,9 +349,10 @@ def _extract_numbered_sources(content):
     return sources
 
 def _extract_meta_content(html_text, attr_name, attr_value):
+    escaped_val = re.escape(attr_value)
     patterns = [
-        rf'<meta[^>]+{attr_name}=["\']{re.escape(attr_value)}["\'][^>]+content=["\'](.*?)["\']',
-        rf'<meta[^>]+content=["\'](.*?)["\'][^>]+{attr_name}=["\']{re.escape(attr_value)}["\']',
+        rf'<meta[^>]*\s{attr_name}=["\']{escaped_val}["\'][^>]*\scontent=["\']([^"\']*)["\']',
+        rf'<meta[^>]*\scontent=["\']([^"\']*)["\'][^>]*\s{attr_name}=["\']{escaped_val}["\']',
     ]
     for pattern in patterns:
         m = re.search(pattern, html_text, flags=re.IGNORECASE | re.DOTALL)
@@ -350,7 +361,7 @@ def _extract_meta_content(html_text, attr_name, attr_value):
     return ""
 
 def _extract_first_img(html_text, base_url):
-    m = re.search(r'<img[^>]+src=["\'](https?://[^"\']+)["\']', html_text, re.IGNORECASE)
+    m = re.search(r'<img\s[^>]*\bsrc=["\'](https?://[^"\']+)["\']', html_text, re.IGNORECASE)
     if m:
         return m.group(1)
     return None
@@ -381,9 +392,9 @@ def _fetch_preview_image_for_url(source_url):
         return None
 
 def _should_add_source_images(content, stats):
-    if re.search(r'!\[[^\]]*]\(([^)]+)\)', str(content or '')):
+    if re.search(r'!\[[^\]]*]\([^)]+\)', str(content or '')):
         return False
-    if re.search(r'\bhttps?://[^\s<>()\]]+\b', str(content or '')):
+    if re.search(r'https?://[^\s<>()\]]+', str(content or '')):
         return True
     tool_names = set()
     for round_item in stats or []:
@@ -498,12 +509,12 @@ def _strip_tool_code_blocks(text):
     """Remove <tool_code>, <tool>, [TOOL_CALL], and <tool_call> blocks from AI responses."""
     if not text:
         return text
-    import re as _re
-    cleaned = _re.sub(r'<tool_code>.*?</tool_code>', '', str(text), flags=_re.DOTALL)
-    cleaned = _re.sub(r'<tool[ >].*?</tool>', '', cleaned, flags=_re.DOTALL)
-    cleaned = _re.sub(r'<tool\s+[^>]*/>', '', cleaned, flags=_re.DOTALL)
-    cleaned = _re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', cleaned, flags=_re.DOTALL)
-    cleaned = _re.sub(r'<tool_call>.*?</tool_call>', '', cleaned, flags=_re.DOTALL)
+    cleaned = str(text)
+    cleaned = _re.sub(r'<tool_code>.*?</tool_code>', '', cleaned)
+    cleaned = _re.sub(r'<tool[ >][^<]*</tool>', '', cleaned)
+    cleaned = _re.sub(r'<tool\s+[^>]*/>', '', cleaned)
+    cleaned = _re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', cleaned)
+    cleaned = _re.sub(r'<tool_call>[^<]*</tool_call>', '', cleaned)
     return cleaned.strip()
 
 def _parse_tool_code_fallback(text):
@@ -1161,7 +1172,7 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
         return
     except Exception as e:
         logger.exception(f"Unbehandelter Fehler in web_agent_loop_stream: {e}")
-        yield {"type": "error", "error": str(e)}
+        yield {"type": "error", "error": str(e)[:200]}
 
 # ── Helper Functions ──────────────────────────────────────
 def _fmt_endpoints(d, lines, indent="    "):
@@ -1198,8 +1209,13 @@ if not AUTH_USERS:
         'role': 'admin',
     }
     AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
-    logger.warning('Created initial admin account with temporary password: %s', default_password)
+    logger.warning('Created initial admin account with temporary password')
 
+
+def _safe_error(message, exception=None, status=500):
+    if exception:
+        logger.error('%s: %s', message, exception)
+    return jsonify({'success': False, 'error': message}), status
 
 def _verify_password(user, password):
     password_hash = user.get('password_hash')
@@ -1382,7 +1398,7 @@ def auth_config():
         AUTH_CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
         return jsonify({'success': True, **cfg})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': str(e)[:200]}), 500
 
 @app.route('/api/auth/profile', methods=['GET', 'PUT'])
 @require_auth
@@ -1509,9 +1525,12 @@ def frontend_static(path):
         return jsonify({'success': False, 'error': 'Not found'}), 404
     if not STATIC_EXPORT_DIR.is_dir():
         return jsonify({'error': 'not found'}), 404
-    file_path = STATIC_EXPORT_DIR / path
+    safe_path = os.path.normpath('/' + path).lstrip('/')
+    file_path = STATIC_EXPORT_DIR / safe_path
+    if not str(file_path.resolve()).startswith(str(STATIC_EXPORT_DIR.resolve())):
+        return jsonify({'error': 'not found'}), 404
     if file_path.exists() and file_path.is_file():
-        return send_from_directory(STATIC_EXPORT_DIR, path)
+        return send_from_directory(STATIC_EXPORT_DIR, safe_path)
     index = file_path / 'index.html'
     if index.exists():
         return send_from_directory(file_path, 'index.html')
@@ -1584,7 +1603,10 @@ def setup_bootstrap():
         nc_url = data.get('nextcloud_url', '').strip()
         cid = data.get('client_id', '').strip()
         secret = data.get('client_secret', '').strip()
-        oauth_data = {'nextcloud_url': nc_url, 'client_id': cid, 'client_secret': secret}
+        vault_set('nextcloud/url', nc_url)
+        vault_set('nextcloud/client_id', cid)
+        vault_set('nextcloud/client_secret', secret)
+        oauth_data = {'nextcloud_url': nc_url, 'client_id': '***'}
         (DATA_DIR / 'nextcloud_oauth.json').write_text(json.dumps(oauth_data, indent=2))
         return jsonify({'success': True, 'mode': 'nextcloud'})
     elif mode == 'auth_config':
@@ -1952,17 +1974,18 @@ def upload_file():
     try:
         safe_name = re.sub(r'[^\w\.\-]', '_', f.filename)
         dest = UPLOAD_DIR / safe_name
+        if not str(dest.resolve()).startswith(str(UPLOAD_DIR.resolve())):
+            return jsonify({'success': False, 'error': 'Invalid path'}), 400
         dest.write_bytes(f.read())
         size = dest.stat().st_size
         return jsonify({
             'success': True,
             'filename': safe_name,
-            'path': str(dest),
             'size': size,
             'url': f'/api/uploads/{safe_name}'
         })
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Upload failed'}), 500
 
 @app.route('/api/uploads/<path:filename>')
 def serve_upload(filename):
@@ -2076,7 +2099,7 @@ def _store_credentials_from_message(message):
     if not ip_match:
         ip_match = re.search(r'truenas|proxmox|server', message, re.IGNORECASE)
     user_match = re.search(r'(?:username|benutzer|user)\s+(\S+)', message, re.IGNORECASE)
-    pass_match = re.search(r'(?:passwort|password|pass)\s+(.+?)(?:\s+(?:und|auf|für|bitte|gibt|mit)\s|$)', message, re.IGNORECASE)
+    pass_match = re.search(r'(?:passwort|password|pass)\s+(\S+)', message, re.IGNORECASE)
 
     if ip_match:
         ip = ip_match.group(1) if ip_match.lastindex else 'server'
@@ -2114,7 +2137,7 @@ def ollama_models():
             'base_url': ollama_client.base_url,
             'current_model': ollama_client.model,
             'models': [ollama_client.model] if ollama_client.model else [],
-            'error': str(e)
+            'error': str(e)[:200]
         })
 
 @app.route('/api/ai/config', methods=['GET', 'POST'])
@@ -2214,7 +2237,7 @@ def api_vault_entries():
         entries = [{'key': k, 'value': v} for k, v in sorted(vault_data.items())]
         return jsonify({'entries': entries, 'count': len(entries)})
     except Exception as e:
-        return jsonify({'error': str(e), 'entries': [], 'count': 0})
+        return jsonify({'error': str(e)[:200], 'entries': [], 'count': 0})
 
 @app.route('/api/vault/entries', methods=['POST'])
 def api_vault_set():
@@ -2330,7 +2353,7 @@ def indexing_start():
         except Exception as e:
             with _app_lock:
                 INDEXING_STATUS['status'] = 'error'
-                INDEXING_STATUS['errors'].append(str(e))
+                INDEXING_STATUS['errors'].append(str(e)[:200])
             logger.error(f"Indexing error: {e}")
 
     threading.Thread(target=run_index, daemon=True).start()
@@ -2372,7 +2395,10 @@ def indexing_config():
             return jsonify({'url': cfg.get('url', ''), 'username': cfg.get('username', ''), 'password': '***' if cfg.get('password') else ''})
         return jsonify({'url': '', 'username': '', 'password': ''})
     data = request.json or {}
-    cfg = {'url': data.get('url', ''), 'username': data.get('username', ''), 'password': data.get('password', '')}
+    pw = data.get('password', '')
+    if pw:
+        vault_set('indexing/password', pw)
+    cfg = {'url': data.get('url', ''), 'username': data.get('username', ''), 'password': '***' if pw else ''}
     (DATA_DIR / 'indexing_config.json').write_text(json.dumps(cfg, indent=2))
     return jsonify({'status': 'saved'})
 
@@ -2451,7 +2477,7 @@ def calendar_calendars():
         calendars = [{'name': name, 'href': href} for name, href in cals]
         return jsonify({'success': True, 'calendars': calendars, 'count': len(calendars)})
     except Exception as e:
-        return jsonify({'success': False, 'calendars': [], 'count': 0, 'error': str(e)}), 502
+        return jsonify({'success': False, 'calendars': [], 'count': 0, 'error': str(e)[:200]}), 502
 
 @app.route('/api/calendar/create', methods=['POST'])
 def calendar_create():
@@ -2792,7 +2818,7 @@ def email_test():
             errors.append('SMTP unconfigured')
         return jsonify({'success': imap_ok or smtp_ok, 'imap': imap_ok, 'smtp': smtp_ok, 'errors': errors})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)[:200]})
 
 @app.route('/api/email/folders', methods=['POST'])
 def email_folders():
@@ -2815,7 +2841,7 @@ def email_folders():
                 names.append(parts[1].strip())
         return jsonify({'success': True, 'folders': names or ['INBOX']})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)[:200]})
 
 
 # ── E-Mail-Konten API ──────────────────────────────────
@@ -2849,7 +2875,7 @@ def api_email_accounts():
                         }
             return jsonify({"success": True, "accounts": result})
         except Exception as e:
-            return jsonify({"success": False, "error": str(e)})
+            return jsonify({"success": False, "error": str(e)[:200]})
     data = request.json or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -2870,7 +2896,7 @@ def api_email_account_delete(name):
             vault_delete(f"email/accounts/{name}/{key}")
         return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        return jsonify({"success": False, "error": str(e)[:200]})
 
 
 # ── E-Mail-Indexierung ─────────────────────────────────
@@ -2890,7 +2916,7 @@ def email_index():
         count = len([line for line in lines if line.startswith("ID:")])
         return jsonify({"success": True, "indexed": count, "account": account})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        return jsonify({"success": False, "error": str(e)[:200]})
 
 
 # ── Indexing-Schedule (startet beim App-Start) ─────────
@@ -2948,7 +2974,7 @@ def indexing_status():
         stats["email_accounts"] = len(_list_accounts())
         return jsonify({"success": True, "stats": stats})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        return jsonify({"success": False, "error": str(e)[:200]})
 
 
 # ── Tagesassistent Briefing ──────────────────────────────
@@ -3015,7 +3041,7 @@ def agent_briefing():
 
         return jsonify({"success": True, "briefing": briefing})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        return jsonify({"success": False, "error": str(e)[:200]})
 
 
 # ── Immich ──────────────────────────────────────────────
@@ -3051,7 +3077,7 @@ def immich_thumbnail(asset_id):
         return Response(b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x00\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b',
                         content_type='image/gif')
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e)[:200]}), 500
 
 
 @app.route('/api/immich/original/<asset_id>')
@@ -3075,7 +3101,7 @@ def immich_original(asset_id):
             return Response(r2.raw, content_type=r2.headers.get('Content-Type', 'image/jpeg'), status=r2.status_code)
         return jsonify({'error': f'Original nicht gefunden (Status {r.status_code})'}), 404
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e)[:200]}), 500
 
 
 @app.route('/api/immich/test', methods=['POST'])
@@ -3092,7 +3118,7 @@ def immich_test():
             return jsonify({'success': True, 'status': 'connected', 'asset_count': count})
         return jsonify({'success': False, 'error': f'Immich responded with {resp.status_code}: {resp.text[:200]}'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({'success': False, 'error': str(e)[:200]})
 
 @app.route('/api/nina/regions', methods=['GET'])
 def nina_regions():
@@ -3237,7 +3263,7 @@ def backup_export():
                 else:
                     files[fname] = {'content': raw.decode('utf-8'), 'encoding': 'utf-8'}
             except Exception as e:
-                files[fname] = {'error': str(e)}
+                files[fname] = {'error': str(e)[:200]}
     return jsonify({'success': True, 'files': files, 'exported_at': datetime.now(UTC).isoformat()})
 
 @app.route('/api/backup/import', methods=['POST'])
@@ -3268,13 +3294,18 @@ def backup_import():
         try:
             content = meta.get('content', '')
             encoding = meta.get('encoding', 'utf-8')
-            fpath = DATA_DIR / fname
+            safe_restore = os.path.normpath('/' + fname).lstrip('/')
+            fpath = DATA_DIR / safe_restore
+            if not str(fpath.resolve()).startswith(str(DATA_DIR.resolve())):
+                errors.append(f"{fname}: invalid path")
+                continue
             if encoding == 'base64':
                 fpath.write_bytes(base64.b64decode(content, validate=True))
             elif encoding == 'utf-8':
                 fpath.write_text(content, encoding='utf-8')
             else:
-                raise ValueError(f"unsupported encoding: {encoding}")
+                errors.append(f"{fname}: unsupported encoding")
+                continue
             restored += 1
         except Exception as e:
             errors.append(f"{fname}: {e}")
@@ -3303,7 +3334,7 @@ def tool_run():
         result = func(**pending['args'])
         return jsonify({'success': True, 'result': str(result)})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': str(e)[:200]}), 500
 
 # ── Automations API ────────────────────────────────────────
 
@@ -3406,7 +3437,7 @@ def install_plugin():
         name = install_from_github(url)
         return jsonify({'success': True, 'name': name})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+        return jsonify({'success': False, 'error': str(e)[:200]}), 400
 
 @app.route('/api/plugins/<name>/toggle', methods=['POST'])
 @require_admin
@@ -3418,7 +3449,7 @@ def toggle_plugin(name):
         set_plugin_enabled(name, enabled)
         return jsonify({'success': True, 'enabled': enabled})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+        return jsonify({'success': False, 'error': str(e)[:200]}), 400
 
 @app.route('/api/plugins/<name>', methods=['DELETE'])
 @require_admin
@@ -3428,7 +3459,7 @@ def delete_plugin(name):
         uninstall_plugin(name)
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+        return jsonify({'success': False, 'error': str(e)[:200]}), 400
 
 # ── Main ──────────────────────────────────────────────────
 if __name__ == '__main__':
