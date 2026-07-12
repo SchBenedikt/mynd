@@ -51,6 +51,11 @@ body {
   --success: var(--positive);
   --warning: #d97706;
   --danger: #dc2626;
+  --hover: var(--chip-hover);
+  --border: var(--line);
+  --card-bg: var(--panel);
+  --background: var(--input-bg);
+  --bg: var(--bg-1);
 
   --radius-sm: 6px;
   --radius: 10px;

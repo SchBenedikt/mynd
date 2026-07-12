@@ -12,7 +12,7 @@ export default function ApiRefsTab({ tr, language }) {
 
   const loadApiRefs = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/references`);
+      const res = await apiFetch('/api/references');
       const data = await res.json();
       setApiRefsContent(JSON.stringify(data, null, 2));
       setApiRefsError('');
@@ -31,7 +31,7 @@ export default function ApiRefsTab({ tr, language }) {
     setApiRefsError('');
     setApiRefsStatus(tr('Speichere...', 'Saving...'));
     try {
-      const res = await fetch(`${getApiBase()}/api/references`, {
+      const res = await apiFetch('/api/references', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: apiRefsContent

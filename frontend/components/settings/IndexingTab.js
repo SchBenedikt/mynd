@@ -21,7 +21,7 @@ export default function IndexingTab({ tr, language }) {
 
   const loadNcConfig = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/indexing/config`);
+      const res = await apiFetch('/api/indexing/config');
       if (res.ok) {
         const data = await res.json();
         setNcUrl(data.url || '');
@@ -37,7 +37,7 @@ export default function IndexingTab({ tr, language }) {
   const saveNcConfig = async () => {
     try {
       setNcConfigStatus(tr('Speichere...', 'Saving...'));
-      const res = await fetch(`${getApiBase()}/api/indexing/config`, {
+      const res = await apiFetch('/api/indexing/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -61,7 +61,7 @@ export default function IndexingTab({ tr, language }) {
 
   const loadIndexingConfig = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/indexing/path`);
+      const res = await apiFetch('/api/indexing/path');
       if (res.ok) {
         const data = await res.json();
         setIndexingPath(data.path || '');
@@ -73,7 +73,7 @@ export default function IndexingTab({ tr, language }) {
 
   const saveIndexingConfig = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/indexing/path`, {
+      const res = await apiFetch('/api/indexing/path', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: indexingPath })
       });
       if (res.ok) {
@@ -89,7 +89,7 @@ export default function IndexingTab({ tr, language }) {
 
   const loadIndexingStats = async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/indexing/stats`);
+      const res = await apiFetch('/api/indexing/stats');
       if (res.ok) {
         const data = await res.json();
         setPersistentIndexStats(data || {});
@@ -109,7 +109,7 @@ export default function IndexingTab({ tr, language }) {
           return;
         }
       }
-      const res = await fetch(`${getApiBase()}/api/indexing/start`, {
+      const res = await apiFetch('/api/indexing/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: indexingPath || undefined })
       });
       if (res.ok) {
@@ -217,7 +217,7 @@ export default function IndexingTab({ tr, language }) {
         <div style={{display: 'flex', gap: '0.75rem', flexWrap: 'wrap'}}>
           <button className="btn primary" onClick={async () => {
             try {
-              const r = await fetch(`${getApiBase()}/api/email-indexing/start`, {method: 'POST'});
+              const r = await apiFetch('/api/email-indexing/start', {method: 'POST'});
               const d = await r.json();
               if(d.success) alert(tr('E-Mail-Indexierung gestartet!', 'Email indexing started!'));
             } catch(e) { alert('Error: '+e.message); }
@@ -226,7 +226,7 @@ export default function IndexingTab({ tr, language }) {
             {tr('Jetzt indizieren', 'Index Now')}
           </button>
           <button className="btn secondary" onClick={async () => {
-            await fetch(`${getApiBase()}/api/email-indexing/stop`, {method: 'POST'});
+            await apiFetch('/api/email-indexing/stop', {method: 'POST'});
           }}>
             {tr('Stoppen', 'Stop')}
           </button>
@@ -280,7 +280,7 @@ export default function IndexingTab({ tr, language }) {
             {indexingStatus === 'running' ? tr('Indexierung läuft...', 'Indexing...') : tr('Indexierung starten', 'Start Indexing')}
           </button>
           {indexingStatus === 'running' && (
-            <button className="btn secondary" onClick={() => fetch(`${getApiBase()}/api/indexing/stop`, {method: 'POST'})}>
+            <button className="btn secondary" onClick={() => apiFetch('/api/indexing/stop', {method: 'POST'})}>
               {tr('Stoppen', 'Stop')}
             </button>
           )}

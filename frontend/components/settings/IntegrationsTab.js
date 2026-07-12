@@ -56,7 +56,7 @@ export default function IntegrationsTab({ tr, language }) {
 
   const loadAll = async () => {
     try {
-      const r = await fetch(`${getApiBase()}/api/vault/entries`);
+      const r = await apiFetch('/api/vault/entries');
       const d = await r.json();
       if (d?.success === false) return;
       const entries = d.entries || [];
@@ -69,7 +69,7 @@ export default function IntegrationsTab({ tr, language }) {
 
   const loadPlugins = async () => {
     try {
-      const r = await fetch(`${getApiBase()}/api/plugins`);
+      const r = await apiFetch('/api/plugins');
       const d = await r.json();
       if (d.success) {
         setPlugins(d.plugins || []);
@@ -93,7 +93,7 @@ export default function IntegrationsTab({ tr, language }) {
       if (raw === '__SET__') continue;
       if (raw !== undefined && raw !== '') {
         try {
-          const r = await fetch(`${getApiBase()}/api/vault/entries`, {
+          const r = await apiFetch('/api/vault/entries', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: f.key, value: raw }),
@@ -112,7 +112,7 @@ export default function IntegrationsTab({ tr, language }) {
 
   const handleToggle = async (name, enabled) => {
     try {
-      await fetch(`${getApiBase()}/api/plugins/${name}/toggle`, {
+      await apiFetch(`/api/plugins/${name}/toggle`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
@@ -124,7 +124,7 @@ export default function IntegrationsTab({ tr, language }) {
   const handleUninstall = async (name) => {
     if (!window.confirm(t(`Plugin "${name}" wirklich deinstallieren?`, `Really uninstall "${name}"?`))) return;
     try {
-      const r = await fetch(`${getApiBase()}/api/plugins/${name}`, { method: 'DELETE' });
+      const r = await apiFetch(`/api/plugins/${name}`, { method: 'DELETE' });
       const d = await r.json();
       if (d.success) {
         setPlugins(plugins.filter(p => p.name !== name));
@@ -138,7 +138,7 @@ export default function IntegrationsTab({ tr, language }) {
     if (!installUrl.trim()) return;
     setInstalling(true); setInstallMsg('');
     try {
-      const r = await fetch(`${getApiBase()}/api/plugins/install`, {
+      const r = await apiFetch('/api/plugins/install', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: installUrl.trim() }),
@@ -359,7 +359,7 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
 
   const loadAccounts = async () => {
     try {
-      const r = await fetch(`${getApiBase()}/api/email/accounts`);
+      const r = await apiFetch('/api/email/accounts');
       const d = await r.json();
       if (d.success) setAccounts(Object.entries(d.accounts || {}).map(([k,v]) => ({ name: k, ...v })));
     } catch(e) { console.error(e); }
@@ -371,7 +371,7 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
     setSaving(true); setMsg('');
     try {
       const payload = { name, ...form };
-      await fetch(`${getApiBase()}/api/email/accounts`, {
+      await apiFetch('/api/email/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -380,7 +380,7 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
       if (name === 'default') {
         for (const f of EMAIL_FIELDS) {
           if (form[f.key]) {
-            await fetch(`${getApiBase()}/api/vault/entries`, {
+            await apiFetch('/api/vault/entries', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ key: `email/${f.key}`, value: form[f.key] }),
@@ -398,7 +398,7 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
   const deleteAccount = async (name) => {
     if (!window.confirm(t(`Konto "${name}" löschen?`, `Delete account "${name}"?`))) return;
     try {
-      await fetch(`${getApiBase()}/api/email/accounts/${name}`, { method: 'DELETE' });
+      await apiFetch(`/api/email/accounts/${name}`, { method: 'DELETE' });
       await loadAccounts();
     } catch(e) { console.error(e); }
   };

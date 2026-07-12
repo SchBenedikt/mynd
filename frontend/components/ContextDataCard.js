@@ -224,7 +224,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
 
     try {
       if (isCalendar) {
-        const res = await fetch(`${getApiBase()}/api/calendar/update`, {
+        const res = await apiFetch('/api/calendar/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -241,7 +241,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
           throw new Error(data?.error || 'Could not update event.');
         }
       } else {
-        const res = await fetch(`${getApiBase()}/api/tasks/update/${encodeURIComponent(editForm.uid)}`, {
+        const res = await apiFetch(`/api/tasks/update/${encodeURIComponent(editForm.uid)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -269,7 +269,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
 
   const completeTask = async (taskItem) => {
     try {
-      const res = await fetch(`${getApiBase()}/api/tasks/complete/${encodeURIComponent(taskItem.uid)}`, {
+      const res = await apiFetch(`/api/tasks/complete/${encodeURIComponent(taskItem.uid)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ list_name: taskItem.list_name || 'tasks' })
@@ -293,7 +293,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
     setError('');
 
     try {
-      const res = await fetch(`${getApiBase()}/api/email/send`, {
+      const res = await apiFetch('/api/email/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

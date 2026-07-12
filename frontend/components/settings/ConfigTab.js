@@ -187,7 +187,7 @@ export default function ConfigTab({ tr, language }) {
 
   const loadEmbeddingStatus = async () => {
     try {
-      const kbRes = await fetch(`${getApiBase()}/api/knowledge/status`);
+      const kbRes = await apiFetch('/api/knowledge/status');
       const kb = await kbRes.json();
       const totalChunks = Number(kb.chunks_loaded || 0);
       const generatedEmbeddings = Number(kb.generated_embeddings ?? kb.embeddings_count ?? 0);
@@ -239,7 +239,7 @@ export default function ConfigTab({ tr, language }) {
   const setSecurityMode = async (mode) => {
     setSecurityModeState(mode);
     try {
-      const res = await fetch(`${getApiBase()}/api/security/mode`, {
+      const res = await apiFetch('/api/security/mode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode })
@@ -279,7 +279,7 @@ export default function ConfigTab({ tr, language }) {
         };
       }
       if (geminiTtsApiKey.trim()) payload.gemini_tts_api_key = geminiTtsApiKey.trim();
-      const res = await fetch(`${getApiBase()}/api/ai/config`, {
+      const res = await apiFetch('/api/ai/config', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       const data = await res.json();
@@ -301,7 +301,7 @@ export default function ConfigTab({ tr, language }) {
   const updateEmbeddings = async () => {
     try {
       setAiStatus(tr('Embeddings werden aktualisiert...', 'Updating embeddings...'));
-      const res = await fetch(`${getApiBase()}/api/knowledge/update-embeddings`, { method: 'POST' });
+      const res = await apiFetch('/api/knowledge/update-embeddings', { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data?.status === 'success') {
         setAiStatus(tr('Embeddings erfolgreich aktualisiert', 'Embeddings updated successfully'));

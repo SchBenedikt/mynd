@@ -19,8 +19,8 @@ export default function AutomationsTab({ tr, language }) {
   const load = useCallback(async () => {
     try {
       const [aRes, sRes] = await Promise.all([
-        fetch(`${getApiBase()}/api/automations`),
-        fetch(`${getApiBase()}/api/automations/schema`)
+        apiFetch('/api/automations'),
+        apiFetch('/api/automations/schema')
       ]);
       const aData = await aRes.json();
       const sData = await sRes.json();
@@ -35,7 +35,7 @@ export default function AutomationsTab({ tr, language }) {
 
   const loadHistory = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiBase()}/api/automations/history?limit=50`);
+      const res = await apiFetch('/api/automations/history?limit=50');
       const data = await res.json();
       if (data.success) setHistory(data.history);
     } catch (e) {
@@ -47,9 +47,9 @@ export default function AutomationsTab({ tr, language }) {
 
   const save = async (auto) => {
     const method = automations.find(a => a.id === auto.id) ? 'PUT' : 'POST';
-    const url = method === 'PUT' ? `${getApiBase()}/api/automations/${auto.id}` : `${getApiBase()}/api/automations`;
+    const endpoint = method === 'PUT' ? `/api/automations/${auto.id}` : '/api/automations';
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(endpoint, {
         method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(auto)
       });
       if ((await res.json()).success) { await load(); setEditingId(null); }
@@ -59,7 +59,7 @@ export default function AutomationsTab({ tr, language }) {
   const remove = async (id) => {
     if (!window.confirm(L('Wirklich löschen?', 'Really delete?'))) return;
     try {
-      await fetch(`${getApiBase()}/api/automations/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/automations/${id}`, { method: 'DELETE' });
       await load();
     } catch (e) { console.error('Delete failed:', e); }
   };
@@ -71,7 +71,7 @@ export default function AutomationsTab({ tr, language }) {
   const test = async (auto) => {
     setTestResult({ running: true, name: auto.name });
     try {
-      const res = await fetch(`${getApiBase()}/api/automations/${auto.id}/test`, { method: 'POST' });
+      const res = await apiFetch(`/api/automations/${auto.id}/test`, { method: 'POST' });
       const data = await res.json();
       setTestResult({ ...data, name: auto.name, ts: new Date().toLocaleTimeString() });
     } catch (e) { setTestResult({ success: false, error: String(e), name: auto.name }); }
