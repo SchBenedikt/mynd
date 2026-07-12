@@ -89,6 +89,27 @@ export default function AuthGate({ children }) {
   }, [router]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const interval = setInterval(async () => {
+      try {
+        const storedToken = localStorage.getItem(TOKEN_KEY);
+        if (!storedToken) return;
+        const res = await apiFetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (res.ok && data?.token) {
+          localStorage.setItem(TOKEN_KEY, data.token);
+        }
+      } catch (e) {
+        /* token refresh failed silently — existing token still valid */
+      }
+    }, 15 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
     const handleLogin = () => {
       try {
         const storedToken = localStorage.getItem(TOKEN_KEY);
@@ -117,7 +138,32 @@ export default function AuthGate({ children }) {
     guardedReplace('/login');
   }, [ready, pathname, user, forceOpen, hasToken]);
 
-  if (!ready) return null;
+  if (!ready) return (
+    <div className="authgate-skeleton">
+      <div className="authgate-skeleton-sidebar">
+        <div className="skeleton-brand" />
+        <div className="skeleton-nav">
+          <div className="skeleton-nav-item" />
+          <div className="skeleton-nav-item" />
+          <div className="skeleton-nav-item" />
+          <div className="skeleton-nav-item" />
+        </div>
+        <div className="skeleton-chats">
+          <div className="skeleton-chat-item" />
+          <div className="skeleton-chat-item" />
+          <div className="skeleton-chat-item" />
+        </div>
+      </div>
+      <div className="authgate-skeleton-main">
+        <div className="skeleton-landing">
+          <div className="skeleton-logo" />
+          <div className="skeleton-title" />
+          <div className="skeleton-subtitle" />
+          <div className="skeleton-composer" />
+        </div>
+      </div>
+    </div>
+  );
   if (pathname === '/language') return children;
   if (pathname?.startsWith('/setup')) return children;
   if (pathname === '/login') return children;
