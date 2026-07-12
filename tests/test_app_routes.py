@@ -2,6 +2,7 @@
 
 import pytest
 
+import app as app_module
 from app import app
 
 
@@ -123,3 +124,31 @@ class TestCornerCases:
     def test_immich_thumbnail_missing_id(self, client):
         resp = client.get("/api/immich/thumbnail/nonexistent")
         assert resp.status_code in (200, 400, 404, 500)
+
+
+class TestBackupSecurity:
+    def test_backup_requires_admin(self, client):
+        assert client.get("/api/backup/export").status_code == 401
+        assert client.post("/api/backup/import", json={"files": {}}).status_code == 401
+
+    def test_backup_import_rejects_path_traversal(self, client, monkeypatch, tmp_path):
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        auth_file = data_dir / "auth_users.json"
+        monkeypatch.setattr(app_module, "DATA_DIR", data_dir)
+        monkeypatch.setattr(app_module, "AUTH_FILE", auth_file)
+        monkeypatch.setitem(
+            app_module.AUTH_USERS,
+            "admin",
+            {"name": "Admin", "role": "admin", "token": "test-admin-token"},
+        )
+
+        response = client.post(
+            "/api/backup/import",
+            headers={"Authorization": "Bearer test-admin-token"},
+            json={"files": {"../outside.json": {"content": "owned", "encoding": "utf-8"}}},
+        )
+
+        assert response.status_code == 200
+        assert response.get_json()["restored"] == 0
+        assert not (tmp_path / "outside.json").exists()

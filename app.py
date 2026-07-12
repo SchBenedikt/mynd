@@ -3212,7 +3212,7 @@ def ai_greeting():
 
 # ── Backup Export/Import ──────────────────────────────────
 @app.route('/api/backup/export', methods=['GET'])
-@require_auth
+@require_admin
 def backup_export():
     import base64
     files = {}
@@ -3231,14 +3231,27 @@ def backup_export():
     return jsonify({'success': True, 'files': files, 'exported_at': datetime.now(UTC).isoformat()})
 
 @app.route('/api/backup/import', methods=['POST'])
-@require_auth
+@require_admin
 def backup_import():
     import base64
     data = request.json or {}
     files = data.get('files', {})
+    if not isinstance(files, dict):
+        return jsonify({'success': False, 'error': 'files must be an object'}), 400
     errors = []
     restored = 0
     for fname, meta in files.items():
+        if (
+            not isinstance(fname, str)
+            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', fname)
+            or '/' in fname
+            or '\\' in fname
+        ):
+            errors.append(f"Rejected unsafe filename: {fname}")
+            continue
+        if not isinstance(meta, dict):
+            errors.append(f"{fname}: metadata must be an object")
+            continue
         if meta.get('error'):
             errors.append(f"Skipped {fname}: source error")
             continue
@@ -3247,9 +3260,11 @@ def backup_import():
             encoding = meta.get('encoding', 'utf-8')
             fpath = DATA_DIR / fname
             if encoding == 'base64':
-                fpath.write_bytes(base64.b64decode(content))
-            else:
+                fpath.write_bytes(base64.b64decode(content, validate=True))
+            elif encoding == 'utf-8':
                 fpath.write_text(content, encoding='utf-8')
+            else:
+                raise ValueError(f"unsupported encoding: {encoding}")
             restored += 1
         except Exception as e:
             errors.append(f"{fname}: {e}")

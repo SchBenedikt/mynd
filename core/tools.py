@@ -283,7 +283,7 @@ def prompt_user(message, secret=False):
         return "(abgebrochen)"
 
 
-def http_request(method="GET", url="", headers={}, body="", auth_user="", auth_pass=""):
+def http_request(method="GET", url="", headers=None, body="", auth_user="", auth_pass=""):
     try:
         h = {}
         if headers:
