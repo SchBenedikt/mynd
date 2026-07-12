@@ -1398,7 +1398,7 @@ def auth_config():
         AUTH_CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
         return jsonify({'success': True, **cfg})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)[:200]}), 500
+        return jsonify({'success': False, 'error': "Request failed"}), 500
 
 @app.route('/api/auth/profile', methods=['GET', 'PUT'])
 @require_auth
@@ -2230,7 +2230,7 @@ def api_vault_entries():
         entries = [{'key': k, 'value': v} for k, v in sorted(vault_data.items())]
         return jsonify({'entries': entries, 'count': len(entries)})
     except Exception as e:
-        return jsonify({'error': str(e)[:200], 'entries': [], 'count': 0})
+        return jsonify({'error': "Request failed", 'entries': [], 'count': 0})
 
 @app.route('/api/vault/entries', methods=['POST'])
 def api_vault_set():
@@ -2470,7 +2470,7 @@ def calendar_calendars():
         calendars = [{'name': name, 'href': href} for name, href in cals]
         return jsonify({'success': True, 'calendars': calendars, 'count': len(calendars)})
     except Exception as e:
-        return jsonify({'success': False, 'calendars': [], 'count': 0, 'error': str(e)[:200]}), 502
+        return jsonify({'success': False, 'calendars': [], 'count': 0, 'error': "Request failed"}), 502
 
 @app.route('/api/calendar/create', methods=['POST'])
 def calendar_create():
@@ -2811,7 +2811,7 @@ def email_test():
             errors.append('SMTP unconfigured')
         return jsonify({'success': imap_ok or smtp_ok, 'imap': imap_ok, 'smtp': smtp_ok, 'errors': errors})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)[:200]})
+        return jsonify({'success': False, 'error': "Request failed"})
 
 @app.route('/api/email/folders', methods=['POST'])
 def email_folders():
@@ -2834,7 +2834,7 @@ def email_folders():
                 names.append(parts[1].strip())
         return jsonify({'success': True, 'folders': names or ['INBOX']})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)[:200]})
+        return jsonify({'success': False, 'error': "Request failed"})
 
 
 # ── E-Mail-Konten API ──────────────────────────────────
@@ -2868,7 +2868,7 @@ def api_email_accounts():
                         }
             return jsonify({"success": True, "accounts": result})
         except Exception as e:
-            return jsonify({"success": False, "error": str(e)[:200]})
+            return jsonify({"success": False, "error": "Request failed"})
     data = request.json or {}
     name = (data.get("name") or "").strip()
     if not name:
@@ -2889,7 +2889,7 @@ def api_email_account_delete(name):
             vault_delete(f"email/accounts/{name}/{key}")
         return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)[:200]})
+        return jsonify({"success": False, "error": "Request failed"})
 
 
 # ── E-Mail-Indexierung ─────────────────────────────────
@@ -2909,7 +2909,7 @@ def email_index():
         count = len([line for line in lines if line.startswith("ID:")])
         return jsonify({"success": True, "indexed": count, "account": account})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)[:200]})
+        return jsonify({"success": False, "error": "Request failed"})
 
 
 # ── Indexing-Schedule (startet beim App-Start) ─────────
@@ -2967,7 +2967,7 @@ def indexing_status():
         stats["email_accounts"] = len(_list_accounts())
         return jsonify({"success": True, "stats": stats})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)[:200]})
+        return jsonify({"success": False, "error": "Request failed"})
 
 
 # ── Tagesassistent Briefing ──────────────────────────────
@@ -3034,7 +3034,7 @@ def agent_briefing():
 
         return jsonify({"success": True, "briefing": briefing})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)[:200]})
+        return jsonify({"success": False, "error": "Request failed"})
 
 
 # ── Immich ──────────────────────────────────────────────
@@ -3070,7 +3070,7 @@ def immich_thumbnail(asset_id):
         return Response(b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x00\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b',
                         content_type='image/gif')
     except Exception as e:
-        return jsonify({'error': str(e)[:200]}), 500
+        return jsonify({'error': "Request failed"}), 500
 
 
 @app.route('/api/immich/original/<asset_id>')
@@ -3094,7 +3094,7 @@ def immich_original(asset_id):
             return Response(r2.raw, content_type=r2.headers.get('Content-Type', 'image/jpeg'), status=r2.status_code)
         return jsonify({'error': f'Original nicht gefunden (Status {r.status_code})'}), 404
     except Exception as e:
-        return jsonify({'error': str(e)[:200]}), 500
+        return jsonify({'error': "Request failed"}), 500
 
 
 @app.route('/api/immich/test', methods=['POST'])
@@ -3111,7 +3111,7 @@ def immich_test():
             return jsonify({'success': True, 'status': 'connected', 'asset_count': count})
         return jsonify({'success': False, 'error': f'Immich responded with {resp.status_code}: {resp.text[:200]}'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)[:200]})
+        return jsonify({'success': False, 'error': "Request failed"})
 
 @app.route('/api/nina/regions', methods=['GET'])
 def nina_regions():
@@ -3327,7 +3327,7 @@ def tool_run():
         result = func(**pending['args'])
         return jsonify({'success': True, 'result': str(result)})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)[:200]}), 500
+        return jsonify({'success': False, 'error': "Request failed"}), 500
 
 # ── Automations API ────────────────────────────────────────
 
@@ -3430,7 +3430,7 @@ def install_plugin():
         name = install_from_github(url)
         return jsonify({'success': True, 'name': name})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)[:200]}), 400
+        return jsonify({'success': False, 'error': "Request failed"}), 400
 
 @app.route('/api/plugins/<name>/toggle', methods=['POST'])
 @require_admin
@@ -3442,7 +3442,7 @@ def toggle_plugin(name):
         set_plugin_enabled(name, enabled)
         return jsonify({'success': True, 'enabled': enabled})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)[:200]}), 400
+        return jsonify({'success': False, 'error': "Request failed"}), 400
 
 @app.route('/api/plugins/<name>', methods=['DELETE'])
 @require_admin
@@ -3452,7 +3452,7 @@ def delete_plugin(name):
         uninstall_plugin(name)
         return jsonify({'success': True})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)[:200]}), 400
+        return jsonify({'success': False, 'error': "Request failed"}), 400
 
 # ── Main ──────────────────────────────────────────────────
 if __name__ == '__main__':
