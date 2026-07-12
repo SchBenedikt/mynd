@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -136,6 +137,7 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
             return "❌ Keine Host/IP. `vault_set vm/<profil>/ip <ip>` oder host-Parameter angeben."
 
         keyfile = None
+        cmd_parts = shlex.split(command)
 
         if key:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False) as f:
@@ -144,22 +146,22 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
             os.chmod(keyfile, 0o600)
             ssh_cmd = ['ssh', '-i', keyfile, '-o', 'StrictHostKeyChecking=no',
                        '-o', 'UserKnownHostsFile=/dev/null',
-                       '-p', str(port), f'{user}@{host}', command]
+                       '-p', str(port), f'{user}@{host}'] + cmd_parts
         elif password:
             ssh_cmd = ['sshpass', '-p', password, 'ssh', '-o', 'StrictHostKeyChecking=no',
                        '-o', 'UserKnownHostsFile=/dev/null',
-                       '-p', str(port), f'{user}@{host}', command]
+                       '-p', str(port), f'{user}@{host}'] + cmd_parts
         else:
             ssh_cmd = ['ssh', '-o', 'StrictHostKeyChecking=no',
                        '-o', 'UserKnownHostsFile=/dev/null',
-                       '-p', str(port), f'{user}@{host}', command]
+                       '-p', str(port), f'{user}@{host}'] + cmd_parts
 
         r = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=60)
         if key and password and r.returncode != 0:
             first_err = (r.stderr or r.stdout or "").strip()
             password_cmd = ['sshpass', '-p', password, 'ssh', '-o', 'StrictHostKeyChecking=no',
                             '-o', 'UserKnownHostsFile=/dev/null',
-                            '-p', str(port), f'{user}@{host}', command]
+                            '-p', str(port), f'{user}@{host}'] + cmd_parts
             r = subprocess.run(password_cmd, capture_output=True, text=True, timeout=60)
             if not (r.stdout or r.stderr).strip() and first_err:
                 r.stderr = first_err

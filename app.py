@@ -361,7 +361,7 @@ def _extract_meta_content(html_text, attr_name, attr_value):
     return ""
 
 def _extract_first_img(html_text, base_url):
-    m = re.search(r'<img\s[^>]*\bsrc=["\'](https?://[^"\']+)["\']', html_text, re.IGNORECASE)
+    m = re.search(r'<img\s[^>]*?\bsrc=["\'](https?://[^"\']+)["\']', html_text, re.IGNORECASE)
     if m:
         return m.group(1)
     return None
@@ -1217,6 +1217,16 @@ def _safe_error(message, exception=None, status=500):
         logger.error('%s: %s', message, exception)
     return jsonify({'success': False, 'error': message}), status
 
+def _safe_resolve_path(base_dir, user_path):
+    resolved = (base_dir / user_path).resolve()
+    if not str(resolved).startswith(str(base_dir.resolve())):
+        raise ValueError('Path escape detected')
+    return resolved
+
+def _safe_send_from_directory(directory, path):
+    safe = _safe_resolve_path(directory, path)
+    return send_from_directory(directory, path)
+
 def _verify_password(user, password):
     password_hash = user.get('password_hash')
     if password_hash:
@@ -1526,14 +1536,15 @@ def frontend_static(path):
     if not STATIC_EXPORT_DIR.is_dir():
         return jsonify({'error': 'not found'}), 404
     safe_path = os.path.normpath('/' + path).lstrip('/')
-    file_path = STATIC_EXPORT_DIR / safe_path
-    if not str(file_path.resolve()).startswith(str(STATIC_EXPORT_DIR.resolve())):
+    try:
+        file_path = _safe_resolve_path(STATIC_EXPORT_DIR, safe_path)
+    except ValueError:
         return jsonify({'error': 'not found'}), 404
     if file_path.exists() and file_path.is_file():
-        return send_from_directory(STATIC_EXPORT_DIR, safe_path)
+        return _safe_send_from_directory(STATIC_EXPORT_DIR, safe_path)
     index = file_path / 'index.html'
     if index.exists():
-        return send_from_directory(file_path, 'index.html')
+        return _safe_send_from_directory(file_path, 'index.html')
     return send_from_directory(STATIC_EXPORT_DIR, 'index.html')
 
 @app.route('/api/setup/status', methods=['GET'])
@@ -1541,11 +1552,13 @@ def setup_status():
     needs_setup = not SETUP_DONE_FILE.exists()
     oauth_cfg = DATA_DIR / 'nextcloud_oauth.json'
     oauth_configured = oauth_cfg.exists()
-    nc_url = ''
-    if oauth_cfg.exists():
+    nc_url = _vg('nextcloud/url') or ''
+    if not nc_url and oauth_cfg.exists():
         try:
             d = json.loads(oauth_cfg.read_text())
             nc_url = d.get('nextcloud_url', '')
+            if nc_url == '***':
+                nc_url = ''
         except Exception:
             pass
     return jsonify({
@@ -1606,7 +1619,7 @@ def setup_bootstrap():
         vault_set('nextcloud/url', nc_url)
         vault_set('nextcloud/client_id', cid)
         vault_set('nextcloud/client_secret', secret)
-        oauth_data = {'nextcloud_url': nc_url, 'client_id': '***'}
+        oauth_data = {'nextcloud_url': '***', 'client_id': '***'}
         (DATA_DIR / 'nextcloud_oauth.json').write_text(json.dumps(oauth_data, indent=2))
         return jsonify({'success': True, 'mode': 'nextcloud'})
     elif mode == 'auth_config':
@@ -1973,9 +1986,7 @@ def upload_file():
         return jsonify({'success': False, 'error': 'No file selected'}), 400
     try:
         safe_name = re.sub(r'[^\w\.\-]', '_', f.filename)
-        dest = UPLOAD_DIR / safe_name
-        if not str(dest.resolve()).startswith(str(UPLOAD_DIR.resolve())):
-            return jsonify({'success': False, 'error': 'Invalid path'}), 400
+        dest = _safe_resolve_path(UPLOAD_DIR, safe_name)
         dest.write_bytes(f.read())
         size = dest.stat().st_size
         return jsonify({
@@ -3295,8 +3306,9 @@ def backup_import():
             content = meta.get('content', '')
             encoding = meta.get('encoding', 'utf-8')
             safe_restore = os.path.normpath('/' + fname).lstrip('/')
-            fpath = DATA_DIR / safe_restore
-            if not str(fpath.resolve()).startswith(str(DATA_DIR.resolve())):
+            try:
+                fpath = _safe_resolve_path(DATA_DIR, safe_restore)
+            except ValueError:
                 errors.append(f"{fname}: invalid path")
                 continue
             if encoding == 'base64':
