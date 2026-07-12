@@ -1217,16 +1217,6 @@ def _safe_error(message, exception=None, status=500):
         logger.error('%s: %s', message, exception)
     return jsonify({'success': False, 'error': message}), status
 
-def _safe_resolve_path(base_dir, user_path):
-    resolved = (base_dir / user_path).resolve()
-    if not str(resolved).startswith(str(base_dir.resolve())):
-        raise ValueError('Path escape detected')
-    return resolved
-
-def _safe_send_from_directory(directory, path):
-    safe = _safe_resolve_path(directory, path)
-    return send_from_directory(directory, path)
-
 def _verify_password(user, password):
     password_hash = user.get('password_hash')
     if password_hash:
@@ -1536,15 +1526,14 @@ def frontend_static(path):
     if not STATIC_EXPORT_DIR.is_dir():
         return jsonify({'error': 'not found'}), 404
     safe_path = os.path.normpath('/' + path).lstrip('/')
-    try:
-        file_path = _safe_resolve_path(STATIC_EXPORT_DIR, safe_path)
-    except ValueError:
+    file_path = os.path.realpath(os.path.join(STATIC_EXPORT_DIR, safe_path))
+    if not file_path.startswith(os.path.realpath(STATIC_EXPORT_DIR)):
         return jsonify({'error': 'not found'}), 404
-    if file_path.exists() and file_path.is_file():
-        return _safe_send_from_directory(STATIC_EXPORT_DIR, safe_path)
-    index = file_path / 'index.html'
-    if index.exists():
-        return _safe_send_from_directory(file_path, 'index.html')
+    if os.path.isfile(file_path):
+        return send_from_directory(STATIC_EXPORT_DIR, safe_path)
+    index = os.path.join(file_path, 'index.html')
+    if os.path.isfile(index):
+        return send_from_directory(file_path, 'index.html')
     return send_from_directory(STATIC_EXPORT_DIR, 'index.html')
 
 @app.route('/api/setup/status', methods=['GET'])
@@ -1552,20 +1541,12 @@ def setup_status():
     needs_setup = not SETUP_DONE_FILE.exists()
     oauth_cfg = DATA_DIR / 'nextcloud_oauth.json'
     oauth_configured = oauth_cfg.exists()
-    nc_url = _vg('nextcloud/url') or ''
-    if not nc_url and oauth_cfg.exists():
-        try:
-            d = json.loads(oauth_cfg.read_text())
-            nc_url = d.get('nextcloud_url', '')
-            if nc_url == '***':
-                nc_url = ''
-        except Exception:
-            pass
+    nc_url = _vg('nextcloud/url') or os.getenv('NEXTCLOUD_URL', '')
     return jsonify({
         'success': True,
         'needs_setup': needs_setup,
         'oauth_configured': oauth_configured,
-        'nextcloud_url': nc_url or os.getenv('NEXTCLOUD_URL', '')
+        'nextcloud_url': nc_url
     })
 
 @app.route('/api/setup/bootstrap', methods=['POST'])
@@ -1619,8 +1600,7 @@ def setup_bootstrap():
         vault_set('nextcloud/url', nc_url)
         vault_set('nextcloud/client_id', cid)
         vault_set('nextcloud/client_secret', secret)
-        oauth_data = {'nextcloud_url': '***', 'client_id': '***'}
-        (DATA_DIR / 'nextcloud_oauth.json').write_text(json.dumps(oauth_data, indent=2))
+        (DATA_DIR / 'nextcloud_oauth.json').write_text(json.dumps({'configured': True}))
         return jsonify({'success': True, 'mode': 'nextcloud'})
     elif mode == 'auth_config':
         cfg = {'allowRegistration': False, 'requireLogin': True}
@@ -1986,9 +1966,11 @@ def upload_file():
         return jsonify({'success': False, 'error': 'No file selected'}), 400
     try:
         safe_name = re.sub(r'[^\w\.\-]', '_', f.filename)
-        dest = _safe_resolve_path(UPLOAD_DIR, safe_name)
-        dest.write_bytes(f.read())
-        size = dest.stat().st_size
+        dest = os.path.realpath(os.path.join(UPLOAD_DIR, safe_name))
+        if not dest.startswith(os.path.realpath(UPLOAD_DIR)):
+            return jsonify({'success': False, 'error': 'Invalid path'}), 400
+        Path(dest).write_bytes(f.read())
+        size = os.path.getsize(dest)
         return jsonify({
             'success': True,
             'filename': safe_name,
@@ -3306,15 +3288,14 @@ def backup_import():
             content = meta.get('content', '')
             encoding = meta.get('encoding', 'utf-8')
             safe_restore = os.path.normpath('/' + fname).lstrip('/')
-            try:
-                fpath = _safe_resolve_path(DATA_DIR, safe_restore)
-            except ValueError:
+            fpath = os.path.realpath(os.path.join(DATA_DIR, safe_restore))
+            if not fpath.startswith(os.path.realpath(DATA_DIR)):
                 errors.append(f"{fname}: invalid path")
                 continue
             if encoding == 'base64':
-                fpath.write_bytes(base64.b64decode(content, validate=True))
+                Path(fpath).write_bytes(base64.b64decode(content, validate=True))
             elif encoding == 'utf-8':
-                fpath.write_text(content, encoding='utf-8')
+                Path(fpath).write_text(content, encoding='utf-8')
             else:
                 errors.append(f"{fname}: unsupported encoding")
                 continue

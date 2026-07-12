@@ -137,7 +137,10 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
             return "❌ Keine Host/IP. `vault_set vm/<profil>/ip <ip>` oder host-Parameter angeben."
 
         keyfile = None
-        cmd_parts = shlex.split(command)
+        validated = command.strip()
+        if not validated or len(validated) > 10000:
+            return "❌ Ungültiger Befehl"
+        cmd_parts = shlex.split(validated)
 
         if key:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False) as f:
