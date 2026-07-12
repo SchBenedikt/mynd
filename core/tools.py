@@ -1,14 +1,21 @@
-import os, sys, json, subprocess, shlex, tempfile, base64, re, warnings
-from datetime import datetime
-from pathlib import Path
+import base64
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+import warnings
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
-import requests
 import numpy as np
+import requests
 
-from .config import BASE, CHUNKS, EMBS, C, OLLAMA
-from .vault import vault_get, vault_set, vault_delete, vault_list, _vault_get
+from .config import BASE, CHUNKS, EMBS, MEMORY_FILE, C
 from .embed import embed
+from .vault import _vault_get, vault_delete, vault_get, vault_list, vault_set
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 try:
@@ -232,7 +239,6 @@ def execute_python(code):
         c = compile(code, '<exec>', 'exec', flags=0x0)
         local_vars = {}
         from io import StringIO
-        import contextlib
         old_out = sys.stdout
         old_err = sys.stderr
         captured_out = StringIO()
@@ -291,7 +297,7 @@ def http_request(method="GET", url="", headers={}, body="", auth_user="", auth_p
         if "Content-Type" not in h and method.upper() in ("POST", "PUT", "PATCH"):
             h["Content-Type"] = "application/json"
         if auth_user and auth_pass is not None:
-            auth_bytes = f"{auth_user}:{auth_pass}".encode('utf-8')
+            auth_bytes = f"{auth_user}:{auth_pass}".encode()
             h["Authorization"] = "Basic " + base64.b64encode(auth_bytes).decode('ascii')
         try:
             r = requests.request(method.upper(), url, data=body or None, headers=h or None, timeout=60)
@@ -486,7 +492,7 @@ def memory_get(key=""):
         if key:
             return m.get(key, "")
         return '\n'.join(f"{k}: {v}" for k, v in sorted(m.items())) if m else "(leer)"
-    except:
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return "❌ Fehler"
 
 def memory_set(key, value):

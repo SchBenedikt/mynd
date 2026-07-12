@@ -1,4 +1,4 @@
-.PHONY: help setup backend frontend start stop sync-index test lint typecheck
+.PHONY: help setup dev stop sync-index test lint frontend-lint typecheck clean check
 
 help:
 	@echo "mynd-2new – KI-Assistent mit Smart-Home, Foto-Suche, Wissensgraph"
@@ -44,19 +44,20 @@ test-fast:
 
 lint:
 	@echo "=== Running ruff linter ==="
-	pip3 install -q ruff 2>/dev/null || true
-	python3 -m ruff check data/ tests/ app.py chat.py 2>/dev/null || \
-		echo "ruff not available, skipping"
+	ruff check app.py core/ data/plugins/ tests/
 
 frontend-lint:
-	@echo "=== Running Next.js build (syntax check) ==="
-	cd frontend && npx next build 2>&1 | tail -5
+	@echo "=== Running frontend lint ==="
+	cd frontend && npm run lint
 
 typecheck:
 	@echo "=== Running mypy ==="
 	pip3 install -q mypy 2>/dev/null || true
 	python3 -m mypy data/ tests/ app.py chat.py --ignore-missing-imports 2>/dev/null || \
 		echo "mypy not available or errors found"
+
+check: test frontend-lint
+	cd frontend && npm run build
 
 clean:
 	@echo "=== Cleaning up ==="

@@ -22,9 +22,17 @@ dependencies = [
     "lxml>=5.0.0",
     "beautifulsoup4>=4.12.0",
     "chromadb>=1.5.0",
-    "duckduckgo_search>=8.0.0",
+    "ddgs>=1.0.0",
     "APScheduler>=3.10.0",
     "tiktoken>=0.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.13.0",
+    "pytest>=8.3.0",
+    "pytest-timeout>=2.3.0",
+    "ruff>=0.9.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -42,11 +50,16 @@ filterwarnings = [
 ]
 
 [tool.ruff]
-line-length = 200
+line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP"]
+ignore = [
+    "E501", # Gradually shorten legacy tool descriptions and embedded templates.
+    "E701", # Gradually expand legacy one-line control flow.
+    "F403", # core/__init__.py intentionally preserves its legacy public API.
+]
 
 [tool.ruff.format]
 quote-style = "single"

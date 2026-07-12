@@ -1,11 +1,10 @@
 import importlib
 import json
 import logging
-import os
 import re
 import sys
-import urllib.request
 import urllib.parse
+import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -127,8 +126,10 @@ def get_all_tools():
 def get_plugin_state():
     f = PLUGIN_DIR / 'plugin_state.json'
     if f.exists():
-        try: return json.loads(f.read_text())
-        except: pass
+        try:
+            return json.loads(f.read_text())
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
     return {}
 
 def save_plugin_state(state):

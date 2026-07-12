@@ -1,5 +1,7 @@
 import json
+
 from .config import VAULT_FILE, C
+
 
 def vault_get(key=""):
     try:
@@ -22,7 +24,7 @@ def vault_get(key=""):
                     lines.append(f"    {k}: {val}")
             return '\n'.join(lines)
         return v.get(key, "")
-    except:
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return "❌ Fehler"
 
 def vault_set(key, value):
@@ -67,7 +69,7 @@ def vault_list(group=""):
                 vv = str(groups[g][k])
                 lines.append(f"    {k}: {vv[:50]}{'…' if len(vv) > 50 else ''}")
         return '\n'.join(lines) if lines else "(leer)"
-    except:
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return "❌ Fehler"
 
 def _vault_get(key):

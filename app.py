@@ -21,6 +21,7 @@ import requests
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from werkzeug.exceptions import HTTPException
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import core.tools as _ct
 import data.plugins.email as _email_module
@@ -110,12 +111,18 @@ app = Flask(__name__)
 @app.after_request
 def add_cors_headers(response):
     origin = request.headers.get('Origin', '')
-    if origin:
+    allowed_origins = {
+        value.strip()
+        for value in os.getenv(
+            'CORS_ALLOWED_ORIGINS',
+            'http://127.0.0.1:3000,http://localhost:3000',
+        ).split(',')
+        if value.strip()
+    }
+    if origin in allowed_origins:
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Vary'] = 'Origin'
         response.headers['Access-Control-Allow-Credentials'] = 'true'
-    else:
-        response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
     return response
@@ -1185,8 +1192,31 @@ if AUTH_FILE.exists():
 
 if not AUTH_USERS:
     default_password = secrets.token_urlsafe(16)
-    AUTH_USERS['admin'] = {'password': default_password, 'name': 'Admin'}
+    AUTH_USERS['admin'] = {
+        'password_hash': generate_password_hash(default_password),
+        'name': 'Admin',
+        'role': 'admin',
+    }
     AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    logger.warning('Created initial admin account with temporary password: %s', default_password)
+
+
+def _verify_password(user, password):
+    password_hash = user.get('password_hash')
+    if password_hash:
+        return check_password_hash(password_hash, password)
+    # Transparent migration for installations that predate password hashing.
+    if secrets.compare_digest(str(user.get('password', '')), str(password)):
+        user['password_hash'] = generate_password_hash(password)
+        user.pop('password', None)
+        AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+        return True
+    return False
+
+
+def _set_password(user, password):
+    user['password_hash'] = generate_password_hash(password)
+    user.pop('password', None)
 
 def require_auth(f):
     @wraps(f)
@@ -1200,6 +1230,30 @@ def require_auth(f):
                     return f(*args, **kwargs)
         return jsonify({'authenticated': False, 'error': 'Unauthorized'}), 401
     return decorated
+
+
+def require_admin(f):
+    @require_auth
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        username = request.current_user
+        user = AUTH_USERS.get(username, {})
+        if user.get('role') != 'admin' and username != 'admin':
+            return jsonify({'success': False, 'error': 'Forbidden'}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _request_has_admin_token():
+    auth = request.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return False
+    token = auth[7:]
+    return any(
+        secrets.compare_digest(str(user.get('token', '')), token)
+        and (user.get('role') == 'admin' or username == 'admin')
+        for username, user in AUTH_USERS.items()
+    )
 
 # ==========================================================
 #  API ENDPOINTS
@@ -1224,7 +1278,7 @@ def auth_login():
     data = request.json or {}
     username = data.get('username', '')
     password = data.get('password', '')
-    if username in AUTH_USERS and AUTH_USERS[username].get('password') == password:
+    if username in AUTH_USERS and _verify_password(AUTH_USERS[username], password):
         token = os.urandom(32).hex()
         AUTH_USERS[username]['token'] = token
         AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
@@ -1254,7 +1308,12 @@ def auth_register():
     if username in AUTH_USERS:
         return jsonify({'success': False, 'error': 'User already exists'}), 409
     token = os.urandom(32).hex()
-    AUTH_USERS[username] = {'password': password, 'name': name, 'token': token}
+    AUTH_USERS[username] = {
+        'password_hash': generate_password_hash(password),
+        'name': name,
+        'role': 'user',
+        'token': token,
+    }
     AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
     return jsonify({
         'success': True, 'authenticated': True,
@@ -1263,6 +1322,14 @@ def auth_register():
 
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer '):
+        token = auth[7:]
+        for user in AUTH_USERS.values():
+            if secrets.compare_digest(str(user.get('token', '')), token):
+                user.pop('token', None)
+                AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+                break
     return jsonify({'success': True})
 
 @app.route('/api/auth/factory-reset', methods=['POST'])
@@ -1270,11 +1337,15 @@ def auth_factory_reset():
     data = request.json or {}
     password = data.get('password', '')
     admin_user = AUTH_USERS.get('admin', {})
-    if admin_user.get('password') != password:
+    if not _verify_password(admin_user, password):
         return jsonify({'success': False, 'error': 'Invalid password'}), 401
     admin_name = admin_user.get('name', 'Admin')
     AUTH_USERS.clear()
-    AUTH_USERS['admin'] = {'password': password, 'name': admin_name}
+    AUTH_USERS['admin'] = {
+        'password_hash': generate_password_hash(password),
+        'name': admin_name,
+        'role': 'admin',
+    }
     AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
     SETUP_DONE_FILE.unlink(missing_ok=True)
     return jsonify({'success': True})
@@ -1290,6 +1361,8 @@ def auth_config():
             pass
     if request.method == 'GET':
         return jsonify({'success': True, **cfg})
+    if not _request_has_admin_token():
+        return jsonify({'success': False, 'error': 'Forbidden'}), 403
     data = request.json or {}
     if 'allowRegistration' in data:
         cfg['allowRegistration'] = bool(data['allowRegistration'])
@@ -1318,12 +1391,12 @@ def auth_profile():
         if name:
             AUTH_USERS[username]['name'] = name
         if password:
-            AUTH_USERS[username]['password'] = password
+            _set_password(AUTH_USERS[username], password)
         AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
     return jsonify({'success': True, 'user': {'username': username, 'name': name or AUTH_USERS.get(username, {}).get('name', username)}})
 
 @app.route('/api/admin/users', methods=['GET'])
-@require_auth
+@require_admin
 def admin_users_list():
     return jsonify({
         'success': True,
@@ -1331,7 +1404,7 @@ def admin_users_list():
     })
 
 @app.route('/api/admin/users/create', methods=['POST'])
-@require_auth
+@require_admin
 def admin_users_create():
     data = request.json or {}
     username = data.get('username', '').strip()
@@ -1341,12 +1414,16 @@ def admin_users_create():
         return jsonify({'success': False, 'error': 'Username and password required'}), 400
     if username in AUTH_USERS:
         return jsonify({'success': False, 'error': 'User already exists'}), 409
-    AUTH_USERS[username] = {'password': password, 'name': name or username}
+    AUTH_USERS[username] = {
+        'password_hash': generate_password_hash(password),
+        'name': name or username,
+        'role': 'user',
+    }
     AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
     return jsonify({'success': True, 'user': {'username': username, 'name': name or username}})
 
 @app.route('/api/admin/users/delete', methods=['POST'])
-@require_auth
+@require_admin
 def admin_users_delete():
     data = request.json or {}
     username = data.get('username', '').strip()
@@ -1359,7 +1436,7 @@ def admin_users_delete():
     return jsonify({'success': True})
 
 @app.route('/api/admin/users/reset', methods=['POST'])
-@require_auth
+@require_admin
 def admin_users_reset():
     data = request.json or {}
     username = data.get('username', '').strip()
@@ -1368,18 +1445,26 @@ def admin_users_reset():
         return jsonify({'success': False, 'error': 'User not found'}), 404
     if not password:
         return jsonify({'success': False, 'error': 'Password required'}), 400
-    AUTH_USERS[username]['password'] = password
+    _set_password(AUTH_USERS[username], password)
     AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
     return jsonify({'success': True})
 
 def _reset_app_data():
     import shutil
     for f in DATA_DIR.iterdir():
-        if f.name == '.gitkeep': continue
-        if f.is_file(): f.unlink()
-        elif f.is_dir(): shutil.rmtree(f)
+        if f.name == '.gitkeep':
+            continue
+        if f.is_file():
+            f.unlink()
+        elif f.is_dir():
+            shutil.rmtree(f)
+    temporary_password = secrets.token_urlsafe(16)
     AUTH_USERS.clear()
-    AUTH_USERS['admin'] = {'password': 'admin', 'name': 'Admin'}
+    AUTH_USERS['admin'] = {
+        'password_hash': generate_password_hash(temporary_password),
+        'name': 'Admin',
+        'role': 'admin',
+    }
     AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
     AI_CONFIG_FILE.write_text(json.dumps({
         'base_url': 'http://127.0.0.1:11434',
@@ -1388,12 +1473,13 @@ def _reset_app_data():
     }, indent=2))
     auth_cfg = DATA_DIR / 'auth_config.json'
     auth_cfg.write_text(json.dumps({'allowRegistration': False, 'requireLogin': True}, indent=2))
+    return temporary_password
 
 @app.route('/api/admin/reset', methods=['POST'])
-@require_auth
+@require_admin
 def admin_reset():
-    _reset_app_data()
-    return jsonify({'success': True})
+    temporary_password = _reset_app_data()
+    return jsonify({'success': True, 'temporary_password': temporary_password})
 
 @app.route('/api/health', methods=['GET'])
 def api_health():
@@ -1409,6 +1495,8 @@ def root_status():
 
 @app.route('/<path:path>')
 def frontend_static(path):
+    if path == 'api' or path.startswith('api/'):
+        return jsonify({'success': False, 'error': 'Not found'}), 404
     if not STATIC_EXPORT_DIR.is_dir():
         return jsonify({'error': 'not found'}), 404
     file_path = STATIC_EXPORT_DIR / path
@@ -1440,6 +1528,8 @@ def setup_status():
 
 @app.route('/api/setup/bootstrap', methods=['POST'])
 def setup_bootstrap():
+    if SETUP_DONE_FILE.exists() and not _request_has_admin_token():
+        return jsonify({'success': False, 'error': 'Forbidden'}), 403
     data = request.json or {}
     mode = data.get('mode', '')
     if mode == 'admin':
@@ -1448,7 +1538,11 @@ def setup_bootstrap():
         if not pw:
             return jsonify({'success': False, 'error': 'Password required'}), 400
         AUTH_USERS.clear()
-        AUTH_USERS['admin'] = {'password': pw, 'name': name}
+        AUTH_USERS['admin'] = {
+            'password_hash': generate_password_hash(pw),
+            'name': name,
+            'role': 'admin',
+        }
         AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
         return jsonify({'success': True, 'mode': 'admin'})
     elif mode == 'ai':
@@ -3276,6 +3370,7 @@ def list_plugins():
     return jsonify({'success': True, 'plugins': get_all_plugins()})
 
 @app.route('/api/plugins/install', methods=['POST'])
+@require_admin
 def install_plugin():
     from core.plugin_base import install_from_github
     data = request.get_json(silent=True) or {}
@@ -3289,6 +3384,7 @@ def install_plugin():
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route('/api/plugins/<name>/toggle', methods=['POST'])
+@require_admin
 def toggle_plugin(name):
     from core.plugin_base import set_plugin_enabled
     data = request.get_json(silent=True) or {}
@@ -3300,6 +3396,7 @@ def toggle_plugin(name):
         return jsonify({'success': False, 'error': str(e)}), 400
 
 @app.route('/api/plugins/<name>', methods=['DELETE'])
+@require_admin
 def delete_plugin(name):
     from core.plugin_base import uninstall_plugin
     try:
@@ -3307,11 +3404,6 @@ def delete_plugin(name):
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 400
-
-# ── Static file serving for production frontend ──────────
-@app.route('/')
-def index():
-    return send_from_directory(FRONTEND_DIR, 'index.html') if (FRONTEND_DIR / 'index.html').exists() else jsonify({'status': 'mynd-2new backend running', 'frontend': 'Start with: cd frontend && npm run dev'})  # noqa: E501
 
 # ── Main ──────────────────────────────────────────────────
 if __name__ == '__main__':

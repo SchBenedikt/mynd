@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "postinstall": "cd frontend && npm install",
-    "dev": "concurrently -n backend,frontend -c yellow,cyan \"python3 app.py\" \"cd frontend && npm run dev\"",
+    "backend": "sh -c 'PYTHON_BIN=$(command -v python3.14 || command -v python3.13 || command -v python3.12 || command -v python3); exec \"$PYTHON_BIN\" app.py'",
+    "dev": "concurrently -n backend,frontend -c yellow,cyan \"npm run backend\" \"cd frontend && npm run dev\"",
     "build": "cd frontend && npm run build",
-    "start": "concurrently -n backend,frontend -c yellow,cyan \"python3 app.py\" \"cd frontend && npm start\"",
+    "start": "concurrently -n backend,frontend -c yellow,cyan \"npm run backend\" \"cd frontend && npm start\"",
     "install:all": "pip3 install -r requirements-backend.txt && cd frontend && npm install",
     "setup": "pip3 install -r requirements-backend.txt && cd frontend && npm install"
   },

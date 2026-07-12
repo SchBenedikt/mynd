@@ -1,150 +1,103 @@
-# MYND — Second Brain
+# MYND
 
-A local-first AI assistant with smart home control, internet research, file generation, photo search, daily briefings, automations, a plugin system, local tool-calling fallback, and Python code execution.
+MYND is a local-first AI workspace that combines chat, personal knowledge retrieval,
+automations, file generation, photo search, and smart-home integrations in one web
+application. The backend is built with Flask; the frontend uses Next.js and React.
 
-## Features
+> [!IMPORTANT]
+> MYND can execute tools and connect to private services. Run it only in a trusted
+> environment, review enabled plugins, and never commit your `.env` or `data/` directory.
 
-- **Chat with any model** — Ollama (local) or OpenAI-compatible via API key
-- **Web search** — DuckDuckGo (no API key needed) + RSS news feeds
-- **Deep Research Mode** — multi-query search, cross-referencing, fact-checking, detailed analysis
-- **76 tools** across 8 plugins: email, Home Assistant, Immich, Nextcloud, Python execution, Reolink, system, TrueNAS
-- **Document RAG** — sync from Nextcloud, parse PDF/DOCX/MD, LightRAG index with graph retrieval
-- **Plugin system** — Nextcloud (calendar/tasks/contacts), email (IMAP), Immich (photo search), Home Assistant (smart home), Reolink (cameras), TrueNAS (storage)
-- **File generation** — Excel, Word, PowerPoint, HTML, CSV via Python execution
-- **Settings** — AI provider, Nextcloud, Immich, Home Assistant, security mode, theme
-- **Chat history** — editable messages, copyable responses, chat IDs in URL
-- **Code syntax highlighting**, side-by-side images, file cards with download/preview
+## Highlights
 
-## Architecture
+- Local Ollama models and OpenAI-compatible providers
+- Streaming chat, web research, document retrieval, and a knowledge graph
+- Integrations for Nextcloud, Immich, Home Assistant, email, Reolink, and TrueNAS
+- Automations, timers, daily briefings, and generated documents
+- Authentication, configurable security controls, and an extensible plugin registry
 
-```
-mynd-2new/
-├── app.py                 # Flask backend (API routes, agent loop, SSE streaming)
-├── core/
-│   ├── config.py          # Paths, constants, OpenAI helpers
-│   ├── embed.py           # Embedding (Ollama bge-m3)
-│   ├── llm.py             # chat_with_tools + streaming
-│   ├── model.py           # Model selection, tool support detection
-│   ├── tools.py           # 18 core tools
-│   ├── utils.py           # call_with_timeout utility
-│   └── vault.py           # JSON key-value store
-├── data/plugins/
-│   ├── nextcloud.py       # Calendar, tasks, contacts
-│   ├── email.py           # IMAP search, read, send
-│   ├── immich.py          # Photo search, albums, people
-│   ├── homeassistant.py   # Device status, control
-│   ├── reolink.py         # Camera snapshot, PTZ
-│   ├── truenas.py         # Pool, dataset, service status
-│   └── python_exec.py     # Sandboxed Python execution
-├── frontend/              # Next.js 16 + React 19
-│   └── app/
-│       ├── (main)/page.js     # Main chat page + SSE streaming
-│       ├── (main)/layout.js   # Persistent sidebar layout
-│       └── (main)/settings/   # Settings page
-└── tests/                 # 76 pytest tests
-```
+## Requirements
 
-## Quick Start
+- Python 3.12 or newer
+- Node.js 22 or newer
+- npm 10 or newer
+- Optional: [Ollama](https://ollama.com/) for local inference
+
+## Quick start
 
 ```bash
-# Install dependencies
+git clone <repository-url>
+cd mynd-2new
+cp .env.example .env
 make setup
-
-# Start both servers
 make dev
-# → Backend: http://localhost:5001
-# → Frontend: http://localhost:3000
 ```
 
-### Prerequisites
-
-- Python 3.14+
-- Node.js 22+
-- Ollama (for local models)
+Open `http://localhost:3000`. The API runs at `http://127.0.0.1:5001`.
+On a new installation, the backend writes the generated temporary administrator
+password to its startup log. Change it immediately in the profile settings.
 
 ## Configuration
 
-### AI Provider
+The application can be configured from the settings UI. Environment variables are
+useful for the initial local setup:
 
-Configure in Settings (`/settings`):
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `OLLAMA_BASE_URL` | Ollama API endpoint | `http://127.0.0.1:11434` |
+| `OLLAMA_MODEL` | Initial chat model | `gemma3:latest` |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated trusted frontend origins | local port 3000 |
+| `NEXTCLOUD_URL` | Nextcloud instance URL | — |
+| `NEXTCLOUD_USERNAME` | Nextcloud username | — |
+| `NEXTCLOUD_PASSWORD` | Nextcloud app password | — |
 
-| Provider | Base URL | API Key |
-|----------|----------|---------|
-| Ollama (local) | `http://127.0.0.1:11434` | – |
-| OpenAI-compatible | any (e.g. `https://api.openai.com/v1`) | required |
+See [.env.example](.env.example) for document-sync settings. Secrets and runtime state
+are stored locally below `data/`, which is intentionally ignored by Git.
 
-### Environment Variables
+## Architecture
 
-```env
-NEXTCLOUD_URL=https://your-nextcloud-instance.com
-NEXTCLOUD_USERNAME=your_username
-NEXTCLOUD_PASSWORD=your_password
-LLM_MODEL=qwen2.5:7b
-EMBEDDING_MODEL=nomic-embed-text
-OLLAMA_BASE_URL=http://127.0.0.1:11434
+```text
+app.py                  Flask API, authentication, agent orchestration, streaming
+core/                   model, retrieval, tools, vault, plugins, scheduler
+data/plugins/           built-in service integrations (runtime directory is ignored)
+frontend/               Next.js 16 / React 19 application
+scripts/                document synchronization and ingestion utilities
+tests/                  backend route and plugin regression tests
 ```
 
-### Plugins
-
-Configure via Settings UI or vault commands:
-- **Nextcloud**: `vault_set nextcloud/url`, `vault_set nextcloud/username`, `vault_set nextcloud/password`
-- **Immich**: `vault_set immich/url`, `vault_set immich/api-key`
-- **Home Assistant**: `vault_set homeassistant/url`, `vault_set homeassistant/token`
-- **Email**: `vault_set email/imap_server` etc.
-
-## API Routes
-
-| Route | Method | Description |
-|-------|--------|-------------|
-| `/api/agent/query` | POST | AI query (non-streaming) |
-| `/api/agent/query/stream` | POST | AI query (SSE streaming) |
-| `/api/ai/models` | GET | Available models + tool support |
-| `/api/ai/config` | GET/PUT | AI provider configuration |
-| `/api/auth/profile` | GET/PUT | User profile |
-| `/api/admin/users` | GET | List users |
-| `/api/admin/reset` | POST | Reset entire application |
-| `/api/knowledge/status` | GET | RAG index status |
-| `/api/security/status` | GET | Security mode status |
-
-## Plugins & Tools
-
-### Core Tools (18)
-
-| Tool | Description |
-|------|-------------|
-| `think` | Reasoning log |
-| `web_search` | DuckDuckGo search |
-| `fetch_news` | RSS/Atom news |
-| `execute_python` | Python code in sandbox |
-| `http_request` | HTTP requests |
-| `execute_bash` | Shell commands (restricted) |
-| `ssh_execute` | SSH on remote hosts |
-| `file_read` / `file_write` | File I/O |
-| `vault_get/set/delete/list` | Key-value store |
-| `search_documents` | RAG full-text search |
-| `get_date` | Current date/time |
-| `ask_user_for_input` | Ask user for input |
-
-### Plugin Tools (58)
-
-- **Nextcloud** (15): calendar, tasks, contacts, file search, notifications
-- **Home Assistant** (13): entity states, service calls, camera snapshots
-- **TrueNAS** (13): pools, datasets, services, apps, alerts
-- **Immich** (8): photo search, albums, people, timeline
-- **Python Execution** (7): execute, create script, run, list, read, install, list packages
-- **Reolink** (6): camera snapshot, PTZ control, system info
-- **Email** (4): search, read, send, list folders
-- **System** (11): save text, weather, timer, screenshot, briefing
+The browser talks to the Flask API. The agent combines core tools with enabled plugin
+tools, while credentials remain in the local vault. Document embeddings are requested
+from the configured Ollama endpoint.
 
 ## Development
 
 ```bash
-make dev       # Start both servers
-make test      # Run all tests
-make lint      # Run ruff linter
-make clean     # Clean build artifacts
+make test              # backend test suite
+make frontend-lint     # frontend static analysis
+make check             # tests, frontend lint, and production build
+make clean             # remove local caches and build output
 ```
+
+For a dedicated Python environment:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+npm install
+npm install --prefix frontend
+```
+
+Pull requests are checked with GitHub Actions on Python 3.12 and Node.js 22. More
+details are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Security
+
+Passwords are stored as salted hashes. Existing installations using the older
+clear-text format are migrated after a successful login. Authentication tokens and
+integration credentials are still sensitive local data; back up and protect `data/`
+accordingly. Please report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
-Private / internal.
+Licensed under the [MIT License](LICENSE).

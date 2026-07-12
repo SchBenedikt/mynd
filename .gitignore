@@ -20,6 +20,10 @@ build/
 *.egg
 .venv/
 venv/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
 # OS
 .DS_Store
@@ -36,3 +40,8 @@ docker-compose.override.yml
 
 # Temp files
 /tmp/
+
+# Generated local artifacts
+response.json
+output.png
+quadratische_funktion.xlsx

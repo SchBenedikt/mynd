@@ -4,7 +4,7 @@ from datetime import datetime
 
 import requests
 
-from .config import OLLAMA, _is_openai, _openai_cfg, C
+from .config import OLLAMA, C, _is_openai, _openai_cfg
 
 DATA_DIR = None
 
@@ -21,12 +21,12 @@ def _load_openai_config():
     ai_cfg_file = os.path.join(_get_data_dir(), 'ai_config.json')
     if os.path.exists(ai_cfg_file):
         try:
-            fc = json.loads(open(ai_cfg_file, 'r').read())
+            fc = json.loads(open(ai_cfg_file).read())
             if fc.get('provider') == 'openai':
                 base = str(fc.get('base_url', '')).rstrip('/')
                 key = str(fc.get('api_key', ''))
                 return base or 'https://api.openai.com/v1', key
-        except:
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
             pass
     return _openai_cfg()
 
@@ -125,7 +125,8 @@ def chat_with_tools_stream(model, msgs, tools):
             body.setdefault("options", {})["temperature"] = 0.3
         r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300, stream=True)
         if not r.ok:
-            import logging as _lg, json as _js
+            import json as _js
+            import logging as _lg
             _lg.error(f"Ollama 400: {r.text[:500]}")
             _lg.error(f"Request msgs: {len(msgs)}, total chars: {sum(len(str(m)) for m in msgs)}")
             _lg.error(f"Tool names: {[t.get('function',{}).get('name','?') for t in (tools or [])]}")
@@ -215,7 +216,7 @@ def run_tool_loop(model, user_msg, system_prompt, tools, tool_map, max_rounds=10
             if isinstance(args_raw, str):
                 try:
                     args = json.loads(args_raw)
-                except:
+                except (TypeError, ValueError, json.JSONDecodeError):
                     args = {}
             else:
                 args = args_raw

@@ -31,7 +31,7 @@ class TestPluginAPI:
         if plugins:
             name = plugins[0]["name"]
             resp = client.post(f"/api/plugins/{name}/toggle")
-            assert resp.status_code in (200, 404, 500)
+            assert resp.status_code in (200, 401, 404, 500)
 
 
 class TestAuthAPI:
@@ -118,6 +118,7 @@ class TestCornerCases:
     def test_404_returns_json(self, client):
         resp = client.get("/api/nonexistent_route_xyz")
         assert resp.status_code == 404
+        assert resp.is_json
 
     def test_immich_thumbnail_missing_id(self, client):
         resp = client.get("/api/immich/thumbnail/nonexistent")

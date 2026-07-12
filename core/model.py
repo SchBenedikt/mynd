@@ -2,7 +2,7 @@ import sys
 
 import requests
 
-from .config import OLLAMA, LLM_BLACKLIST, _is_openai, _openai_cfg, C, RICH
+from .config import LLM_BLACKLIST, OLLAMA, RICH, C, _is_openai, _openai_cfg
 
 _PROMPT = None
 if RICH:
@@ -48,7 +48,7 @@ def check_tool_support(model, base_url=None):
         # Prüfe ob das Modell tatsächlich tool_calls zurückgibt
         msg = data.get("message", {})
         return bool(msg.get("tool_calls"))
-    except:
+    except (requests.RequestException, KeyError, TypeError, ValueError):
         return False
 
 
@@ -60,7 +60,7 @@ def select_model(force=None):
             m["name"] for m in r.json().get("models", [])
             if not any(b in m["name"] for b in LLM_BLACKLIST)
         ]
-    except:
+    except (requests.RequestException, KeyError, TypeError, ValueError):
         pass
 
     _, _, openai_models = _openai_cfg()

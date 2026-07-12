@@ -1,7 +1,9 @@
-import os, sys, json, re, logging, threading, time
-from datetime import datetime, date
+import json
+import logging
+import re
+import threading
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +91,7 @@ class AutomationEngine:
     def save_history(self, history):
         _save_json(self.history_file, history)
 
-    def get_automation(self, aid: str) -> Optional[dict]:
+    def get_automation(self, aid: str) -> dict | None:
         for a in self.load_automations():
             if a.get("id") == aid:
                 return a

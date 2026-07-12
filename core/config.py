@@ -1,6 +1,6 @@
-import os, sys, logging
+import logging
+import os
 from pathlib import Path
-from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -10,17 +10,16 @@ STATE = BASE / 'data' / 'state.json'
 CHUNKS = BASE / 'data' / 'chunks.json'
 EMBS = BASE / 'data' / 'embeddings.npy'
 VAULT_FILE = BASE / 'data' / 'vault.json'
+MEMORY_FILE = BASE / 'data' / 'memory.json'
 PLUGIN_DIR = BASE / 'data' / 'plugins'
 PLUGIN_STATE = BASE / 'data' / 'plugins_enabled.json'
 
-OLLAMA = "http://localhost:11434"
+OLLAMA = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 
 LLM_BLACKLIST = {"bge-m3", "nomic-embed-text", "snowflake-arctic-embed", "mxbai-embed"}
 
 try:
     from rich.console import Console
-    from rich.markdown import Markdown
-    from rich.prompt import Prompt
     CON = Console()
     RICH = True
 except ImportError:
