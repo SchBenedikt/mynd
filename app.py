@@ -361,7 +361,7 @@ def _extract_meta_content(html_text, attr_name, attr_value):
     return ""
 
 def _extract_first_img(html_text, base_url):
-    m = re.search(r'<img\s[^>]*?\bsrc=["\'](https?://[^"\']+)["\']', html_text, re.IGNORECASE)
+    m = re.search(r'<img\s[^>]{0,500}\bsrc=["\'](https?://[^"\']+)["\']', html_text, re.IGNORECASE)
     if m:
         return m.group(1)
     return None
@@ -392,7 +392,7 @@ def _fetch_preview_image_for_url(source_url):
         return None
 
 def _should_add_source_images(content, stats):
-    if re.search(r'!\[[^\]]*]\([^)]+\)', str(content or '')):
+    if re.search(r'!\[[^\]]{0,200}]\([^)]+\)', str(content or '')):
         return False
     if re.search(r'https?://[^\s<>()\]]+', str(content or '')):
         return True
