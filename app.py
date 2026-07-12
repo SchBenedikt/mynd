@@ -135,9 +135,10 @@ def handle_500(e):
 @app.errorhandler(Exception)
 def handle_unhandled(e):
     if isinstance(e, HTTPException):
-        return jsonify({"success": False, "error": str(e.description[:500])}), e.code
+        logger.error('HTTP error: %s', e)
+        return jsonify({"success": False, "error": "Request failed"}), e.code
     logger.exception(f"Unbehandelte Exception: {e}")
-    return jsonify({"success": False, "error": f"Unbehandelter Fehler: {str(e)[:500]}"}), 500
+    return jsonify({"success": False, "error": "Request failed"}), 500
 
 # ── Ollama Client (simplified wrapper) ──────────────────
 class OllamaClient:
@@ -1172,7 +1173,7 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
         return
     except Exception as e:
         logger.exception(f"Unbehandelter Fehler in web_agent_loop_stream: {e}")
-        yield {"type": "error", "error": str(e)[:200]}
+        yield {"type": "error", "error": "Request failed"}
 
 # ── Helper Functions ──────────────────────────────────────
 def _fmt_endpoints(d, lines, indent="    "):
@@ -1846,7 +1847,7 @@ def agent_query_stream():
                 return "Keine Ergebnisse gefunden."
             return result
         except Exception as e:
-            return f"⚠️ Web-Suche nicht verfügbar: {str(e)[:200]}"
+            return "⚠️ Web-Suche nicht verfügbar"
     if preferred_source == 'web':
         web_context = _get_web_context_safe(prompt, 10)
         source_hint = (
@@ -1943,12 +1944,12 @@ def _get_web_context_safe_v2(query, max_results):
         if error:
             if isinstance(error, TimeoutError):
                 return "⚠️ Web-Suche hat zu lange gedauert (Timeout nach 8s)."
-            return f"⚠️ Web-Suche Fehler: {str(error)[:200]}"
+            return "⚠️ Web-Suche Fehler"
         if not result:
             return "Keine Ergebnisse gefunden."
         return result
     except Exception as e:
-        return f"⚠️ Web-Suche nicht verfügbar: {str(e)[:200]}"
+        return "⚠️ Web-Suche nicht verfügbar"
 
 @app.route('/api/generated/<path:filename>')
 def serve_generated(filename):
@@ -2130,7 +2131,7 @@ def ollama_models():
             'base_url': ollama_client.base_url,
             'current_model': ollama_client.model,
             'models': [ollama_client.model] if ollama_client.model else [],
-            'error': str(e)[:200]
+            'error': 'Ollama connection failed'
         })
 
 @app.route('/api/ai/config', methods=['GET', 'POST'])
@@ -2456,7 +2457,7 @@ def _calendar_query_response(start, end):
 @app.route('/api/calendar/status', methods=['GET'])
 def calendar_status():
     ok, info = _nextcloud_status()
-    return jsonify({'enabled': ok, 'connected': ok, 'message': 'Nextcloud CalDAV verfügbar' if ok else str(info)})
+    return jsonify({'enabled': ok, 'connected': ok, 'message': 'Nextcloud CalDAV verfügbar' if ok else 'Nextcloud nicht verbunden'})
 
 @app.route('/api/calendar/calendars', methods=['GET'])
 def calendar_calendars():
@@ -2524,7 +2525,7 @@ def calendar_day(day_name):
 @app.route('/api/tasks/status', methods=['GET'])
 def tasks_status():
     ok, info = _nextcloud_status()
-    return jsonify({'enabled': ok, 'connected': ok, 'message': 'Nextcloud Tasks verfügbar' if ok else str(info)})
+    return jsonify({'enabled': ok, 'connected': ok, 'message': 'Nextcloud Tasks verfügbar' if ok else 'Nextcloud nicht verbunden'})
 
 @app.route('/api/tasks/list', methods=['GET'])
 def tasks_list():
@@ -2553,7 +2554,7 @@ def tasks_create_with_details():
 @app.route('/api/tasks/init', methods=['POST'])
 def tasks_init():
     ok, info = _nextcloud_status()
-    return jsonify({'enabled': ok, 'success': ok, 'message': 'Nextcloud Tasks verfügbar' if ok else str(info)})
+    return jsonify({'enabled': ok, 'success': ok, 'message': 'Nextcloud Tasks verfügbar' if ok else 'Nextcloud nicht verbunden'})
 
 @app.route('/api/tasks/complete/<task_uid>', methods=['POST'])
 def tasks_complete(task_uid):
@@ -2681,7 +2682,7 @@ def email_config():
 def nextcloud_config():
     ok, info = _nextcloud_status()
     if not ok:
-        return jsonify({'configured': False, 'display_name': '', 'username': '', 'nextcloud_url': '', 'error': str(info)})
+        return jsonify({'configured': False, 'display_name': '', 'username': '', 'nextcloud_url': '', 'error': 'Nextcloud nicht verbunden'})
     return jsonify({
         'configured': True,
         'display_name': info.get('user', ''),
@@ -3256,7 +3257,7 @@ def backup_export():
                 else:
                     files[fname] = {'content': raw.decode('utf-8'), 'encoding': 'utf-8'}
             except Exception as e:
-                files[fname] = {'error': str(e)[:200]}
+                files[fname] = {'error': 'read failed'}
     return jsonify({'success': True, 'files': files, 'exported_at': datetime.now(UTC).isoformat()})
 
 @app.route('/api/backup/import', methods=['POST'])
