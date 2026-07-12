@@ -17,7 +17,6 @@ export default function AuthGate({ children }) {
   const [user, setUser] = useState(null);
   const [hasToken, setHasToken] = useState(false);
   const [forceOpen, setForceOpen] = useState(false);
-  const [requireLoginSetting, setRequireLoginSetting] = useState(true);
   const lastReplaceRef = useRef(0);
 
   const guardedReplace = (url) => {
@@ -57,16 +56,6 @@ export default function AuthGate({ children }) {
         }
       })
       .catch(() => {});
-    apiFetch('/api/auth/config')
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        if (data?.success) {
-          setRequireLoginSetting(data.requireLogin !== false);
-        }
-      })
-      .catch(() => {});
-
     setReady(true);
 
     return () => {
@@ -125,9 +114,8 @@ export default function AuthGate({ children }) {
     if (pathname === '/language' || pathname?.startsWith('/setup') || pathname === '/login') return;
     if (user && !forceOpen) return;
     if (hasToken && !forceOpen) return;
-    if (!requireLoginSetting && !forceOpen) return;
     guardedReplace('/login');
-  }, [ready, pathname, user, forceOpen, hasToken, requireLoginSetting]);
+  }, [ready, pathname, user, forceOpen, hasToken]);
 
   if (!ready) return null;
   if (pathname === '/language') return children;
@@ -135,7 +123,6 @@ export default function AuthGate({ children }) {
   if (pathname === '/login') return children;
   if (user && !forceOpen) return children;
   if (hasToken && !forceOpen) return children;
-  if (!requireLoginSetting && !forceOpen) return children;
 
   return null;
 }
