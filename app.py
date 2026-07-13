@@ -1332,6 +1332,10 @@ def auth_register():
         return jsonify({'success': False, 'error': 'Registration is disabled'}), 403
     if not username or not password:
         return jsonify({'success': False, 'error': 'Username and password required'}), 400
+    if len(username) < 2:
+        return jsonify({'success': False, 'error': 'Username too short (min 2 characters)'}), 400
+    if len(password) < 4:
+        return jsonify({'success': False, 'error': 'Password too short (min 4 characters)'}), 400
     if username in AUTH_USERS:
         return jsonify({'success': False, 'error': 'User already exists'}), 409
     token = os.urandom(32).hex()

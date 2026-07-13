@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { apiFetch, getApiBase } from '../../lib/api';
+import { apiFetch } from '../../lib/api';
 import './login.css';
 
 const TOKEN_KEY = 'mynd_token_v1';
@@ -9,10 +9,12 @@ const TOKEN_KEY = 'mynd_token_v1';
 export default function LoginPage() {
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
+  const [loginPassConfirm, setLoginPassConfirm] = useState('');
   const [loginName, setLoginName] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loading, setLoading] = useState(false);
   const [registerMode, setRegisterMode] = useState(false);
+  const [registrationAllowed, setRegistrationAllowed] = useState(false);
   const [backendUrl, setBackendUrl] = useState('http://127.0.0.1:5001');
   const [showDetails, setShowDetails] = useState(false);
 
@@ -27,12 +29,29 @@ export default function LoginPage() {
     if (typeof window === 'undefined') return;
     apiFetch('/api/auth/config')
       .then(r => r.json())
-      .then(data => { if (data?.allowRegistration) setRegisterMode(true); })
+      .then(data => {
+        if (data?.allowRegistration) setRegistrationAllowed(true);
+      })
       .catch(() => {});
   }, []);
 
+  const validate = () => {
+    if (!loginUser || !loginPass) return 'Benutzername und Passwort erforderlich';
+    if (loginUser.length < 2) return 'Benutzername zu kurz (min. 2 Zeichen)';
+    if (registerMode) {
+      if (loginPass.length < 4) return 'Passwort zu kurz (min. 4 Zeichen)';
+      if (loginPass !== loginPassConfirm) return 'Passwörter stimmen nicht überein';
+    }
+    return '';
+  };
+
   const submitCredentials = async (e) => {
     e.preventDefault();
+    const validationError = validate();
+    if (validationError) {
+      setLoginError(validationError);
+      return;
+    }
     setLoading(true);
     setLoginError('');
     try {
@@ -56,6 +75,12 @@ export default function LoginPage() {
       setLoginError('Netzwerkfehler – Backend nicht erreichbar');
     }
     setLoading(false);
+  };
+
+  const toggleMode = () => {
+    setRegisterMode(!registerMode);
+    setLoginError('');
+    setLoginPassConfirm('');
   };
 
   const changeBackendUrl = (url) => {
@@ -107,15 +132,29 @@ export default function LoginPage() {
               type="password"
             />
           </div>
+          {registerMode && (
+            <div className="login-field">
+              <label htmlFor="login-pass-confirm">Passwort bestätigen</label>
+              <input
+                id="login-pass-confirm"
+                value={loginPassConfirm}
+                onChange={(e) => setLoginPassConfirm(e.target.value)}
+                placeholder="Passwort wiederholen"
+                type="password"
+              />
+            </div>
+          )}
           <button type="submit" className="login-btn" disabled={loading || !loginUser || !loginPass}>
             {loading ? (registerMode ? 'Wird registriert...' : 'Anmelden...') : (registerMode ? 'Registrieren' : 'Anmelden')}
           </button>
           {loginError && <div className="login-error">{loginError}</div>}
-          <div className="login-switch">
-            <button type="button" onClick={() => { setRegisterMode(!registerMode); setLoginError(''); }}>
-              {registerMode ? 'Bereits registriert? → Anmelden' : 'Noch kein Account? → Registrieren'}
-            </button>
-          </div>
+          {registrationAllowed && (
+            <div className="login-switch">
+              <button type="button" onClick={toggleMode}>
+                {registerMode ? 'Bereits registriert? → Anmelden' : 'Noch kein Account? → Registrieren'}
+              </button>
+            </div>
+          )}
         </form>
 
         <div className="login-footer">
