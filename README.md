@@ -1,84 +1,135 @@
-# MYND
+# 🧠 MYND
 
-MYND is a local-first AI workspace that combines chat, personal knowledge retrieval,
-automations, file generation, photo search, and smart-home integrations in one web
-application. The backend is built with Flask; the frontend uses Next.js and React.
+**Local-first AI workspace** — Chat, search, automate, and control your smart home, all running on your own hardware.
 
-> [!IMPORTANT]
-> MYND can execute tools and connect to private services. Run it only in a trusted
-> environment, review enabled plugins, and never commit your `.env` or `data/` directory.
+![GitHub last commit](https://img.shields.io/github/last-commit/SchBenedikt/mynd)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![Node](https://img.shields.io/badge/node-22%2B-green)
 
-## Highlights
+MYND combines a conversational AI agent with personal knowledge retrieval, file generation, photo search, smart-home control, automations, and a plugin system — fully local, no cloud dependency.
 
-- Local Ollama models and OpenAI-compatible providers
-- Streaming chat, web research, document retrieval, and a knowledge graph
-- Integrations for Nextcloud, Immich, Home Assistant, email, Reolink, and TrueNAS
-- Automations, timers, daily briefings, and generated documents
-- Authentication, configurable security controls, and an extensible plugin registry
+---
 
-## Requirements
+## ✨ Features
 
-- Python 3.12 or newer
-- Node.js 22 or newer
-- npm 10 or newer
-- Optional: [Ollama](https://ollama.com/) for local inference
+| | |
+|---|---|
+| **💬 Chat & Agent** | Streaming AI chat with tool-calling, web research, document Q&A |
+| **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings) |
+| **📷 Photo Search** | Semantic photo search via Immich (self-hosted Google Photos alternative) |
+| **🏠 Smart Home** | Home Assistant integration — lights, switches, sensors, cameras |
+| **📅 Productivity** | CalDAV calendars & tasks (Nextcloud), timer reminders |
+| **📧 Email** | IMAP/SMTP integration for reading & sending |
+| **🤖 Automations** | Cron-based automations, daily briefing, scheduled actions |
+| **🔌 Plugin System** | Extensible registry — install from GitHub, toggle at runtime |
+| **🛡️ Auth** | Password-based login, configurable registration, role-based access |
+| **🎨 Themes** | 7 color themes × light/dark modes |
+| **🌐 Multi-language** | UI in German & English |
 
-## Quick start
+---
+
+## 🚀 Quick Start
 
 ```bash
-git clone <repository-url>
-cd mynd-2new
-cp .env.example .env
-make setup
+git clone https://github.com/SchBenedikt/mynd.git
+cd mynd
+
+# Backend
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e '.[dev]'
+
+# Frontend
+npm install && npm install --prefix frontend
+
+# Start both
 make dev
 ```
 
-Open `http://localhost:3000`. The API runs at `http://127.0.0.1:5001`.
-On a new installation, the backend writes the generated temporary administrator
-password to its startup log. Change it immediately in the profile settings.
+Open **http://localhost:3000**. The API runs at `http://127.0.0.1:5001`.
 
-## Configuration
+On first launch, the admin password is printed to the backend log. Change it immediately in **Settings → Profile**.
 
-The application can be configured from the settings UI. Environment variables are
-useful for the initial local setup:
+---
+
+## 📦 Requirements
+
+- **Python** 3.12+
+- **Node.js** 22+ / npm 10+
+- **Ollama** (optional) — for local embeddings & inference
+
+---
+
+## 🏗️ Architecture
+
+```
+mynd/
+├── app.py                  ← Flask API, auth, agent orchestration, SSE streaming
+├── core/                   ← Model client, retrieval, tools, vault, scheduler, plugins
+│   ├── ollama_client.py
+│   ├── tools.py
+│   ├── vault.py
+│   ├── plugin_base.py
+│   └── ...
+├── data/                   ← Runtime data (gitignored): vault, configs, uploads
+│   └── plugins/            ← Built-in integrations (Home Assistant, Nextcloud, Immich, …)
+├── frontend/               ← Next.js 16 / React 19 application
+│   ├── app/                ← Pages, layout, globals.css
+│   ├── components/         ← Reusable UI components
+│   ├── hooks/              ← Custom React hooks
+│   └── lib/                ← API fetch helpers, contexts
+├── scripts/                ← Document sync & ingestion
+└── tests/                  ← Backend pytest suite
+```
+
+### Data Flow
+
+```
+Browser ──HTTP/SSE──> Flask API ──> Ollama / OpenAI
+                              │
+                              ├──> Knowledge Base (embeddings)
+                              ├──> Tools (search, home, files, …)
+                              ├──> Plugins (HA, Nextcloud, Immich, …)
+                              └──> Vault (credentials, encrypted)
+```
+
+---
+
+## ⚙️ Configuration
+
+### Environment Variables
 
 | Variable | Purpose | Default |
-| --- | --- | --- |
+|---|---|---|
 | `OLLAMA_BASE_URL` | Ollama API endpoint | `http://127.0.0.1:11434` |
-| `OLLAMA_MODEL` | Initial chat model | `gemma3:latest` |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated trusted frontend origins | local port 3000 |
+| `OLLAMA_MODEL` | Default chat model | `gemma3:latest` |
+| `CORS_ALLOWED_ORIGINS` | Allowed frontend origins | `http://localhost:3000` |
 | `NEXTCLOUD_URL` | Nextcloud instance URL | — |
 | `NEXTCLOUD_USERNAME` | Nextcloud username | — |
 | `NEXTCLOUD_PASSWORD` | Nextcloud app password | — |
 
-See [.env.example](.env.example) for document-sync settings. Secrets and runtime state
-are stored locally below `data/`, which is intentionally ignored by Git.
+See [.env.example](.env.example) for all options.
 
-## Architecture
+### Settings UI
 
-```text
-app.py                  Flask API, authentication, agent orchestration, streaming
-core/                   model, retrieval, tools, vault, plugins, scheduler
-data/plugins/           built-in service integrations (runtime directory is ignored)
-frontend/               Next.js 16 / React 19 application
-scripts/                document synchronization and ingestion utilities
-tests/                  backend route and plugin regression tests
-```
+Most configuration is available from the web UI:
+- **AI Provider** — Ollama, OpenAI-compatible
+- **Integrations** — Nextcloud, Home Assistant, Immich, Reolink, TrueNAS, Email
+- **Theme** — 7 color themes, light/dark/auto
+- **Users** — Registration toggle, role management
+- **Indexing** — Document sync & embedding
 
-The browser talks to the Flask API. The agent combines core tools with enabled plugin
-tools, while credentials remain in the local vault. Document embeddings are requested
-from the configured Ollama endpoint.
+---
 
-## Development
+## 🧪 Development
 
 ```bash
-make test              # backend test suite
-make frontend-lint     # frontend static analysis
-make check             # tests, frontend lint, and production build
-make clean             # remove local caches and build output
+make test              # Backend tests (pytest)
+make frontend-lint     # Frontend lint (next build)
+make check             # Full CI check
+make clean             # Remove caches & build output
 ```
 
-For a dedicated Python environment:
+### Manual setup
 
 ```bash
 python3.12 -m venv .venv
@@ -88,16 +139,21 @@ npm install
 npm install --prefix frontend
 ```
 
-Pull requests are checked with GitHub Actions on Python 3.12 and Node.js 22. More
-details are in [CONTRIBUTING.md](CONTRIBUTING.md).
+---
 
-## Security
+## 🛡️ Security
 
-Passwords are stored as salted hashes. Existing installations using the older
-clear-text format are migrated after a successful login. Authentication tokens and
-integration credentials are still sensitive local data; back up and protect `data/`
-accordingly. Please report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+- Passwords stored as **salted hashes** (werkzeug)
+- Integration credentials in **local encrypted vault**
+- **Role-based access** (admin / user)
+- **Configurable registration** — disabled by default
+- CSRF protection via token-based auth
+- All data stays **on your machine** — no cloud egress
 
-## License
+> **Run only in a trusted environment.** MYND can execute shell commands and connect to private services.
 
-Licensed under the [MIT License](LICENSE).
+---
+
+## 📄 License
+
+[MIT](LICENSE) — feel free to use, modify, and share.
