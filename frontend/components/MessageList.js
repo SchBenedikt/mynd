@@ -10,6 +10,7 @@ import SourceCard from './SourceCard';
 import ContextDataCard from './ContextDataCard';
 import ResearchStats from './ResearchStats';
 import GeneratedFileCard from './GeneratedFileCard';
+import BrowserPreview from './BrowserPreview';
 import { parseSourceList, embedCitations, stripSourceList, renumberSources } from '../lib/sources';
 
 function _stripToolTags(text) {
@@ -83,12 +84,36 @@ function LiveTools({ tools, thinking }) {
           <div className="live-round-tools">
             {r.tools.map((t, i) => {
               const icon = t.status === 'running' ? <span className="live-spinner">⟳</span> : (t.success ? <span>✓</span> : <span>✗</span>);
+              let browserData = t.browser;
+              if (!browserData?.screenshot && t.tool?.startsWith('browser_') && t.result_preview) {
+                try {
+                  const p = JSON.parse(t.result_preview);
+                  if (p.screenshot) browserData = p;
+                } catch {
+                  const m = t.result_preview.match(/"screenshot"\s*:\s*"([^"]+)"/);
+                  if (m) browserData = { screenshot: m[1] };
+                }
+              }
               return (
                 <div key={i} className={`live-tool-row ${t.status}`}>
                   <span className="live-tool-icon">{icon}</span>
                   <span className="live-tool-name">{t.tool}</span>
                   {t.result_preview && <span className="live-tool-args-preview" title={t.result_preview}>{t.result_preview.slice(0, 240)}</span>}
                   {t.duration_ms > 0 && <span className="live-tool-duration">{(t.duration_ms / 1000).toFixed(1)}s</span>}
+                  {t.result_preview?.startsWith('{') && !t.result_preview.includes('❌') && browserData?.screenshot && (
+                    <div className="live-tool-screenshot">
+                      <BrowserPreview
+                        screenshot={browserData.screenshot}
+                        title={browserData.title || browserData.new_title}
+                        url={browserData.url || browserData.new_url}
+                        textPreview={browserData.text_preview || browserData.text}
+                        compact={true}
+                      />
+                    </div>
+                  )}
+                  {t.result_preview?.startsWith('{') && !t.result_preview.includes('❌') && !browserData?.screenshot && (
+                    <span className="live-tool-noimg">⚠️ Kein Screenshot</span>
+                  )}
                 </div>
               );
             })}
@@ -117,7 +142,7 @@ export default function MessageList({
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(msgId);
       setTimeout(() => setCopiedId(null), 2000);
-    }).catch(() => {});
+    }).catch(() => { setCopiedId(msgId); setTimeout(() => setCopiedId(null), 2000); });
   };
 
   return (

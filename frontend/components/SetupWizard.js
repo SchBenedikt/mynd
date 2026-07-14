@@ -56,7 +56,7 @@ export default function SetupWizard() {
           }
         }
       })
-      .catch(() => {});
+      .catch((e) => { console.warn('Setup status:', e?.message); setSetupComplete(true); });
   }, []);
 
   useEffect(() => {
@@ -68,7 +68,7 @@ export default function SetupWizard() {
             setNextcloudForm((cur) => ({ ...cur, clientId: data.client_id || cur.clientId, nextcloudUrl: data.nextcloud_url || cur.nextcloudUrl }));
           }
         })
-        .catch(() => {})
+        .catch((e) => console.warn('Nextcloud config:', e?.message))
         .finally(() => setNextcloudConfigLoaded(true));
     }
   }, [setupMode, nextcloudConfigLoaded]);
@@ -78,7 +78,7 @@ export default function SetupWizard() {
       apiFetch('/api/ollama/models')
         .then(r => r.json())
         .then(data => setAiModels(Array.isArray(data?.models) ? data.models : []))
-        .catch(() => {});
+        .catch((e) => console.warn('Ollama models:', e?.message));
       apiFetch('/api/ui/system-config')
         .then(r => r.json())
         .then(data => {
@@ -86,7 +86,7 @@ export default function SetupWizard() {
             setAiForm(cur => ({ ...cur, baseUrl: data.config.base_url || cur.baseUrl, model: data.config.model || cur.model, embeddingModel: data.config.embedding_model || cur.embeddingModel }));
           }
         })
-        .catch(() => {});
+        .catch((e) => console.warn('System config:', e?.message));
     }
   }, [setupMode, aiModels, aiDone]);
 

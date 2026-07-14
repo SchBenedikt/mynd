@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import BrowserPreview from './BrowserPreview';
 
 function formatMs(ms) {
   if (ms < 1000) return `${ms}ms`;
@@ -12,6 +13,15 @@ function ToolDetail({ tool }) {
   const argsEntries = Object.entries(args);
   const isVaultCall = tool.name === 'vault_get' || tool.name === 'vault_set' || tool.name === 'vault_list';
   const isThink = tool.name === 'think';
+  const isBrowserTool = tool.name?.startsWith('browser_');
+
+  const toolResult = tool.result || tool.result_preview;
+  let browserData = null;
+  if (isBrowserTool && toolResult) {
+    try {
+      browserData = typeof toolResult === 'string' ? JSON.parse(toolResult) : toolResult;
+    } catch {}
+  }
 
   const actionLabel = (() => {
     if (isThink) return '';
@@ -24,6 +34,15 @@ function ToolDetail({ tool }) {
     if (tool.name === 'nextcloud_read_file' || tool.name === 'nextcloud_write_file') return args.path || '';
     if (tool.name === 'memory_get' || tool.name === 'memory_set') return args.key || '';
     if (tool.name === 'read_local_file' || tool.name === 'write_local_file') return args.path || '';
+    if (tool.name === 'browser_open' || tool.name === 'browser_navigate') return args.url || '';
+    if (tool.name === 'browser_search') return args.query || '';
+    if (tool.name === 'browser_click') return args.selector || '';
+    if (tool.name === 'browser_type') return `${args.selector || ''} → "${args.text || ''}"`;
+    if (tool.name === 'browser_extract') return args.mode || 'text';
+    if (tool.name === 'browser_evaluate') return (args.expression || '').slice(0, 60);
+    if (tool.name === 'browser_fill_form') return 'Formular ausfüllen';
+    if (tool.name === 'browser_select') return `${args.selector || ''} = ${args.value || ''}`;
+    if (tool.name === 'browser_scroll') return args.direction || 'down';
     if (args.url) return args.url;
     if (args.query) return args.query;
     if (args.command) return args.command;
@@ -53,13 +72,22 @@ function ToolDetail({ tool }) {
       </div>
       {showDetails && (
         <div className="research-tool-detail-body">
-          {tool.result && (
+          {toolResult && (
             <div className="research-result">
               <div className="research-detail-label">Ergebnis:</div>
-              <pre className="research-result-pre">
-                {(typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2)).slice(0, 1000)}
-                {(typeof tool.result === 'string' ? tool.result.length : JSON.stringify(tool.result).length) > 1000 ? '...' : ''}
-              </pre>
+              {isBrowserTool && browserData?.screenshot ? (
+                <BrowserPreview
+                  screenshot={browserData.screenshot}
+                  title={browserData.title || browserData.new_title}
+                  url={browserData.url || browserData.new_url}
+                  textPreview={browserData.text_preview || browserData.text}
+                />
+              ) : (
+                <pre className="research-result-pre">
+                  {(typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult, null, 2)).slice(0, 1000)}
+                  {(typeof toolResult === 'string' ? toolResult.length : JSON.stringify(toolResult).length) > 1000 ? '...' : ''}
+                </pre>
+              )}
             </div>
           )}
           {!isThink && argsEntries.length > 0 && (

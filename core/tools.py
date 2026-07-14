@@ -516,6 +516,65 @@ def memory_delete(key):
     except Exception as e:
         return f"❌ {e}"
 
+
+# ── Sub-Agent Delegation ───────────────────────────────────────
+
+def delegate(task, context="", model=""):
+    """Delegate a sub-task to a focused sub-agent. Use for complex multi-step
+    research, parallel analysis, or when you need a dedicated agent to work
+    on a sub-problem while you handle the main task."""
+    try:
+        prompt = f"Du bist ein fokussierter Sub-Agent. Löse folgende Aufgabe:\n\n{task}"
+        if context:
+            prompt += f"\n\nKontext:\n{context}"
+        prompt += "\n\nAntworte ausführlich und präzise."
+        cfg_path = Path(__file__).resolve().parent.parent / 'data' / 'ai_config.json'
+        cfg = {"model": "qwen3.6:27b", "base_url": "http://127.0.0.1:11434"}
+        if cfg_path.exists():
+            try:
+                c = json.loads(cfg_path.read_text())
+                cfg["model"] = c.get("model", cfg["model"])
+                cfg["base_url"] = c.get("base_url", c.get("ollama_host", cfg["base_url"]))
+            except Exception:
+                pass
+        if model:
+            cfg["model"] = model
+        resp = requests.post(
+            f"{cfg['base_url']}/api/chat",
+            json={"model": cfg["model"], "messages": [{"role": "user", "content": prompt}], "stream": False},
+            timeout=120,
+        )
+        data = resp.json()
+        content = data.get("message", {}).get("content", "") or data.get("response", "")
+        return f"📋 SUB-AGENT ERGEBNIS (Aufgabe: {task[:100]}...):\n\n{content[:3000]}"
+    except Exception as e:
+        return f"❌ Sub-Agent Fehler: {e}"
+
+
+def create_plan(steps, description=""):
+    """Create a structured multi-step plan before executing. Use this for
+    complex tasks that need coordination of multiple tools across multiple rounds.
+    Returns the plan as a checklist."""
+    try:
+        if isinstance(steps, str):
+            steps = [s.strip() for s in steps.split("\n") if s.strip()]
+        plan = {
+            "description": description or "Mehrschritt-Plan",
+            "total_steps": len(steps),
+            "steps": [{"id": i + 1, "task": s, "status": "pending"} for i, s in enumerate(steps)],
+            "created": __import__('datetime').datetime.now().isoformat(),
+        }
+        lines = [f"## 📋 Plan: {plan['description']}", ""]
+        for s in plan["steps"]:
+            lines.append(f"  [{s['id']}] ⬜ **{s['task'][:80]}**")
+            if len(s['task']) > 80:
+                lines[-1] = lines[-1][:-2] + "...**"
+        lines.append(f"\n{plan['total_steps']} Schritte insgesamt.")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ Plan-Erstellung fehlgeschlagen: {e}"
+
+
 CORE_TOOLS = [
     {"type": "function", "function": {
         "name": "execute_bash",
@@ -657,6 +716,23 @@ CORE_TOOLS = [
             "key": {"type": "string", "description": "Schlüssel"}
         }, "required": ["key"]}
     }},
+    {"type": "function", "function": {
+        "name": "delegate",
+        "description": "ÜBERGEBE eine Teilaufgabe an einen spezialisierten Sub-Agenten. Nutze DAS bei komplexen, mehrstufigen Aufgaben: Recherche, Analyse, Code-Generierung, Parallel-Aufgaben. Der Sub-Agent arbeitet fokussiert und liefert Ergebnisse zurück. Du kannst mehrere delegate()-Aufrufe machen für verschiedene Aspekte einer Aufgabe.",
+        "parameters": {"type": "object", "properties": {
+            "task": {"type": "string", "description": "Die Aufgabe für den Sub-Agenten (detailliert)"},
+            "context": {"type": "string", "description": "Zusätzlicher Kontext / Hintergrundinfos (optional)"},
+            "model": {"type": "string", "description": "Model für Sub-Agent (default: Haupt-Model, optional)"}
+        }, "required": ["task"]}
+    }},
+    {"type": "function", "function": {
+        "name": "create_plan",
+        "description": "Erstelle einen MEHR-SCHRITT-PLAN für komplexe Aufgaben. Definiere die Schritte in chronologischer Reihenfolge. Der Plan hilft dir, den Überblick zu behalten und systematisch vorzugehen. Nutze DAS BEVOR du mit mehrstufigen Aktionen beginnst.",
+        "parameters": {"type": "object", "properties": {
+            "steps": {"type": "string", "description": "Schritte, einer pro Zeile, in der Reihenfolge der Ausführung"},
+            "description": {"type": "string", "description": "Kurze Beschreibung des Gesamtplans (optional)"}
+        }, "required": ["steps"]}
+    }},
 ]
 
 CORE_MAP = {
@@ -679,4 +755,6 @@ CORE_MAP = {
     "vault_list": vault_list,
     "http_request": http_request,
     "image_search": image_search,
+    "delegate": delegate,
+    "create_plan": create_plan,
 }

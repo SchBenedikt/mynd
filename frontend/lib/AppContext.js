@@ -53,7 +53,7 @@ export function AppProvider({ children }) {
     apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => { if (data?.authenticated && data.user) setUser(data.user); })
-      .catch(() => {});
+      .catch(() => setUser(null));
   }, []);
 
   useEffect(() => {

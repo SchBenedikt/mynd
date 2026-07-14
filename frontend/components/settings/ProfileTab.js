@@ -25,7 +25,7 @@ export default function ProfileTab({ tr, language }) {
       .then(data => {
         if (data?.success) setProfile({ name: data.user.name || '', username: data.user.username });
       })
-      .catch(() => {});
+      .catch(() => setError('Profil konnte nicht geladen werden'));
   }, []);
 
   const saveProfile = async (e) => {

@@ -27,14 +27,14 @@ export default function AdminTab({ tr, language }) {
           setAuthConfig({ allowRegistration: !!data.allowRegistration, requireLogin: !!data.requireLogin });
         }
       })
-      .catch(() => {});
+      .catch(() => setUserError('Auth-Konfiguration konnte nicht geladen werden'));
     const headers = getAuthHeaders();
     apiFetch('/api/admin/users', { headers })
       .then(r => r.json())
       .then(data => {
         if (data?.success) setUsers(data.users || []);
       })
-      .catch(() => {})
+      .catch(() => setUserError('Benutzerliste konnte nicht geladen werden'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -55,7 +55,7 @@ export default function AdminTab({ tr, language }) {
         setAuthConfigMsg(data?.error || tr('Fehler', 'Error'));
         apiFetch('/api/auth/config').then(r => r.json()).then(d => {
           if (d?.success) setAuthConfig({ allowRegistration: !!d.allowRegistration, requireLogin: !!d.requireLogin });
-        }).catch(() => {});
+        }).catch(() => setUserError('Auth-Konfiguration konnte nicht neu geladen werden'));
       }
     } catch (err) {
       setAuthConfigMsg(tr('Netzwerkfehler', 'Network error'));

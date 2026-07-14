@@ -511,11 +511,12 @@ def _strip_tool_code_blocks(text):
     if not text:
         return text
     cleaned = str(text)
-    cleaned = _re.sub(r'<tool_code>.*?</tool_code>', '', cleaned)
-    cleaned = _re.sub(r'<tool[ >][^<]*</tool>', '', cleaned)
-    cleaned = _re.sub(r'<tool\s+[^>]*/>', '', cleaned)
-    cleaned = _re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', cleaned)
-    cleaned = _re.sub(r'<tool_call>[^<]*</tool_call>', '', cleaned)
+    cleaned = re.sub(r'<tool_code>.*?</tool_code>', '', cleaned)
+    cleaned = re.sub(r'<tool_code>.*?</minimax:tool_call>', '', cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r'<tool[ >][^<]*</tool>', '', cleaned)
+    cleaned = re.sub(r'<tool\s+[^>]*/>', '', cleaned)
+    cleaned = re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', cleaned)
+    cleaned = re.sub(r'<tool_call>[^<]*</tool_call>', '', cleaned)
     return cleaned.strip()
 
 def _parse_tool_code_fallback(text):
@@ -525,19 +526,19 @@ def _parse_tool_code_fallback(text):
       - <tool name="xxx"><param name="key">val</param></tool> (nested)
       - tool_name\n<param name="key">val</param>
       - tool_name --key "val"
+      - minimax format: <tool_code> URL TIMEOUT FLAG </minimax:tool_call>
     Returns list of {name, args} dicts or empty list.
     """
     if not text:
         return []
-    import re as _re
-    # Extract <tool_code>... blocks
-    blocks = _re.findall(
-        r'(?:<tool_code>|\[TOOL_CALL\]|<tool_call>)(.*?)(?:</tool_code>|\[/TOOL_CALL\]|</tool_call>)',
-        str(text), flags=_re.DOTALL
+    # Extract <tool_code>... blocks (also handles </minimax:tool_call> closing tag)
+    blocks = re.findall(
+        r'(?:<tool_code>|\[TOOL_CALL\]|<tool_call>)(.*?)(?:</tool_code>|\[/TOOL_CALL\]|</tool_call>|</minimax:tool_call>)',
+        str(text), flags=re.DOTALL
     )
     if not blocks:
         # Also try standalone <tool> blocks
-        blocks = _re.findall(r'<tool\s+name\s*=\s*["\']([^"\']+)["\']\s*(.*?)(?:/>|</tool>)', str(text), flags=_re.DOTALL)
+        blocks = re.findall(r'<tool\s+name\s*=\s*["\']([^"\']+)["\']\s*(.*?)(?:/>|</tool>)', str(text), flags=re.DOTALL)
         result = []
         for name, rest in blocks:
             args = _parse_xml_attrs(rest)
@@ -549,7 +550,7 @@ def _parse_tool_code_fallback(text):
     for block in blocks:
         block = block.strip()
         # Try self-closing <tool name="xxx" key="val"/> inside block
-        self_closing = _re.findall(r'<tool\s+name\s*=\s*["\']([^"\']+)["\']\s*(.*?)/>', block, flags=_re.DOTALL)
+        self_closing = re.findall(r'<tool\s+name\s*=\s*["\']([^"\']+)["\']\s*(.*?)/>', block, flags=re.DOTALL)
         if self_closing:
             for name, rest in self_closing:
                 args = _parse_xml_attrs(rest)
@@ -557,13 +558,61 @@ def _parse_tool_code_fallback(text):
             if result:
                 continue
         # Try nested <tool name="xxx">...<param name="key">val</param></tool>
-        single_tools = _re.findall(r'<tool\s+name\s*=\s*["\']([^"\']+)["\']>(.*?)</tool>', block, flags=_re.DOTALL)
+        single_tools = re.findall(r'<tool\s+name\s*=\s*["\']([^"\']+)["\']>(.*?)</tool>', block, flags=re.DOTALL)
         for name, body in (single_tools or [(None, block)]):
             if name is None:
                 # Try: tool => 'xxx' or tool => "xxx"
-                m = _re.search(r"tool\s*=>\s*['\"]([^'\"]+)['\"]", block)
+                m = re.search(r"tool\s*=>\s*['\"]([^'\"]+)['\"]", block)
                 if m:
                     name = m.group(1)
+            if name is None:
+                # Try minimax format: "URL TIMEOUT FLAG" or "tool_name URL TIMEOUT FLAG"
+                # or "tool_name arg1 arg2"
+                parts = block.split()
+                if len(parts) >= 1:
+                    # Check if first part is a known tool name
+                    known_tools = {'browser_open', 'browser_search', 'browser_click',
+                                   'browser_type', 'browser_extract', 'browser_navigate',
+                                   'browser_screenshot', 'browser_evaluate', 'browser_scroll'}
+                    if parts[0] in known_tools:
+                        name = parts[0]
+                        args = {}
+                        if name in ('browser_open', 'browser_navigate'):
+                            if len(parts) >= 2:
+                                args['url'] = parts[1]
+                        elif name == 'browser_search':
+                            args['query'] = ' '.join(parts[1:])
+                        elif name in ('browser_click', 'browser_type'):
+                            if len(parts) >= 2:
+                                args['selector'] = parts[1]
+                            if name == 'browser_type' and len(parts) >= 3:
+                                args['text'] = ' '.join(parts[2:])
+                        elif name == 'browser_extract':
+                            if len(parts) >= 2:
+                                args['mode'] = parts[1]
+                        else:
+                            # Generic: pass remaining as positional args
+                            if len(parts) >= 2:
+                                args['url'] = parts[1]
+                        result.append({"name": name, "args": args})
+                        continue
+                    # Try URL-based format
+                    url_part = parts[0]
+                    if len(parts) >= 2 and not parts[0].startswith('http'):
+                        url_part = parts[1] if len(parts) >= 2 else ''
+                    if url_part.startswith('http'):
+                        name = 'browser_open'
+                        args = {'url': url_part}
+                        remaining = parts[2:] if not parts[0].startswith('http') else parts[1:]
+                        if remaining:
+                            try:
+                                args['timeout'] = remaining[0]
+                            except (ValueError, IndexError):
+                                pass
+                        if len(remaining) >= 2:
+                            args['dismiss_cookies'] = remaining[1].lower() in ('true', '1', 'yes')
+                        result.append({"name": name, "args": args})
+                        continue
             if name is None:
                 # Try: first word = tool name (format: "tool_name\n<param ...>")
                 lines = block.strip().split('\n')
@@ -583,16 +632,16 @@ def _parse_tool_code_fallback(text):
                 continue
             args = {}
             # Parse <param name="X">Y</param>
-            for pm in _re.finditer(r'<param\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)</param>', body, _re.DOTALL):
+            for pm in re.finditer(r'<param\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)</param>', body, re.DOTALL):
                 args[pm.group(1).strip()] = pm.group(2).strip()
             # Parse XML attrs from body
             if not args:
                 args = _parse_xml_attrs(body)
             # Parse --key "value" or key: value
             if not args:
-                for pm in _re.finditer(r'--(\w+)\s+["\']([^"\']+)["\']', body):
+                for pm in re.finditer(r'--(\w+)\s+["\']([^"\']+)["\']', body):
                     args[pm.group(1).strip()] = pm.group(2).strip()
-                for pm in _re.finditer(r'(\w+)\s*:\s*["\']?([^"\'\n]+)["\']?', body):
+                for pm in re.finditer(r'(\w+)\s*:\s*["\']?([^"\'\n]+)["\']?', body):
                     k, v = pm.group(1).strip(), pm.group(2).strip()
                     if k != 'tool' and k not in args:
                         args[k] = v
@@ -605,7 +654,7 @@ def _parse_xml_attrs(text):
     """Parse XML attribute key="value" pairs from a string."""
     import re as _re
     args = {}
-    for pm in _re.finditer(r'(\w+)\s*=\s*["\']([^"\']+)["\']', text):
+    for pm in re.finditer(r'(\w+)\s*=\s*["\']([^"\']+)["\']', text):
         k, v = pm.group(1).strip(), pm.group(2).strip()
         if k != 'name':
             args[k] = v
@@ -1011,8 +1060,19 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                             result = f"❌ Unbekanntes Tool: {name}"
                             success = False
                         tool_duration = int((time.time() - tool_start) * 1000)
-                        yield {"type": "tool_end", "round": rnd + 1, "tool": name, "result_preview": str(result)[:500], "duration_ms": tool_duration, "success": success}
-                        rnd_tools.append({"name": name, "args": safe_args, "duration_ms": tool_duration, "result_size": len(str(result)), "success": success, "result": str(result)[:1000]})
+                        browser_data = None
+                        if name.startswith('browser_') and isinstance(result, str):
+                            m = re.search(r'"screenshot"\s*:\s*"([^"]+)"', result)
+                            if m:
+                                t = re.search(r'"title"\s*:\s*"([^"]+)"', result) or re.search(r'"new_title"\s*:\s*"([^"]+)"', result)
+                                u = re.search(r'"url"\s*:\s*"([^"]+)"', result) or re.search(r'"new_url"\s*:\s*"([^"]+)"', result)
+                                tx = re.search(r'"text_preview"\s*:\s*"([^"]+)"', result) or re.search(r'"text"\s*:\s*"([^"]+)"', result)
+                                browser_data = {"screenshot": m.group(1)}
+                                if t: browser_data["title"] = t.group(1)
+                                if u: browser_data["url"] = u.group(1)
+                                if tx: browser_data["text_preview"] = tx.group(1)
+                        yield {"type": "tool_end", "round": rnd + 1, "tool": name, "result_preview": str(result)[:2000], "duration_ms": tool_duration, "success": success, "browser": browser_data}
+                        rnd_tools.append({"name": name, "args": safe_args, "duration_ms": tool_duration, "result_size": len(str(result)), "success": success, "result": str(result)[:5000]})
                         msgs.append({"role": "tool", "content": str(result)[:8000], "name": name})
                     stats.append({"round": rnd + 1, "tool_count": len(tc_list), "duration_ms": int((time.time() - rnd_start) * 1000), "tools": rnd_tools})
                     yield {"type": "round_end", "round": rnd + 1, "round_stats": stats[-1]}
@@ -1089,7 +1149,18 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                         success = False
                 tool_duration = int((time.time() - tool_start) * 1000)
 
-                yield {"type": "tool_end", "round": rnd + 1, "tool": name, "result_preview": str(result)[:500], "duration_ms": tool_duration, "success": success}
+                browser_data = None
+                if name.startswith('browser_') and isinstance(result, str):
+                    m = re.search(r'"screenshot"\s*:\s*"([^"]+)"', result)
+                    if m:
+                        t = re.search(r'"title"\s*:\s*"([^"]+)"', result) or re.search(r'"new_title"\s*:\s*"([^"]+)"', result)
+                        u = re.search(r'"url"\s*:\s*"([^"]+)"', result) or re.search(r'"new_url"\s*:\s*"([^"]+)"', result)
+                        tx = re.search(r'"text_preview"\s*:\s*"([^"]+)"', result) or re.search(r'"text"\s*:\s*"([^"]+)"', result)
+                        browser_data = {"screenshot": m.group(1)}
+                        if t: browser_data["title"] = t.group(1)
+                        if u: browser_data["url"] = u.group(1)
+                        if tx: browser_data["text_preview"] = tx.group(1)
+                yield {"type": "tool_end", "round": rnd + 1, "tool": name, "result_preview": str(result)[:2000], "duration_ms": tool_duration, "success": success, "browser": browser_data}
 
                 round_tools.append({
                     "name": name,
@@ -1097,7 +1168,7 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                     "duration_ms": tool_duration,
                     "result_size": len(str(result)),
                     "success": success,
-                    "result": str(result)[:1000]
+                    "result": str(result)[:5000]
                 })
 
                 msgs.append({
@@ -1695,19 +1766,39 @@ def _build_agent_system_prompt(message):
 
     system = (
         f"Heute ist {date_str}, {time_str} Uhr.\n\n"
-        "Du bist ein KI-Assistent mit Zugriff auf Nextcloud-Dokumente, E-Mails, Fotos und Server-Tools.\n\n"
+        "Du bist Mynd – ein KI-Assistent mit Zugriff auf Nextcloud-Dokumente, E-Mails, Fotos und Server-Tools. "
+        "Du bist freundlich, zuvorkommend und proaktiv. Du denkst mit, fragst nach wenn etwas unklar ist, "
+        "und schlägst Lösungen vor noch bevor der User danach fragt.\n\n"
+        "DEINE PERSÖNLICHKEIT:\n"
+        "- Du bist hilfsbereit, geduldig und erklärst Dinge verständlich\n"
+        "- Du fragst aktiv nach wenn dir Infos fehlen – rate nie einfach irgendwas\n"
+        "- Du bietest proaktiv Hilfe an: 'Soll ich das für dich erledigen?', 'Möchtest du dass ich das automatisiere?'\n"
+        "- Du passt deinen Ton an: fachlich bei Technik, locker bei Alltag, emphatisch bei Problemen\n"
+        "- Wenn etwas schiefgeht, erklärst du warum und schlägst Alternativen vor\n"
+        "- Du erinnerst dich an Vorlieben und Gewohnheiten (via memory_set/get) und nutzt das für bessere Vorschläge\n\n"
+        "AGENTISCHES VERHALTEN:\n"
+        "- **Denke strategisch**: Bei komplexen Aufgaben erstelle einen Plan (create_plan), bevor du loslegst\n"
+        "- **Delegiere Teilaufgaben**: Nutze delegate() für aufwändige Recherche, Analyse oder Code-Generierung – "
+        "das hält den Haupt-Kontext sauber und ermöglicht parallele Bearbeitung\n"
+        "- **Sei vorausschauend**: Wenn der User ein Ziel nennt, überlege welche weiteren Schritte nötig sind "
+        "und biete sie gleich mit an\n"
+        "- **Lerne aus Fehlern**: Wenn ein Tool fehlschlägt, versuche einen anderen Ansatz (anderen Endpoint, anderen Befehl, andere Strategie)\n"
+        "- **Frage nach bei Unsicherheit**: prompt_user() ist dein Freund – bei fehlenden Daten, mehreren Optionen oder unklaren Anweisungen\n"
+        "- **Hinterlege Wissen**: Persönliche Infos sofort in memory_set() speichern\n\n"
         "KERN-WERKZEUGE:\n"
         "- **think**: IMMER ZUERST aufrufen. Plane dein Vorgehen.\n"
         "- **search_documents**: Indexierte Dokumente semantisch durchsuchen\n"
         "- **web_search**: INTERNET-Suche via DuckDuckGo für aktuelle Infos, News, Webseiten\n"
         "- **fetch_news**: AKTUELLE NACHRICHTEN per WEB-MULTI-QUELLEN. RSS nur ergänzend/fallback (category='top' oder 'technologie')\n"
         "- **vault_get / vault_set / vault_list / vault_delete**: Zugangsdaten speichern/lesen\n"
-        "- **execute_python**: Python-Code ausführen für Berechnungen, Datum/Uhrzeit, Daten-Analyse, URL-Inhalte laden, Datei-Erstellung (Excel/openpyxl, Word/docx, PowerPoint/pptx), Formatierungen, Mathe, etc. Nutze DAS STATT execute_bash für alles außer System-Befehle.\n"  # noqa: E501
+        "- **execute_python**: Python-Code ausführen für Berechnungen, Datum/Uhrzeit, Daten-Analyse, URL-Inhalte laden, Datei-Erstellung (Excel/openpyxl, Word/docx, PowerPoint/pptx), Formatierungen, Mathe, etc. Nutze DAS STATT execute_bash für alles außer System-Befehle.\n"
         "- **http_request**: HTTP-Request an JEDE REST-API (auch URL-Inhalte laden!). auth_user + auth_pass für Basic Auth (UTF-8-sicher). Self-Signed-Certs automatisch akzeptiert.\n"
         "- **execute_ssh**: Befehl per SSH auf Remote-Host (host, user, password, command)\n"
         "- **read_local_file / write_local_file**: Lokale Dateien lesen/schreiben\n"
-        "- **prompt_user**: User interaktiv nach Eingabe fragen – wenn du unsicher bist, mehrere Möglichkeiten siehst, eine Auswahl brauchst oder zusätzliche Infos benötigst. ÜBERLEGE NICHT LANGE, sondern frage einfach.\n"  # noqa: E501
-        "- **memory_get / memory_set / memory_delete**: Dauerhaftes Gedächtnis über Chats hinweg\n\n"
+        "- **prompt_user**: User interaktiv nach Eingabe fragen – wenn du unsicher bist, mehrere Möglichkeiten siehst, eine Auswahl brauchst oder zusätzliche Infos benötigst. ÜBERLEGE NICHT LANGE, sondern frage einfach.\n"
+        "- **memory_get / memory_set / memory_delete**: Dauerhaftes Gedächtnis über Chats hinweg\n"
+        "- **delegate**: Übergib eine Teilaufgabe an einen Sub-Agenten – nutze DAS für aufwändige Recherchen, Analyse, Code-Reviews oder wenn mehrere Dinge parallel erledigt werden müssen\n"
+        "- **create_plan**: Erstelle einen strukturierten Mehr-Schritt-Plan für komplexe Aufgaben\n\n"
         "NEXTCLOUD:\n"
         "- **nextcloud_list / nextcloud_read_file / nextcloud_write_file / nextcloud_delete / nextcloud_mkdir / nextcloud_move**: Dateien verwalten\n"
         "- **nextcloud_caldav_query(start_date=YYYYMMDD, end_date=YYYYMMDD)**: Kalender-Termine abrufen\n"
@@ -1724,7 +1815,7 @@ def _build_agent_system_prompt(message):
         "WICHTIGE REGELN:\n"
         "- Credentials IMMER per vault_get() mit vollem Key abrufen (z.B. vault_get('truenas/192.168.178.44/user')). NIEMALS aus Nachrichten kopieren.\n"
         "- KEINE <tool_code> Blöcke generieren! Nutze ausschließlich die standardisierten function_call/tool_calls der API.\n"
-        "- **prompt_user() NUTZEN bei Unsicherheit**: Wenn du dir nicht sicher bist, der User eine Wahl treffen muss, oder du mehrere Möglichkeiten siehst – rufe SOFORT prompt_user() auf. Rate NICHT einfach irgendwas. Beispiele:\n"  # noqa: E501
+        "- **prompt_user() NUTZEN bei Unsicherheit**: Wenn du dir nicht sicher bist, der User eine Wahl treffen muss, oder du mehrere Möglichkeiten siehst – rufe SOFORT prompt_user() auf. Rate NICHT einfach irgendwas. Beispiele:\n"
         "  * 'Welche Farbe?' → prompt_user('Soll ich Blau oder Rot nehmen?')\n"
         "  * 'Ich habe XYZ zur Auswahl' → prompt_user('Welche Option bevorzugst du?')\n"
         "  * 'Ich kenne den Standort nicht' → prompt_user('In welcher Stadt bist du?')\n"
@@ -1746,16 +1837,17 @@ def _build_agent_system_prompt(message):
         "   - URL vom User gegeben → **http_request(url)** oder **execute_python(requests.get(url))** zum Laden der Seite\n"
         "   - Lokale Nextcloud-Dokumente → **search_documents()**\n"
         "   - Kombiniere bei Bedarf: z.B. web_search() für Kontext + fetch_news() für heutige News\n"
-         "3. **AKTION** → Vault → prompt_user (bei Unsicherheit/Fragen) → vault_set → http_request / execute_ssh / execute_python. API unbekannt? → api_refs.json.\n"
+        "   - Komplexe mehrstufige Aufgabe? → **create_plan()** + **delegate()** für Teilaufgaben\n"
+        "3. **AKTION** → Vault → prompt_user (bei Unsicherheit/Fragen) → vault_set → http_request / execute_ssh / execute_python. API unbekannt? → api_refs.json.\n"
         "4. **MERKEN (MUSS)** → User sagt etwas Persönliches (Name, Alter, Wohnort etc.)? → DU MUSST memory_set() AUFRUFEN. Sage nicht nur 'ich merke es mir' – führe das Tool aus!\n"
         "5. **ANTWORTEN**: Deutsch.\n"
         "   - **QUELLE IMMER NENNEN** – bei JEDER Antwort die Quellen angeben.\n"
-        "   - **Quellen-Format**: Verwende KURZE ZITIER-MARKIERUNGEN im Text wie (1), (2), (3) ... "
+        "   - **Quellen-Format**: Verwende KURZE ZITIER-MARKIERUNGEN im Text wie (1), (2), (3) … "
         "und führe die Quellen am Ende aufgelistet auf:\n"
         "     (1) [tagesschau.de](https://www.tagesschau.de/...)\n"
         "     (2) [heise.de](https://www.heise.de/...)\n"
         "   - Zeige NUR den Domain-Namen als Link an, NICHT die volle URL.\n"
-        "   - NUMERIERUNG MUSS SEQUENTIELL SEIN: 1, 2, 3, 4, 5, ... – "
+        "   - NUMERIERUNG MUSS SEQUENTIELL SEIN: 1, 2, 3, 4, 5, … – "
         "niemals Zahlen aus den Rohdaten übernehmen!\n"
         "   - **LISTEN WICHTIG**: Format `• **Titel**: Beschreibung (1)` – ZAHL und TEXT in EINER Zeile. "
         "NIEMALS Zahl und Text auf zwei Zeilen verteilen. KEINE Leerzeilen zwischen Listeneinträgen.\n"
@@ -1958,6 +2050,16 @@ def _get_web_context_safe_v2(query, max_results):
 @app.route('/api/generated/<path:filename>')
 def serve_generated(filename):
     return send_from_directory(GENERATED_DIR, filename)
+
+BROWSER_SCREENSHOTS_DIR = DATA_DIR / 'browser_screenshots'
+os.makedirs(BROWSER_SCREENSHOTS_DIR, exist_ok=True)
+
+@app.route('/data/browser_screenshots/<path:filename>')
+def serve_browser_screenshot(filename):
+    safe = os.path.realpath(BROWSER_SCREENSHOTS_DIR / filename)
+    if not safe.startswith(os.path.realpath(BROWSER_SCREENSHOTS_DIR)):
+        return "Forbidden", 403
+    return send_from_directory(BROWSER_SCREENSHOTS_DIR, filename)
 
 UPLOAD_DIR = DATA_DIR / 'uploads'
 os.makedirs(UPLOAD_DIR, exist_ok=True)

@@ -41,7 +41,7 @@ export default function AuthGate({ children }) {
               setUser({ name: data.user.name, username: data.user.username, token: storedToken });
             }
           })
-          .catch(() => {});
+          .catch(() => { if (!cancelled) setUser(null); });
       }
     } catch (e) {}
 
@@ -55,7 +55,7 @@ export default function AuthGate({ children }) {
           guardedReplace('/setup');
         }
       })
-      .catch(() => {});
+      .catch(() => { if (!cancelled) setSetupRequired(false); });
     setReady(true);
 
     return () => {
@@ -123,7 +123,7 @@ export default function AuthGate({ children }) {
               setForceOpen(false);
             }
           })
-          .catch(() => {});
+          .catch(() => setUser(null));
       } catch (e) {}
     };
     window.addEventListener('auth-login', handleLogin);

@@ -37,7 +37,7 @@ export default function LoginPage() {
       .then(data => {
         if (data?.allowRegistration) setRegistrationAllowed(true);
       })
-      .catch(() => {});
+      .catch(() => setRegistrationAllowed(false));
   }, []);
 
   const validate = () => {

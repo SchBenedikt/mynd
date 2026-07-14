@@ -1,12 +1,12 @@
 # 🧠 MYND
 
-**Local-first AI workspace** — Chat, search, automate, and control your smart home, all running on your own hardware.
+**Local-first AI workspace** — Chat, search, automate, browser automation, smart home control, and sub-agent delegation — all running on your own hardware.
 
 ![GitHub last commit](https://img.shields.io/github/last-commit/SchBenedikt/mynd)
-![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![Python](https://img.shields.io/badge/python-3.14%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-green)
 
-MYND combines a conversational AI agent with personal knowledge retrieval, file generation, photo search, smart-home control, automations, and a plugin system — fully local, no cloud dependency.
+MYND combines a conversational AI agent with personal knowledge retrieval, file generation, photo search, smart-home control, automations, browser automation, and a plugin system — fully local, no cloud dependency.
 
 ---
 
@@ -14,14 +14,19 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 
 | | |
 |---|---|
-| **💬 Chat & Agent** | Streaming AI chat with tool-calling, web research, document Q&A |
+| **💬 Agentic Chat** | Streaming AI chat with tool-calling, multi-round planning, sub-agent delegation |
 | **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings) |
-| **📷 Photo Search** | Semantic photo search via Immich (self-hosted Google Photos alternative) |
-| **🏠 Smart Home** | Home Assistant integration — lights, switches, sensors, cameras |
+| **🌐 Web Research** | DuckDuckGo search, news aggregation, multi-source research |
+| **🗺️ Browser Automation** | Headless Playwright — open pages, click, type, scroll, extract, screenshot, PDF export |
+| **📷 Photo Search** | Semantic photo search via Immich |
+| **🏠 Smart Home** | Home Assistant — lights, switches, sensors, cameras, scenes, scripts |
 | **📅 Productivity** | CalDAV calendars & tasks (Nextcloud), timer reminders |
 | **📧 Email** | IMAP/SMTP integration for reading & sending |
 | **🤖 Automations** | Cron-based automations, daily briefing, scheduled actions |
 | **🔌 Plugin System** | Extensible registry — install from GitHub, toggle at runtime |
+| **🔐 Vault** | Encrypted credential storage for API keys, passwords, configs |
+| **🧩 Sub-Agent Delegation** | `delegate()` spawns focused sub-agents for complex sub-tasks |
+| **📋 Multi-Step Planning** | `create_plan()` builds structured plans for complex workflows |
 | **🛡️ Auth** | Password-based login, configurable registration, role-based access |
 | **🎨 Themes** | 7 color themes × light/dark modes |
 | **🌐 Multi-language** | UI in German & English |
@@ -37,6 +42,7 @@ cd mynd
 # Backend
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
+playwright install chromium      # only for browser automation
 
 # Frontend
 npm install && npm install --prefix frontend
@@ -65,20 +71,29 @@ On first launch, the admin password is printed to the backend log. Change it imm
 mynd/
 ├── app.py                  ← Flask API, auth, agent orchestration, SSE streaming
 ├── core/                   ← Model client, retrieval, tools, vault, scheduler, plugins
-│   ├── ollama_client.py
-│   ├── tools.py
-│   ├── vault.py
-│   ├── plugin_base.py
+│   ├── ollama_client.py    ← Ollama / OpenAI API client with tool-calling support
+│   ├── tools.py            ← Core tools: bash, ssh, web, memory, vault, delegate, plan
+│   ├── vault.py            ← Encrypted credential storage
+│   ├── plugin_base.py      ← Plugin discovery & hot-reload
 │   └── ...
 ├── data/                   ← Runtime data (gitignored): vault, configs, uploads
-│   └── plugins/            ← Built-in integrations (Home Assistant, Nextcloud, Immich, …)
+│   └── plugins/            ← Built-in integrations (Browser, HA, Nextcloud, Immich, …)
 ├── frontend/               ← Next.js 16 / React 19 application
 │   ├── app/                ← Pages, layout, globals.css
 │   ├── components/         ← Reusable UI components
+│   │   └── BrowserPreview.js  ← Screenshot viewer in LiveTools
 │   ├── hooks/              ← Custom React hooks
 │   └── lib/                ← API fetch helpers, contexts
 ├── scripts/                ← Document sync & ingestion
 └── tests/                  ← Backend pytest suite
+```
+
+### Agentic Workflow
+
+```
+User query → Think() → Plan() → Web research / Docs search / Browse
+  → Delegate sub-tasks to sub-agents (parallel research, analysis, code)
+  → Synthesize results → Respond with sources
 ```
 
 ### Data Flow
@@ -87,9 +102,73 @@ mynd/
 Browser ──HTTP/SSE──> Flask API ──> Ollama / OpenAI
                               │
                               ├──> Knowledge Base (embeddings)
-                              ├──> Tools (search, home, files, …)
+                              ├──> Tools (bash, ssh, web, files, …)
+                              ├──> Browser (Playwright)
                               ├──> Plugins (HA, Nextcloud, Immich, …)
                               └──> Vault (credentials, encrypted)
+```
+
+---
+
+## 🤖 Agentic Capabilities
+
+MYND uses a **multi-round tool-calling loop** with advanced agentic features:
+
+| Capability | Tool | Description |
+|---|---|---|
+| **Strategic Thinking** | `think()` | Always called first — plans the approach |
+| **Multi-Step Planning** | `create_plan()` | Structured plans with step-by-step tracking |
+| **Sub-Agent Delegation** | `delegate()` | Spawns focused sub-agents for complex sub-tasks |
+| **Web Research** | `web_search()`, `fetch_news()` | DuckDuckGo + multi-source news |
+| **Browser Automation** | `browser_*()` (29 tools) | Open, click, type, scroll, extract, screenshot |
+| **API Access** | `http_request()` | Any REST API with Basic Auth, self-signed certs |
+| **Remote Execution** | `execute_ssh()` | Commands on remote hosts via SSH |
+| **Code Execution** | `execute_python()`, `execute_bash()` | Run code in safe sandbox or directly |
+| **Memory** | `memory_set/get/delete` | Persistent cross-session knowledge |
+| **User Interaction** | `prompt_user()` | Ask for input when uncertain |
+| **Credential Vault** | `vault_get/set/delete/list` | Encrypted storage for secrets |
+
+---
+
+## 🗺️ Browser Automation (29 Tools)
+
+Headless Chromium via Playwright with anti-detection stealth:
+
+| Tool | Purpose |
+|---|---|
+| `browser_open` | Navigate to URL with optional ad blocking & cookie consent |
+| `browser_click` / `browser_type` / `browser_select` | Interact with page elements |
+| `browser_extract` | Extract text, tables, or Markdown from current page |
+| `browser_screenshot` | Capture screenshot (full page or element) |
+| `browser_search` | Search engine query (Google, DuckDuckGo, Bing) |
+| `browser_pdf` | Export page to PDF |
+| `browser_new_tab` / `browser_switch_tab` / `browser_close_tab` | Multi-tab management |
+| `browser_scroll` / `browser_hover` / `browser_wait_for` | Navigation & waiting |
+| `browser_fill_form` | Auto-fill entire forms |
+| `browser_intercept` | Block ads / trackers via network interception |
+| `browser_cookies` / `browser_set_viewport` | Browser state management |
+| `browser_mobile_emulate` | Emulate mobile device viewports |
+| `browser_get_performance` / `browser_network_log` | Debugging & metrics |
+| `browser_get_shadow_dom` / `browser_accessibility_snapshot` | Advanced DOM access |
+| `browser_dialog_handler` | Auto-accept alerts/confirm/prompt dialogs |
+
+Screenshots are displayed inline in the chat via `BrowserPreview` component.
+
+---
+
+## 💡 Usage Examples
+
+```bash
+# Start the system
+make dev
+
+# Then open http://localhost:3000 and try:
+#   "Öffne spiegel.de und mach einen Screenshot"
+#   "Was ist heute in den Nachrichten?"
+#   "Finde das Foto von letztem Sommer in Italien"
+#   "Zeige mir meinen Kalender für diese Woche"
+#   "Vergleiche die Server-Auslastung von TrueNAS und Proxmox"
+#   "Erstelle einen Plan: Sichere Nextcloud, update alle Container, sende Bericht"
 ```
 
 ---
@@ -137,6 +216,7 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 npm install
 npm install --prefix frontend
+playwright install chromium   # for browser automation
 ```
 
 ---
@@ -150,7 +230,7 @@ npm install --prefix frontend
 - CSRF protection via token-based auth
 - All data stays **on your machine** — no cloud egress
 
-> **Run only in a trusted environment.** MYND can execute shell commands and connect to private services.
+> **Run only in a trusted environment.** MYND can execute shell commands, SSH into remote hosts, control smart home devices, and automate browsers.
 
 ---
 

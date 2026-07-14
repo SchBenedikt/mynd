@@ -66,7 +66,15 @@ def load_plugins():
         mod_name = f'data.plugins.{f.stem}'
         try:
             mod = importlib.import_module(mod_name)
-            plugin_cls = getattr(mod, 'Plugin', None) or getattr(mod, 'plugin', None)
+            # Find Plugin subclasses defined in THIS module (not the imported base class)
+            plugin_cls = None
+            for attr_name in dir(mod):
+                obj = getattr(mod, attr_name, None)
+                if (isinstance(obj, type) and issubclass(obj, Plugin)
+                        and obj is not Plugin
+                        and getattr(obj, 'name', '')):
+                    plugin_cls = obj
+                    break
             if plugin_cls is None:
                 legacy_tools = list(getattr(mod, 'TOOLS', []))
                 legacy_map = dict(getattr(mod, 'TOOL_MAP', {}))

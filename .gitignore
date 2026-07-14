@@ -2,7 +2,11 @@
 .env
 
 # Generated data
-data/
+data/*
+!data/plugins/
+data/plugins/*.json
+data/plugins/__pycache__/
+data/browser_screenshots/
 parsed_docs/
 logs/
 
