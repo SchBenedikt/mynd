@@ -50,5 +50,8 @@ response.json
 output.png
 *.xlsx
 *.rtf
-screenshots/
+# Curated documentation screenshots are tracked in screenshots/.
+screenshots/*
+!screenshots/login.png
+!screenshots/app-main.png
 quadratische_funktion.xlsx

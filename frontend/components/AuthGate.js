@@ -3,11 +3,10 @@
 import { useEffect, useState, useRef } from "react";
 import { usePathname, useRouter } from 'next/navigation';
 import './AuthGate.css';
-import { apiFetch, getApiBase } from '../lib/api';
+import { apiFetch } from '../lib/api';
 
 const LANGUAGE_KEY = 'mynd_language';
 const TOKEN_KEY = 'mynd_token_v1';
-const SETUP_FLOW_KEY = 'mynd_setup_flow_v1';
 
 export default function AuthGate({ children }) {
   const pathname = usePathname();
@@ -15,7 +14,6 @@ export default function AuthGate({ children }) {
   const [ready, setReady] = useState(false);
   const [setupRequired, setSetupRequired] = useState(false);
   const [user, setUser] = useState(null);
-  const [hasToken, setHasToken] = useState(false);
   const [forceOpen, setForceOpen] = useState(false);
   const lastReplaceRef = useRef(0);
 
@@ -28,39 +26,28 @@ export default function AuthGate({ children }) {
 
   useEffect(() => {
     let cancelled = false;
+    const storedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } })();
+    Promise.allSettled([
+      storedToken
+        ? apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${storedToken}` } })
+            .then((r) => r.json())
+            .then((data) => {
+              if (!cancelled && data?.authenticated && data.user) {
+                setUser({ name: data.user.name, username: data.user.username, token: storedToken });
+              }
+            })
+        : Promise.resolve(),
+      apiFetch('/api/setup/status')
+        .then((r) => r.json())
+        .then((data) => {
+          if (cancelled) return;
+          const needsSetup = Boolean(data?.success && data.needs_setup);
+          setSetupRequired(needsSetup);
+          if (needsSetup && pathname !== '/setup') guardedReplace('/setup');
+        })
+    ]).finally(() => { if (!cancelled) setReady(true); });
 
-    try {
-      const storedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } })();
-      setHasToken(!!storedToken);
-
-      if (storedToken) {
-        apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${storedToken}` } })
-          .then((r) => r.json())
-          .then((data) => {
-            if (!cancelled && data && data.authenticated && data.user) {
-              setUser({ name: data.user.name, username: data.user.username, token: storedToken });
-            }
-          })
-          .catch(() => { if (!cancelled) setUser(null); });
-      }
-    } catch (e) {}
-
-    apiFetch('/api/setup/status')
-      .then((r) => r.json())
-      .then((data) => {
-        if (cancelled) return;
-        const needsSetup = Boolean(data && data.success && data.needs_setup);
-        setSetupRequired(needsSetup);
-        if (needsSetup && pathname !== '/setup') {
-          guardedReplace('/setup');
-        }
-      })
-      .catch(() => { if (!cancelled) setSetupRequired(false); });
-    setReady(true);
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -89,32 +76,10 @@ export default function AuthGate({ children }) {
   }, [router]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const interval = setInterval(async () => {
-      try {
-        const storedToken = localStorage.getItem(TOKEN_KEY);
-        if (!storedToken) return;
-        const res = await apiFetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${storedToken}`, 'Content-Type': 'application/json' }
-        });
-        const data = await res.json();
-        if (res.ok && data?.token) {
-          localStorage.setItem(TOKEN_KEY, data.token);
-        }
-      } catch (e) {
-        /* token refresh failed silently — existing token still valid */
-      }
-    }, 15 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
     const handleLogin = () => {
       try {
         const storedToken = localStorage.getItem(TOKEN_KEY);
         if (!storedToken) return;
-        setHasToken(true);
         apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${storedToken}` } })
           .then(r => r.json())
           .then(data => {
@@ -131,12 +96,21 @@ export default function AuthGate({ children }) {
   }, []);
 
   useEffect(() => {
+    const handleExpired = () => {
+      setUser(null);
+      setForceOpen(true);
+      if (pathname !== '/login') router.replace('/login');
+    };
+    window.addEventListener('auth-expired', handleExpired);
+    return () => window.removeEventListener('auth-expired', handleExpired);
+  }, [pathname, router]);
+
+  useEffect(() => {
     if (!ready) return;
     if (pathname === '/language' || pathname?.startsWith('/setup') || pathname === '/login') return;
     if (user && !forceOpen) return;
-    if (hasToken && !forceOpen) return;
     guardedReplace('/login');
-  }, [ready, pathname, user, forceOpen, hasToken]);
+  }, [ready, pathname, user, forceOpen]);
 
   if (!ready) return (
     <div className="authgate-skeleton">
@@ -168,7 +142,5 @@ export default function AuthGate({ children }) {
   if (pathname?.startsWith('/setup')) return children;
   if (pathname === '/login') return children;
   if (user && !forceOpen) return children;
-  if (hasToken && !forceOpen) return children;
-
   return null;
 }

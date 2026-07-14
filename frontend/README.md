@@ -1,31 +1,28 @@
-# Frontend (Next.js)
+# MYND frontend
 
-Next.js-basiertes Frontend für das MYND-Backend.
+The MYND web application is built with Next.js 16 and React 19.
 
-## Start
+## Run locally
+
+From the repository root:
 
 ```bash
 npm install
-cp .env.local.example .env.local
 npm run dev
 ```
 
-Frontend: http://localhost:3000
-Backend: http://127.0.0.1:5001
+The frontend opens at `http://localhost:3000` and connects to the backend at `http://127.0.0.1:5001`. Users can override the backend URL from the login page; the value is stored locally in the browser.
 
-## Konfiguration
+## Main routes
 
-- API-Ziel wird über `NEXT_PUBLIC_BACKEND_URL` in `.env.local` gesteuert
-- Nutzt die Endpunkte `/api/chat`, `/api/ollama/status`, `/api/knowledge/status`, `/api/ai/config` u.a.
-- Einstellungen für Immich, Nextcloud, AI unter `/settings`
+| Route | Purpose |
+|---|---|
+| `/` | Chat workspace |
+| `/login` | Authentication and registration |
+| `/language` | Language selection |
+| `/setup` | First-run setup wizard |
+| `/settings` | Models, integrations, indexing, users, and appearance |
+| `/projects` | Project organization |
+| `/knowledge-graph` | Knowledge graph visualization |
 
-## Seiten
-
-| Route | Beschreibung |
-|-------|-------------|
-| `/` | Chat-Interface |
-| `/settings` | Einstellungen (AI, Nextcloud, Immich, Kalender) |
-| `/setup` | Setup-Wizard |
-| `/admin` | Admin-Bereich |
-| `/knowledge-graph` | Knowledge-Graph-Visualisierung |
-| `/internal` | Interne Debug-Tools |
+Run `npm run lint` and `npm run build` before submitting frontend changes.

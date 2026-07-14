@@ -1,5 +1,7 @@
 """Test Flask app routes and API endpoints using the test client."""
 
+import time
+
 import pytest
 
 import app as app_module
@@ -9,8 +11,15 @@ from app import app
 @pytest.fixture
 def client():
     app.config["TESTING"] = True
+    app_module.AUTH_USERS["test-client"] = {
+        "name": "Test Client",
+        "role": "admin",
+        "token": "test-client-token",
+    }
     with app.test_client() as client:
+        client.environ_base["HTTP_AUTHORIZATION"] = "Bearer test-client-token"
         yield client
+    app_module.AUTH_USERS.pop("test-client", None)
 
 
 class TestPluginAPI:
@@ -37,7 +46,7 @@ class TestPluginAPI:
 
 class TestAuthAPI:
     def test_auth_me_unauthenticated(self, client):
-        resp = client.get("/api/auth/me")
+        resp = client.get("/api/auth/me", headers={"Authorization": ""})
         # Should return 401 or 200 with no user
         assert resp.status_code in (200, 401)
 
@@ -91,6 +100,40 @@ class TestSecurityAPI:
     def test_security_status(self, client):
         resp = client.get("/api/security/status")
         assert resp.status_code == 200
+
+    def test_sensitive_routes_require_authentication(self, client):
+        response = client.get("/api/vault/entries", headers={"Authorization": ""})
+        assert response.status_code == 401
+        assert response.get_json()["authenticated"] is False
+
+    def test_tool_confirmation_is_owner_bound_and_single_use(self, client):
+        app_module.AUTH_USERS["other-user"] = {
+            "name": "Other",
+            "role": "user",
+            "token": "other-token",
+        }
+        confirmation_id = "test-confirmation"
+        app_module._PENDING_TOOL_CONFIRMS[confirmation_id] = {
+            "tool": "think",
+            "args": {"thought": "test"},
+            "owner": "test-client",
+            "created_at": time.time(),
+        }
+        payload = {"confirmation_id": confirmation_id, "confirmed": False}
+
+        forbidden = client.post(
+            "/api/tool/run",
+            json=payload,
+            headers={"Authorization": "Bearer other-token"},
+        )
+        assert forbidden.status_code == 403
+        assert confirmation_id in app_module._PENDING_TOOL_CONFIRMS
+
+        accepted = client.post("/api/tool/run", json=payload)
+        assert accepted.status_code == 200
+        assert confirmation_id not in app_module._PENDING_TOOL_CONFIRMS
+        assert client.post("/api/tool/run", json=payload).status_code == 404
+        app_module.AUTH_USERS.pop("other-user", None)
 
 
 class TestVaultAPI:
@@ -148,11 +191,27 @@ class TestCornerCases:
         resp = client.get("/api/immich/thumbnail/nonexistent")
         assert resp.status_code in (200, 400, 404, 500)
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/chat/summarize",
+            "/api/calendar/update",
+            "/api/tasks/update/example",
+            "/api/email/send",
+            "/api/tts/live",
+            "/api/tts/synthesize",
+        ],
+    )
+    def test_visible_frontend_actions_have_backend_routes(self, client, path):
+        response = client.post(path, json={})
+        assert response.status_code != 404
+
 
 class TestBackupSecurity:
     def test_backup_requires_admin(self, client):
-        assert client.get("/api/backup/export").status_code == 401
-        assert client.post("/api/backup/import", json={"files": {}}).status_code == 401
+        no_auth = {"Authorization": ""}
+        assert client.get("/api/backup/export", headers=no_auth).status_code == 401
+        assert client.post("/api/backup/import", json={"files": {}}, headers=no_auth).status_code == 401
 
     def test_backup_import_rejects_path_traversal(self, client, monkeypatch, tmp_path):
         data_dir = tmp_path / "data"

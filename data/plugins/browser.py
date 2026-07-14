@@ -4,16 +4,12 @@ Anti-detection bypass, cookie consent handling, network interception,
 iframe/shadow DOM support, mobile emulation, retry logic.
 """
 
-import base64
-import hashlib
 import json
 import logging
-import os
-import re
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urlparse, urljoin, quote_plus
+from urllib.parse import quote_plus, urlparse
 
 from core.plugin_base import Plugin
 

@@ -664,19 +664,21 @@ function interpolate(template, vars) {
 }
 
 export function LanguageProvider({ children }) {
-  const [language, setLanguageState] = useState('de');
+  const [language, setLanguageState] = useState('en');
 
   useEffect(() => {
     const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
     const valid = SUPPORTED_LANGUAGES.some((l) => l.code === stored);
-    const next = valid ? stored : 'de';
+    const browserLanguage = navigator.language?.split('-')[0]?.toLowerCase();
+    const browserSupported = SUPPORTED_LANGUAGES.some((l) => l.code === browserLanguage);
+    const next = valid ? stored : (browserSupported ? browserLanguage : 'en');
     setLanguageState(next);
     document.documentElement.setAttribute('lang', next);
   }, []);
 
   const setLanguage = useCallback((nextLanguage) => {
     const valid = SUPPORTED_LANGUAGES.some((l) => l.code === nextLanguage);
-    const safe = valid ? nextLanguage : 'de';
+    const safe = valid ? nextLanguage : 'en';
     setLanguageState(safe);
     localStorage.setItem(LANGUAGE_STORAGE_KEY, safe);
     document.documentElement.setAttribute('lang', safe);
@@ -696,7 +698,7 @@ export function useLanguage() {
   const t = useMemo(() => {
     return (key, vars) => {
       const table = TRANSLATIONS[language] || TRANSLATIONS.en;
-      const value = table?.[key] ?? TRANSLATIONS.de[key] ?? key;
+      const value = table?.[key] ?? TRANSLATIONS.en[key] ?? key;
       return interpolate(value, vars);
     };
   }, [language]);

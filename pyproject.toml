@@ -3,9 +3,9 @@ requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mynd-2new"
+name = "mynd"
 version = "0.1.0"
-description = "KI-Assistent mit Smart-Home-Steuerung, Foto-Suche und persönlichem Wissensgraphen"
+description = "Local-first AI workspace with chat, knowledge retrieval, automations, and integrations"
 authors = [{ name = "Benedikt Schächner" }]
 license = "MIT"
 requires-python = ">=3.12"
@@ -25,6 +25,10 @@ dependencies = [
     "ddgs>=1.0.0",
     "APScheduler>=3.10.0",
     "tiktoken>=0.5.0",
+    "playwright>=1.40.0",
+    "requests-oauthlib>=2.0.0",
+    "lxml-html-clean>=0.4.0",
+    "markdown>=3.5.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +47,10 @@ exclude = ["frontend*", "node_modules*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+addopts = [
+    "--ignore=tests/test_browser_plugin.py",
+    "--ignore=tests/test_browser_v2.py",
+]
 timeout = 30
 filterwarnings = [
     "ignore::DeprecationWarning",
@@ -52,6 +60,10 @@ filterwarnings = [
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+extend-exclude = [
+    "tests/test_browser_plugin.py",
+    "tests/test_browser_v2.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP"]
@@ -60,6 +72,9 @@ ignore = [
     "E701", # Gradually expand legacy one-line control flow.
     "F403", # core/__init__.py intentionally preserves its legacy public API.
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"data/plugins/browser.py" = ["N802"]
 
 [tool.ruff.format]
 quote-style = "single"

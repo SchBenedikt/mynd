@@ -1,20 +1,30 @@
 """Cloud Browser v2 – comprehensive real-world tests."""
 import json
 import sys
-import time
 
 sys.path.insert(0, '.')
 
 from data.plugins.browser import (
-    browser_open, browser_screenshot, browser_extract, browser_click,
-    browser_type, browser_evaluate, browser_search, browser_back,
-    browser_forward, browser_scroll, browser_select, browser_hover,
-    browser_wait_for, browser_list_tabs, browser_new_tab, browser_switch_tab,
-    browser_close_tab, browser_fill_form, browser_pdf, browser_cookies,
-    browser_set_viewport, browser_get_performance, browser_network_log,
-    browser_mobile_emulate, browser_get_shadow_dom, browser_intercept,
-    browser_dialog_handler, browserAccessibility_snapshot,
-    _ensure_browser, _close_browser, _pages, _active_tab
+    _close_browser,
+    browser_back,
+    browser_close_tab,
+    browser_cookies,
+    browser_evaluate,
+    browser_extract,
+    browser_get_performance,
+    browser_intercept,
+    browser_list_tabs,
+    browser_mobile_emulate,
+    browser_network_log,
+    browser_new_tab,
+    browser_open,
+    browser_pdf,
+    browser_screenshot,
+    browser_scroll,
+    browser_search,
+    browser_set_viewport,
+    browser_type,
+    browserAccessibility_snapshot,
 )
 
 print("=" * 70)
@@ -291,6 +301,7 @@ test("Close browser", lambda: (_close_browser(), True)[-1])
 # ═══════════════════════════════════════════════════════════════════════
 print("\n20. PLUGIN CLASS")
 from data.plugins.browser import BrowserPlugin
+
 plugin = BrowserPlugin()
 test("Plugin name", lambda: plugin.name == "browser")
 test("Plugin version", lambda: plugin.version == "2.0.0")

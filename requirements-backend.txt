@@ -1,4 +1,4 @@
-# mynd-2new Backend Requirements
+# MYND backend requirements
 # Install: pip3 install -r requirements-backend.txt
 
 # Core

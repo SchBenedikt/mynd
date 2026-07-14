@@ -1,7 +1,7 @@
-.PHONY: help setup dev stop sync-index test lint frontend-lint typecheck clean check
+.PHONY: help setup dev stop sync-index test lint frontend-lint frontend-audit typecheck clean check
 
 help:
-	@echo "mynd-2new – KI-Assistent mit Smart-Home, Foto-Suche, Wissensgraph"
+	@echo "MYND – local-first AI workspace"
 	@echo ""
 	@echo "  make setup            Install dependencies (backend + frontend)"
 	@echo "  make dev              Start both servers via npm run dev"
@@ -16,14 +16,14 @@ help:
 
 setup:
 	@echo "=== Installing dependencies ==="
-	pip3 install -q -r requirements-backend.txt
+	uv sync --locked --extra dev
 	cd frontend && npm install
 	npm install
 	@echo "Done."
 
 dev:
 	@echo "=== Starting mynd (backend + frontend) ==="
-	npm run dev
+	uv run npm run dev
 
 stop:
 	@echo "=== Stopping services ==="
@@ -32,31 +32,34 @@ stop:
 
 sync-index:
 	@echo "=== Syncing from Nextcloud ==="
-	python3 scripts/sync_nextcloud.py
+	uv run python scripts/sync_nextcloud.py
 
 test:
 	@echo "=== Running all backend tests ==="
-	python3 -m pytest tests/ -v --tb=short --timeout=30
+	uv run pytest tests/ -v --tb=short --timeout=30
 
 test-fast:
 	@echo "=== Running fast backend tests (no network) ==="
-	python3 -m pytest tests/ -v --tb=short --timeout=30 -k "not web_search and not weather and not ollama"
+	uv run pytest tests/ -v --tb=short --timeout=30 -k "not web_search and not weather and not ollama"
 
 lint:
 	@echo "=== Running ruff linter ==="
-	ruff check app.py core/ data/plugins/ tests/
+	uv run ruff check app.py core/ data/plugins/ tests/
 
 frontend-lint:
 	@echo "=== Running frontend lint ==="
 	cd frontend && npm run lint
 
+frontend-audit:
+	@echo "=== Auditing frontend dependencies ==="
+	cd frontend && npm audit --audit-level=moderate
+
 typecheck:
 	@echo "=== Running mypy ==="
-	pip3 install -q mypy 2>/dev/null || true
-	python3 -m mypy data/ tests/ app.py chat.py --ignore-missing-imports 2>/dev/null || \
+	uv run mypy data/ tests/ app.py chat.py --ignore-missing-imports --explicit-package-bases 2>/dev/null || \
 		echo "mypy not available or errors found"
 
-check: test frontend-lint
+check: test lint frontend-audit frontend-lint
 	cd frontend && npm run build
 
 clean:

@@ -19,12 +19,12 @@ const ibmPlexMono = IBM_Plex_Mono({
 
 export const metadata = {
   title: "MYND - Second Brain",
-  description: "AI Chat Anwendung mit lokalen Dokumenten und Wissensdatenbank"
+  description: "A local-first AI workspace for chat, knowledge, automation, and integrations"
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="de">
+    <html lang="en">
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

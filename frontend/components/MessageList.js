@@ -5,7 +5,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import rehypeRaw from 'rehype-raw';
 import SourceCard from './SourceCard';
 import ContextDataCard from './ContextDataCard';
 import ResearchStats from './ResearchStats';
@@ -175,9 +174,9 @@ export default function MessageList({
               {msg.role === 'assistant' ? (
                 <div onClickCapture={handleMarkdownContentClick}>
                   {processed ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]} components={markdownComponents}>{processed.mainContent}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{processed.mainContent}</ReactMarkdown>
                   ) : (
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex, rehypeRaw]} components={markdownComponents}>{_stripToolTags(msg.content)}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{_stripToolTags(msg.content)}</ReactMarkdown>
                   )}
                 </div>
               ) : msg.content}

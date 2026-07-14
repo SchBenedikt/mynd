@@ -1,4 +1,5 @@
 const DEFAULT_BACKEND = 'http://127.0.0.1:5001';
+const TOKEN_KEY = 'mynd_token_v1';
 
 function cleanUrl(url) {
   return url.replace(/\/+$/, '');
@@ -11,7 +12,17 @@ export function getApiBase() {
   return DEFAULT_BACKEND;
 }
 
-export function apiFetch(path, options = {}) {
+export async function apiFetch(path, options = {}) {
   const url = path.startsWith('http') ? path : `${getApiBase()}${path}`;
-  return fetch(url, options);
+  const headers = new Headers(options.headers || {});
+  if (typeof window !== 'undefined' && !headers.has('Authorization')) {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+  }
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401 && typeof window !== 'undefined') {
+    localStorage.removeItem(TOKEN_KEY);
+    window.dispatchEvent(new CustomEvent('auth-expired'));
+  }
+  return response;
 }

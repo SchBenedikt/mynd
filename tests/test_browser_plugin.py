@@ -1,7 +1,6 @@
 """Test the Cloud Browser plugin – real Playwright automation."""
 import json
 import sys
-import time
 
 sys.path.insert(0, '.')
 
@@ -26,13 +25,31 @@ def test(name, fn):
 # ── Import plugin ──
 print("\n1. IMPORT & INITIALIZATION")
 from data.plugins.browser import (
-    browser_open, browser_screenshot, browser_extract, browser_click,
-    browser_type, browser_evaluate, browser_search, browser_back,
-    browser_forward, browser_scroll, browser_select, browser_hover,
-    browser_wait_for, browser_list_tabs, browser_new_tab, browser_switch_tab,
-    browser_close_tab, browser_fill_form, browser_pdf, browser_cookies,
-    browser_set_viewport, browser_get_performance, browser_navigate,
-    _ensure_browser, _close_browser, _pages, _active_tab
+    _active_tab,
+    _close_browser,
+    _ensure_browser,
+    _pages,
+    browser_back,
+    browser_click,
+    browser_close_tab,
+    browser_cookies,
+    browser_evaluate,
+    browser_extract,
+    browser_fill_form,
+    browser_forward,
+    browser_get_performance,
+    browser_hover,
+    browser_list_tabs,
+    browser_navigate,
+    browser_new_tab,
+    browser_open,
+    browser_pdf,
+    browser_screenshot,
+    browser_scroll,
+    browser_search,
+    browser_set_viewport,
+    browser_type,
+    browser_wait_for,
 )
 
 test("Plugin imports OK", lambda: True)
@@ -238,6 +255,7 @@ print(f"    Tabs remaining: {len(json.loads(browser_list_tabs()).get('tabs', [])
 # ── Plugin class ──
 print("\n21. PLUGIN CLASS")
 from data.plugins.browser import BrowserPlugin
+
 plugin = BrowserPlugin()
 test("Plugin name", lambda: plugin.name == "browser")
 test("Plugin version", lambda: plugin.version == "1.0.0")

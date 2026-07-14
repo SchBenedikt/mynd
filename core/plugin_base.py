@@ -190,12 +190,12 @@ def install_from_github(url):
     repo = m.group(1)
     raw_url = f'https://raw.githubusercontent.com/{repo}/main/plugin.py'
     try:
-        req = urllib.request.Request(raw_url, headers={'User-Agent': 'mynd-2new'})
+        req = urllib.request.Request(raw_url, headers={'User-Agent': 'MYND'})
         with urllib.request.urlopen(req, timeout=30) as resp:
             code = resp.read().decode('utf-8')
     except urllib.error.HTTPError:
         raw_url = f'https://raw.githubusercontent.com/{repo}/master/plugin.py'
-        req = urllib.request.Request(raw_url, headers={'User-Agent': 'mynd-2new'})
+        req = urllib.request.Request(raw_url, headers={'User-Agent': 'MYND'})
         with urllib.request.urlopen(req, timeout=30) as resp:
             code = resp.read().decode('utf-8')
     name = repo.split('/')[-1]

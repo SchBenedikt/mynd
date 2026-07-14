@@ -25,6 +25,7 @@ def _nc():
 
     base_dir = Path(__file__).resolve().parents[2]
     cfg_file = base_dir / 'data' / 'indexing_config.json'
+    vault_file = base_dir / 'data' / 'vault.json'
     if cfg_file.exists():
         try:
             cfg = json.loads(cfg_file.read_text())

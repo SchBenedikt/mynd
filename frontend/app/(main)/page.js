@@ -384,7 +384,7 @@ export default function HomePage() {
             clearActiveThinkTool();
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
-            setPendingToolConfirm({ tool: event.tool, description: event.description });
+            setPendingToolConfirm({ confirmationId: event.confirmation_id, tool: event.tool, description: event.description });
           }
         }
       }
@@ -477,7 +477,7 @@ export default function HomePage() {
     try {
       const res = await apiFetch('/api/chat/summarize', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: messagesForSummary, title: chat.title, language: 'de', preferred_source: 'auto' })
+        body: JSON.stringify({ messages: messagesForSummary, title: chat.title, language, preferred_source: 'auto' })
       });
       const data = await safeReadJson(res);
       if (!res.ok || data?.success === false) throw new Error(data?.error || `Request failed with status ${res.status}`);
@@ -486,7 +486,7 @@ export default function HomePage() {
       setChats((prevChats) => prevChats.map((item) => (item.id === chatId ? { ...item, summary: { content: summaryText, generatedAt, messageCount: messagesForSummary.length }, updatedAt: item.updatedAt || Date.now() } : item)));
       setChatSummaryPanel((prev) => ({ ...prev, open: true, summary: summaryText, generatedAt, loading: false, error: '' }));
     } catch (err) { setChatSummaryPanel((prev) => ({ ...prev, loading: false, error: `Zusammenfassung fehlgeschlagen: ${err.message}` })); }
-  }, [chats, setChats]);
+  }, [chats, language, setChats]);
 
   const renameChat = useCallback((chatId) => {
     const chat = chats.find((item) => item.id === chatId);
@@ -1028,12 +1028,18 @@ export default function HomePage() {
               <p style={{marginBottom: '12px', color: '#e8a040'}}><i className="fas fa-shield-halved"></i> <strong>{pendingToolConfirm.tool}</strong>: {pendingToolConfirm.description}</p>
               <p style={{fontSize: '0.9em', color: '#999', marginBottom: '20px'}}>{tr('M\u00f6chtest du die Ausf\u00fchrung dieses Tools erlauben?', 'Do you want to allow executing this tool?')}</p>
               <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end'}}>
-                <button className="btn btn-secondary" onClick={() => setPendingToolConfirm(null)}>{tr('Ablehnen', 'Deny')}</button>
+                <button className="btn btn-secondary" onClick={async () => {
+                  const confirmationId = pendingToolConfirm.confirmationId;
+                  setPendingToolConfirm(null);
+                  try {
+                    await apiFetch('/api/tool/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ confirmation_id: confirmationId, confirmed: false }) });
+                  } catch (e) { console.error('Tool denial error:', e); }
+                }}>{tr('Ablehnen', 'Deny')}</button>
                 <button className="btn btn-primary" onClick={async () => {
                   const toolInfo = pendingToolConfirm;
                   setPendingToolConfirm(null);
                   try {
-                    const res = await apiFetch('/api/tool/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ confirmed: true }) });
+                    const res = await apiFetch('/api/tool/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ confirmation_id: toolInfo.confirmationId, confirmed: true }) });
                     const data = await res.json();
                     if (data.success) { insertMessageAfter(activeChatId, userMessageId, { role: 'assistant', content: `✅ Tool ausgef\u00fchrt:\n\`\`\`\n${data.result}\n\`\`\``, id: createMessageId() }); }
                     else { insertMessageAfter(activeChatId, userMessageId, { role: 'assistant', content: `\u274c Fehler: ${data.error}`, id: createMessageId() }); }

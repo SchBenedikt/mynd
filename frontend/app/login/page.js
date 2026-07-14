@@ -2,15 +2,33 @@
 
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../../lib/api';
+import { useLanguage } from '../../hooks/useLanguage';
 import './login.css';
 
 const TOKEN_KEY = 'mynd_token_v1';
+
+const COPY = {
+  en: { signIn:'Sign in', register:'Register', create:'Create account', subtitle:'Sign in to continue', newAccount:'Create a new account', username:'Username', displayName:'Display name (optional)', password:'Password', confirm:'Confirm password', repeat:'Repeat password', min:'At least 4 characters', signingIn:'Signing in…', creating:'Creating account…', server:'Server connection', serverHint:'Address of the local backend server', required:'Username and password are required', shortUser:'Username must contain at least 2 characters', shortPass:'Password must contain at least 4 characters', mismatch:'Passwords do not match', created:'Account created! Redirecting…', failed:'Sign-in failed', registerFailed:'Registration failed', network:'Network error — backend is unreachable' },
+  de: { signIn:'Anmelden', register:'Registrieren', create:'Account erstellen', subtitle:'Melde dich an', newAccount:'Neuen Account erstellen', username:'Benutzername', displayName:'Anzeigename (optional)', password:'Passwort', confirm:'Passwort bestätigen', repeat:'Passwort wiederholen', min:'Mindestens 4 Zeichen', signingIn:'Anmeldung läuft…', creating:'Account wird erstellt…', server:'Server-Verbindung', serverHint:'Adresse des lokalen Backend-Servers', required:'Benutzername und Passwort erforderlich', shortUser:'Benutzername zu kurz (mind. 2 Zeichen)', shortPass:'Passwort zu kurz (mind. 4 Zeichen)', mismatch:'Passwörter stimmen nicht überein', created:'Account erstellt! Weiterleitung…', failed:'Anmeldung fehlgeschlagen', registerFailed:'Registrierung fehlgeschlagen', network:'Netzwerkfehler — Backend nicht erreichbar' },
+  fr: { signIn:'Se connecter', register:"S’inscrire", create:'Créer un compte', subtitle:'Connectez-vous pour continuer', username:"Nom d’utilisateur", password:'Mot de passe', confirm:'Confirmer le mot de passe', signingIn:'Connexion…', creating:'Création…', server:'Connexion au serveur', network:'Erreur réseau — serveur inaccessible' },
+  es: { signIn:'Iniciar sesión', register:'Registrarse', create:'Crear cuenta', subtitle:'Inicia sesión para continuar', username:'Usuario', password:'Contraseña', confirm:'Confirmar contraseña', signingIn:'Iniciando sesión…', creating:'Creando cuenta…', server:'Conexión del servidor', network:'Error de red — servidor no disponible' },
+  it: { signIn:'Accedi', register:'Registrati', create:'Crea account', subtitle:'Accedi per continuare', username:'Nome utente', password:'Password', confirm:'Conferma password', signingIn:'Accesso…', creating:'Creazione…', server:'Connessione server', network:'Errore di rete — server non raggiungibile' },
+  pt: { signIn:'Entrar', register:'Registrar', create:'Criar conta', subtitle:'Entre para continuar', username:'Usuário', password:'Senha', confirm:'Confirmar senha', signingIn:'Entrando…', creating:'Criando conta…', server:'Conexão do servidor', network:'Erro de rede — servidor indisponível' },
+  nl: { signIn:'Inloggen', register:'Registreren', create:'Account maken', subtitle:'Log in om door te gaan', username:'Gebruikersnaam', password:'Wachtwoord', confirm:'Wachtwoord bevestigen', signingIn:'Inloggen…', creating:'Account maken…', server:'Serververbinding' },
+  pl: { signIn:'Zaloguj się', register:'Zarejestruj się', create:'Utwórz konto', subtitle:'Zaloguj się, aby kontynuować', username:'Nazwa użytkownika', password:'Hasło', confirm:'Potwierdź hasło', signingIn:'Logowanie…', creating:'Tworzenie konta…', server:'Połączenie z serwerem' },
+  tr: { signIn:'Giriş yap', register:'Kayıt ol', create:'Hesap oluştur', subtitle:'Devam etmek için giriş yapın', username:'Kullanıcı adı', password:'Parola', confirm:'Parolayı doğrula', signingIn:'Giriş yapılıyor…', creating:'Hesap oluşturuluyor…', server:'Sunucu bağlantısı' },
+  ru: { signIn:'Войти', register:'Регистрация', create:'Создать аккаунт', subtitle:'Войдите, чтобы продолжить', username:'Имя пользователя', password:'Пароль', confirm:'Подтвердите пароль', signingIn:'Вход…', creating:'Создание аккаунта…', server:'Подключение к серверу' },
+  ja: { signIn:'ログイン', register:'登録', create:'アカウントを作成', subtitle:'続行するにはログインしてください', username:'ユーザー名', password:'パスワード', confirm:'パスワードを確認', signingIn:'ログイン中…', creating:'作成中…', server:'サーバー接続' },
+  zh: { signIn:'登录', register:'注册', create:'创建账户', subtitle:'登录以继续', username:'用户名', password:'密码', confirm:'确认密码', signingIn:'正在登录…', creating:'正在创建…', server:'服务器连接' }
+};
 
 function Spinner() {
   return <span className="login-btn-spinner" />;
 }
 
 export default function LoginPage() {
+  const { language } = useLanguage();
+  const c = { ...COPY.en, ...(COPY[language] || {}) };
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [loginPassConfirm, setLoginPassConfirm] = useState('');
@@ -41,11 +59,11 @@ export default function LoginPage() {
   }, []);
 
   const validate = () => {
-    if (!loginUser || !loginPass) return 'Benutzername und Passwort erforderlich';
-    if (loginUser.length < 2) return 'Benutzername zu kurz (min. 2 Zeichen)';
+    if (!loginUser || !loginPass) return c.required;
+    if (loginUser.length < 2) return c.shortUser;
     if (tab === 'register') {
-      if (loginPass.length < 4) return 'Passwort zu kurz (min. 4 Zeichen)';
-      if (loginPass !== loginPassConfirm) return 'Passwörter stimmen nicht überein';
+      if (loginPass.length < 4) return c.shortPass;
+      if (loginPass !== loginPassConfirm) return c.mismatch;
     }
     return '';
   };
@@ -82,15 +100,15 @@ export default function LoginPage() {
       if (resp.ok && data.token) {
         try { localStorage.setItem(TOKEN_KEY, data.token); } catch {}
         if (tab === 'register') {
-          setLoginSuccess('Account erstellt! Du wirst weitergeleitet...');
+          setLoginSuccess(c.created);
           await new Promise(r => setTimeout(r, 800));
         }
         window.location.href = '/';
         return;
       }
-      setLoginError((data && data.error) ? String(data.error) : (tab === 'register' ? 'Registrierung fehlgeschlagen' : 'Login fehlgeschlagen'));
+      setLoginError((data && data.error) ? String(data.error) : (tab === 'register' ? c.registerFailed : c.failed));
     } catch (err) {
-      setLoginError('Netzwerkfehler – Backend nicht erreichbar');
+      setLoginError(c.network);
     }
     setLoading(false);
   };
@@ -111,7 +129,7 @@ export default function LoginPage() {
           <div className="login-logo">◆</div>
           <h1>MYND</h1>
           <p className="login-subtitle">
-            {isRegister ? 'Neuen Account erstellen' : 'Melde dich an'}
+            {isRegister ? c.newAccount : c.subtitle}
           </p>
         </div>
 
@@ -122,33 +140,33 @@ export default function LoginPage() {
               onClick={() => switchTab('login')}
               type="button"
             >
-              Anmelden
+              {c.signIn}
             </button>
             <button
               className={'login-tab' + (tab === 'register' ? ' active' : '')}
               onClick={() => switchTab('register')}
               type="button"
             >
-              Registrieren
+              {c.register}
             </button>
           </div>
         )}
 
         <form onSubmit={submitCredentials} className="login-form">
           <div className="login-field">
-            <label htmlFor="login-user">Benutzername</label>
+            <label htmlFor="login-user">{c.username}</label>
             <input
               id="login-user"
               value={loginUser}
               onChange={(e) => setLoginUser(e.target.value)}
-              placeholder="Benutzername"
+              placeholder={c.username}
               autoFocus
               autoComplete="username"
             />
           </div>
           {isRegister && (
             <div className="login-field">
-              <label htmlFor="login-name">Anzeigename (optional)</label>
+              <label htmlFor="login-name">{c.displayName}</label>
               <input
                 id="login-name"
                 value={loginName}
@@ -158,27 +176,27 @@ export default function LoginPage() {
             </div>
           )}
           <div className="login-field">
-            <label htmlFor="login-pass">Passwort</label>
+            <label htmlFor="login-pass">{c.password}</label>
             <input
               id="login-pass"
               value={loginPass}
               onChange={(e) => setLoginPass(e.target.value)}
-              placeholder="Passwort"
+              placeholder={c.password}
               type="password"
               autoComplete={isRegister ? 'new-password' : 'current-password'}
             />
             {isRegister && loginPass.length > 0 && loginPass.length < 4 && (
-              <p className="login-hint">Mindestens 4 Zeichen</p>
+              <p className="login-hint">{c.min}</p>
             )}
           </div>
           {isRegister && (
             <div className="login-field">
-              <label htmlFor="login-pass-confirm">Passwort bestätigen</label>
+              <label htmlFor="login-pass-confirm">{c.confirm}</label>
               <input
                 id="login-pass-confirm"
                 value={loginPassConfirm}
                 onChange={(e) => setLoginPassConfirm(e.target.value)}
-                placeholder="Passwort wiederholen"
+                placeholder={c.repeat}
                 type="password"
                 autoComplete="new-password"
               />
@@ -187,8 +205,8 @@ export default function LoginPage() {
           <button type="submit" className="login-btn" disabled={!canSubmit}>
             {loading && <Spinner />}
             {loading
-              ? (isRegister ? 'Account wird erstellt...' : 'Anmeldung läuft...')
-              : (isRegister ? 'Account erstellen' : 'Anmelden')}
+              ? (isRegister ? c.creating : c.signingIn)
+              : (isRegister ? c.create : c.signIn)}
           </button>
           {loginError && <div className="login-error">{loginError}</div>}
           {loginSuccess && <div className="login-success">{loginSuccess}</div>}
@@ -196,7 +214,7 @@ export default function LoginPage() {
 
         <div className="login-footer">
           <button className="login-details-toggle" onClick={() => setShowDetails(!showDetails)}>
-            Server-Verbindung
+            {c.server}
           </button>
           {showDetails && (
             <div className="login-details">
@@ -206,7 +224,7 @@ export default function LoginPage() {
                 onChange={(e) => changeBackendUrl(e.target.value)}
                 placeholder="http://127.0.0.1:5001"
               />
-              <small>Adresse des lokalen Backend-Servers</small>
+              <small>{c.serverHint}</small>
             </div>
           )}
         </div>

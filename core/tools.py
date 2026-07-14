@@ -1,8 +1,10 @@
 import base64
+import ipaddress
 import json
 import os
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import tempfile
@@ -88,12 +90,12 @@ def execute_bash(command):
     global PERMISSION_MODE
     if PERMISSION_MODE == "ask":
         ok = _request_tool_confirmation("execute_bash", command)
-        if ok is False:
-            return "⛔ Abgebrochen (nicht bestätigt)"
+        if ok is not True:
+            return ok if isinstance(ok, str) else "⛔ Cancelled (not confirmed)"
     elif PERMISSION_MODE == "semi" and _is_critical(command):
         ok = _request_tool_confirmation("execute_bash", command)
-        if ok is False:
-            return "⛔ Abgebrochen (nicht bestätigt)"
+        if ok is not True:
+            return ok if isinstance(ok, str) else "⛔ Cancelled (not confirmed)"
     try:
         if 'cd ' in command and '&&' not in command and ';' not in command:
             return "⚠️ cd allein ist nicht persistent. Nutze '&&' zum Verketten, z.B. 'cd ordner && ls'"
@@ -110,12 +112,12 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
     global PERMISSION_MODE
     if PERMISSION_MODE == "ask":
         ok = _request_tool_confirmation("execute_ssh", command)
-        if ok is False:
-            return "⛔ Abgebrochen (nicht bestätigt)"
+        if ok is not True:
+            return ok if isinstance(ok, str) else "⛔ Cancelled (not confirmed)"
     elif PERMISSION_MODE == "semi" and _is_critical(command):
         ok = _request_tool_confirmation("execute_ssh", command)
-        if ok is False:
-            return "⛔ Abgebrochen (nicht bestätigt)"
+        if ok is not True:
+            return ok if isinstance(ok, str) else "⛔ Cancelled (not confirmed)"
     try:
         if profile:
             base = f"vm/{profile}"
@@ -147,25 +149,22 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
                 f.write(key)
                 keyfile = f.name
             os.chmod(keyfile, 0o600)
-            ssh_cmd = ['ssh', '-i', keyfile, '-o', 'StrictHostKeyChecking=no',
-                       '-o', 'UserKnownHostsFile=/dev/null',
+            ssh_cmd = ['ssh', '-i', keyfile, '-o', 'StrictHostKeyChecking=yes',
                        '-p', str(port), f'{user}@{host}'] + cmd_parts
         elif password:
-            ssh_cmd = ['sshpass', '-p', password, 'ssh', '-o', 'StrictHostKeyChecking=no',
-                       '-o', 'UserKnownHostsFile=/dev/null',
+            ssh_cmd = ['sshpass', '-e', 'ssh', '-o', 'StrictHostKeyChecking=yes',
                        '-p', str(port), f'{user}@{host}'] + cmd_parts
         else:
-            ssh_cmd = ['ssh', '-o', 'StrictHostKeyChecking=no',
-                       '-o', 'UserKnownHostsFile=/dev/null',
+            ssh_cmd = ['ssh', '-o', 'StrictHostKeyChecking=yes',
                        '-p', str(port), f'{user}@{host}'] + cmd_parts
 
-        r = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=60)
+        ssh_env = {**os.environ, 'SSHPASS': password} if password else None
+        r = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=60, env=ssh_env)
         if key and password and r.returncode != 0:
             first_err = (r.stderr or r.stdout or "").strip()
-            password_cmd = ['sshpass', '-p', password, 'ssh', '-o', 'StrictHostKeyChecking=no',
-                            '-o', 'UserKnownHostsFile=/dev/null',
+            password_cmd = ['sshpass', '-e', 'ssh', '-o', 'StrictHostKeyChecking=yes',
                             '-p', str(port), f'{user}@{host}'] + cmd_parts
-            r = subprocess.run(password_cmd, capture_output=True, text=True, timeout=60)
+            r = subprocess.run(password_cmd, capture_output=True, text=True, timeout=60, env=ssh_env)
             if not (r.stdout or r.stderr).strip() and first_err:
                 r.stderr = first_err
         out = r.stdout.strip()[:5000] if r.stdout.strip() else r.stderr.strip()[:2000]
@@ -202,11 +201,20 @@ def search_documents(query, top_k=10):
         return f"❌ {e}"
 
 
+def _workspace_path(path):
+    root = Path(os.getenv('MYND_WORKSPACE_DIR', BASE / 'data' / 'workspace')).expanduser().resolve()
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    candidate = candidate.resolve(strict=False)
+    if candidate != root and root not in candidate.parents:
+        raise ValueError(f'Path is outside the allowed workspace: {root}')
+    return candidate
+
+
 def read_local_file(path):
     try:
-        p = Path(path)
-        if not p.is_absolute():
-            p = BASE / p
+        p = _workspace_path(path)
         if not p.exists():
             return f"❌ Datei nicht gefunden: {p}"
         return p.read_text(encoding='utf-8', errors='replace')[:10000]
@@ -216,9 +224,7 @@ def read_local_file(path):
 
 def write_local_file(path, content):
     try:
-        p = Path(path)
-        if not p.is_absolute():
-            p = BASE / p
+        p = _workspace_path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
         return f"✅ {p} geschrieben ({len(content)} Zeichen)"
@@ -230,12 +236,12 @@ def execute_python(code):
     global PERMISSION_MODE
     if PERMISSION_MODE == "ask":
         ok = _request_tool_confirmation("execute_python", code[:120])
-        if ok is False:
-            return "⛔ Abgebrochen (nicht bestätigt)"
+        if ok is not True:
+            return ok if isinstance(ok, str) else "⛔ Cancelled (not confirmed)"
     elif PERMISSION_MODE == "semi" and _is_critical(code):
         ok = _request_tool_confirmation("execute_python", code[:120])
-        if ok is False:
-            return "⛔ Abgebrochen (nicht bestätigt)"
+        if ok is not True:
+            return ok if isinstance(ok, str) else "⛔ Cancelled (not confirmed)"
     try:
         c = compile(code, '<exec>', 'exec', flags=0x0)
         local_vars = {}
@@ -268,14 +274,14 @@ def execute_python(code):
 
 
 def think(thought, auto_plan=False):
-    COMPLEX_KEYWORDS = [
+    complex_keywords = [
         'recherchiere', 'vergleiche', 'analysiere', 'erstelle', 'baue', 'entwickle',
         'konfiguriere', 'installiere', 'automatisiere', 'optimiere', 'migriere',
         'integriere', 'koordiniere', 'überwache', 'sammle', 'evaluiere', 'teste',
         'verhandle', 'bereite vor', 'strukturiere', 'dokumentiere',
     ]
-    lines = [l.strip() for l in thought.split('\n') if l.strip()]
-    is_complex = auto_plan or len(lines) > 2 or any(kw in thought.lower() for kw in COMPLEX_KEYWORDS)
+    lines = [line.strip() for line in thought.split('\n') if line.strip()]
+    is_complex = auto_plan or len(lines) > 2 or any(kw in thought.lower() for kw in complex_keywords)
     print(f"  {C.YELLOW}🧠 {thought[:500]}{C.RESET}", flush=True)
     if is_complex and len(lines) >= 2:
         plan = create_plan('\n'.join(lines), "Automatisch erstellter Plan aus think()")
@@ -298,6 +304,30 @@ def prompt_user(message, secret=False):
         return "(abgebrochen)"
 
 
+def _validate_http_url(url):
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+        raise ValueError('Only absolute http:// and https:// URLs are allowed')
+    hostname = parsed.hostname.rstrip('.').lower()
+    allow_private = {
+        item.strip().lower()
+        for item in os.getenv('MYND_HTTP_ALLOW_PRIVATE_HOSTS', '').split(',')
+        if item.strip()
+    }
+    if hostname in allow_private:
+        return
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(hostname, parsed.port or 443)}
+    except socket.gaierror as exc:
+        raise ValueError(f'Host resolution failed: {hostname}') from exc
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if not ip.is_global:
+            raise ValueError(f'Private or reserved address is blocked: {address}')
+
+
 def http_request(method="GET", url="", headers=None, body="", auth_user="", auth_pass=""):
     try:
         h = {}
@@ -314,12 +344,23 @@ def http_request(method="GET", url="", headers=None, body="", auth_user="", auth
         if auth_user and auth_pass is not None:
             auth_bytes = f"{auth_user}:{auth_pass}".encode()
             h["Authorization"] = "Basic " + base64.b64encode(auth_bytes).decode('ascii')
-        try:
-            r = requests.request(method.upper(), url, data=body or None, headers=h or None, timeout=60)
-        except requests.exceptions.SSLError:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            r = requests.request(method.upper(), url, data=body or None, headers=h or None, timeout=60, verify=False)
+        current_url = url
+        for _ in range(6):
+            _validate_http_url(current_url)
+            r = requests.request(
+                method.upper(), current_url, data=body or None, headers=h or None,
+                timeout=60, allow_redirects=False,
+            )
+            if r.is_redirect or r.is_permanent_redirect:
+                location = r.headers.get('Location')
+                if not location:
+                    break
+                from urllib.parse import urljoin
+                current_url = urljoin(current_url, location)
+                continue
+            break
+        else:
+            return '❌ Too many redirects'
 
         ct = r.headers.get("Content-Type", "")
         if "application/json" in ct:
@@ -332,6 +373,8 @@ def http_request(method="GET", url="", headers=None, body="", auth_user="", auth
         return out
     except requests.exceptions.Timeout:
         return "⏱ Timeout (60s)"
+    except (ValueError, requests.exceptions.SSLError) as e:
+        return f"❌ Request blocked: {e}"
     except Exception as e:
         return f"❌ {e}"
 
@@ -593,7 +636,7 @@ def create_plan(steps, description=""):
 
 def agent_browser(action, selector="", text="", url=""):
     """Steuere den Browser via agent-browser CLI.
-    
+
     Actions:
       goto <url>        – Seite öffnen
       click <selector>  – Element klicken (CSS oder ref=...)
@@ -635,7 +678,7 @@ def agent_browser(action, selector="", text="", url=""):
             cmd += ["scroll", direction]
         else:
             return f"❌ Unbekannte agent-browser Aktion: {action}. Erlaubt: goto, click, type, snapshot, screenshot, extract, back, scroll"
-        
+
         if action != "screenshot":
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if r.returncode != 0:
