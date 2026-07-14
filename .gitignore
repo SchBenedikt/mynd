@@ -48,4 +48,6 @@ docker-compose.override.yml
 # Generated local artifacts
 response.json
 output.png
+*.xlsx
+screenshots/
 quadratische_funktion.xlsx
