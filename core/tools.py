@@ -267,8 +267,22 @@ def execute_python(code):
         return f"❌ Python-Fehler: {e}"
 
 
-def think(thought):
+def think(thought, auto_plan=False):
+    COMPLEX_KEYWORDS = [
+        'recherchiere', 'vergleiche', 'analysiere', 'erstelle', 'baue', 'entwickle',
+        'konfiguriere', 'installiere', 'automatisiere', 'optimiere', 'migriere',
+        'integriere', 'koordiniere', 'überwache', 'sammle', 'evaluiere', 'teste',
+        'verhandle', 'bereite vor', 'strukturiere', 'dokumentiere',
+    ]
+    lines = [l.strip() for l in thought.split('\n') if l.strip()]
+    is_complex = auto_plan or len(lines) > 2 or any(kw in thought.lower() for kw in COMPLEX_KEYWORDS)
     print(f"  {C.YELLOW}🧠 {thought[:500]}{C.RESET}", flush=True)
+    if is_complex and len(lines) >= 2:
+        plan = create_plan('\n'.join(lines), "Automatisch erstellter Plan aus think()")
+        return f"📋 KOMPLEXE AUFGABE ERKANNT – Plan erstellt:\n\n{plan}\n\n📝 Ursprüngliche Überlegung: {thought[:500]}"
+    if is_complex:
+        plan = create_plan(thought, "Automatisch erstellter Plan aus think()")
+        return f"📋 KOMPLEXE AUFGABE ERKANNT – Plan erstellt:\n\n{plan}\n\n📝 Ursprüngliche Überlegung: {thought[:500]}"
     return f"📝 Überlegung notiert: {thought[:500]}"
 
 
@@ -575,6 +589,71 @@ def create_plan(steps, description=""):
         return f"❌ Plan-Erstellung fehlgeschlagen: {e}"
 
 
+# ── agent-browser Integration ───────────────────────────────
+
+def agent_browser(action, selector="", text="", url=""):
+    """Steuere den Browser via agent-browser CLI.
+    
+    Actions:
+      goto <url>        – Seite öffnen
+      click <selector>  – Element klicken (CSS oder ref=...)
+      type <selector> <text> – Text eingeben
+      snapshot          – Accessibility-Tree ausgeben
+      screenshot        – Screenshot (base64) machen
+      extract <selector> – Text extrahieren
+      back              – Zurück
+      scroll <dir>      – Scrollen (up/down)
+    """
+    try:
+        cmd = ["agent-browser"]
+        action = action.strip().lower()
+        if action == "goto" and url:
+            cmd += ["goto", url]
+        elif action == "click" and selector:
+            cmd += ["click", selector]
+        elif action == "type" and selector and text:
+            cmd += ["type", selector, text]
+        elif action == "snapshot":
+            cmd += ["snapshot"]
+        elif action == "screenshot":
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            tmp.close()
+            cmd += ["screenshot", tmp.name]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                return f"❌ Screenshot-Fehler: {r.stderr[:500]}"
+            data = base64.b64encode(open(tmp.name, 'rb').read()).decode()
+            os.unlink(tmp.name)
+            return json.dumps({"screenshot": data[:500000], "screenshot_available": True, "action": "screenshot"})
+        elif action == "extract" and selector:
+            cmd += ["extract", selector]
+        elif action == "back":
+            cmd += ["back"]
+        elif action in ("scroll", "scroll_up", "scroll_down"):
+            direction = action.replace("scroll_", "").replace("scroll", "down") or "down"
+            cmd += ["scroll", direction]
+        else:
+            return f"❌ Unbekannte agent-browser Aktion: {action}. Erlaubt: goto, click, type, snapshot, screenshot, extract, back, scroll"
+        
+        if action != "screenshot":
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                return f"❌ agent-browser Fehler: {r.stderr[:500]}"
+            output = r.stdout[:3000] or r.stderr[:500] or "(leer)"
+            return json.dumps({
+                "action": action,
+                "result": output,
+                "screenshot_available": False,
+            })
+    except FileNotFoundError:
+        return "❌ agent-browser nicht installiert. Installiere es via: brew install agent-browser"
+    except subprocess.TimeoutExpired:
+        return "❌ agent-browser Zeitüberschreitung (>30s)"
+    except Exception as e:
+        return f"❌ agent-browser Fehler: {e}"
+
+
 CORE_TOOLS = [
     {"type": "function", "function": {
         "name": "execute_bash",
@@ -640,8 +719,11 @@ CORE_TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "think",
-        "description": "RUFE DIES ALS ERSTES AUF. Plane: Welche Tools? Welche Reihenfolge? Welche Daten fehlen?",
-        "parameters": {"type": "object", "properties": {"thought": {"type": "string", "description": "Deine Überlegung"}}, "required": ["thought"]}
+        "description": "RUFE DIES ALS ERSTES AUF. Bei komplexen Aufgaben (3+ Schritte, Recherche, Vergleich, Analyse) erkennt think() das automatisch und erstellt einen Plan mit create_plan(). Gib deine Gedanken als Stichpunkte pro Zeile ein – daraus wird der Plan generiert.",
+        "parameters": {"type": "object", "properties": {
+            "thought": {"type": "string", "description": "Deine Überlegung – bei komplexen Aufgaben als Liste von Schritten pro Zeile formatieren (wird automatisch zu create_plan())"},
+            "auto_plan": {"type": "boolean", "description": "True erzwingt create_plan(), auch bei einfachen Gedanken"}
+        }, "required": ["thought"]}
     }},
     {"type": "function", "function": {
         "name": "vault_get",
@@ -733,6 +815,16 @@ CORE_TOOLS = [
             "description": {"type": "string", "description": "Kurze Beschreibung des Gesamtplans (optional)"}
         }, "required": ["steps"]}
     }},
+    {"type": "function", "function": {
+        "name": "agent_browser",
+        "description": "Steuere den Browser via agent-browser CLI. Einfacher als die Playwright-browser_* Tools. Aktionen: goto (URL öffnen), click (Element klicken), type (Text eingeben), snapshot (Seitenstruktur lesen), screenshot (Screenshot), extract (Text aus Element), back (zurück), scroll (scrollen).",
+        "parameters": {"type": "object", "properties": {
+            "action": {"type": "string", "description": "Aktion: goto, click, type, snapshot, screenshot, extract, back, scroll"},
+            "selector": {"type": "string", "description": "CSS-Selektor oder ref=... für click/type/extract"},
+            "text": {"type": "string", "description": "Text für type-Aktion"},
+            "url": {"type": "string", "description": "URL für goto-Aktion"}
+        }, "required": ["action"]}
+    }},
 ]
 
 CORE_MAP = {
@@ -757,4 +849,5 @@ CORE_MAP = {
     "image_search": image_search,
     "delegate": delegate,
     "create_plan": create_plan,
+    "agent_browser": agent_browser,
 }

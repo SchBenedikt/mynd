@@ -49,5 +49,6 @@ docker-compose.override.yml
 response.json
 output.png
 *.xlsx
+*.rtf
 screenshots/
 quadratische_funktion.xlsx

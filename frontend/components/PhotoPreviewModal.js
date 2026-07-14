@@ -2,8 +2,8 @@
 
 export default function PhotoPreviewModal({ photoPreview, onClose }) {
   if (!photoPreview.open) return null;
-  const externalUrl = photoPreview.sourceUrl || photoPreview.immichUrl || '';
-  const externalLabel = photoPreview.immichUrl ? 'In Immich öffnen' : 'Quelle öffnen';
+  const isImmichSource = photoPreview.sourceUrl?.startsWith('/api/immich/');
+  const immichWebUrl = photoPreview.immichUrl || '';
   return (
     <div className="image-modal-overlay" onClick={onClose}>
       <div className="image-modal" onClick={(e) => e.stopPropagation()}>
@@ -13,11 +13,14 @@ export default function PhotoPreviewModal({ photoPreview, onClose }) {
         <div className="image-modal-actions">
           {photoPreview.sourceUrl && (
             <a className="btn primary" href={photoPreview.sourceUrl} target="_blank" rel="noopener noreferrer">
-              <i className="fas fa-external-link-alt" style={{marginRight:6}}></i>Bild in Immich anzeigen
+              <i className="fas fa-external-link-alt" style={{marginRight:6}}></i>
+              {isImmichSource ? 'Original öffnen' : 'Quelle öffnen'}
             </a>
           )}
-          {externalUrl && externalUrl !== photoPreview.sourceUrl && (
-            <a className="btn" href={externalUrl} target="_blank" rel="noopener noreferrer">{externalLabel}</a>
+          {immichWebUrl && immichWebUrl !== photoPreview.sourceUrl && (
+            <a className="btn" href={immichWebUrl} target="_blank" rel="noopener noreferrer">
+              <i className="fas fa-images" style={{marginRight:6}}></i>In Immich öffnen
+            </a>
           )}
         </div>
       </div>
