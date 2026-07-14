@@ -1,5 +1,7 @@
 """Test Flask app routes and API endpoints using the test client."""
 
+import io
+import re
 import time
 
 import pytest
@@ -94,6 +96,20 @@ class TestKnowledgeAPI:
         assert resp.status_code == 200
         data = resp.get_json()
         assert isinstance(data, dict)
+
+    def test_txt_upload_uses_server_generated_id(self, client, monkeypatch, tmp_path):
+        monkeypatch.setattr(app_module, "DATA_DIR", tmp_path)
+        response = client.post(
+            "/api/knowledge/upload-txt",
+            data={"files": (io.BytesIO(b"hello"), "../user-name.txt")},
+            content_type="multipart/form-data",
+        )
+        assert response.status_code == 200
+        document = response.get_json()["uploaded"][0]
+        assert re.fullmatch(r"[0-9a-f]{32}\.txt", document["id"])
+        assert document["name"] == "user-name.txt"
+        assert (tmp_path / "text_uploads" / document["id"]).read_text() == "hello"
+        assert client.delete(f"/api/knowledge/txt-files/{document['id']}").status_code == 200
 
 
 class TestSecurityAPI:

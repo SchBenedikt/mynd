@@ -206,7 +206,8 @@ class OllamaClient:
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.RequestException as e:
-            return {"error": f"Ollama connection failed: {e}"}
+            logger.warning('Ollama connection failed: %s', e)
+            return {"error": "Model provider unavailable"}
 
     def check_connection(self):
         try:
@@ -777,7 +778,8 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
             rnd_start = time.time()
             resp = chat_with_tools(model, msgs, tools)
             if "error" in resp:
-                return f"Fehler: {resp['error']}", msgs, None, stats
+                logger.warning('Model request failed: %s', resp.get('error'))
+                return "Model provider unavailable", msgs, None, stats
             msg = resp.get("message", {})
 
             with _app_lock:
@@ -865,8 +867,9 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
                                 with _app_lock:
                                     _WEB_PROMPT_PENDING = {'message': result.replace("⏳ TOOL_CONFIRM_REQUIRED: Bist du sicher, dass du ", "").rstrip("?") + "?"}
                                 return None, msgs, _WEB_PROMPT_PENDING, stats
-                        except Exception as e:
-                            result = f"❌ Fehler: {e}"
+                        except Exception:
+                            logger.exception('Tool execution failed: %s', name)
+                            result = "❌ Tool execution failed"
                             success = False
                     else:
                         result = f"❌ Unbekanntes Tool: {name}"
@@ -921,9 +924,10 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
             try:
                 ssh_result = execute_ssh(host=ip, command="cat /etc/version 2>/dev/null || cat /etc/os-release 2>/dev/null || uname -a", user=user_val, password=pwd_val)
                 rows.append(f"SSH: {ssh_result[:1000]}")
-            except Exception as e:
-                rows.append(f"SSH Fehler: {e}")
-                ssh_result = str(e)
+            except Exception:
+                logger.exception('TrueNAS SSH check failed')
+                rows.append("SSH check failed")
+                ssh_result = "SSH check failed"
             if "Permission denied" in ssh_result or "sshpass" in ssh_result.lower() or "timeout" in ssh_result.lower():
                 try:
                     token_resp = http_request(method='POST', url=f'http://{ip}/api/v2.0/auth/generate_token', headers={"Content-Type": "application/json"}, body=json.dumps({"username": user_val, "password": pwd_val}))  # noqa: E501
@@ -931,8 +935,9 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
                         rows.append(f"TrueNAS API erreichbar.\n{token_resp[:500]}")
                     else:
                         rows.append(f"TrueNAS API fehlgeschlagen:\n{token_resp[:500]}")
-                except Exception as e:
-                    rows.append(f"HTTP Fehler: {e}")
+                except Exception:
+                    logger.exception('TrueNAS HTTP check failed')
+                    rows.append("HTTP check failed")
             text = f"## Ergebnis der Überprüfung von {ip}\n\n" + "\n\n".join(rows)
             msgs.append({"role": "assistant", "content": text})
             final_text, files = _decorate_response_with_media(text, stats)
@@ -946,9 +951,9 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
             final_text, files = _decorate_response_with_media(content, stats)
             return final_text, msgs, None, stats
         return "⚠️ Max Runden erreicht.", msgs, None, stats
-    except Exception as e:
-        logger.exception(f"Unbehandelter Fehler in web_agent_loop: {e}")
-        return f"❌ Interner Fehler: {e}", msgs, None, stats
+    except Exception:
+        logger.exception("Unhandled error in web_agent_loop")
+        return "❌ Internal processing error", msgs, None, stats
 
 # ── Streaming Agent Loop (SSE events) ────────────────────
 def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=None, owner=None):
@@ -1065,8 +1070,9 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                                         }
                                     yield {"type": "confirm_tool", "confirmation_id": confirmation_id, "tool": name, "description": result.replace("⏳ TOOL_CONFIRM_REQUIRED: ", "")}
                                     return
-                            except Exception as e:
-                                result = f"❌ Fehler: {e}"
+                            except Exception:
+                                logger.exception('Tool execution failed: %s', name)
+                                result = "❌ Tool execution failed"
                                 success = False
                         else:
                             result = f"❌ Unbekanntes Tool: {name}"
@@ -1157,8 +1163,9 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                                     }
                                 yield {"type": "confirm_tool", "confirmation_id": confirmation_id, "tool": name, "description": result.replace("⏳ TOOL_CONFIRM_REQUIRED: ", "")}
                                 return
-                        except Exception as e:
-                            result = f"❌ Fehler: {e}"
+                        except Exception:
+                            logger.exception('Tool execution failed: %s', name)
+                            result = "❌ Tool execution failed"
                             success = False
                     else:
                         result = f"❌ Unbekanntes Tool: {name}"
@@ -1227,9 +1234,10 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
             try:
                 ssh_result = execute_ssh(host=ip, command="cat /etc/version 2>/dev/null || cat /etc/os-release 2>/dev/null || uname -a", user=user_val, password=pwd_val)
                 rows.append(f"SSH: {ssh_result[:1000]}")
-            except Exception as e:
-                rows.append(f"SSH Fehler: {e}")
-                ssh_result = str(e)
+            except Exception:
+                logger.exception('TrueNAS SSH check failed')
+                rows.append("SSH check failed")
+                ssh_result = "SSH check failed"
             yield {"type": "tool_end", "round": rnd + 1, "tool": "execute_ssh", "result_preview": ssh_result[:300], "duration_ms": 0, "success": "Permission denied" not in ssh_result}
             if "Permission denied" in ssh_result or "sshpass" in ssh_result.lower() or "timeout" in ssh_result.lower():
                 yield {"type": "tool_start", "round": rnd + 1, "tool": "http_request", "args": {"method": "POST", "url": f"http://{ip}/api/v2.0/auth/generate_token"}}
@@ -1239,8 +1247,9 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                         rows.append(f"TrueNAS API erreichbar.\n{token_resp[:500]}")
                     else:
                         rows.append(f"TrueNAS API fehlgeschlagen:\n{token_resp[:500]}")
-                except Exception as e:
-                    rows.append(f"HTTP Fehler: {e}")
+                except Exception:
+                    logger.exception('TrueNAS HTTP check failed')
+                    rows.append("HTTP check failed")
                 yield {"type": "tool_end", "round": rnd + 1, "tool": "http_request", "result_preview": rows[-1][:300], "duration_ms": 0, "success": "200" in rows[-1]}
             text = f"## Ergebnis der Überprüfung von {ip}\n\n" + "\n\n".join(rows)
             msgs.append({"role": "assistant", "content": text})
@@ -1994,7 +2003,8 @@ def chat_summarize():
     )
     result = ollama_client.chat([{'role': 'user', 'content': prompt}])
     if result.get('error'):
-        return jsonify({'success': False, 'error': result['error']}), 502
+        logger.warning('Conversation summary failed: %s', result.get('error'))
+        return jsonify({'success': False, 'error': 'The model provider is unavailable'}), 502
     summary = str(result.get('message', {}).get('content', '')).strip()
     if not summary:
         return jsonify({'success': False, 'error': 'The model returned an empty summary'}), 502
@@ -2024,7 +2034,8 @@ def agent_query_stream():
             if error:
                 if isinstance(error, TimeoutError):
                     return "⚠️ Web-Suche hat zu lange gedauert (Timeout nach 8s)."
-                return f"⚠️ Web-Suche Fehler: {str(error)[:200]}"
+                logger.warning('Web search failed: %s', error)
+                return "⚠️ Web search is currently unavailable."
             if not result:
                 return "Keine Ergebnisse gefunden."
             return result
@@ -2375,7 +2386,8 @@ def ai_test():
     resp = ollama_client.chat([{'role': 'user', 'content': prompt}])
     dur = int((time.time() - start) * 1000)
     if 'error' in resp:
-        return jsonify({'status': 'error', 'error': resp['error'], 'duration_ms': dur}), 502
+        logger.warning('AI connection test failed: %s', resp.get('error'))
+        return jsonify({'status': 'error', 'error': 'Model provider unavailable', 'duration_ms': dur}), 502
     content = resp.get('message', {}).get('content', '')
     return jsonify({
         'status': 'ok', 'connected': True,
@@ -2540,7 +2552,7 @@ def indexing_start():
         except Exception as e:
             with _app_lock:
                 INDEXING_STATUS['status'] = 'error'
-                INDEXING_STATUS['errors'].append(str(e)[:200])
+                INDEXING_STATUS['errors'].append('Indexing failed; check the backend log')
             logger.error(f"Indexing error: {e}")
 
     threading.Thread(target=run_index, daemon=True).start()
@@ -3010,26 +3022,28 @@ def knowledge_upload_txt():
     errors = []
     incoming = request.files.getlist('files') or request.files.getlist('file')
     for item in incoming:
-        name = re.sub(r'[^A-Za-z0-9._-]+', '_', Path(item.filename or '').name)
-        if not name.lower().endswith('.txt'):
-            errors.append({'name': name or 'unnamed', 'error': 'Only .txt files are allowed'})
+        original_name = re.sub(r'[^A-Za-z0-9._-]+', '_', Path(item.filename or '').name)
+        if not original_name.lower().endswith('.txt'):
+            errors.append({'name': original_name or 'unnamed', 'error': 'Only .txt files are allowed'})
             continue
         raw = item.read(2 * 1024 * 1024 + 1)
         if len(raw) > 2 * 1024 * 1024:
-            errors.append({'name': name, 'error': 'File exceeds the 2 MB limit'})
+            errors.append({'name': original_name, 'error': 'File exceeds the 2 MB limit'})
             continue
-        (upload_dir / name).write_text(raw.decode('utf-8', errors='replace'))
-        uploaded.append({'id': name, 'name': name, 'size': len(raw)})
+        document_id = f'{secrets.token_hex(16)}.txt'
+        (upload_dir / document_id).write_text(raw.decode('utf-8', errors='replace'))
+        uploaded.append({'id': document_id, 'name': original_name, 'size': len(raw)})
     status = 200 if uploaded else 400
     return jsonify({'uploaded': uploaded, 'total_chunks': 0, 'errors': errors}), status
 
 @app.route('/api/knowledge/txt-files/<doc_id>', methods=['DELETE'])
 def knowledge_txt_file_delete(doc_id):
-    safe_name = Path(doc_id).name
-    if safe_name != doc_id or not safe_name.lower().endswith('.txt'):
+    if not re.fullmatch(r'[0-9a-f]{32}\.txt', doc_id):
         return jsonify({'success': False, 'error': 'Invalid document id'}), 400
-    path = DATA_DIR / 'text_uploads' / safe_name
-    if not path.exists():
+    upload_dir = DATA_DIR / 'text_uploads'
+    known_files = {item.name: item for item in upload_dir.glob('*.txt') if item.is_file()}
+    path = known_files.get(doc_id)
+    if path is None:
         return jsonify({'success': False, 'error': 'Document not found'}), 404
     path.unlink()
     return jsonify({'success': True})
@@ -3114,7 +3128,10 @@ def email_send_api():
         str(message.get('account') or 'default'),
     )
     success = not str(result).startswith('❌')
-    return jsonify({'success': success, 'message': result}), 200 if success else 502
+    if not success:
+        logger.warning('Email send failed: %s', result)
+        return jsonify({'success': False, 'error': 'Email delivery failed'}), 502
+    return jsonify({'success': True, 'message': result})
 
 
 @app.route('/api/tts/synthesize', methods=['POST'])
