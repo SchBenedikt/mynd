@@ -54,4 +54,5 @@ output.png
 screenshots/*
 !screenshots/login.png
 !screenshots/app-main.png
+!screenshots/chat-response.png
 quadratische_funktion.xlsx

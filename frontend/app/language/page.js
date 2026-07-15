@@ -17,8 +17,8 @@ export default function LanguagePage() {
     <div className="lang-page">
       <div className="lang-card">
         <div className="lang-badge">MYND</div>
-        <h1 className="lang-title">Willkommen</h1>
-        <p className="lang-sub">Bitte wähle deine Sprache / Please select your language</p>
+        <h1 className="lang-title">Welcome</h1>
+        <p className="lang-sub">Please select your language</p>
         <div className="lang-grid">
           {languages.map((lang) => (
             <button

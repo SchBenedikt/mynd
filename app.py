@@ -1759,13 +1759,17 @@ def setup_bootstrap():
 # ── Chat with tool-calling ────────────────────────────────
 def _build_agent_system_prompt(message, language='en'):
     now = datetime.now()
-    date_str = now.strftime("%A, %d. %B %Y")
     time_str = now.strftime("%H:%M")
     try:
-        locale.setlocale(locale.LC_TIME, 'de_DE.UTF-8')
+        locale_map = {'de': 'de_DE.UTF-8', 'en': 'en_US.UTF-8', 'fr': 'fr_FR.UTF-8',
+                      'es': 'es_ES.UTF-8', 'it': 'it_IT.UTF-8', 'pt': 'pt_PT.UTF-8',
+                      'nl': 'nl_NL.UTF-8', 'pl': 'pl_PL.UTF-8', 'tr': 'tr_TR.UTF-8',
+                      'ru': 'ru_RU.UTF-8', 'ja': 'ja_JP.UTF-8', 'zh': 'zh_CN.UTF-8'}
+        loc = locale_map.get(language, 'en_US.UTF-8')
+        locale.setlocale(locale.LC_TIME, loc)
         date_str = now.strftime("%A, %d. %B %Y")
     except Exception:
-        pass
+        date_str = now.strftime("%A, %d. %B %Y")
 
     memory_block = ""
     mem_file = DATA_DIR / 'memory.json'
@@ -1827,7 +1831,7 @@ def _build_agent_system_prompt(message, language='en'):
     ha_extra = getattr(ha_plugin, 'PROMPT_EXTRA', '') if ha_plugin else ''
 
     system = (
-        f"Heute ist {date_str}, {time_str} Uhr.\n\n"
+        f"Today is {date_str}, {time_str}. Your language is {language}. You MUST respond in {language}.\n\n"
         "Du bist Mynd – ein KI-Assistent mit Zugriff auf Nextcloud-Dokumente, E-Mails, Fotos und Server-Tools. "
         "Du bist freundlich, zuvorkommend und proaktiv. Du denkst mit, fragst nach wenn etwas unklar ist, "
         "und schlägst Lösungen vor noch bevor der User danach fragt.\n\n"
