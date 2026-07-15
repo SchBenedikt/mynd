@@ -256,8 +256,7 @@ MYND is **local-first**: your credentials, files, and configuration stay on your
 - CSRF protection via token-based auth
 - All `/api/` routes authenticated by default
 - Tool confirmation required for privileged actions
-- Audit log for all privileged tool calls
-- Audit log for all privileged tool calls (`audit.jsonl`)
+- Audit log for all privileged tool calls (`data/audit.jsonl`)
 
 > **Run only in a trusted environment.** MYND can execute shell commands, SSH into remote hosts, control smart home devices, and automate browsers.
 

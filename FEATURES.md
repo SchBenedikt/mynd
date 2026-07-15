@@ -1,96 +1,234 @@
-# MYND feature reference
+# MYND – Complete AI Tool Reference
 
-This document describes the user-facing capabilities currently represented by the MYND backend and web application. A feature may require an optional dependency, local service, or integration account. Features marked **experimental** can have incomplete provider-specific operations.
+This document lists **every function the AI agent can call**, grouped by category. Total: **128 tools** across 10 source files.
 
-## AI chat and agent runtime
+---
 
-MYND provides streaming and non-streaming chat, model selection, multi-round tool calling, conversation summaries, response source cards, generated-file cards, and research statistics. The agent can reason through multi-step work, build plans, delegate focused subtasks, ask the user for missing input, and request confirmation before privileged tool calls.
+## 1. Core Agent Tools (`core/tools.py`) — 22 tools
 
-The default model runtime is Ollama. An OpenAI-compatible endpoint can be selected in settings. Tool support depends on the chosen model. Models without native tool calling use a reduced workflow.
+Always available. Foundation of the agentic loop.
 
-## Knowledge and memory
+| Tool | Description |
+|------|-------------|
+| `think()` | First-step analysis; auto-creates plans for complex tasks (3+ steps or keywords) |
+| `create_plan()` | Build a structured multi-step plan with tracking |
+| `delegate()` | Spawn a focused sub-agent for a complex sub-task |
+| `prompt_user()` | Ask the user interactively for input (supports secret masking) |
+| `web_search()` | Internet search via DuckDuckGo |
+| `fetch_news()` | Multi-source news retrieval with RSS fallback |
+| `image_search()` | Image search via DuckDuckGo (thumbnails + source links) |
+| `http_request()` | Generic HTTP client (REST APIs, page content, Basic Auth, self-signed certs) |
+| `execute_bash()` | Run shell commands (with permission modes) |
+| `execute_python()` | Execute Python code (captures stdout/stderr) |
+| `execute_ssh()` | Run commands on remote hosts via SSH (host-key verification) |
+| `search_documents()` | Semantic search across indexed Nextcloud documents |
+| `read_local_file()` | Read a local file within `MYND_WORKSPACE_DIR` |
+| `write_local_file()` | Write content to a local file within `MYND_WORKSPACE_DIR` |
+| `vault_get()` | Read a stored credential/configuration value |
+| `vault_set()` | Store a credential/configuration value |
+| `vault_delete()` | Delete a stored credential/configuration value |
+| `vault_list()` | List all stored values (grouped) |
+| `memory_get()` | Read a persistent fact from cross-session memory |
+| `memory_set()` | Store a persistent fact in memory |
+| `memory_delete()` | Delete a persistent fact from memory |
+| `agent_browser()` | Simplified browser CLI wrapper — goto, click, type, snapshot, screenshot, extract, back, scroll |
 
-- Semantic search across indexed documents using local embeddings.
-- Source inventory, index status, reloading, and embedding rebuild operations.
-- Knowledge-graph visualization for relationships in indexed content.
-- Persistent key/value memory with create, read, and delete controls.
-- Document ingestion scripts for local or Nextcloud-backed content.
+---
 
-Memory and document context can be included in model requests. If a remote model is configured, that selected context may be transferred to the provider.
+## 2. Playwright Browser Automation (`browser.py`) — 29 tools
 
-## Research and browsing
+Full browser automation via headless Chromium with stealth anti-detection.
 
-- DuckDuckGo-backed web and image search.
-- Multi-source news retrieval.
-- Playwright browser tools for navigation, clicking, typing, selecting, scrolling, extraction, screenshots, PDF export, tabs, cookies, viewport changes, mobile emulation, network logs, performance data, dialogs, accessibility trees, and Shadow DOM inspection.
-- Inline browser screenshot previews in chat.
-- Generic HTTP requests with Basic Authentication.
+| Tool | Description |
+|------|-------------|
+| `browser_open` | Navigate to URL with stealth, ad-blocking & cookie-consent dismissal |
+| `browser_screenshot` | Capture screenshot (full page or element) |
+| `browser_extract` | Extract content: text, links, images, tables, code, meta, readability, forms, structured data |
+| `browser_click` | Click element by CSS selector (supports iframes) |
+| `browser_type` | Type text into an input field |
+| `browser_evaluate` | Execute JavaScript in page context |
+| `browser_search` | Search web via real browser (DuckDuckGo, Google, Bing) |
+| `browser_navigate` | Alias for browser_open |
+| `browser_back` | Go back in browser history |
+| `browser_forward` | Go forward in browser history |
+| `browser_scroll` | Scroll page up/down by pixel amount |
+| `browser_select` | Select a dropdown option |
+| `browser_hover` | Hover over element (triggers menus/tooltips) |
+| `browser_wait_for` | Wait for element (visible/attached/detached/hidden) |
+| `browser_list_tabs` | List all open tabs |
+| `browser_new_tab` | Open a new tab (optionally with URL) |
+| `browser_switch_tab` | Switch to a tab by ID |
+| `browser_close_tab` | Close a tab (or active tab) |
+| `browser_fill_form` | Fill multiple form fields at once (JSON field map) |
+| `browser_pdf` | Save current page as PDF |
+| `browser_cookies` | Manage cookies: get, set, delete, clear |
+| `browser_set_viewport` | Set browser viewport size |
+| `browser_get_performance` | Page performance metrics + Core Web Vitals |
+| `browser_network_log` | Log network requests (start/stop/get with domain filter) |
+| `browser_mobile_emulate` | Emulate mobile device (iPhone, iPad, Pixel, Galaxy) |
+| `browser_get_shadow_dom` | Extract Shadow DOM content |
+| `browser_intercept` | Configure network interception (block domains, mock responses) |
+| `browser_dialog_handler` | Auto-accept/dismiss JS dialogs (alert/confirm/prompt) |
+| `browser_accessibility_snapshot` | Get accessibility tree of current page |
 
-The generic HTTP tool accepts only HTTP(S), validates every redirect target, blocks private/reserved addresses by default, and never disables TLS verification automatically. Administrators can allow required internal hosts with `MYND_HTTP_ALLOW_PRIVATE_HOSTS`.
+---
 
-## Files and generated artifacts
+## 3. Nextcloud Integration (`nextcloud.py`) — 15 tools
 
-The agent can read and write text files inside `MYND_WORKSPACE_DIR`. Canonical-path checks prevent traversal and symlink escapes outside this directory. Uploads and generated artifacts can be displayed in chat. Python and shell tools can also create output, but they are powerful capabilities and should only be enabled in a trusted deployment.
+File management, calendar, contacts, and tasks via WebDAV, CalDAV, CardDAV, and OCS APIs.
 
-## Integrations
+| Tool | Description |
+|------|-------------|
+| `nextcloud_list` | List folder contents (WebDAV) |
+| `nextcloud_read_file` | Read file content (.md, .txt, .docx, .pdf) |
+| `nextcloud_write_file` | Create or overwrite a file |
+| `nextcloud_delete` | Delete a file or empty folder |
+| `nextcloud_mkdir` | Create a new folder |
+| `nextcloud_move` | Move/rename a file or folder |
+| `nextcloud_request` | Arbitrary HTTP request to Nextcloud API (WebDAV/CalDAV/CardDAV/OCS) |
+| `nextcloud_caldav_query` | Query calendar events from all calendars (optional date filter) |
+| `nextcloud_caldav_create` | Create a new calendar event |
+| `nextcloud_tasks_query` | Query tasks/todos from all calendars |
+| `nextcloud_tasks_create` | Create a new task/todo |
+| `nextcloud_contact_search` | Search contacts by name/email/phone across all address books |
+| `nextcloud_contact_get` | Get a single contact by UID (full vCard) |
+| `nextcloud_share_link` | Create a public share link for a file/folder |
+| `nextcloud_search` | Full-text search in Nextcloud files (filename + content) |
 
-### Nextcloud
+---
 
-WebDAV file operations, CalDAV queries and event creation, VTODO queries and task creation, contact search, and setup/configuration views are available. Event and task editing, Talk webhooks, and the browser-based Nextcloud Login Flow are currently marked unavailable rather than reporting false success.
+## 4. Home Assistant Integration (`homeassistant.py`) — 13 tools
 
-### Immich
+Smart home control: lights, switches, sensors, scenes, scripts, cameras.
 
-Configure and test an Immich connection, run semantic photo searches, and display thumbnails or original assets in the MYND interface.
+| Tool | Description |
+|------|-------------|
+| `homeassistant_get_states` | List ALL entities filtered by domain (light/sensor/switch/'') |
+| `homeassistant_get_state` | Get detailed state of a single entity |
+| `homeassistant_find` | Search entities by name, room, or manufacturer |
+| `homeassistant_turn_on` | Turn an entity ON |
+| `homeassistant_turn_off` | Turn an entity OFF |
+| `homeassistant_toggle` | Toggle an entity ON/OFF |
+| `homeassistant_light_set` | Set light color, brightness, or color temperature |
+| `homeassistant_call_service` | Call any Home Assistant service (domain/service/entity_id) |
+| `homeassistant_list_scenes` | List all scenes (lighting moods) |
+| `homeassistant_activate_scene` | Activate a scene |
+| `homeassistant_list_scripts` | List all scripts/automations |
+| `homeassistant_run_script` | Execute a script |
+| `homeassistant_get_camera_snapshot` | Get live camera snapshot (Base64 image) |
 
-### Home Assistant
+---
 
-Inspect entities and control supported lights, switches, scenes, scripts, sensors, and cameras through the plugin tool registry.
+## 5. TrueNAS Scale Integration (`truenas.py`) — 13 tools
 
-### Email
+Storage, services, alerts, apps, network, and system management via TrueNAS API v2.0.
 
-Configure IMAP and SMTP accounts, test connections, list folders, search/read mail, manage multiple accounts, and send messages. Sending from a context card uses the same backend SMTP implementation as the agent email tool.
+| Tool | Description |
+|------|-------------|
+| `truenas_api_request` | Generic TrueNAS API v2.0 call (any endpoint) |
+| `truenas_get_system_info` | System information (CPU, RAM, hostname, uptime, license) |
+| `truenas_get_version` | Get TrueNAS version string |
+| `truenas_list_pools` | List storage pools (size, usage, status, topology) |
+| `truenas_list_datasets` | List datasets (size, compression, dedup, encryption) |
+| `truenas_list_disks` | List physical disks (size, model, temperature, type) |
+| `truenas_list_services` | List services (running/stopped status) |
+| `truenas_list_alerts` | List active alerts (Critical, Warning, Info) |
+| `truenas_list_shares` | List shares (NFS, SMB, iSCSI) |
+| `truenas_list_users` | List users (UID, shell, groups, lock status) |
+| `truenas_list_apps` | List installed apps (version, status) |
+| `truenas_list_network` | List network interfaces (IP addresses, link state) |
+| `truenas_check_update` | Check for available TrueNAS updates + release notes |
 
-### Infrastructure and cameras
+---
 
-Plugins provide tools for TrueNAS, Reolink, SSH-managed hosts, and generic REST APIs. SSH verifies host keys against the user's normal `known_hosts` file. Password authentication uses `sshpass` environment input so the password is not included in the command line.
+## 6. Immich Photo Search (`immich.py`) — 8 tools
 
-## Productivity and automation
+Semantic photo search, album management, uploads, and server stats.
 
-- Calendar views for today, tomorrow, a week, next week, or a named day.
-- Event and task creation through Nextcloud.
-- Timers and reminders.
-- Cron-based automations with create, update, delete, test, history, and schema endpoints.
-- Optional briefing and suggestion surfaces.
+| Tool | Description |
+|------|-------------|
+| `immich_api_request` | Generic Immich API call (any of 270+ endpoints) |
+| `immich_search_photos` | Search photos by text/person/date/smart search or random |
+| `immich_list_albums` | List all albums with photo count and ID |
+| `immich_get_album_photos` | List photos in a specific album |
+| `immich_list_people` | List all recognized people |
+| `immich_get_server_stats` | Server statistics (version, photo/video counts, storage) |
+| `immich_upload_photo` | Upload a photo from a URL into Immich |
+| `immich_create_album` | Create a new album |
 
-Provider-specific editing operations that are not implemented return HTTP 501 so the UI can show a clear unavailable state.
+---
 
-## Authentication and administration
+## 7. System Tools (`system.py`) — 11 tools
 
-- Setup wizard for the first administrator account and model configuration.
-- Password hashing with Werkzeug and transparent migration from legacy plaintext records.
-- Bearer-token login, logout, profile changes, registration control, and role-based administration.
-- API authentication is deny-by-default after setup; only health, setup status, login, registration, and public auth configuration are exempt.
-- User creation, deletion, and password reset for administrators.
-- Backup export/import and full application reset controls.
+Server information, timers, weather, and file saving.
 
-The frontend automatically attaches the current token to API requests and immediately returns to the login page when a token is rejected.
+| Tool | Description |
+|------|-------------|
+| `system_get_info` | Server information (disk, RAM, CPU, uptime, OS, Python version) |
+| `system_get_disk_usage` | Disk usage of all important mountpoints |
+| `system_get_processes` | Top processes by CPU usage |
+| `system_get_network` | Network interfaces and IP addresses |
+| `timer_set` | Set a timer/reminder (seconds/minutes/hours) |
+| `timer_list` | Show all active and expired timers |
+| `timer_remove` | Remove/delete a timer by ID |
+| `weather_get` | Get current weather (HA sensors or Open-Meteo fallback) |
+| `weather_forecast` | Get weather forecast for next 1–7 days |
+| `web_search` | Internet search via DuckDuckGo (in-plugin variant) |
+| `system_save_text` | Save text/content to a file in the generated/ directory |
 
-## Internationalization and accessibility
+---
 
-The language selector supports German, English, French, Spanish, Italian, Portuguese, Dutch, Polish, Turkish, Russian, Japanese, and Chinese. Core navigation and workspace strings have native translations. The login flow also follows the selected language, with English fallback for untranslated strings. The document language is updated at runtime for assistive technology.
+## 8. Python Execution (`python_exec.py`) — 7 tools
 
-The interface includes responsive layouts, keyboard-compatible controls, accessible labels in key workflows, light/dark modes, seven theme families, configurable contrast, and reduced or dynamic motion options.
+Run, create, and manage Python scripts on the server.
 
-## Voice and text to speech
+| Tool | Description |
+|------|-------------|
+| `python_execute` | Execute Python code (subprocess with timeout, safety checks) |
+| `python_create_script` | Create a Python script file for later execution |
+| `python_run_script` | Run a saved Python script file |
+| `python_list_scripts` | List all saved Python scripts with size and date |
+| `python_read_script` | Show the content of a saved Python script |
+| `python_install_package` | Install a Python package via pip |
+| `python_list_packages` | List all installed Python packages (pip list) |
 
-Browser speech recognition and speech synthesis are supported where the browser exposes them. Provider-backed server TTS routes explicitly return “not configured” until a server provider is implemented; the client can use browser speech synthesis instead.
+---
 
-## Plugin system
+## 9. Email Integration (`email.py`) — 4 tools
 
-MYND discovers built-in plugins and exposes their tools through a shared registry. Plugins can be enabled, disabled, installed, or removed at runtime. Remote plugins execute code and therefore require the same trust as the backend itself; use only audited sources. Strong process/container isolation is not yet guaranteed.
+IMAP/SMTP email reading and sending with multi-account support.
 
-## Security boundaries and known limitations
+| Tool | Description |
+|------|-------------|
+| `email_search` | Search IMAP mailbox (FROM, SUBJECT, SINCE, UNSEEN, etc.) |
+| `email_read` | Read an email by ID |
+| `email_send` | Send an email via SMTP |
+| `email_list_accounts` | List all configured email accounts |
 
-MYND sanitizes the browser rendering path by leaving raw HTML disabled and adds browser security headers. Privileged tool confirmations stop execution while approval is pending. File, HTTP, SSH, authentication, and secret-redaction safeguards provide defense in depth.
+---
 
-The shell and Python tools are not a container sandbox, and plugin imports are not isolated from the backend process. Multi-user deployments should disable those tools or place the whole backend inside a hardened container with restricted mounts, networking, users, and resource limits. See [SECURITY.md](SECURITY.md) and the open GitHub security issues for the current hardening roadmap.
+## 10. Reolink Camera Integration (`reolink.py`) — 6 tools
+
+Live snapshots, AI detection, RTSP streams, and recordings.
+
+| Tool | Description |
+|------|-------------|
+| `reolink_get_channels` | List all Reolink cameras with online/sleep status |
+| `reolink_get_snapshot` | Get snapshot from a camera (Base64) |
+| `reolink_get_ai_state` | Get AI detection status (person/vehicle/animal) |
+| `reolink_get_rtsp_url` | Get RTSP stream URL for live view |
+| `reolink_get_device_info` | Device information (model, firmware, channels) |
+| `reolink_get_records` | Get recordings for a channel on a specific date |
+
+---
+
+## Tool Registration
+
+All tools above are registered in `AGENT_TOOLS` (app.py:123) and available to the AI model via function calling:
+
+```
+AGENT_TOOLS = [*CORE_TOOLS, *PLUGIN_TOOLS]
+WEB_TOOL_MAP = {**CORE_MAP, **PLUGIN_TOOL_MAP, 'prompt_user': web_prompt_user}
+```
+
+**Total: 128 tools** (22 core + 106 plugin)
