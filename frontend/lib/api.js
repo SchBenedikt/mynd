@@ -1,13 +1,27 @@
 const DEFAULT_BACKEND = 'http://127.0.0.1:5001';
 const TOKEN_KEY = 'mynd_token_v1';
+const BACKEND_KEY = 'backendUrl';
 
 function cleanUrl(url) {
   return url.replace(/\/+$/, '');
 }
 
+function guessBackendFromPage() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const u = new URL(window.location.href);
+    const saved = localStorage.getItem(BACKEND_KEY);
+    if (saved) return saved;
+    if (u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
+      return `${u.protocol}//${u.hostname}:5001`;
+    }
+  } catch {}
+  return null;
+}
+
 export function getApiBase() {
   if (typeof window !== 'undefined') {
-    return cleanUrl(localStorage.getItem('backendUrl') || DEFAULT_BACKEND);
+    return cleanUrl(guessBackendFromPage() || localStorage.getItem(BACKEND_KEY) || DEFAULT_BACKEND);
   }
   return DEFAULT_BACKEND;
 }

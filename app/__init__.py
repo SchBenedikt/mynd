@@ -30,20 +30,17 @@ def create_app(test_config=None):
 @flask_app.after_request
 def add_cors_headers(response):
     origin = request.headers.get('Origin', '')
-    allowed_origins = {
-        value.strip()
-        for value in os.getenv(
-            'CORS_ALLOWED_ORIGINS',
-            'http://127.0.0.1:3000,http://localhost:3000',
-        ).split(',')
-        if value.strip()
-    }
-    if origin in allowed_origins:
+    raw = os.getenv('CORS_ALLOWED_ORIGINS', 'http://127.0.0.1:3000,http://localhost:3000')
+    allowed_origins = {v.strip() for v in raw.split(',') if v.strip()}
+    if origin and ('*' in allowed_origins):
         response.headers['Access-Control-Allow-Origin'] = origin
         response.headers['Vary'] = 'Origin'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
+    elif origin in allowed_origins:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Vary'] = 'Origin'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+    response.headers['Access-Control-Expose-Headers'] = 'Content-Type,Authorization'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'same-origin'
     response.headers['X-Frame-Options'] = 'DENY'

@@ -81,7 +81,17 @@ export default function ConfigTab({ tr, language }) {
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupImportMsg, setBackupImportMsg] = useState('');
   const [backendUrl, setBackendUrlState] = useState(() => {
-    if (typeof window !== 'undefined') return localStorage.getItem('backendUrl') || 'http://127.0.0.1:5001';
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('backendUrl');
+      if (saved) return saved;
+      try {
+        const u = new URL(window.location.href);
+        if (u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
+          return `${u.protocol}//${u.hostname}:5001`;
+        }
+      } catch {}
+      return 'http://127.0.0.1:5001';
+    }
     return 'http://127.0.0.1:5001';
   });
 
