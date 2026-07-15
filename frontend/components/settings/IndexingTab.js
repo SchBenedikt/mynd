@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { apiFetch, getApiBase } from '../../lib/api';
 
 const API_BASE = () => getApiBase();
+const EMAIL_INDEXING_ENABLED = false;
 
 export default function IndexingTab({ tr, language }) {
   const [ncUrl, setNcUrl] = useState('');
@@ -209,7 +210,7 @@ export default function IndexingTab({ tr, language }) {
         {ncConfigStatus && <div className="status-text">{ncConfigStatus}</div>}
       </div>
 
-      <div className="panel-section" style={{marginTop: '2rem'}}>
+      {EMAIL_INDEXING_ENABLED && <div className="panel-section" style={{marginTop: '2rem'}}>
         <div className="section-title">{tr('E-Mail-Indexierung', 'Email Indexing')}</div>
         <p style={{fontSize: '0.9rem', color: 'var(--muted)', margin: '0.5rem 0'}}>
           {tr('Indiziere E-Mails für die semantische Suche.', 'Index emails for semantic search.')}
@@ -231,7 +232,7 @@ export default function IndexingTab({ tr, language }) {
             {tr('Stoppen', 'Stop')}
           </button>
         </div>
-      </div>
+      </div>}
 
       <div className="panel-section" style={{marginTop: '2rem'}}>
         <div className="section-title">{tr('Dokumenten-Indexierung', 'Document Indexing')}</div>

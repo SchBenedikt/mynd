@@ -1,9 +1,9 @@
 # 🧠 MYND
 
-**Local-first AI workspace** — Chat, search, automate, browser automation, smart home control, and sub-agent delegation — all running on your own hardware.
+**Local-first AI workspace** — chat, search, automation, browser control, smart-home integrations, and sub-agent delegation with local storage and a configurable model provider.
 
 ![GitHub last commit](https://img.shields.io/github/last-commit/SchBenedikt/mynd)
-![Python](https://img.shields.io/badge/python-3.14%2B-blue)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Node](https://img.shields.io/badge/node-22%2B-green)
 
 <p align="center">
@@ -12,7 +12,7 @@
   <img src="screenshots/chat-response.png" alt="Chat with AI Response" width="280" />
 </p>
 
-MYND combines a conversational AI agent with personal knowledge retrieval, file generation, photo search, smart-home control, automations, browser automation, and a plugin system — fully local, no cloud dependency.
+MYND combines a conversational AI agent with personal knowledge retrieval, file generation, photo search, smart-home control, automations, browser automation, and a plugin system. It can use a local Ollama model; cloud model providers and external integrations are optional and transmit data when enabled.
 
 ---
 
@@ -23,19 +23,19 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 | **💬 Agentic Chat** | Streaming AI chat with tool-calling, multi-round planning, sub-agent delegation |
 | **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings) |
 | **🌐 Web Research** | DuckDuckGo search, news aggregation, multi-source research |
-| **🗺️ Browser Automation** | Headless Playwright + agent-browser CLI — [128 tools total](features.md) |
+| **🗺️ Browser Automation** | Headless Playwright + agent-browser CLI — [128 tools total](FEATURES.md) |
 | **📷 Photo Search** | Semantic photo search via Immich |
 | **🏠 Smart Home** | Home Assistant — lights, switches, sensors, cameras, scenes, scripts |
 | **📅 Productivity** | CalDAV calendars & tasks (Nextcloud), timer reminders |
 | **📧 Email** | IMAP/SMTP integration for reading & sending |
 | **🤖 Automations** | Cron-based automations, daily briefing, scheduled actions |
-| **🔌 Plugin System** | Extensible registry — install from GitHub, toggle at runtime |
-| **🔐 Vault** | Encrypted credential storage for API keys, passwords, configs |
+| **🔌 Plugin System** | Extensible registry for repository-reviewed local plugins, toggle at runtime |
+| **🔐 Vault** | Local credential storage for API keys, passwords, and integration configuration |
 | **🛡️ Auth** | Password-based login, configurable registration, role-based access |
 | **🎨 Themes** | 7 color themes × light/dark/modes |
 | **🌐 Multi-language** | UI in 12 languages: DE, EN, FR, ES, IT, PT, NL, PL, TR, RU, JA, ZH |
 
-> All 128 AI-callable tools documented in **[features.md](features.md)** — agentic capabilities, browser automation, and all integrations.
+> All 128 AI-callable tools are documented in **[FEATURES.md](FEATURES.md)**.
 
 ---
 
@@ -45,13 +45,11 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 git clone https://github.com/SchBenedikt/mynd.git
 cd mynd
 
-# Backend
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'
-playwright install chromium      # only for browser automation
+# Install locked backend dependencies and frontend packages
+make setup
 
-# Frontend
-npm install && npm install --prefix frontend
+# Optional: install Chromium for browser automation
+uv run playwright install chromium
 
 # Start both
 make dev
@@ -75,11 +73,14 @@ On first launch, the admin password is printed to the backend log. Change it imm
 
 ```
 mynd/
-├── app.py                  ← Flask API, auth, agent orchestration, SSE streaming
-├── core/                   ← Model client, retrieval, tools, vault, scheduler, plugins
-│   ├── ollama_client.py    ← Ollama / OpenAI API client with tool-calling support
+├── app.py                  ← Backend entry point
+├── app/                    ← Flask application, routes, auth, agent loop, scheduling
+│   ├── routes.py           ← HTTP and SSE API routes
+│   ├── agent_loop.py       ← Agent orchestration and tool execution loop
+│   └── ollama_client.py    ← Ollama / OpenAI-compatible model client
+├── core/                   ← Retrieval, model helpers, tools, vault, scheduler, plugins
 │   ├── tools.py            ← Core tools: bash, ssh, web, memory, vault, delegate, plan, agent-browser
-│   ├── vault.py            ← Encrypted credential storage
+│   ├── vault.py            ← Local credential storage
 │   ├── plugin_base.py      ← Plugin discovery & hot-reload
 │   └── ...
 ├── data/                   ← Runtime data (gitignored): vault, configs, uploads
@@ -94,7 +95,7 @@ mynd/
 └── tests/                  ← Backend pytest suite
 ```
 
-### Data Flow
+### Data flow
 
 ```
 Browser ──HTTP/SSE──> Flask API ──> Ollama / OpenAI
@@ -103,10 +104,10 @@ Browser ──HTTP/SSE──> Flask API ──> Ollama / OpenAI
                               ├──> Tools (bash, ssh, web, files, …)
                               ├──> Browser (Playwright + agent-browser)
                               ├──> Plugins (HA, Nextcloud, Immich, …)
-                              └──> Vault (credentials, encrypted)
+                              └──> Vault (local credentials)
 ```
 
-For a complete reference of all 128 AI-callable tools (agentic capabilities, browser automation, integrations), see **[features.md](features.md)**.
+For the complete tool reference, see **[FEATURES.md](FEATURES.md)**. Plugin authors should start with **[PLUGIN_DEV.md](PLUGIN_DEV.md)**.
 
 ---
 
@@ -139,12 +140,18 @@ make dev
 | `NEXTCLOUD_URL` | Nextcloud instance URL | — |
 | `NEXTCLOUD_USERNAME` | Nextcloud username | — |
 | `NEXTCLOUD_PASSWORD` | Nextcloud app password | — |
+| `MYND_WORKSPACE_DIR` | Allowed root for agent file tools | `./data/workspace` |
+| `MYND_HTTP_ALLOW_PRIVATE_HOSTS` | Explicit allowlist for private HTTP targets | empty |
+| `MYND_PERMISSION_MODE` | Privileged command confirmation policy (`ask`, `semi`, `auto`) | `ask` |
+| `MYND_VAULT_KEY` | Optional Fernet key supplied by a secret manager | generated key file |
+| `MYND_VAULT_KEY_FILE` | External vault-key file location | `~/.config/mynd/vault.key` |
 
-See [.env.example](.env.example) for all options.
+Copy [.env.example](.env.example) to `.env` for the complete, commented configuration.
 
 ### Settings UI
 
 Most configuration is available from the web UI:
+
 - **AI Provider** — Ollama, OpenAI-compatible
 - **Integrations** — Nextcloud, Home Assistant, Immich, Reolink, TrueNAS, Email
 - **Theme** — 7 color themes, light/dark/auto
@@ -158,7 +165,8 @@ Most configuration is available from the web UI:
 
 ```bash
 make test              # Backend tests (pytest)
-make frontend-lint     # Frontend lint (next build)
+make lint              # Python lint (Ruff)
+make frontend-lint     # Frontend lint (ESLint)
 make check             # Full CI check
 make clean             # Remove caches & build output
 ```
@@ -166,12 +174,10 @@ make clean             # Remove caches & build output
 ### Manual setup
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-npm install
-npm install --prefix frontend
-playwright install chromium   # for browser automation
+uv sync --locked --extra dev
+npm ci
+npm ci --prefix frontend
+uv run playwright install chromium   # optional, for browser automation
 ```
 
 ---
@@ -180,7 +186,7 @@ playwright install chromium   # for browser automation
 
 ### Data Locality
 
-MYND is **local-first**: your credentials, files, and configuration stay on your machine. However, some features intentionally communicate with external services:
+MYND is **local-first** in the sense that application state, credentials, files, and configuration are stored on the machine running MYND. It is not automatically offline: enabled providers and integrations intentionally communicate with external services.
 
 | Feature | Data Sent | External Service |
 |---|---|---|
@@ -197,13 +203,14 @@ MYND is **local-first**: your credentials, files, and configuration stay on your
 ### Security
 
 - Passwords stored as **salted hashes** (werkzeug)
-- Integration credentials in **local encrypted vault**
+- Integration credentials encrypted at rest with **Fernet**; the key is stored outside the repository data directory
 - **Role-based access** (admin / user)
 - **Configurable registration** — disabled by default
-- CSRF protection via token-based auth
 - All `/api/` routes authenticated by default
-- Tool confirmation required for privileged actions
+- Configurable confirmation modes for privileged tools
 - Audit log for all privileged tool calls (`data/audit.jsonl`)
+
+> Existing plaintext vaults are encrypted automatically on first access. Back up the external vault key separately; losing it makes the encrypted vault unrecoverable.
 
 > **Run only in a trusted environment.** MYND can execute shell commands, SSH into remote hosts, control smart home devices, and automate browsers.
 

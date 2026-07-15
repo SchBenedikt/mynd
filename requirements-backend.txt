@@ -7,6 +7,8 @@ flask-socketio>=5.6.0
 werkzeug>=3.0.0
 requests>=2.31.0
 python-dotenv>=1.0.0
+cryptography>=42.0.0
+defusedxml>=0.7.1
 
 # AI / Embeddings
 numpy>=1.24.0

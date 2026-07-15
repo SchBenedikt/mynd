@@ -48,9 +48,6 @@ export default function IntegrationsTab({ tr, language }) {
   const [err, setErr] = useState('');
   const [plugins, setPlugins] = useState([]);
   const [pluginsLoaded, setPluginsLoaded] = useState(false);
-  const [installUrl, setInstallUrl] = useState('');
-  const [installMsg, setInstallMsg] = useState('');
-  const [installing, setInstalling] = useState(false);
 
   const t = (de, en) => language === 'de' ? de : en;
 
@@ -134,27 +131,6 @@ export default function IntegrationsTab({ tr, language }) {
     } catch (e) { alert(String(e)); }
   };
 
-  const handleInstall = async () => {
-    if (!installUrl.trim()) return;
-    setInstalling(true); setInstallMsg('');
-    try {
-      const r = await apiFetch('/api/plugins/install', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: installUrl.trim() }),
-      });
-      const d = await r.json();
-      if (d.success) {
-        setInstallMsg(t(`✅ Plugin "${d.name}" installiert`, `✅ Plugin "${d.name}" installed`));
-        setInstallUrl('');
-        await loadPlugins();
-      } else {
-        setInstallMsg(`❌ ${d.error}`);
-      }
-    } catch (e) { setInstallMsg(`❌ ${e.message}`); }
-    setInstalling(false);
-  };
-
   const currentFields = FIELD_DEFS[activeInt] || [];
   const intLabel = INTEGRATIONS.find(i => i.id === activeInt);
 
@@ -187,26 +163,6 @@ export default function IntegrationsTab({ tr, language }) {
                   {t(`${plugins.filter(p => p.enabled).length} aktiv`, `${plugins.filter(p => p.enabled).length} active`)}
                 </p>
               </div>
-            </div>
-
-            <div style={{ border: '1px solid var(--line)', borderRadius: 'var(--radius)', padding: '0.85rem 1rem', marginBottom: '1.25rem', background: 'var(--chip-bg)' }}>
-              <label style={{ fontSize: '0.85rem', fontWeight: 600, display: 'block', marginBottom: '0.4rem' }}>
-                <i className="fas fa-download" style={{ marginRight: 6, color: 'var(--brand)' }}></i>
-                {t('Plugin aus GitHub installieren', 'Install Plugin from GitHub')}
-              </label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input type="text" value={installUrl} onChange={e => { setInstallUrl(e.target.value); setInstallMsg(''); }}
-                  placeholder="https://github.com/user/plugin-repo"
-                  style={{ flex: 1, background: 'var(--input-bg)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', color: 'var(--ink)', fontSize: '0.85rem' }} />
-                <button className="btn primary" onClick={handleInstall} disabled={installing || !installUrl.trim()}>
-                  {installing ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-arrow-right"></i>}
-                </button>
-              </div>
-              {installMsg && <p style={{ fontSize: '0.82rem', margin: '0.4rem 0 0', color: installMsg.startsWith('✅') ? 'var(--success)' : '#ef4444' }}>{installMsg}</p>}
-              <p style={{ fontSize: '0.72rem', color: 'var(--muted)', margin: '0.4rem 0 0' }}>
-                <i className="fas fa-info-circle"></i>{' '}
-                {t('Das Plugin-Repository muss eine plugin.py im Root enthalten.', 'The plugin repo must contain plugin.py in its root.')}
-              </p>
             </div>
 
             {!pluginsLoaded ? (

@@ -13,6 +13,8 @@ import textwrap
 import time
 from pathlib import Path
 
+from core.sandbox import SandboxUnavailableError, run_sandboxed
+
 PLUGIN_NAME = 'python_exec'
 PLUGIN_DESC = 'Python-Code-Ausführung: Skripte schreiben, ausführen, Pakete installieren'
 TOOL_SCHEMA = True
@@ -129,17 +131,10 @@ def _execute_code(code, timeout=30):
         with open(script_file, 'w') as f:
             f.write(code)
 
-        env = os.environ.copy()
-        env['PYTHONIOENCODING'] = 'utf-8'
-        env['PYTHONDONTWRITEBYTECODE'] = '1'
-
-        result = subprocess.run(
-            [sys.executable, '-u', script_file],
-            capture_output=True,
-            text=True,
+        result = run_sandboxed(
+            [sys.executable, '-I', '-S', '-u', script_file],
             timeout=timeout,
             cwd=tmp,
-            env=env,
         )
 
         stdout = result.stdout or ''
@@ -173,6 +168,8 @@ def _execute_code(code, timeout=30):
         return '\n'.join(output_parts), None
     except subprocess.TimeoutExpired:
         return '', f'❌ Timeout nach {timeout}s – Code zu langsam oder Endlosschleife'
+    except SandboxUnavailableError as e:
+        return '', f'⛔ Sandbox nicht verfügbar; Code wurde nicht ausgeführt: {e}'
     except Exception as e:
         return '', f'❌ Ausführungsfehler: {e}'
     finally:
@@ -238,10 +235,7 @@ def python_run_script(filename, args='', timeout=30):
 
     try:
         timeout = min(max(int(timeout), 5), 120)
-        result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            timeout=timeout, cwd=str(SCRIPTS_DIR),
-        )
+        result = run_sandboxed(cmd, timeout=timeout, cwd=SCRIPTS_DIR)
         full = ''
         if result.stdout:
             full += result.stdout
@@ -265,6 +259,8 @@ def python_run_script(filename, args='', timeout=30):
         return '✅ Skript ausgeführt – keine Ausgabe'
     except subprocess.TimeoutExpired:
         return f'❌ Timeout nach {timeout}s'
+    except SandboxUnavailableError as e:
+        return f'⛔ Sandbox nicht verfügbar; Skript wurde nicht ausgeführt: {e}'
     except Exception as e:
         return f'❌ Fehler: {e}'
 
@@ -290,22 +286,7 @@ def python_read_script(filename):
 
 
 def python_install_package(package):
-    package = package.strip()
-    if not package:
-        return '❌ Kein Paketname angegeben.'
-    try:
-        result = subprocess.run(
-            [sys.executable, '-m', 'pip', 'install', package],
-            capture_output=True, text=True, timeout=120,
-        )
-        if result.returncode == 0:
-            return f'✅ {package} installiert.\n```\n{result.stdout.strip()[:2000]}\n```'
-        else:
-            return f'❌ Installation fehlgeschlagen:\n```\n{(result.stderr or result.stdout)[:2000]}\n```'
-    except subprocess.TimeoutExpired:
-        return '❌ Installation abgebrochen (Timeout 120s)'
-    except Exception as e:
-        return f'❌ Fehler: {e}'
+    return '⛔ Paketinstallation durch Agent-Tools ist deaktiviert. Nutze den administrativen Dependency-Workflow.'
 
 
 def python_list_packages():

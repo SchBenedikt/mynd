@@ -7,9 +7,9 @@ runs the development server.
 """
 from app import flask_app as app
 from app.config import logger
-from app.ollama_client import ollama_client
 from app.helpers import knowledge_base
-from app.scheduler import automation_engine, _start_indexing_scheduler
+from app.ollama_client import ollama_client
+from app.scheduler import _start_indexing_scheduler, automation_engine
 
 if __name__ == '__main__':
     print("=" * 50)

@@ -3,11 +3,11 @@ import json
 import logging
 import re
 import sys
-import urllib.parse
-import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 PLUGIN_DIR = Path(__file__).resolve().parents[1] / 'data' / 'plugins'
 PLUGIN_INSTALL_DIR = PLUGIN_DIR  # same dir for now
@@ -29,6 +29,71 @@ class Plugin:
 
     def on_unload(self):
         pass
+
+
+def normalize_tool_schema(tool):
+    """Return one canonical OpenAI-compatible function-tool definition."""
+    if not isinstance(tool, dict):
+        raise ValueError("Tool definition must be an object")
+
+    if tool.get("type") == "function" and isinstance(tool.get("function"), dict):
+        function = dict(tool["function"])
+    else:
+        function = {
+            "name": tool.get("name"),
+            "description": tool.get("description", ""),
+            "parameters": {
+                "type": "object",
+                "properties": tool.get("parameters", {}),
+                "required": tool.get("required", []),
+            },
+        }
+
+    name = function.get("name")
+    if not isinstance(name, str) or not TOOL_NAME_RE.fullmatch(name):
+        raise ValueError(f"Invalid tool name: {name!r}")
+    if not isinstance(function.get("description", ""), str):
+        raise ValueError(f"Tool {name!r} has an invalid description")
+
+    parameters = function.get("parameters") or {}
+    if not isinstance(parameters, dict):
+        raise ValueError(f"Tool {name!r} parameters must be an object")
+    if "type" not in parameters:
+        parameters = {
+            "type": "object",
+            "properties": parameters,
+            "required": function.get("required", []),
+        }
+    if parameters.get("type") != "object":
+        raise ValueError(f"Tool {name!r} parameters.type must be 'object'")
+    if not isinstance(parameters.get("properties", {}), dict):
+        raise ValueError(f"Tool {name!r} parameters.properties must be an object")
+    required = parameters.get("required", [])
+    if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+        raise ValueError(f"Tool {name!r} parameters.required must be a string array")
+    unknown_required = set(required) - set(parameters.get("properties", {}))
+    if unknown_required:
+        raise ValueError(f"Tool {name!r} requires unknown properties: {sorted(unknown_required)}")
+
+    function["parameters"] = {
+        "type": "object",
+        "properties": parameters.get("properties", {}),
+        "required": required,
+    }
+    return {"type": "function", "function": function}
+
+
+def validate_plugin_tools(plugin):
+    normalized = [normalize_tool_schema(tool) for tool in plugin.tools]
+    names = [tool["function"]["name"] for tool in normalized]
+    if len(names) != len(set(names)):
+        raise ValueError(f"Plugin {plugin.name!r} defines duplicate tool names")
+    missing = [name for name in names if not callable(plugin.tool_map.get(name))]
+    if missing:
+        raise ValueError(f"Plugin {plugin.name!r} has no callable implementation for: {missing}")
+    plugin.tools = normalized
+    plugin.tool_map = {name: plugin.tool_map[name] for name in names}
+    return plugin
 
 
 _registry = {}
@@ -95,6 +160,7 @@ def load_plugins():
                     'config_schema': legacy_config_schema,
                 })
                 instance = plugin(config=_config_cache.get(name, {}))
+                validate_plugin_tools(instance)
                 _registry[name] = instance
                 logger.info(f"Plugin geladen (Legacy): {name}")
             else:
@@ -104,6 +170,7 @@ def load_plugins():
                     _registry[name] = None
                     continue
                 instance = plugin_cls(config=_config_cache.get(name, {}))
+                validate_plugin_tools(instance)
                 instance.on_load()
                 _registry[name] = instance
                 logger.info(f"Plugin geladen: {instance.name} v{instance.version}")
@@ -181,34 +248,11 @@ def uninstall_plugin(name):
         f.unlink()
     reload_plugins()
 
-GITHUB_RAW_RE = re.compile(r'github\.com[:/]([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+)$')
-
 def install_from_github(url):
-    m = GITHUB_RAW_RE.search(url)
-    if not m:
-        raise ValueError("Keine gültige GitHub-URL. Erwartet: https://github.com/user/repo")
-    repo = m.group(1)
-    raw_url = f'https://raw.githubusercontent.com/{repo}/main/plugin.py'
-    try:
-        req = urllib.request.Request(raw_url, headers={'User-Agent': 'MYND'})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            code = resp.read().decode('utf-8')
-    except urllib.error.HTTPError:
-        raw_url = f'https://raw.githubusercontent.com/{repo}/master/plugin.py'
-        req = urllib.request.Request(raw_url, headers={'User-Agent': 'MYND'})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            code = resp.read().decode('utf-8')
-    name = repo.split('/')[-1]
-    target = PLUGIN_DIR / f'{name}.py'
-    if target.exists():
-        raise FileExistsError(f'Plugin "{name}" existiert bereits.')
-    target.write_text(code, encoding='utf-8')
-    try:
-        reload_plugins()
-    except Exception as e:
-        target.unlink()
-        raise ValueError(f'Plugin-Code konnte nicht geladen werden: {e}')
-    return name
+    raise RuntimeError(
+        'Remote plugin installation is disabled. Review plugin source locally '
+        'and add it through the trusted repository workflow.'
+    )
 
 def reload_plugins():
     for name, plugin in list(_registry.items()):

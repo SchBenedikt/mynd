@@ -1,53 +1,85 @@
+import hashlib
 import json
 import os
 import re
 import secrets
 import threading
 import time
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 import requests
 from flask import Response, jsonify, request, send_from_directory, stream_with_context
 from werkzeug.security import generate_password_hash
 
+import core.tools as _ct
+import data.plugins.email as _email_module
+import data.plugins.immich as _immich_module
+import data.plugins.nextcloud as _nc_module
 from app import flask_app as app
+from app.agent_loop import (
+    WEB_TOOL_MAP,
+    _get_tool_names_for_prompt,
+    _get_vault_keys_for_prompt,
+    _store_credentials_from_message,
+    load_plugins,
+    web_agent_loop,
+    web_agent_loop_stream,
+)
+from app.audit import audit_tool
 from app.auth import (
-    _authenticated_username, _request_has_admin_token, _verify_password,
-    require_admin, require_auth, _set_password
+    _authenticated_username,
+    _request_has_admin_token,
+    _set_password,
+    _verify_password,
+    require_admin,
+    require_auth,
 )
 from app.config import (
-    AI_CONFIG_FILE, AUTH_CONFIG_FILE, AUTH_FILE, BROWSER_SCREENSHOTS_DIR,
-    DATA_DIR, GENERATED_DIR, MEMORY_FILE, SETUP_DONE_FILE, UPLOAD_DIR, VAULT_FILE, _app_lock, logger
+    AI_CONFIG_FILE,
+    AUTH_CONFIG_FILE,
+    AUTH_FILE,
+    BROWSER_SCREENSHOTS_DIR,
+    CHUNKS,
+    DATA_DIR,
+    GENERATED_DIR,
+    SETUP_DONE_FILE,
+    UPLOAD_DIR,
+    VAULT_FILE,
+    _app_lock,
+    logger,
 )
 from app.helpers import (
-    _build_agent_system_prompt, _calendar_query_response, _calendar_range,
-    _load_memory, _nextcloud_status, _reset_app_data, _save_memory,
-    knowledge_base, load_security_mode, save_security_mode, _safe_error
+    _build_agent_system_prompt,
+    _calendar_query_response,
+    _calendar_range,
+    _load_memory,
+    _nextcloud_status,
+    _reset_app_data,
+    _save_memory,
+    knowledge_base,
+    load_security_mode,
+    save_security_mode,
 )
-from app.agent_loop import (
-    _get_tool_names_for_prompt, _get_vault_keys_for_prompt, _store_credentials_from_message,
-    load_plugins, web_agent_loop, web_agent_loop_stream, AGENT_TOOLS, WEB_TOOL_MAP, _PENDING_TOOL_CONFIRMS
-)
-from app.ollama_client import ollama_client, load_ai_config, save_ai_config
-from app.state import (
-    _WEB_PROMPT_PENDING, _AGENT_SESSION, INDEXING_STATUS, _PENDING_TOOL_CONFIRMS as _CONFIRMS
-)
-from core.llm import chat_with_tools
+from app.ollama_client import load_ai_config, ollama_client, save_ai_config
+from app.scheduler import automation_engine
+from app.session_store import agent_sessions
+from app.state import _PENDING_TOOL_CONFIRMS as _CONFIRMS
+from app.state import INDEXING_STATUS
 from core.model import check_tool_support
-from core.plugin_base import get_all_tools, get_all_plugins, get_registry, install_from_github, set_plugin_enabled, uninstall_plugin
+from core.plugin_base import (
+    get_all_plugins,
+    get_all_tools,
+    get_registry,
+    set_plugin_enabled,
+    uninstall_plugin,
+)
 from core.scheduler import CRON_HELP, TRIGGER_EXAMPLES
-from core.tools import PERMISSION_HELP, PERMISSION_MODE, CORE_TOOLS, vault_delete, vault_set
+from core.tools import CORE_TOOLS, PERMISSION_HELP, PERMISSION_MODE, vault_delete, vault_set, web_search
 from core.utils import call_with_timeout
+from core.vault import load_vault
 from core.vault import vault_get as _vg
 from core.vault import vault_set as _vs
-import core.tools as _ct
-
-import data.plugins.email as _email_module
-import data.plugins.nextcloud as _nc_module
-import data.plugins.immich as _immich_module
-
 
 # ── Init ───────────────────────────────────────────────────
 load_plugins()
@@ -162,7 +194,6 @@ def auth_factory_reset():
 
 @app.route('/api/auth/config', methods=['GET', 'POST'])
 def auth_config():
-    from app.state import AUTH_USERS
     cfg = {'allowRegistration': False, 'requireLogin': True}
     if AUTH_CONFIG_FILE.exists():
         try:
@@ -270,6 +301,24 @@ def admin_reset():
     temporary_password = _reset_app_data()
     return jsonify({'success': True, 'temporary_password': temporary_password})
 
+# ── /api/capabilities ──────────────────────────────────────
+def _get_capabilities():
+    return {
+        'chat': True, 'agent': True, 'streaming': True,
+        'knowledge_graph': True, 'knowledge_status': True, 'knowledge_reload': True,
+        'calendar': True, 'tasks': True,
+        'email': True, 'email_indexing': False,
+        'nextcloud': True, 'nextcloud_login_flow': False,
+        'location': True, 'briefing': True, 'automations': True,
+        'plugins': True, 'security': True, 'memory': True, 'vault': True,
+        'tts_server_side': False, 'training': False, 'registry': False,
+        'nina': False, 'projects': False,
+    }
+
+@app.route('/api/capabilities', methods=['GET'])
+def api_capabilities():
+    return jsonify({'success': True, 'capabilities': _get_capabilities()})
+
 # ── /api/health ────────────────────────────────────────────
 @app.route('/api/health', methods=['GET'])
 def api_health():
@@ -279,6 +328,8 @@ def api_health():
 @app.route('/<path:path>')
 def frontend_static(path):
     from app.config import STATIC_EXPORT_DIR
+    if path == 'api' or path.startswith('api/'):
+        return jsonify({'success': False, 'error': 'Not found'}), 404
     if not STATIC_EXPORT_DIR.is_dir():
         return jsonify({'error': 'not found'}), 404
     safe_path = os.path.normpath('/' + path).lstrip('/')
@@ -410,7 +461,7 @@ def chat():
     try:
         content, history, needs_input, research_stats = web_agent_loop(
             ollama_client.model, message, system_prompt, max_rounds=20,
-            tools=[] if not model_has_tools else None
+            tools=[] if not model_has_tools else None, owner=request.current_user
         )
     except Exception:
         logger.exception('chat() failed')
@@ -418,7 +469,11 @@ def chat():
     if needs_input:
         return jsonify({
             'response': f"⚠️ Ich benötige weitere Informationen:\n\n{needs_input['message']}",
-            'requires_input': True, 'prompt_message': needs_input['message']
+            'requires_input': True, 'prompt_message': needs_input['message'],
+            'session_id': needs_input.get('session_id'),
+            'requires_confirmation': needs_input.get('requires_confirmation', False),
+            'confirmation_id': needs_input.get('confirmation_id'),
+            'tool': needs_input.get('tool'),
         })
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
@@ -543,12 +598,23 @@ def agent_query():
     system_prompt = base_prompt + source_hint
     active_model = requested_model or ollama_client.model
     try:
-        content, history, needs_input, research_stats = web_agent_loop(active_model, prompt, system_prompt, max_rounds=100)
+        content, history, needs_input, research_stats = web_agent_loop(
+            active_model, prompt, system_prompt, max_rounds=100, owner=request.current_user
+        )
     except Exception:
         logger.exception('agent_query() failed')
         return jsonify({'success': False, 'error': 'Internal processing error'}), 500
     if needs_input:
-        return jsonify({'success': True, 'response': f"⚠️ Ich benötige weitere Informationen:\n\n{needs_input['message']}", 'requires_input': True, 'prompt_message': needs_input['message']})
+        return jsonify({
+            'success': True,
+            'response': f"⚠️ Ich benötige weitere Informationen:\n\n{needs_input['message']}",
+            'requires_input': True,
+            'prompt_message': needs_input['message'],
+            'session_id': needs_input.get('session_id'),
+            'requires_confirmation': needs_input.get('requires_confirmation', False),
+            'confirmation_id': needs_input.get('confirmation_id'),
+            'tool': needs_input.get('tool'),
+        })
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
     return jsonify({'success': True, 'response': content})
@@ -565,30 +631,38 @@ def _get_web_context_safe_v2(query, max_results):
 
 @app.route('/api/agent/input', methods=['POST'])
 def agent_input():
-    global _AGENT_SESSION
     data = request.json or {}
     user_input = data.get('input', '').strip()
+    session_id = str(data.get('session_id') or '').strip()
     if not user_input:
         return jsonify({'success': False, 'error': 'Keine Eingabe'}), 400
-    with _app_lock:
-        if not _AGENT_SESSION:
-            return jsonify({'success': False, 'error': 'Keine ausstehende Frage'}), 400
-        session = _AGENT_SESSION
-        _AGENT_SESSION = None
+    if not session_id:
+        return jsonify({'success': False, 'error': 'session_id is required'}), 400
+    session, session_error = agent_sessions.consume(request.current_user, session_id)
+    if session_error == 'forbidden':
+        return jsonify({'success': False, 'error': 'Forbidden'}), 403
+    if session_error:
+        return jsonify({'success': False, 'error': 'Session not found or expired'}), 404
     msgs = session['msgs']
     model = session['model']
     tools = session['tools']
     max_rounds = session.get('max_rounds', 100)
     msgs.append({"role": "user", "content": f"👤 Der User antwortet: \"{user_input}\"\n\nVerarbeite diese Antwort nun."})
     try:
-        content, history, needs_input, research_stats = web_agent_loop(model, "", "", max_rounds=max_rounds, tools=tools, initial_msgs=msgs)
+        content, history, needs_input, research_stats = web_agent_loop(
+            model, '', '', max_rounds=max_rounds, tools=tools, initial_msgs=msgs, owner=request.current_user
+        )
     except Exception:
         logger.exception('agent_input() failed')
         return jsonify({'success': False, 'error': 'Internal processing error'}), 500
     if needs_input:
-        with _app_lock:
-            _AGENT_SESSION = {'msgs': history, 'stats': research_stats, 'model': model, 'tools': tools, 'max_rounds': max_rounds, 'prompt': needs_input['message'], 'secret': False}
-        return jsonify({'success': True, 'response': needs_input['message'], 'requires_input': True, 'prompt_message': needs_input['message']})
+        return jsonify({
+            'success': True, 'response': needs_input['message'], 'requires_input': True,
+            'prompt_message': needs_input['message'], 'session_id': needs_input.get('session_id'),
+            'requires_confirmation': needs_input.get('requires_confirmation', False),
+            'confirmation_id': needs_input.get('confirmation_id'),
+            'tool': needs_input.get('tool'),
+        })
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
     return jsonify({'success': True, 'response': content})
@@ -599,11 +673,13 @@ def serve_generated(filename):
     return send_from_directory(GENERATED_DIR, filename)
 
 @app.route('/data/browser_screenshots/<path:filename>')
+@require_auth
 def serve_browser_screenshot(filename):
-    safe = os.path.realpath(BROWSER_SCREENSHOTS_DIR / filename)
-    if not safe.startswith(os.path.realpath(BROWSER_SCREENSHOTS_DIR)):
-        return "Forbidden", 403
-    return send_from_directory(BROWSER_SCREENSHOTS_DIR, filename)
+    root = BROWSER_SCREENSHOTS_DIR.resolve()
+    candidate = (root / filename).resolve(strict=False)
+    if candidate != root and root not in candidate.parents:
+        return jsonify({'success': False, 'error': 'Forbidden'}), 403
+    return send_from_directory(root, candidate.relative_to(root))
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
@@ -740,8 +816,8 @@ def api_ai_check_models():
 @app.route('/api/vault/entries', methods=['GET'])
 def api_vault_entries():
     try:
-        vault_data = json.loads(VAULT_FILE.read_text()) if VAULT_FILE.exists() else {}
-        entries = [{'key': k, 'value': v} for k, v in sorted(vault_data.items())]
+        vault_data = load_vault(VAULT_FILE) if VAULT_FILE.exists() else {}
+        entries = [{'key': k, 'value': '__SET__'} for k in sorted(vault_data)]
         return jsonify({'entries': entries, 'count': len(entries)})
     except Exception:
         return jsonify({'error': "Request failed", 'entries': [], 'count': 0})
@@ -779,6 +855,92 @@ def knowledge_sources():
 @app.route('/api/knowledge/graph-data', methods=['GET'])
 def knowledge_graph_data():
     return jsonify({'chunks': knowledge_base.chunks, 'sources': []})
+
+
+def _knowledge_graph():
+    """Build a deterministic document/folder graph from the indexed chunks."""
+    by_source = {}
+    for chunk in knowledge_base.chunks:
+        source = str(chunk.get('source') or 'Unknown')
+        entry = by_source.setdefault(source, {'chunks': 0, 'headings': set()})
+        entry['chunks'] += 1
+        for heading in chunk.get('headings') or []:
+            if isinstance(heading, dict) and heading.get('text'):
+                entry['headings'].add(str(heading['text']))
+
+    nodes = []
+    edges = []
+    folder_ids = {}
+    for source, metadata in sorted(by_source.items()):
+        source_path = Path(source)
+        parent = str(source_path.parent)
+        document_id = 'document-' + hashlib.sha256(source.encode('utf-8')).hexdigest()[:16]
+        nodes.append({
+            'id': document_id,
+            'label': source_path.name or source,
+            'type': 'document',
+            'properties': {
+                'source': source,
+                'path': source,
+                'chunks': metadata['chunks'],
+                'headings': ', '.join(sorted(metadata['headings']))[:500],
+            },
+        })
+        if parent not in ('', '.'):
+            folder_id = folder_ids.get(parent)
+            if folder_id is None:
+                folder_id = 'project-' + hashlib.sha256(parent.encode('utf-8')).hexdigest()[:16]
+                folder_ids[parent] = folder_id
+                nodes.append({
+                    'id': folder_id,
+                    'label': Path(parent).name or parent,
+                    'type': 'project',
+                    'properties': {'path': parent},
+                })
+            edges.append({'from': folder_id, 'to': document_id, 'type': 'contains'})
+
+    updated_at = datetime.fromtimestamp(CHUNKS.stat().st_mtime, UTC) if CHUNKS.exists() else datetime.now(UTC)
+    return {
+        'nodes': nodes,
+        'edges': edges,
+        'stats': {
+            'node_count': len(nodes),
+            'edge_count': len(edges),
+            'last_update': updated_at.isoformat(),
+        },
+    }
+
+
+@app.route('/api/knowledge/graph', methods=['GET'])
+def knowledge_graph():
+    if request.args.get('refresh', '').lower() in ('1', 'true', 'yes'):
+        knowledge_base._load()
+    return jsonify({'success': True, 'data': _knowledge_graph(), 'refreshing': False})
+
+
+@app.route('/api/knowledge/graph/node/<node_id>', methods=['GET'])
+def knowledge_graph_node(node_id):
+    graph = _knowledge_graph()
+    node_by_id = {node['id']: node for node in graph['nodes']}
+    if node_id not in node_by_id:
+        return jsonify({'success': False, 'error': 'Node not found'}), 404
+    related_ids = set()
+    related_edges = []
+    for edge in graph['edges']:
+        if edge['from'] == node_id:
+            related_ids.add(edge['to'])
+            related_edges.append(edge)
+        elif edge['to'] == node_id:
+            related_ids.add(edge['from'])
+            related_edges.append(edge)
+    return jsonify({
+        'success': True,
+        'data': {
+            'node': node_by_id[node_id],
+            'nodes': {related_id: node_by_id[related_id] for related_id in sorted(related_ids)},
+            'edges': related_edges,
+        },
+    })
 
 @app.route('/api/knowledge/reload', methods=['POST'])
 def knowledge_reload():
@@ -950,7 +1112,26 @@ def indexing_path():
 
 @app.route('/api/indexing/stats', methods=['GET'])
 def indexing_stats():
-    return jsonify({'success': False, 'error': 'Not implemented'}), 501
+    sources = {str(chunk.get('source') or 'Unknown') for chunk in knowledge_base.chunks}
+    embeddings = 0
+    embeddings_file = DATA_DIR / 'embeddings.npy'
+    if embeddings_file.exists():
+        try:
+            import numpy as np
+            embeddings = int(np.load(embeddings_file, mmap_mode='r').shape[0])
+        except (OSError, ValueError, IndexError):
+            embeddings = 0
+    completed_at = CHUNKS.stat().st_mtime if CHUNKS.exists() else None
+    runs = [{'ended_at': completed_at, 'status': 'completed'}] if completed_at else []
+    return jsonify({
+        'success': True,
+        'db_stats': {
+            'documents': len(sources),
+            'chunks': len(knowledge_base.chunks),
+            'embeddings': embeddings,
+        },
+        'indexing_runs': runs,
+    })
 
 @app.route('/api/indexing/status', methods=['GET'])
 def indexing_status_v2():
@@ -1140,15 +1321,35 @@ def api_references():
 # ── Stubs (501) ────────────────────────────────────────────
 @app.route('/api/assistant/briefing/current', methods=['GET'])
 def assistant_briefing():
-    return jsonify({'success': False, 'error': 'Not implemented'}), 501
+    # Proactive briefings are optional; an empty, successful response keeps the
+    # dashboard truthful until a scheduler has produced actionable items.
+    return jsonify({'success': True, 'items': [], 'generated_at': datetime.now(UTC).isoformat()})
 
 @app.route('/api/registry/email/config', methods=['GET'])
 def registry_email_config():
-    return jsonify({'success': False, 'error': 'Not implemented'}), 501
+    return jsonify({
+        'success': True,
+        'configured': bool(_vg('email/imap_server') and _vg('email/imap_user')),
+        'imap_server': _vg('email/imap_server') or '',
+        'imap_user': _vg('email/imap_user') or '',
+        'password_set': bool(_vg('email/imap_password')),
+    })
 
 @app.route('/api/location/resolve', methods=['POST'])
 def location_resolve():
-    return jsonify({'success': False, 'error': 'Not implemented'}), 501
+    data = request.json or {}
+    try:
+        latitude = float(data['latitude'])
+        longitude = float(data['longitude'])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'latitude and longitude are required'}), 400
+    if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        return jsonify({'success': False, 'error': 'Coordinates are out of range'}), 400
+    return jsonify({
+        'success': True,
+        'location': {'latitude': latitude, 'longitude': longitude},
+        'display_name': f'{latitude:.4f}, {longitude:.4f}',
+    })
 
 @app.route('/api/training/stats', methods=['GET'])
 def training_stats():
@@ -1261,7 +1462,8 @@ def nextcloud_talk_webhook():
 @app.route('/api/email/test', methods=['POST'])
 def email_test():
     try:
-        import imaplib, smtplib
+        import imaplib
+        import smtplib
         imap_ok = False
         smtp_ok = False
         errors = []
@@ -1348,7 +1550,7 @@ def api_email_accounts():
                 "smtp_user": _vg("email/smtp_user") or "",
             }
             result = {"default": default} if default.get("imap_server") else {}
-            v = json.loads(VAULT_FILE.read_text()) if VAULT_FILE.exists() else {}
+            v = load_vault(VAULT_FILE) if VAULT_FILE.exists() else {}
             for k in v:
                 if k.startswith("email/accounts/") and k.endswith("/imap_server"):
                     name = k.split("/")[2]
@@ -1649,15 +1851,30 @@ def tool_run():
         return jsonify({'success': False, 'error': 'Confirmation expired'}), 410
     confirmed = data.get('confirmed', False)
     if not confirmed:
+        audit_tool(
+            pending['tool'], request.current_user, pending['args'], False,
+            duration_ms=0, request_id=confirmation_id, confirmation='denied',
+        )
         return jsonify({'success': True, 'result': '⛔ Cancelled'})
     func = WEB_TOOL_MAP.get(pending['tool'])
     if not func:
         return jsonify({'success': False, 'error': f'Unknown tool: {pending["tool"]}'}), 400
     try:
+        started_at = time.monotonic()
         _ct.PERMISSION_MODE = 'auto'
         result = func(**pending['args'])
+        audit_tool(
+            pending['tool'], request.current_user, pending['args'], True,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            request_id=confirmation_id, confirmation='confirmed',
+        )
         return jsonify({'success': True, 'result': str(result)})
-    except Exception:
+    except Exception as exc:
+        audit_tool(
+            pending['tool'], request.current_user, pending['args'], False,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            request_id=confirmation_id, confirmation='confirmed', error_class=type(exc).__name__,
+        )
         return jsonify({'success': False, 'error': "Request failed"}), 500
 
 # ── /api/automations/* ─────────────────────────────────────
@@ -1747,15 +1964,10 @@ def list_plugins():
 @app.route('/api/plugins/install', methods=['POST'])
 @require_admin
 def install_plugin():
-    data = request.get_json(silent=True) or {}
-    url = data.get('url', '')
-    if not url:
-        return jsonify({'success': False, 'error': 'URL erforderlich'}), 400
-    try:
-        name = install_from_github(url)
-        return jsonify({'success': True, 'name': name})
-    except Exception:
-        return jsonify({'success': False, 'error': "Request failed"}), 400
+    return jsonify({
+        'success': False,
+        'error': 'Remote plugin installation is disabled; install reviewed plugins through the repository.',
+    }), 410
 
 @app.route('/api/plugins/<name>/toggle', methods=['POST'])
 @require_admin
@@ -1825,6 +2037,3 @@ def agent_briefing():
     except Exception:
         return jsonify({"success": False, "error": "Request failed"})
 
-
-# ── Automation engine (imported globally for routes above) ──
-from app.scheduler import automation_engine

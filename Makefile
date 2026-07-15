@@ -16,9 +16,7 @@ help:
 
 setup:
 	@echo "=== Installing dependencies ==="
-	uv sync --locked --extra dev
-	cd frontend && npm install
-	npm install
+	./setup.sh
 	@echo "Done."
 
 dev:
@@ -44,7 +42,7 @@ test-fast:
 
 lint:
 	@echo "=== Running ruff linter ==="
-	uv run ruff check app.py core/ data/plugins/ tests/
+	uv run ruff check app/ app.py core/ data/plugins/ tests/
 
 frontend-lint:
 	@echo "=== Running frontend lint ==="
@@ -56,8 +54,7 @@ frontend-audit:
 
 typecheck:
 	@echo "=== Running mypy ==="
-	uv run mypy data/ tests/ app.py chat.py --ignore-missing-imports --explicit-package-bases 2>/dev/null || \
-		echo "mypy not available or errors found"
+	uv run mypy --follow-imports=skip core/vault.py core/sandbox.py app/session_store.py app/audit.py
 
 check: test lint frontend-audit frontend-lint
 	cd frontend && npm run build

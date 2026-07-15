@@ -336,11 +336,6 @@ export default function MessageList({
                 {integrationForm.error && <p className="calendar-form-error">{integrationForm.error}</p>}
                 <div className="calendar-form-actions integration-form-actions">
                   <button type="button" className="btn" onClick={closeIntegrationForm} disabled={integrationForm.submitting || integrationForm.loginFlowRunning}>Cancel</button>
-                  {integrationForm.quickActions.some((action) => action?.type === 'nextcloud_login_flow') && (
-                    <button type="button" className="btn" onClick={runNextcloudLoginFlow} disabled={integrationForm.submitting || integrationForm.loginFlowRunning}>
-                      {integrationForm.loginFlowRunning ? 'Waiting for login...' : 'Login with Nextcloud'}
-                    </button>
-                  )}
                   <button type="submit" className="btn primary" disabled={integrationForm.submitting || integrationForm.loginFlowRunning}>
                     {integrationForm.submitting ? 'Saving...' : 'Save & Retry'}
                   </button>

@@ -1,12 +1,11 @@
 import json
-import os
 import secrets
 from functools import wraps
 
 from flask import jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.config import AUTH_CONFIG_FILE, AUTH_FILE, DATA_DIR, logger
+from app.config import AUTH_FILE
 from app.state import AUTH_USERS
 
 

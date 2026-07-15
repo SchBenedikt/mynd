@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
 """MYND Flask application package."""
-import json
 import os
-import secrets
-import threading
-from pathlib import Path
 
-import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
 
-from app.config import DATA_DIR, SETUP_DONE_FILE, _app_lock, logger
-from app.state import AUTH_USERS as _AUTH_USERS
 from app.auth import _authenticated_username
+from app.config import AUTH_FILE as AUTH_FILE
+from app.config import DATA_DIR as DATA_DIR
+from app.config import SETUP_DONE_FILE, logger
+from app.config import _app_lock as _app_lock
+from app.state import _PENDING_TOOL_CONFIRMS as _PENDING_TOOL_CONFIRMS
+from app.state import AUTH_USERS as AUTH_USERS
 
 load_dotenv()
 
 flask_app = Flask(__name__)
+# Backwards-compatible public name used by tests and WSGI servers.
+app = flask_app
+
+
+def create_app(test_config=None):
+    if test_config:
+        flask_app.config.update(test_config)
+    return flask_app
 
 
 @flask_app.after_request
@@ -69,8 +76,8 @@ def protect_api_by_default():
     if request.method == 'OPTIONS' or not request.path.startswith('/api/'):
         return None
     public = {
-        '/api/health', '/api/auth/login', '/api/auth/register',
-        '/api/auth/me', '/api/setup/status',
+        '/api/health', '/api/capabilities', '/api/auth/login',
+        '/api/auth/register', '/api/auth/me', '/api/setup/status',
     }
     if request.path in public or (request.path == '/api/auth/config' and request.method == 'GET'):
         return None
@@ -87,4 +94,8 @@ def protect_api_by_default():
 
 
 # Import routes – triggers all @flask_app.route decorators
-import app.routes  # noqa: F401, E402
+from app import routes as _routes  # noqa: F401, E402
+
+# Importing a submodule can bind the package name in this module; restore the
+# documented WSGI/test alias after route registration.
+app = flask_app

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import requests
 
+from core.vault import load_vault
+
 PLUGIN_NAME = "homeassistant"
 PLUGIN_DESC = "Home Assistant Smart-Home-Steuerung – Räume, Geräte, Status, Steuerung"
 
@@ -15,9 +17,7 @@ _cache = {"states": None, "ts": 0, "ttl": 60}
 _ha_lock = threading.Lock()
 
 def _vault():
-    if not VAULT_FILE.exists():
-        return {}
-    return json.loads(VAULT_FILE.read_text())
+    return load_vault(VAULT_FILE)
 
 def _vget(key):
     v = _vault()
@@ -375,15 +375,6 @@ def homeassistant_get_camera_snapshot(entity_id):
         img_r = requests.get(f"{url}/api/camera_proxy/{entity_id}", headers=headers, timeout=15)
         if img_r.status_code == 200:
             b64 = base64.b64encode(img_r.content).decode()
-            return f"data:image/jpeg;base64,{b64}"
-        # Fallback: Try fetching via snapshot service
-        snap_r = requests.post(
-            f"{url}/api/services/camera/snapshot",
-            json={"entity_id": entity_id, "filename": "/tmp/ha_snapshot.jpg"},
-            headers=headers, timeout=15
-        )
-        if snap_r.status_code == 200:
-            b64 = base64.b64encode(snap_r.content).decode()
             return f"data:image/jpeg;base64,{b64}"
         return f"❌ Live-Bild nicht verfügbar (Status {img_r.status_code}) – Kamera-ID: `{entity_id}` (Status: {state})"
     except Exception as e:

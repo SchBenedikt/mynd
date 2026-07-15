@@ -2,12 +2,14 @@ import html as _html
 import json
 import os
 import re
-import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
+from defusedxml import ElementTree
 from requests.auth import HTTPBasicAuth
+
+from core.vault import load_vault
 
 PLUGIN_NAME = "nextcloud"
 PLUGIN_DESC = "Nextcloud-Integration: Dateien, Kalender, Aufgaben, WebDAV"
@@ -36,7 +38,7 @@ def _nc():
                 pw = pw or cfg_pw
             elif cfg_pw == '***' and vault_file.exists():
                 try:
-                    vault = json.loads(vault_file.read_text())
+                    vault = load_vault(vault_file)
                     pw = pw or _clean_cfg(vault.get('indexing/password', ''))
                 except Exception:
                     pass
@@ -46,7 +48,7 @@ def _nc():
     vault_file = base_dir / 'data' / 'vault.json'
     if vault_file.exists():
         try:
-            vault = json.loads(vault_file.read_text())
+            vault = load_vault(vault_file)
             url = url or _clean_cfg(vault.get('nextcloud/url', '')).rstrip('/')
             user = user or _clean_cfg(vault.get('nextcloud/username', '') or vault.get('nextcloud/user', ''))
             pw = pw or _clean_cfg(vault.get('nextcloud/password', ''))
@@ -74,7 +76,7 @@ def nextcloud_list(folder=""):
             headers={"Depth":"1"}, auth=auth, timeout=30)
         if r.status_code not in (207, 200):
             return f"❌ Status {r.status_code}: {r.text[:300]}"
-        root = ET.fromstring(r.content)
+        root = ElementTree.fromstring(r.content)
         ns = {'d':'DAV:'}
         items = []
         for resp in root.findall(".//d:response", ns):
@@ -400,7 +402,7 @@ def _carddav_discover(base_url, user, auth):
         return []
     books = []
     try:
-        root = ET.fromstring(r.content)
+        root = ElementTree.fromstring(r.content)
         ns = {"d": "DAV:", "card": "urn:ietf:params:xml:ns:carddav"}
         for resp in root.findall(".//d:response", ns):
             href_el = resp.find("d:href", ns)
@@ -418,7 +420,7 @@ def _carddav_discover(base_url, user, auth):
             else:
                 name = href.rstrip("/").split("/")[-1]
             books.append((name, href))
-    except ET.ParseError:
+    except ElementTree.ParseError:
         pass
     return books
 

@@ -9,14 +9,15 @@ import subprocess
 import sys
 import tempfile
 import warnings
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
 import requests
+from defusedxml import ElementTree
 
 from .config import BASE, CHUNKS, EMBS, MEMORY_FILE, C
 from .embed import embed
+from .sandbox import SandboxUnavailableError, run_sandboxed
 from .vault import _vault_get, vault_delete, vault_get, vault_list, vault_set
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -30,7 +31,9 @@ except ImportError:
     except ImportError:
         _DDGS_AVAILABLE = False
 
-PERMISSION_MODE = "auto"
+PERMISSION_MODE = os.environ.get("MYND_PERMISSION_MODE", "ask").strip().lower()
+if PERMISSION_MODE not in {"auto", "semi", "ask"}:
+    PERMISSION_MODE = "ask"
 
 PERMISSION_HELP = {
     "auto": "alle Bash-Befehle erlaubt",
@@ -99,11 +102,15 @@ def execute_bash(command):
     try:
         if 'cd ' in command and '&&' not in command and ';' not in command:
             return "⚠️ cd allein ist nicht persistent. Nutze '&&' zum Verketten, z.B. 'cd ordner && ls'"
-        r = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)
+        workspace = Path(os.getenv('MYND_WORKSPACE_DIR', BASE / 'data' / 'workspace'))
+        workspace.mkdir(parents=True, exist_ok=True)
+        r = run_sandboxed(['/bin/sh', '-c', command], cwd=workspace, timeout=60)
         out = r.stdout.strip()[:5000] if r.stdout.strip() else r.stderr.strip()[:2000]
         return out if out else "(leer)"
     except subprocess.TimeoutExpired:
         return "⏱ Timeout (60s)"
+    except SandboxUnavailableError as e:
+        return f"⛔ Sandbox unavailable; command was not executed: {e}"
     except Exception as e:
         return f"❌ {e}"
 
@@ -243,32 +250,25 @@ def execute_python(code):
         if ok is not True:
             return ok if isinstance(ok, str) else "⛔ Cancelled (not confirmed)"
     try:
-        c = compile(code, '<exec>', 'exec', flags=0x0)
-        local_vars = {}
-        from io import StringIO
-        old_out = sys.stdout
-        old_err = sys.stderr
-        captured_out = StringIO()
-        captured_err = StringIO()
-        sys.stdout = captured_out
-        sys.stderr = captured_err
-        try:
-            exec(c, {"__builtins__": __builtins__, "__name__": "__main__"}, local_vars)
-        finally:
-            sys.stdout = old_out
-            sys.stderr = old_err
-        out = captured_out.getvalue()
-        err = captured_err.getvalue()
-        result = ""
-        if out:
-            result += f"stdout:\n{out[:4000]}"
-        if err:
-            if result:
-                result += "\n"
-            result += f"stderr:\n{err[:2000]}"
-        if not result:
-            result = "(keine Ausgabe)"
-        return result
+        compile(code, '<exec>', 'exec', flags=0x0)
+        with tempfile.TemporaryDirectory(prefix='mynd_python_') as temporary:
+            script = Path(temporary) / 'script.py'
+            script.write_text(code, encoding='utf-8')
+            result = run_sandboxed([sys.executable, '-I', '-S', str(script)], cwd=temporary, timeout=60)
+        output = result.stdout[:4000]
+        error = result.stderr[:2000]
+        parts = []
+        if output:
+            parts.append(f"stdout:\n{output}")
+        if error:
+            parts.append(f"stderr:\n{error}")
+        if result.returncode:
+            parts.append(f"exit code: {result.returncode}")
+        return '\n'.join(parts) or '(keine Ausgabe)'
+    except SandboxUnavailableError as e:
+        return f"⛔ Sandbox unavailable; Python was not executed: {e}"
+    except subprocess.TimeoutExpired:
+        return "⏱ Timeout (60s)"
     except Exception as e:
         return f"❌ Python-Fehler: {e}"
 
@@ -328,6 +328,48 @@ def _validate_http_url(url):
             raise ValueError(f'Private or reserved address is blocked: {address}')
 
 
+def safe_http_request(method, url, *, headers=None, data=None, timeout=60, max_bytes=1_000_000):
+    """Perform an HTTP request with SSRF-safe redirect validation and a size limit."""
+    current_url = url
+    request_headers = dict(headers or {})
+    for _ in range(6):
+        _validate_http_url(current_url)
+        response = requests.request(
+            method.upper(),
+            current_url,
+            data=data,
+            headers=request_headers or None,
+            timeout=timeout,
+            allow_redirects=False,
+            stream=True,
+        )
+        if response.is_redirect or response.is_permanent_redirect:
+            location = response.headers.get('Location')
+            response.close()
+            if not location:
+                raise ValueError('Redirect response did not include a Location header')
+            from urllib.parse import urljoin
+            current_url = urljoin(current_url, location)
+            continue
+
+        content_length = response.headers.get('Content-Length')
+        if content_length and int(content_length) > max_bytes:
+            response.close()
+            raise ValueError(f'Response exceeds the {max_bytes}-byte limit')
+        chunks = []
+        total = 0
+        for chunk in response.iter_content(chunk_size=16_384):
+            total += len(chunk)
+            if total > max_bytes:
+                response.close()
+                raise ValueError(f'Response exceeds the {max_bytes}-byte limit')
+            chunks.append(chunk)
+        response._content = b''.join(chunks)
+        response._content_consumed = True
+        return response
+    raise ValueError('Too many redirects')
+
+
 def http_request(method="GET", url="", headers=None, body="", auth_user="", auth_pass=""):
     try:
         h = {}
@@ -344,23 +386,7 @@ def http_request(method="GET", url="", headers=None, body="", auth_user="", auth
         if auth_user and auth_pass is not None:
             auth_bytes = f"{auth_user}:{auth_pass}".encode()
             h["Authorization"] = "Basic " + base64.b64encode(auth_bytes).decode('ascii')
-        current_url = url
-        for _ in range(6):
-            _validate_http_url(current_url)
-            r = requests.request(
-                method.upper(), current_url, data=body or None, headers=h or None,
-                timeout=60, allow_redirects=False,
-            )
-            if r.is_redirect or r.is_permanent_redirect:
-                location = r.headers.get('Location')
-                if not location:
-                    break
-                from urllib.parse import urljoin
-                current_url = urljoin(current_url, location)
-                continue
-            break
-        else:
-            return '❌ Too many redirects'
+        r = safe_http_request(method, url, data=body or None, headers=h or None, timeout=60, max_bytes=1_000_000)
 
         ct = r.headers.get("Content-Type", "")
         if "application/json" in ct:
@@ -458,7 +484,7 @@ def _fetch_news_from_rss(category, max_results):
     for name, url, _tag in feeds:
         try:
             r = requests.get(url, timeout=10, headers=headers)
-            root = ET.fromstring(r.content)
+            root = ElementTree.fromstring(r.content)
             is_atom = 'http://www.w3.org/2005/Atom' in r.text[:300]
             if is_atom:
                 items = root.findall(".//{http://www.w3.org/2005/Atom}entry")

@@ -127,13 +127,10 @@ def chat_with_tools_stream(model, msgs, tools):
             body.setdefault("options", {})["temperature"] = 0.3
         r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300, stream=True)
         if not r.ok:
-            import json as _js
             import logging as _lg
             _lg.error(f"Ollama 400: {r.text[:500]}")
             _lg.error(f"Request msgs: {len(msgs)}, total chars: {sum(len(str(m)) for m in msgs)}")
             _lg.error(f"Tool names: {[t.get('function',{}).get('name','?') for t in (tools or [])]}")
-            with open('/tmp/ollama_fail.json', 'w') as _f:
-                _f.write(_js.dumps({"model": model, "messages": msgs, "stream": False}, ensure_ascii=False, indent=2))
             import traceback as _tb
             _lg.error(f"Stack:\n{''.join(_tb.format_stack()[-10:])}")
         r.raise_for_status()

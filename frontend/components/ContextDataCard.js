@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch, getApiBase } from '../lib/api';
 
+const MUTATING_CONTEXT_ACTIONS_ENABLED = false;
+
 const toIsoDate = (dateObj) => dateObj.toISOString().slice(0, 10);
 
 const shiftDate = (isoDate, deltaDays) => {
@@ -725,9 +727,11 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
                     {eventItem.location ? ` • ${eventItem.location}` : ''}
                   </div>
                 </div>
-                <button type="button" className="context-item-action" onClick={() => onCalendarEdit(eventItem)}>
-                  Edit
-                </button>
+                {MUTATING_CONTEXT_ACTIONS_ENABLED && (
+                  <button type="button" className="context-item-action" onClick={() => onCalendarEdit(eventItem)}>
+                    Edit
+                  </button>
+                )}
 
                 {editing && (
                   <form className="context-edit-form" onSubmit={submitEdit}>
@@ -791,14 +795,14 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
                     {taskItem.priority ? ` • P${taskItem.priority}` : ''}
                   </div>
                 </div>
-                <div className="context-item-actions-row">
+                {MUTATING_CONTEXT_ACTIONS_ENABLED && <div className="context-item-actions-row">
                   <button type="button" className="context-item-action" onClick={() => onTaskEdit(taskItem)}>
                     Edit
                   </button>
                   <button type="button" className="context-item-action success" onClick={() => completeTask(taskItem)}>
                     Done
                   </button>
-                </div>
+                </div>}
 
                 {editing && (
                   <form className="context-edit-form" onSubmit={submitEdit}>

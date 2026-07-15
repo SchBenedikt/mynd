@@ -1,43 +1,17 @@
 import json
 import threading
-from datetime import UTC, date, datetime, timedelta
 
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash
 
-from app.config import AUTH_CONFIG_FILE, AUTH_FILE, DATA_DIR, logger
+from app.audit import _audit_log as _audit_log
+from app.config import AUTH_FILE, logger
 
 _PROMPT_QUEUE = []
-_WEB_PROMPT_PENDING = None
-_AGENT_SESSION = None
 _PENDING_TOOL_CONFIRMS = {}
 _app_lock = threading.Lock()
 
 _PRIVILEGED_TOOL_PREFIXES = ('execute_', 'browser_', 'nextcloud_', 'vault_', 'memory_')
 _PRIVILEGED_TOOL_NAMES = frozenset({'write_local_file', 'http_request', 'agent_browser', 'think'})
-
-# ── Audit logging ─────────────────────────────────────────
-def _audit_log(tool_name, user, args, success, result_preview, duration_ms):
-    try:
-        audit_file = DATA_DIR / 'audit.jsonl'
-        safe_args = {}
-        for k, v in (args or {}).items():
-            if any(secret in k.lower() for secret in ['password', 'pass', 'secret', 'api', 'token', 'key']):
-                safe_args[k] = '***'
-            else:
-                safe_args[k] = str(v)[:200]
-        entry = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'tool': tool_name,
-            'user': user or 'unknown',
-            'args': safe_args,
-            'success': success,
-            'result_preview': str(result_preview)[:200] if result_preview else '',
-            'duration_ms': duration_ms,
-        }
-        with open(audit_file, 'a') as f:
-            f.write(json.dumps(entry) + '\n')
-    except Exception:
-        pass
 
 # ── Auth state ─────────────────────────────────────────────
 AUTH_USERS = {}

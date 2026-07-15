@@ -1,8 +1,11 @@
 import base64
 import json
+import os
 import threading
 
 import requests
+
+from core.vault import vault_get
 
 TOOL_SCHEMA = True
 
@@ -50,13 +53,20 @@ TOOLS = [
     },
 ]
 
-API_BASE_URL = "http://192.168.178.190"
-API_USER = "admin"
-API_PASS = "Schaechner"
-
 _token = None
 _token_expiry = 0
 _login_lock = threading.Lock()
+
+
+def _connection_config():
+    base_url = str(vault_get('reolink/url') or os.getenv('REOLINK_URL', '')).rstrip('/')
+    username = str(vault_get('reolink/user') or os.getenv('REOLINK_USER', ''))
+    password = str(vault_get('reolink/password') or os.getenv('REOLINK_PASSWORD', ''))
+    if not base_url or not username or not password:
+        raise ValueError('Reolink is not configured; set reolink/url, reolink/user and reolink/password in the vault')
+    if not base_url.startswith(('http://', 'https://')):
+        raise ValueError('Reolink URL must use http:// or https://')
+    return base_url, username, password
 
 
 def _login():
@@ -67,8 +77,9 @@ def _login():
         if _token and _token_expiry > now + 60:
             return _token, None
         try:
-            r = requests.post(f"{API_BASE_URL}/cgi-bin/api.cgi?cmd=Login",
-                json=[{"cmd": "Login", "action": 0, "param": {"User": {"userName": API_USER, "password": API_PASS}}}],
+            base_url, username, password = _connection_config()
+            r = requests.post(f"{base_url}/cgi-bin/api.cgi?cmd=Login",
+                json=[{"cmd": "Login", "action": 0, "param": {"User": {"userName": username, "password": password}}}],
                 timeout=10)
             if r.status_code != 200:
                 return None, f"❌ Login fehlgeschlagen (Status {r.status_code})"
@@ -86,7 +97,11 @@ def _api(cmd, params=None, body=None, method="GET"):
     token, err = _login()
     if err:
         return None, err
-    url = f"{API_BASE_URL}/cgi-bin/api.cgi?cmd={cmd}&token={token}"
+    try:
+        base_url, _username, _password = _connection_config()
+    except ValueError as exc:
+        return None, f'❌ {exc}'
+    url = f"{base_url}/cgi-bin/api.cgi?cmd={cmd}&token={token}"
     if params:
         for k, v in params.items():
             url += f"&{k}={v}"
@@ -209,14 +224,23 @@ def reolink_get_records(channel=0, year=2026, month=7, day=8):
     return f"📹 Aufnahmen für Ch{channel} am {day}.{month}.{year}:\n{json.dumps(data, ensure_ascii=False, indent=2)[:2000]}"
 
 
+TOOL_MAP = {
+    "reolink_get_channels": reolink_get_channels,
+    "reolink_get_snapshot": reolink_get_snapshot,
+    "reolink_get_ai_state": reolink_get_ai_state,
+    "reolink_get_rtsp_url": reolink_get_rtsp_url,
+    "reolink_get_device_info": reolink_get_device_info,
+    "reolink_get_records": reolink_get_records,
+}
+
+
 PROMPT_EXTRA = (
-    "REOLINK (Überwachungskameras – Home Hub auf 192.168.178.190):\n"
+    "REOLINK (Überwachungskameras):\n"
     "  - **reolink_get_channels**: Alle Kameras mit Status anzeigen\n"
     "  - **reolink_get_snapshot(channel=0)**: Schnappschuss einer Kamera\n"
     "  - **reolink_get_ai_state(channel=0)**: KI-Erkennungsstatus (Person/Fahrzeug/Tier)\n"
     "  - **reolink_get_rtsp_url(channel=0)**: RTSP-Stream-URL für Live-Ansicht\n"
     "  - **reolink_get_device_info**: Geräte-Informationen\n"
     "  - **reolink_get_records(channel=0, year=2026, month=7, day=8)**: Aufnahmen eines Datums\n"
-    "  Kameras: Ch0=Terrasse, Ch1=Hof, Ch2=Eckterrasse (alle Batterie, schlafen standardmäßig)\n"
     "  Bei 'Kamera schläft': Schnappschuss nicht möglich – Kamera wacht bei Bewegung auf.\n"
 )

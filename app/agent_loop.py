@@ -2,30 +2,18 @@ import json
 import re
 import secrets
 import time
-from datetime import datetime
-from pathlib import Path
+from urllib.parse import urljoin, urlparse
 
 import core.tools as _ct
-from app.config import AI_CONFIG_FILE, DATA_DIR, GENERATED_DIR, VAULT_FILE, _app_lock, logger
-from app.helpers import knowledge_base, _build_agent_system_prompt
-from app.ollama_client import ollama_client, load_ai_config
-from app.state import _WEB_PROMPT_PENDING, _AGENT_SESSION, _PENDING_TOOL_CONFIRMS, _PRIVILEGED_TOOL_PREFIXES, _PRIVILEGED_TOOL_NAMES, _audit_log
-from core.llm import chat_with_tools, chat_with_tools_stream
-from core.model import check_tool_support
-from core.plugin_base import get_all_tools, get_registry
-from core.tools import (
-    CORE_TOOLS, execute_ssh, http_request, think,
-    vault_delete, vault_set, web_search, fetch_news
-)
-from core.utils import call_with_timeout
-from core.vault import vault_get as _vg
-
 
 # Plugin references
-import data.plugins.email as _email_module
-import data.plugins.homeassistant as _ha_module
-import data.plugins.immich as _immich_module
-import data.plugins.nextcloud as _nc_module
+from app.config import DATA_DIR, GENERATED_DIR, VAULT_FILE, _app_lock, logger
+from app.session_store import agent_sessions
+from app.state import _PENDING_TOOL_CONFIRMS, _PRIVILEGED_TOOL_NAMES, _PRIVILEGED_TOOL_PREFIXES, _audit_log
+from core.llm import chat_with_tools, chat_with_tools_stream
+from core.plugin_base import get_all_tools
+from core.tools import CORE_MAP, CORE_TOOLS, execute_ssh, http_request, safe_http_request, think, vault_set
+from core.vault import load_vault
 
 plugins_loaded = False
 PLUGIN_TOOLS = []
@@ -33,10 +21,47 @@ PLUGIN_TOOL_MAP = {}
 AGENT_TOOLS = []
 WEB_TOOL_MAP = {}
 
+_CONFIRMATION_REQUIRED_TOOLS = frozenset({
+    'execute_bash', 'execute_python', 'execute_ssh', 'write_local_file', 'system_save_text',
+    'memory_set', 'memory_delete', 'vault_set', 'vault_delete',
+    'nextcloud_write_file', 'nextcloud_delete', 'nextcloud_mkdir', 'nextcloud_move',
+    'nextcloud_caldav_create', 'nextcloud_tasks_create', 'nextcloud_share_link',
+    'email_send', 'immich_upload_photo', 'immich_create_album',
+    'homeassistant_activate_scene', 'homeassistant_call_service', 'homeassistant_light_set',
+    'homeassistant_run_script', 'homeassistant_toggle', 'homeassistant_turn_off', 'homeassistant_turn_on',
+    'python_create_script', 'python_execute', 'python_install_package', 'python_run_script',
+    'timer_remove', 'timer_set', 'browser_click', 'browser_dialog_handler', 'browser_evaluate',
+    'browser_fill_form', 'browser_intercept', 'browser_select', 'browser_type',
+})
+
+
+def _tool_requires_confirmation(name, args):
+    if name in _CONFIRMATION_REQUIRED_TOOLS:
+        return True
+    if name in {'http_request', 'nextcloud_request', 'immich_api_request', 'truenas_api_request'}:
+        return str((args or {}).get('method', 'GET')).upper() not in {'GET', 'HEAD', 'OPTIONS'}
+    return False
+
+
+def _queue_tool_confirmation(name, args, owner):
+    confirmation_id = secrets.token_urlsafe(24)
+    with _app_lock:
+        _PENDING_TOOL_CONFIRMS[confirmation_id] = {
+            'tool': name, 'args': args, 'owner': owner, 'created_at': time.time(),
+        }
+    return confirmation_id
+
+
+def _confirmation_description(name, args):
+    target = next((args.get(key) for key in ('path', 'url', 'host', 'filename', 'summary') if args.get(key)), None)
+    suffix = f' ({str(target)[:120]})' if target else ''
+    return f'{name}{suffix} ausführen?'
+
 
 def load_plugins():
     global plugins_loaded, PLUGIN_TOOLS, PLUGIN_TOOL_MAP, AGENT_TOOLS, WEB_TOOL_MAP
-    from core.plugin_base import get_all_tools as _get_all_tools, load_plugins as _load_plugins
+    from core.plugin_base import get_all_tools as _get_all_tools
+    from core.plugin_base import load_plugins as _load_plugins
     _load_plugins()
     PLUGIN_TOOLS, PLUGIN_TOOL_MAP = _get_all_tools()
     AGENT_TOOLS = [*CORE_TOOLS, *PLUGIN_TOOLS]
@@ -45,9 +70,6 @@ def load_plugins():
 
 
 def web_prompt_user(message, secret=False):
-    global _WEB_PROMPT_PENDING
-    with _app_lock:
-        _WEB_PROMPT_PENDING = {'message': message, 'secret': secret}
     return "⏳ USER_INPUT_REQUIRED: " + message
 
 
@@ -129,8 +151,11 @@ def _extract_first_img(html_text, base_url):
 def _fetch_preview_image_for_url(source_url):
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
-        resp = requests.get(source_url, timeout=8, headers=headers, allow_redirects=True)
+        resp = safe_http_request('GET', source_url, timeout=8, headers=headers, max_bytes=250_000)
         if not resp.ok:
+            return None
+        content_type = resp.headers.get('Content-Type', '').lower()
+        if content_type and not any(kind in content_type for kind in ('text/html', 'application/xhtml+xml')):
             return None
         html_text = resp.text[:250000]
         image_url = (
@@ -167,7 +192,6 @@ def _should_add_source_images(content, stats):
 
 
 def _append_source_images(content, stats):
-    import requests
     text = str(content or "")
     if not text or not _should_add_source_images(text, stats):
         return text
@@ -282,9 +306,6 @@ def _decorate_response_with_media(content, stats):
     return result, []
 
 
-from core.tools import CORE_MAP
-
-
 def _strip_tool_code_blocks(text):
     if not text:
         return text
@@ -304,10 +325,7 @@ def _parse_tool_code_fallback(text):
 
 
 # ── Web Agent Loop ─────────────────────────────────────────
-def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, initial_msgs=None):
-    global _WEB_PROMPT_PENDING, _AGENT_SESSION
-    with _app_lock:
-        _WEB_PROMPT_PENDING = None
+def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, initial_msgs=None, owner=None):
     if tools is None:
         tools = AGENT_TOOLS
     if initial_msgs is not None:
@@ -328,15 +346,6 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
                 logger.warning('Model request failed: %s', resp.get('error'))
                 return "Model provider unavailable", msgs, None, stats
             msg = resp.get("message", {})
-
-            with _app_lock:
-                if _WEB_PROMPT_PENDING:
-                    pending = _WEB_PROMPT_PENDING
-                    _WEB_PROMPT_PENDING = None
-                else:
-                    pending = None
-            if pending:
-                return None, msgs, pending, stats
 
             if not msg.get("tool_calls"):
                 raw_text = msg.get("content", "")
@@ -398,22 +407,27 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
                     func = WEB_TOOL_MAP.get(name)
                     if func:
                         try:
+                            if _tool_requires_confirmation(name, args):
+                                confirmation_id = _queue_tool_confirmation(name, args, owner)
+                                return None, msgs, {
+                                    'message': _confirmation_description(name, args),
+                                    'confirmation_id': confirmation_id,
+                                    'tool': name,
+                                    'requires_confirmation': True,
+                                }, stats
                             result = func(**args)
                             if isinstance(result, str) and result.startswith("⏳ USER_INPUT_REQUIRED"):
-                                with _app_lock:
-                                    _WEB_PROMPT_PENDING = {'message': args.get('message', result), 'secret': args.get('secret', False)}
-                                    _AGENT_SESSION = {
-                                        'msgs': msgs, 'stats': stats, 'model': model,
-                                        'tools': tools, 'max_rounds': max_rounds,
-                                        'prompt': args.get('message', result),
-                                        'secret': args.get('secret', False),
-                                    }
+                                message = args.get('message', result.replace('⏳ USER_INPUT_REQUIRED: ', ''))
+                                session_id = agent_sessions.create(owner, {
+                                    'msgs': msgs, 'stats': stats, 'model': model,
+                                    'tools': tools, 'max_rounds': max_rounds,
+                                    'prompt': message, 'secret': args.get('secret', False),
+                                })
                                 msgs.append({"role": "tool", "content": "⏳ Warte auf Antwort...", "name": "prompt_user"})
-                                return None, msgs, _WEB_PROMPT_PENDING, stats
+                                return None, msgs, {'message': message, 'session_id': session_id}, stats
                             if isinstance(result, str) and result.startswith("⏳ TOOL_CONFIRM_REQUIRED"):
-                                with _app_lock:
-                                    _WEB_PROMPT_PENDING = {'message': result.replace("⏳ TOOL_CONFIRM_REQUIRED: Bist du sicher, dass du ", "").rstrip("?") + "?"}
-                                return None, msgs, _WEB_PROMPT_PENDING, stats
+                                message = result.replace("⏳ TOOL_CONFIRM_REQUIRED: Bist du sicher, dass du ", "").rstrip("?") + "?"
+                                return None, msgs, {'message': message}, stats
                         except Exception:
                             logger.exception('Tool execution failed: %s', name)
                             result = "❌ Tool execution failed"
@@ -432,7 +446,7 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
                 })
 
                 msgs.append({
-                    "role": "tool", "content": str(result)[:8000],
+                    "role": "tool", "content": "<untrusted_tool_data>\n" + str(result)[:8000] + "\n</untrusted_tool_data>",
                     "name": name, "tool_call_id": tc.get("id", "")
                 })
 
@@ -446,7 +460,7 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
 
         # Bypass
         logger.info("Model stuck in think loop – executing SSH/API directly")
-        vault_data = json.loads(VAULT_FILE.read_text()) if VAULT_FILE.exists() else {}
+        vault_data = load_vault(VAULT_FILE) if VAULT_FILE.exists() else {}
         ip = None
         for k, v in vault_data.items():
             if k.endswith('/ip'):
@@ -499,9 +513,6 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
 
 # ── Streaming Agent Loop ───────────────────────────────────
 def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=None, owner=None):
-    global _WEB_PROMPT_PENDING, _AGENT_SESSION
-    with _app_lock:
-        _WEB_PROMPT_PENDING = None
     if tools is None:
         tools = AGENT_TOOLS
     msgs = [{"role": "system", "content": system_prompt}]
@@ -542,21 +553,6 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                     yield {"type": "error", "error": final_msg["error"]}
                     return
 
-            with _app_lock:
-                if _WEB_PROMPT_PENDING:
-                    pending = _WEB_PROMPT_PENDING
-                    _WEB_PROMPT_PENDING = None
-                    _AGENT_SESSION = {
-                        'msgs': msgs, 'stats': stats, 'model': model,
-                        'tools': tools, 'max_rounds': max_rounds,
-                        'prompt': pending['message'], 'secret': pending.get('secret', False),
-                    }
-                else:
-                    pending = None
-            if pending:
-                yield {"type": "needs_input", "message": pending['message']}
-                return
-
             if not final_msg.get("tool_calls"):
                 raw_text = final_msg.get("content", "")
                 fallback_calls = _parse_tool_code_fallback(raw_text)
@@ -590,17 +586,23 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                         func = WEB_TOOL_MAP.get(name)
                         if func:
                             try:
+                                if _tool_requires_confirmation(name, args):
+                                    confirmation_id = _queue_tool_confirmation(name, args, owner)
+                                    yield {
+                                        "type": "confirm_tool", "confirmation_id": confirmation_id,
+                                        "tool": name, "description": _confirmation_description(name, args),
+                                    }
+                                    return
                                 result = func(**args)
                                 if isinstance(result, str) and result.startswith("⏳ USER_INPUT_REQUIRED"):
-                                    with _app_lock:
-                                        _AGENT_SESSION = {
-                                            'msgs': msgs, 'stats': stats, 'model': model,
-                                            'tools': tools, 'max_rounds': max_rounds,
-                                            'prompt': args.get('message', result),
-                                            'secret': args.get('secret', False),
-                                        }
+                                    message = args.get('message', result.replace('⏳ USER_INPUT_REQUIRED: ', ''))
+                                    session_id = agent_sessions.create(owner, {
+                                        'msgs': msgs, 'stats': stats, 'model': model,
+                                        'tools': tools, 'max_rounds': max_rounds,
+                                        'prompt': message, 'secret': args.get('secret', False),
+                                    })
                                     msgs.append({"role": "tool", "content": "⏳ Warte auf Antwort...", "name": "prompt_user"})
-                                    yield {"type": "needs_input", "message": args.get('message', result)}
+                                    yield {"type": "needs_input", "message": message, "session_id": session_id}
                                     return
                                 if isinstance(result, str) and result.startswith("⏳ TOOL_CONFIRM_REQUIRED"):
                                     confirmation_id = secrets.token_urlsafe(24)
@@ -634,7 +636,7 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                                 if tx: browser_data["text_preview"] = tx.group(1)
                         yield {"type": "tool_end", "round": rnd + 1, "tool": name, "result_preview": str(result)[:2000], "duration_ms": tool_duration, "success": success, "browser": browser_data}
                         rnd_tools.append({"name": name, "args": safe_args, "duration_ms": tool_duration, "result_size": len(str(result)), "success": success, "result": str(result)[:5000]})
-                        msgs.append({"role": "tool", "content": "<data>\n" + str(result)[:8000] + "\n</data>", "name": name})
+                        msgs.append({"role": "tool", "content": "<untrusted_tool_data>\n" + str(result)[:8000] + "\n</untrusted_tool_data>", "name": name})
                     stats.append({"round": rnd + 1, "tool_count": len(tc_list), "duration_ms": int((time.time() - rnd_start) * 1000), "tools": rnd_tools})
                     yield {"type": "round_end", "round": rnd + 1, "round_stats": stats[-1]}
                     continue
@@ -693,9 +695,22 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                     func = WEB_TOOL_MAP.get(name)
                     if func:
                         try:
+                            if _tool_requires_confirmation(name, args):
+                                confirmation_id = _queue_tool_confirmation(name, args, owner)
+                                yield {
+                                    "type": "confirm_tool", "confirmation_id": confirmation_id,
+                                    "tool": name, "description": _confirmation_description(name, args),
+                                }
+                                return
                             result = func(**args)
                             if isinstance(result, str) and result.startswith("⏳ USER_INPUT_REQUIRED"):
-                                yield {"type": "needs_input", "message": args.get('message', result)}
+                                message = args.get('message', result.replace('⏳ USER_INPUT_REQUIRED: ', ''))
+                                session_id = agent_sessions.create(owner, {
+                                    'msgs': msgs, 'stats': stats, 'model': model,
+                                    'tools': tools, 'max_rounds': max_rounds,
+                                    'prompt': message, 'secret': args.get('secret', False),
+                                })
+                                yield {"type": "needs_input", "message": message, "session_id": session_id}
                                 return
                             if isinstance(result, str) and result.startswith("⏳ TOOL_CONFIRM_REQUIRED"):
                                 confirmation_id = secrets.token_urlsafe(24)
@@ -736,7 +751,7 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                 })
 
                 msgs.append({
-                    "role": "tool", "content": str(result)[:8000],
+                    "role": "tool", "content": "<untrusted_tool_data>\n" + str(result)[:8000] + "\n</untrusted_tool_data>",
                     "name": name, "tool_call_id": tc.get("id", "")
                 })
 
@@ -751,7 +766,7 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
 
         # Bypass
         logger.info("Model stuck in think loop – executing SSH/API directly")
-        vault_data = json.loads(VAULT_FILE.read_text()) if VAULT_FILE.exists() else {}
+        vault_data = load_vault(VAULT_FILE) if VAULT_FILE.exists() else {}
         ip = None
         for k, v in vault_data.items():
             if k.endswith('/ip'):
@@ -860,7 +875,7 @@ def _get_vault_keys_for_prompt():
     if not vault_file.exists():
         return ""
     try:
-        v = json.loads(vault_file.read_text())
+        v = load_vault(vault_file)
         if not v:
             return ""
         groups = {}

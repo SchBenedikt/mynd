@@ -1,12 +1,5 @@
-import json
-import os
-import threading
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from app.config import AI_CONFIG_FILE, DATA_DIR, _app_lock, logger
-from app.helpers import knowledge_base
-from app.state import INDEXING_STATUS
 from core.scheduler import AutomationEngine
 
 automation_engine = AutomationEngine({})

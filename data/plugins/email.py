@@ -1,10 +1,11 @@
 import email as eml
 import imaplib
-import json
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
+
+from core.vault import load_vault
 
 PLUGIN_NAME = "email"
 PLUGIN_DESC = "Email-Integration via IMAP + SMTP – Mehrere Konten unterstützt"
@@ -12,9 +13,7 @@ PLUGIN_DESC = "Email-Integration via IMAP + SMTP – Mehrere Konten unterstützt
 VAULT_FILE = Path(__file__).parent.parent / 'vault.json'
 
 def _vault():
-    if not VAULT_FILE.exists():
-        return {}
-    return json.loads(VAULT_FILE.read_text())
+    return load_vault(VAULT_FILE)
 
 def _vget(key):
     v = _vault()

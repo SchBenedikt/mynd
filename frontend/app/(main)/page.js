@@ -380,7 +380,7 @@ export default function HomePage() {
             clearActiveThinkTool();
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
-            setPendingUserInput({ message: event.message, chatId: targetChatId, messageId: assistantMessageId });
+            setPendingUserInput({ message: event.message, sessionId: event.session_id, chatId: targetChatId, messageId: assistantMessageId });
           } else if (event.type === 'confirm_tool') {
             clearActiveThinkTool();
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
@@ -1005,7 +1005,7 @@ export default function HomePage() {
                   setPendingUserInput(null);
                   updateMessageInChat(pendingUserInput.chatId, pendingUserInput.messageId, (msg) => ({ ...msg, content: (msg.content || '') + `\n\n\u26a0\ufe0f **KI fragt:** ${pendingUserInput.message}\n\u{1F464} **Antwort:** ${input}` }));
                   try {
-                    const res = await apiFetch('/api/agent/input', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ input }) });
+                    const res = await apiFetch('/api/agent/input', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ input, session_id: pendingUserInput.sessionId }) });
                     const data = await res.json();
                     if (data.success && data.response) { updateMessageInChat(pendingUserInput.chatId, pendingUserInput.messageId, (msg) => ({ ...msg, content: data.response, streamTrace: [...(msg.streamTrace || [])] })); }
                     else { updateMessageInChat(pendingUserInput.chatId, pendingUserInput.messageId, (msg) => ({ ...msg, content: msg.content + `\n\n\u274c Fehler: ${data.error || 'Unbekannter Fehler'}` })); }

@@ -7,8 +7,8 @@ The MYND web application is built with Next.js 16 and React 19.
 From the repository root:
 
 ```bash
-npm install
-npm run dev
+npm ci --prefix frontend
+npm run dev --prefix frontend
 ```
 
 The frontend opens at `http://localhost:3000` and connects to the backend at `http://127.0.0.1:5001`. Users can override the backend URL from the login page; the value is stored locally in the browser.
@@ -25,4 +25,4 @@ The frontend opens at `http://localhost:3000` and connects to the backend at `ht
 | `/projects` | Project organization |
 | `/knowledge-graph` | Knowledge graph visualization |
 
-Run `npm run lint` and `npm run build` before submitting frontend changes.
+From the repository root, run `npm run lint --prefix frontend` and `npm run build --prefix frontend` before submitting frontend changes. The lint command currently reports warnings without failing; new changes should not add warnings.

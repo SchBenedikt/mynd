@@ -247,9 +247,9 @@ Live snapshots, AI detection, RTSP streams, and recordings.
 
 ---
 
-## Tool Registration
+## Tool registration
 
-All tools above are registered in `AGENT_TOOLS` (app.py:123) and available to the AI model via function calling:
+The application loads the 22 core tools and all enabled plugin tools in `app/agent_loop.py`:
 
 ```
 AGENT_TOOLS = [*CORE_TOOLS, *PLUGIN_TOOLS]
@@ -257,3 +257,5 @@ WEB_TOOL_MAP = {**CORE_MAP, **PLUGIN_TOOL_MAP, 'prompt_user': web_prompt_user}
 ```
 
 **Total: 128 tools** (22 core + 106 plugin)
+
+The count describes the built-in repository state. Disabling a plugin reduces the tools available at runtime; installing a plugin can increase it.

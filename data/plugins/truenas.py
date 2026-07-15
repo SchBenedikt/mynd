@@ -4,13 +4,13 @@ from pathlib import Path
 
 import requests
 
+from core.vault import load_vault
+
 VAULT_FILE = Path(__file__).resolve().parents[1] / 'vault.json'
 
 
 def _vault():
-    if not VAULT_FILE.exists():
-        return {}
-    return json.loads(VAULT_FILE.read_text())
+    return load_vault(VAULT_FILE)
 
 
 def _find_ip():

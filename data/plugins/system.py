@@ -12,6 +12,8 @@ from pathlib import Path
 
 import requests
 
+from core.vault import load_vault
+
 TOOL_SCHEMA = True
 TIMER_FILE = Path(__file__).resolve().parents[2] / "data" / "timers.json"
 _timers_lock = threading.Lock()
@@ -382,7 +384,7 @@ def _ha_get_weather():
         vf = Path(__file__).parent.parent / 'vault.json'
         if not vf.exists():
             return None
-        v = json.loads(vf.read_text())
+        v = load_vault(vf)
         url = v.get("homeassistant/url", "")
         token = v.get("homeassistant/token", "")
         if not url or not token:
@@ -597,6 +599,21 @@ def system_save_text(filename, content, description=''):
     target.write_text(content, encoding='utf-8')
     label = f' – {description}' if description else ''
     return f'✅ Datei `{filename}` erstellt ({len(content)} Bytes){label}'
+
+
+TOOL_MAP = {
+    "system_get_info": system_get_info,
+    "system_get_disk_usage": system_get_disk_usage,
+    "system_get_processes": system_get_processes,
+    "system_get_network": system_get_network,
+    "timer_set": timer_set,
+    "timer_list": timer_list,
+    "timer_remove": timer_remove,
+    "weather_get": weather_get,
+    "weather_forecast": weather_forecast,
+    "web_search": web_search,
+    "system_save_text": system_save_text,
+}
 
 
 PROMPT_EXTRA = (

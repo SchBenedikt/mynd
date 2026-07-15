@@ -1,26 +1,18 @@
 import json
 import locale
-import os
-import re
-import time
-from datetime import UTC, date, datetime, timedelta
-from html import unescape
-from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from datetime import date, datetime, timedelta
 
 import numpy as np
-import requests
-
-from app.config import CHUNKS, DATA_DIR, EMBS, GENERATED_DIR, VAULT_FILE, logger
-from app.state import AUTH_USERS
-from core.embed import embed as _embed_fn
-from core.plugin_base import get_all_tools, get_registry
-
-from core.vault import vault_get as _vg
+from flask import jsonify
 
 import data.plugins.email as _email_module
 import data.plugins.immich as _immich_module
 import data.plugins.nextcloud as _nc_module
+from app.config import AI_CONFIG_FILE, AUTH_FILE, CHUNKS, DATA_DIR, EMBS, logger
+from app.state import AUTH_USERS
+from core.embed import embed as _embed_fn
+from core.vault import load_vault
+
 
 # ── Knowledge Base ─────────────────────────────────────────
 class KnowledgeBase:
@@ -96,7 +88,7 @@ def _build_agent_system_prompt(message, language='en'):
     vault_file = DATA_DIR / 'vault.json'
     if vault_file.exists():
         try:
-            v = json.loads(vault_file.read_text())
+            v = load_vault(vault_file)
             if v:
                 groups = {}
                 for k in v:
@@ -307,8 +299,8 @@ _SAFE_ERROR = _safe_error
 
 
 def _reset_app_data():
-    import shutil
     import secrets
+    import shutil
     for f in DATA_DIR.iterdir():
         if f.name == '.gitkeep':
             continue

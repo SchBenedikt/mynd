@@ -7,6 +7,8 @@ import time
 import pytest
 
 import app as app_module
+import app.auth as app_auth
+import app.routes as app_routes
 from app import app
 
 
@@ -55,6 +57,8 @@ class TestAuthAPI:
     def test_refresh_rotates_token(self, client, monkeypatch, tmp_path):
         auth_file = tmp_path / "auth_users.json"
         monkeypatch.setattr(app_module, "AUTH_FILE", auth_file)
+        monkeypatch.setattr(app_auth, "AUTH_FILE", auth_file)
+        monkeypatch.setattr(app_routes, "AUTH_FILE", auth_file)
         monkeypatch.setitem(
             app_module.AUTH_USERS,
             "refresh-user",
@@ -98,7 +102,7 @@ class TestKnowledgeAPI:
         assert isinstance(data, dict)
 
     def test_txt_upload_uses_server_generated_id(self, client, monkeypatch, tmp_path):
-        monkeypatch.setattr(app_module, "DATA_DIR", tmp_path)
+        monkeypatch.setattr(app_routes, "DATA_DIR", tmp_path)
         response = client.post(
             "/api/knowledge/upload-txt",
             data={"files": (io.BytesIO(b"hello"), "../user-name.txt")},
@@ -110,6 +114,25 @@ class TestKnowledgeAPI:
         assert document["name"] == "user-name.txt"
         assert (tmp_path / "text_uploads" / document["id"]).read_text() == "hello"
         assert client.delete(f"/api/knowledge/txt-files/{document['id']}").status_code == 200
+
+    def test_graph_contract_and_node_details(self, client, monkeypatch):
+        monkeypatch.setattr(
+            app_routes.knowledge_base,
+            "chunks",
+            [{"source": "Projects/Mynd/README.md", "text": "hello", "headings": []}],
+        )
+
+        response = client.get("/api/knowledge/graph")
+        assert response.status_code == 200
+        graph = response.get_json()["data"]
+        assert set(graph) == {"nodes", "edges", "stats"}
+        assert graph["stats"]["node_count"] == 2
+        document = next(node for node in graph["nodes"] if node["type"] == "document")
+
+        detail = client.get(f"/api/knowledge/graph/node/{document['id']}")
+        assert detail.status_code == 200
+        assert detail.get_json()["data"]["node"] == document
+        assert client.get("/api/knowledge/graph/node/missing").status_code == 404
 
 
 class TestSecurityAPI:

@@ -1,6 +1,6 @@
 # MYND Plugin Development Guide
 
-Plugins extend MYND with new tools the AI agent can call. Each plugin is a single `.py` file placed in `data/plugins/`. Plugins can be developed locally or installed directly from GitHub.
+Plugins extend MYND with new tools the AI agent can call. Each plugin is a reviewed `.py` file placed in `data/plugins/`. Remote installation is intentionally disabled because plugin modules execute with backend privileges; add plugin source through the normal repository review workflow.
 
 ---
 
@@ -55,6 +55,8 @@ TOOL_MAP = {
 ```
 
 Save and restart the backend — your plugin loads automatically. Run `GET /api/plugins` to verify.
+
+The examples in this guide use the canonical OpenAI function-tool envelope. Keep this format consistent across all plugins; MYND passes enabled tool definitions to the configured model provider.
 
 ---
 
@@ -242,4 +244,9 @@ Plugin configuration is stored in `data/plugins/plugin_config.json`.
 - **Use `PROMPT_EXTRA`** to inject instructions into the system prompt (e.g., "You have access to weather data")
 - **Log with `logger`** — import from `app.config` or use `print()` (stdout is captured in server logs)
 - **Test loading** — after writing your plugin, restart the server and call `GET /api/plugins` to verify
+- **Test the schema** — verify every entry contains `type: function`, a nested `function.name`, and an object-shaped JSON Schema under `function.parameters`
 - **Errors** — raise exceptions or return error strings; the agent loop catches and reports them
+
+## Security notes
+
+Plugins are Python code and run with the permissions of the MYND backend. Only install code you have reviewed and pinned to a trusted revision. Never hardcode credentials, private host details, or personal data; read secrets from the vault or environment instead. Public plugins should fail closed when required configuration is missing.
