@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import requests as _requests
 
@@ -15,8 +17,11 @@ def _request_embeddings(texts, model):
     return payload["embeddings"]
 
 
-def embed(texts, model="bge-m3:latest"):
-    """Embed texts in one request, with a compatibility fallback for old Ollama versions."""
+def embed(texts, model=None):
+    """Embed texts in one request, with a compatibility fallback for old Ollama versions.
+    Model defaults to EMBEDDING_MODEL env var, then 'nomic-embed-text'."""
+    if model is None:
+        model = os.getenv('EMBEDDING_MODEL', 'nomic-embed-text')
     try:
         return np.asarray(_request_embeddings(texts, model), dtype=np.float32)
     except (_requests.RequestException, KeyError, TypeError, ValueError):

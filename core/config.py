@@ -37,6 +37,10 @@ def _openai_cfg():
     oms = [m.strip() for m in os.environ.get("OPENAI_MODELS", "").split(",") if m.strip()]
     return ob, ok, oms
 
+def _openai_prefixes():
+    raw = os.environ.get("OPENAI_MODEL_PREFIXES", "gpt-,o1-,o3-,claude-,gemini-,minimax-")
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
 def _is_openai(model):
     ob, ok, oms = _openai_cfg()
-    return ob and (model in oms or any(model.startswith(p) for p in ['gpt-', 'o1-', 'o3-', 'claude-', 'gemini-', 'minimax-']))
+    return ob and (model in oms or any(model.startswith(p) for p in _openai_prefixes()))

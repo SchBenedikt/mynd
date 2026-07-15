@@ -1,3 +1,4 @@
+import os
 import sys
 
 import requests
@@ -10,10 +11,14 @@ if RICH:
     _PROMPT = _RichPrompt
 
 
+def _no_tool_keywords():
+    raw = os.getenv('NO_TOOL_MODEL_KEYWORDS', 'gemma,phi,tinyllama')
+    return [k.strip().lower() for k in raw.split(',') if k.strip()]
+
+
 def check_tool_support(model, base_url=None):
-    # Bekannt keine Tool-Unterstützung: gemma (auch gemma3, gemma4)
     model_lower = model.lower()
-    if any(k in model_lower for k in ['gemma', 'phi', 'tinyllama']):
+    if any(k in model_lower for k in _no_tool_keywords()):
         return False
     try:
         url = (base_url or OLLAMA).rstrip('/')

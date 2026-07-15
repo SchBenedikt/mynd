@@ -56,7 +56,8 @@ def chat_with_tools(model, msgs, tools):
         body = {"model": model, "messages": msgs, "stream": False}
         if tools:
             body["tools"] = tools
-        if model in ("minimax-m2.5:cloud",):
+        low_temp_models = [m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()]
+        if model in low_temp_models:
             body.setdefault("options", {})["temperature"] = 0.3
         r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300)
         r.raise_for_status()
@@ -121,7 +122,8 @@ def chat_with_tools_stream(model, msgs, tools):
         body = {"model": model, "messages": msgs, "stream": True}
         if tools:
             body["tools"] = tools
-        if model in ("minimax-m2.5:cloud",):
+        low_temp_models = [m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()]
+        if model in low_temp_models:
             body.setdefault("options", {})["temperature"] = 0.3
         r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300, stream=True)
         if not r.ok:

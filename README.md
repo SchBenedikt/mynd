@@ -23,7 +23,7 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 | **💬 Agentic Chat** | Streaming AI chat with tool-calling, multi-round planning, sub-agent delegation |
 | **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings) |
 | **🌐 Web Research** | DuckDuckGo search, news aggregation, multi-source research |
-| **🗺️ Browser Automation** | Headless Playwright + agent-browser CLI — open pages, click, type, scroll, extract, screenshot, PDF export |
+| **🗺️ Browser Automation** | Headless Playwright + agent-browser CLI — [128 tools total](features.md) |
 | **📷 Photo Search** | Semantic photo search via Immich |
 | **🏠 Smart Home** | Home Assistant — lights, switches, sensors, cameras, scenes, scripts |
 | **📅 Productivity** | CalDAV calendars & tasks (Nextcloud), timer reminders |
@@ -31,11 +31,11 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 | **🤖 Automations** | Cron-based automations, daily briefing, scheduled actions |
 | **🔌 Plugin System** | Extensible registry — install from GitHub, toggle at runtime |
 | **🔐 Vault** | Encrypted credential storage for API keys, passwords, configs |
-| **🧩 Sub-Agent Delegation** | `delegate()` spawns focused sub-agents for complex sub-tasks |
-| **📋 Multi-Step Planning** | `create_plan()` + `think()` auto-detect complex tasks and build structured plans |
 | **🛡️ Auth** | Password-based login, configurable registration, role-based access |
 | **🎨 Themes** | 7 color themes × light/dark/modes |
 | **🌐 Multi-language** | UI in 12 languages: DE, EN, FR, ES, IT, PT, NL, PL, TR, RU, JA, ZH |
+
+> All 128 AI-callable tools documented in **[features.md](features.md)** — agentic capabilities, browser automation, and all integrations.
 
 ---
 
@@ -94,14 +94,6 @@ mynd/
 └── tests/                  ← Backend pytest suite
 ```
 
-### Agentic Workflow
-
-```
-User query → Think() (auto-detects complexity → plan) →
-  Web research / Docs search / Browse / Delegate sub-tasks →
-  Synthesize results → Respond with sources
-```
-
 ### Data Flow
 
 ```
@@ -114,52 +106,7 @@ Browser ──HTTP/SSE──> Flask API ──> Ollama / OpenAI
                               └──> Vault (credentials, encrypted)
 ```
 
----
-
-## 🤖 Agentic Capabilities
-
-MYND uses a **multi-round tool-calling loop** with advanced agentic features:
-
-| Capability | Tool | Description |
-|---|---|---|
-| **Strategic Thinking** | `think()` | Always called first — auto-detects complexity and creates plans |
-| **Multi-Step Planning** | `create_plan()` | Structured plans with step-by-step tracking |
-| **Sub-Agent Delegation** | `delegate()` | Spawns focused sub-agents for complex sub-tasks |
-| **Web Research** | `web_search()`, `fetch_news()` | DuckDuckGo + multi-source news |
-| **Browser Automation** | `browser_*()` (29 tools) + `agent_browser()` | Open, click, type, scroll, extract, screenshot |
-| **API Access** | `http_request()` | Any REST API with Basic Auth, self-signed certs |
-| **Remote Execution** | `execute_ssh()` | Commands on remote hosts via SSH |
-| **Code Execution** | `execute_python()`, `execute_bash()` | Run code in safe sandbox or directly |
-| **Memory** | `memory_set/get/delete` | Persistent cross-session knowledge |
-| **User Interaction** | `prompt_user()` | Ask for input when uncertain |
-| **Credential Vault** | `vault_get/set/delete/list` | Encrypted storage for secrets |
-
----
-
-## 🗺️ Browser Automation (29 Playwright Tools + agent-browser)
-
-Headless Chromium via Playwright with anti-detection stealth, plus `agent-browser` CLI for quick tasks:
-
-| Tool | Purpose |
-|---|---|
-| `browser_open` | Navigate to URL with optional ad blocking & cookie consent |
-| `browser_click` / `browser_type` / `browser_select` | Interact with page elements |
-| `browser_extract` | Extract text, tables, or Markdown from current page |
-| `browser_screenshot` | Capture screenshot (full page or element) |
-| `browser_search` | Search engine query (Google, DuckDuckGo, Bing) |
-| `browser_pdf` | Export page to PDF |
-| `browser_new_tab` / `browser_switch_tab` / `browser_close_tab` | Multi-tab management |
-| `browser_scroll` / `browser_hover` / `browser_wait_for` | Navigation & waiting |
-| `browser_fill_form` | Auto-fill entire forms |
-| `browser_intercept` | Block ads / trackers via network interception |
-| `browser_cookies` / `browser_set_viewport` | Browser state management |
-| `browser_mobile_emulate` | Emulate mobile device viewports |
-| `browser_get_performance` / `browser_network_log` | Debugging & metrics |
-| `browser_get_shadow_dom` / `browser_accessibility_snapshot` | Advanced DOM access |
-| `browser_dialog_handler` | Auto-accept alerts/confirm/prompt dialogs |
-| `agent_browser()` | Simplified CLI wrapper — goto, click, type, snapshot, screenshot |
-
-Screenshots are displayed inline in the chat via `BrowserPreview` component.
+For a complete reference of all 128 AI-callable tools (agentic capabilities, browser automation, integrations), see **[features.md](features.md)**.
 
 ---
 

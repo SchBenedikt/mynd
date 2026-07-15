@@ -586,7 +586,7 @@ def delegate(task, context="", model=""):
             prompt += f"\n\nKontext:\n{context}"
         prompt += "\n\nAntworte ausführlich und präzise."
         cfg_path = Path(__file__).resolve().parent.parent / 'data' / 'ai_config.json'
-        cfg = {"model": "qwen3.6:27b", "base_url": "http://127.0.0.1:11434"}
+        cfg = {"model": os.getenv('OLLAMA_MODEL', 'gemma3:latest'), "base_url": "http://127.0.0.1:11434"}
         if cfg_path.exists():
             try:
                 c = json.loads(cfg_path.read_text())

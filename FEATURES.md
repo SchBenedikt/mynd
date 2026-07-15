@@ -4,6 +4,29 @@ This document lists **every function the AI agent can call**, grouped by categor
 
 ---
 
+## Agentic Capabilities
+
+MYND uses a **multi-round tool-calling loop** where the AI model autonomously decides which tools to invoke, processes results, and continues until a task is complete. The loop is driven by four core capabilities:
+
+| Capability | Tool | Description |
+|---|---|---|
+| **Strategic Thinking** | `think()` | Always called first — auto-detects complexity and creates plans, then executes step by step |
+| **Multi-Step Planning** | `create_plan()` | Builds structured plans with step-by-step tracking across multiple tool calls |
+| **Sub-Agent Delegation** | `delegate()` | Spawns a focused sub-agent for a complex sub-task while the main agent continues working |
+| **Web Research** | `web_search()` + `fetch_news()` + `image_search()` | DuckDuckGo search, news aggregation, image search |
+| **User Interaction** | `prompt_user()` | Ask the user for input or clarification mid-conversation |
+| **Memory** | `memory_get/set/delete` | Persistent cross-session knowledge the model can read and write |
+| **Credential Vault** | `vault_get/set/delete/list` | Encrypted storage for API keys, passwords, and configs the model can access |
+| **Remote Execution** | `execute_ssh()` | Execute commands on remote hosts via SSH |
+| **Code Execution** | `execute_python()` / `execute_bash()` | Run Python or shell code, capture stdout/stderr |
+| **API Access** | `http_request()` | Generic HTTP client for any REST API |
+| **File Operations** | `read_local_file()` / `write_local_file()` | Read and write files inside the workspace |
+| **Document Search** | `search_documents()` | Semantic search across indexed Nextcloud documents |
+
+The agent automatically decides when to browse the web, search documents, execute code, control smart home devices, or delegate sub-tasks — all in a single conversation.
+
+---
+
 ## 1. Core Agent Tools (`core/tools.py`) — 22 tools
 
 Always available. Foundation of the agentic loop.
@@ -35,9 +58,9 @@ Always available. Foundation of the agentic loop.
 
 ---
 
-## 2. Playwright Browser Automation (`browser.py`) — 29 tools
+## 2. Playwright Browser Automation (`data/plugins/browser.py`) — 29 tools
 
-Full browser automation via headless Chromium with stealth anti-detection.
+Full browser automation via headless Chromium with stealth anti-detection, ad blocking, cookie-consent dismissal, and screenshot streaming.
 
 | Tool | Description |
 |------|-------------|
@@ -70,6 +93,8 @@ Full browser automation via headless Chromium with stealth anti-detection.
 | `browser_intercept` | Configure network interception (block domains, mock responses) |
 | `browser_dialog_handler` | Auto-accept/dismiss JS dialogs (alert/confirm/prompt) |
 | `browser_accessibility_snapshot` | Get accessibility tree of current page |
+
+Screenshots are streamed to the chat UI in real time via the `BrowserPreview` component.
 
 ---
 
