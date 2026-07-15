@@ -11,6 +11,13 @@ function backendBase() {
   return 'http://127.0.0.1:5001';
 }
 
+function safeScreenshotSrc(screenshot) {
+  if (!screenshot) return '';
+  if (screenshot.toLowerCase().startsWith('javascript:')) return '';
+  if (screenshot.startsWith('http://') || screenshot.startsWith('https://')) return screenshot;
+  return `${backendBase()}/${screenshot}`;
+}
+
 export default function BrowserPreview({ screenshot, title, url, textPreview, compact = false }) {
   const [expanded, setExpanded] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -24,7 +31,7 @@ export default function BrowserPreview({ screenshot, title, url, textPreview, co
       <div className="browser-preview browser-preview--compact">
         {screenshot && !imgError && (
           <img
-            src={`${backendBase()}/${screenshot}`}
+            src={safeScreenshotSrc(screenshot)}
             alt={title || 'Browser screenshot'}
             className="browser-preview__img browser-preview__img--small"
             onError={() => setImgError(true)}
@@ -39,7 +46,7 @@ export default function BrowserPreview({ screenshot, title, url, textPreview, co
         {expanded && screenshot && !imgError && (
           <div className="browser-preview__overlay" onClick={() => setExpanded(false)}>
             <img
-              src={`${backendBase()}/${screenshot}`}
+              src={safeScreenshotSrc(screenshot)}
               alt={title || 'Browser screenshot'}
               className="browser-preview__img browser-preview__img--full"
               onError={() => setImgError(true)}
@@ -66,7 +73,7 @@ export default function BrowserPreview({ screenshot, title, url, textPreview, co
 
       {screenshot && !imgError && (
         <img
-          src={`${backendBase()}/${screenshot}`}
+          src={safeScreenshotSrc(screenshot)}
           alt={title || 'Browser screenshot'}
           className="browser-preview__img"
           onError={() => setImgError(true)}
@@ -84,7 +91,7 @@ export default function BrowserPreview({ screenshot, title, url, textPreview, co
       {expanded && screenshot && !imgError && (
         <div className="browser-preview__overlay" onClick={() => setExpanded(false)}>
           <img
-            src={`${backendBase()}/${screenshot}`}
+            src={safeScreenshotSrc(screenshot)}
             alt={title || 'Browser screenshot'}
             className="browser-preview__img browser-preview__img--full"
             onError={() => setImgError(true)}

@@ -289,11 +289,11 @@ def _strip_tool_code_blocks(text):
     if not text:
         return text
     cleaned = str(text)
-    cleaned = re.sub(r'<tool_code>.*?</tool_code>', '', cleaned)
-    cleaned = re.sub(r'<tool_code>.*?</minimax:tool_call>', '', cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r'<tool_code>[^<]*</tool_code>', '', cleaned)
+    cleaned = re.sub(r'<tool_code>[^<]*</minimax:tool_call>', '', cleaned)
     cleaned = re.sub(r'<tool[ >][^<]*</tool>', '', cleaned)
     cleaned = re.sub(r'<tool\s+[^>]*/>', '', cleaned)
-    cleaned = re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', cleaned)
+    cleaned = re.sub(r'\[TOOL_CALL\][^<]*\[/TOOL_CALL\]', '', cleaned)
     cleaned = re.sub(r'<tool_call>[^<]*</tool_call>', '', cleaned)
     return cleaned.strip()
 

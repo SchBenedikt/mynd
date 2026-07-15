@@ -407,10 +407,14 @@ def chat():
             pass
         system_prompt += no_tool_context
 
-    content, history, needs_input, research_stats = web_agent_loop(
-        ollama_client.model, message, system_prompt, max_rounds=20,
-        tools=[] if not model_has_tools else None
-    )
+    try:
+        content, history, needs_input, research_stats = web_agent_loop(
+            ollama_client.model, message, system_prompt, max_rounds=20,
+            tools=[] if not model_has_tools else None
+        )
+    except Exception:
+        logger.exception('chat() failed')
+        return jsonify({'response': '⚠️ Internal processing error'}), 500
     if needs_input:
         return jsonify({
             'response': f"⚠️ Ich benötige weitere Informationen:\n\n{needs_input['message']}",
@@ -418,7 +422,7 @@ def chat():
         })
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
-    return jsonify({'response': content, 'research_stats': research_stats})
+    return jsonify({'response': content})
 
 @app.route('/api/chat/summarize', methods=['POST'])
 def chat_summarize():
@@ -538,12 +542,16 @@ def agent_query():
         source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
     system_prompt = base_prompt + source_hint
     active_model = requested_model or ollama_client.model
-    content, history, needs_input, research_stats = web_agent_loop(active_model, prompt, system_prompt, max_rounds=100)
+    try:
+        content, history, needs_input, research_stats = web_agent_loop(active_model, prompt, system_prompt, max_rounds=100)
+    except Exception:
+        logger.exception('agent_query() failed')
+        return jsonify({'success': False, 'error': 'Internal processing error'}), 500
     if needs_input:
         return jsonify({'success': True, 'response': f"⚠️ Ich benötige weitere Informationen:\n\n{needs_input['message']}", 'requires_input': True, 'prompt_message': needs_input['message']})
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
-    return jsonify({'success': True, 'response': content, 'ui_cards': [], 'research_stats': research_stats})
+    return jsonify({'success': True, 'response': content})
 
 def _get_web_context_safe_v2(query, max_results):
     try:
@@ -572,14 +580,18 @@ def agent_input():
     tools = session['tools']
     max_rounds = session.get('max_rounds', 100)
     msgs.append({"role": "user", "content": f"👤 Der User antwortet: \"{user_input}\"\n\nVerarbeite diese Antwort nun."})
-    content, history, needs_input, research_stats = web_agent_loop(model, "", "", max_rounds=max_rounds, tools=tools, initial_msgs=msgs)
+    try:
+        content, history, needs_input, research_stats = web_agent_loop(model, "", "", max_rounds=max_rounds, tools=tools, initial_msgs=msgs)
+    except Exception:
+        logger.exception('agent_input() failed')
+        return jsonify({'success': False, 'error': 'Internal processing error'}), 500
     if needs_input:
         with _app_lock:
             _AGENT_SESSION = {'msgs': history, 'stats': research_stats, 'model': model, 'tools': tools, 'max_rounds': max_rounds, 'prompt': needs_input['message'], 'secret': False}
         return jsonify({'success': True, 'response': needs_input['message'], 'requires_input': True, 'prompt_message': needs_input['message']})
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
-    return jsonify({'success': True, 'response': content, 'research_stats': research_stats})
+    return jsonify({'success': True, 'response': content})
 
 # ── /api/generated/* ───────────────────────────────────────
 @app.route('/api/generated/<path:filename>')
@@ -1684,8 +1696,13 @@ def delete_automation(aid):
 
 @app.route('/api/automations/<aid>/test', methods=['POST'])
 def test_automation(aid):
-    result = automation_engine.run_automation(aid)
-    return jsonify(result)
+    try:
+        result = automation_engine.run_automation(aid)
+        if result.get('error'):
+            return jsonify({'success': False, 'error': result['error']})
+        return jsonify({'success': True, 'results': result.get('results', []), 'log': result.get('log', {})})
+    except Exception:
+        return jsonify({'success': False, 'error': 'Automation execution failed'}), 500
 
 @app.route('/api/automations/history', methods=['GET'])
 def list_automation_history():
