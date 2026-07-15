@@ -85,7 +85,7 @@ export default function LandingPage() {
       <section className="lp-hero">
         <div className="lp-hero-content">
           <h1 className="lp-hero-title">
-            {_('Dein', 'Your')} <em>{_('Second Brain', 'Second Brain')}</em>
+            {_('Dein', 'Your')} <em>{_('lokaler KI-Assistent', 'local AI workspace')}</em>
           </h1>
           <p className="lp-hero-sub">
             {_(
@@ -185,7 +185,7 @@ export default function LandingPage() {
       </div>
 
       <div className="lp-cta">
-        <h2>{_('Bereit für dein Second Brain?', 'Ready for your Second Brain?')}</h2>
+        <h2>{_('Bereit für deinen KI-Assistenten?', 'Ready for your AI workspace?')}</h2>
         <p>{_('Starte jetzt.', 'Start now.')}</p>
         <a href="/login" className="lp-btn lp-btn-primary">{_('Jetzt starten', 'Get Started')}</a>
       </div>
@@ -196,7 +196,7 @@ export default function LandingPage() {
             <span className="lp-logo-icon">◆</span>
             <span>MYND</span>
           </div>
-          <p>{_('Lokal. Privat. Dein Second Brain.', 'Local. Private. Your Second Brain.')}</p>
+          <p>{_('Lokal. Privat. Dein KI-Assistent.', 'Local. Private. Your AI Workspace.')}</p>
         </div>
       </footer>
     </div>

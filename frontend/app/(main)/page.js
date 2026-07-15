@@ -16,6 +16,7 @@ import MessageList from '../../components/MessageList';
 import Composer from '../../components/Composer';
 import PhotoPreviewModal from '../../components/PhotoPreviewModal';
 import ChatSummaryModal from '../../components/ChatSummaryModal';
+import DOMPurify from 'dompurify';
 import { apiFetch, getApiBase } from '../../lib/api';
 import { isChatModel, uniqueSortedModels } from '../../lib/modelUtils';
 import {
@@ -716,8 +717,8 @@ export default function HomePage() {
       const isImageParagraph = node?.children?.length > 0 && node.children.every((c) => isImg(c) || isImgLink(c) || isWhitespace(c));
       return <p className={isImageParagraph ? 'markdown-image-paragraph' : undefined} {...props}>{children}</p>;
     },
-    a: ({ href, children, ...props }) => <a href={href} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>,
-    img: ({ src, alt, ...props }) => <img {...props} src={src} alt={alt} className="chat-thumbnail" loading="lazy" />,
+    a: ({ href, children, ...props }) => <a href={DOMPurify.sanitize(href || '')} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>,
+    img: ({ src, alt, ...props }) => <img {...props} src={DOMPurify.sanitize(src || '')} alt={DOMPurify.sanitize(alt || '')} className="chat-thumbnail" loading="lazy" />,
     code: ({ className, children, inline, ...props }) => {
       if (inline) return <code className="inline-code" {...props}>{children}</code>;
       const codeString = String(children || '').replace(/\n$/, '');

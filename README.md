@@ -229,14 +229,35 @@ playwright install chromium   # for browser automation
 
 ---
 
-## 🛡️ Security
+## 🛡️ Security & Privacy
+
+### Data Locality
+
+MYND is **local-first**: your credentials, files, and configuration stay on your machine. However, some features intentionally communicate with external services:
+
+| Feature | Data Sent | External Service |
+|---|---|---|
+| **Web Search** | Search query | DuckDuckGo |
+| **News Fetch** | None (pulls RSS feeds) | Tagesschau, Heise, etc. |
+| **Web Browsing** | Target URL | Requested websites |
+| **AI Model** | Conversations | Configurable Ollama / OpenAI endpoint |
+| **Email** | Credentials + messages | Your IMAP/SMTP server |
+| **Smart Home** | API commands | Your Home Assistant instance |
+| **Immich** | Search queries | Your Immich server |
+
+> ⚠️ When using cloud-based AI providers (OpenAI, etc.), your conversation text is sent to their API. For full local operation, use Ollama with a local model.
+
+### Security
 
 - Passwords stored as **salted hashes** (werkzeug)
 - Integration credentials in **local encrypted vault**
 - **Role-based access** (admin / user)
 - **Configurable registration** — disabled by default
 - CSRF protection via token-based auth
-- All data stays **on your machine** — no cloud egress
+- All `/api/` routes authenticated by default
+- Tool confirmation required for privileged actions
+- Audit log for all privileged tool calls
+- Audit log for all privileged tool calls (`audit.jsonl`)
 
 > **Run only in a trusted environment.** MYND can execute shell commands, SSH into remote hosts, control smart home devices, and automate browsers.
 

@@ -18,7 +18,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata = {
-  title: "MYND - Second Brain",
+  title: "MYND - Local-first AI Workspace",
   description: "A local-first AI workspace for chat, knowledge, automation, and integrations"
 };
 
@@ -29,6 +29,7 @@ export default function RootLayout({ children }) {
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+        <meta httpEquiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' http://127.0.0.1:* http://localhost:* ws:; font-src 'self' https://cdnjs.cloudflare.com data:;" />
       </head>
       <body className={`${spaceGrotesk.variable} ${ibmPlexMono.variable}`}>
         <ErrorBoundary>

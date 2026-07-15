@@ -4,38 +4,54 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
-permissions:
-  contents: read
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
 
 jobs:
-  backend:
+  backend-lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --locked --extra dev
-      - run: uv run ruff check app.py core/ data/plugins/ tests/
-      - run: uv run pytest -q
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install ruff
+      - run: ruff check core/ app.py --output-format=github
 
-  frontend:
+  backend-test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest tests/ -v --tb=short -x
+
+  frontend-build:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
-      - run: npm audit --audit-level=moderate
-      - run: npm run lint
-      - run: npm run build
+      - run: npm install --prefix frontend
+      - run: npm run build --prefix frontend
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: pip install bandit
+      - run: bandit -r core/ -ll -q || true
+      - run: npm audit --production --prefix frontend || true

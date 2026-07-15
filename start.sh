@@ -5,7 +5,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
 echo "================================================"
-echo "  mynd-2new - Start Script"
+echo "  MYND - Start Script"
 echo "================================================"
 echo ""
 
