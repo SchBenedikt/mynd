@@ -33,7 +33,7 @@ export default function AuthGate({ children }) {
             .then((r) => r.json())
             .then((data) => {
               if (!cancelled && data?.authenticated && data.user) {
-                setUser({ name: data.user.name, username: data.user.username, token: storedToken });
+                setUser({ ...data.user, token: storedToken });
               }
             })
         : Promise.resolve(),
@@ -84,7 +84,7 @@ export default function AuthGate({ children }) {
           .then(r => r.json())
           .then(data => {
             if (data?.authenticated && data.user) {
-              setUser({ name: data.user.name, username: data.user.username, token: storedToken });
+              setUser({ ...data.user, token: storedToken });
               setForceOpen(false);
             }
           })

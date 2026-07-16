@@ -1,4 +1,4 @@
-.PHONY: help setup dev stop sync-index test lint frontend-lint frontend-audit typecheck clean check
+.PHONY: help setup dev stop sync-index test lint frontend-lint frontend-audit typecheck security clean check
 
 help:
 	@echo "MYND – local-first AI workspace"
@@ -52,11 +52,17 @@ frontend-audit:
 	@echo "=== Auditing frontend dependencies ==="
 	cd frontend && npm audit --audit-level=moderate
 
+security:
+	@echo "=== Running fail-closed security checks ==="
+	uv run bandit -r app/ core/ data/plugins/ -ll -q
+	uv run pip-audit --local --skip-editable
+	cd frontend && npm audit --audit-level=moderate
+
 typecheck:
 	@echo "=== Running mypy ==="
 	uv run mypy --follow-imports=skip core/vault.py core/sandbox.py app/session_store.py app/audit.py
 
-check: test lint frontend-audit frontend-lint
+check: test lint typecheck security frontend-lint
 	cd frontend && npm run build
 
 clean:

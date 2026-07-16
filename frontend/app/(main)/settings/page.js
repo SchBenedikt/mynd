@@ -28,7 +28,9 @@ const tr = (de, en, lang) => lang === 'de' ? de : en;
 
 export default function SettingsPage() {
   const { language, t } = useLanguage();
+  const { user } = useApp();
   const [activeTab, setActiveTab] = useState('profile');
+  const isAdmin = user?.role === 'admin' || user?.username === 'admin';
 
   return (
     <div className="center-area">
@@ -40,7 +42,10 @@ export default function SettingsPage() {
         </div>
         <div className="settings-body">
           <div className="settings-nav">
-            {NAV_GROUPS.map(group => (
+            {NAV_GROUPS.map(group => ({
+              ...group,
+              items: group.items.filter(item => item.key !== 'admin' || isAdmin)
+            })).filter(group => group.items.length > 0).map(group => (
               <div key={group.labelDe} className="settings-nav-group">
                 <div className="settings-nav-group-label">{language === 'de' ? group.labelDe : group.labelEn}</div>
                 {group.items.map(item => {
@@ -67,7 +72,7 @@ export default function SettingsPage() {
             {activeTab === 'indexing' && <IndexingTab tr={(d, e) => tr(d, e, language)} language={language} />}
             {activeTab === 'memory' && <MemoryTab tr={(d, e) => tr(d, e, language)} language={language} />}
             {activeTab === 'design' && <DesignTab tr={(d, e) => tr(d, e, language)} />}
-            {activeTab === 'admin' && <AdminTab tr={(d, e) => tr(d, e, language)} language={language} />}
+            {activeTab === 'admin' && isAdmin && <AdminTab tr={(d, e) => tr(d, e, language)} language={language} />}
           </div>
         </div>
       </div>

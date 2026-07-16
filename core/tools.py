@@ -55,6 +55,119 @@ CRITICAL_PATTERNS = [
 # Web confirmation hook – replaced in web mode
 _CONFIRM_TOOL_PENDING = None
 
+_TOOL_CODE_TAGS = (
+    ('<tool_code>', '</tool_code>'),
+    ('<tool_code>', '</minimax:tool_call>'),
+    ('[TOOL_CALL]', '[/TOOL_CALL]'),
+    ('<tool_call>', '</tool_call>'),
+)
+
+
+def _extract_tagged_blocks(text, opening, closing):
+    blocks = []
+    offset = 0
+    while len(blocks) < 20:
+        start = text.find(opening, offset)
+        if start < 0:
+            break
+        start += len(opening)
+        end = text.find(closing, start)
+        if end < 0:
+            break
+        blocks.append(text[start:end].strip())
+        offset = end + len(closing)
+    return blocks
+
+
+def _parse_tool_arguments(text):
+    arguments = {}
+    for match in re.finditer(
+        r'<param\s+name\s*=\s*["\']([^"\']+)["\']\s*>([^<]*)</param>',
+        text,
+    ):
+        arguments[match.group(1).strip()] = match.group(2).strip()
+    if arguments:
+        return arguments
+    for match in re.finditer(r'(\w+)\s*=\s*["\']([^"\']+)["\']', text):
+        if match.group(1) != 'name':
+            arguments[match.group(1)] = match.group(2)
+    if arguments:
+        return arguments
+    for match in re.finditer(r'--(\w+)\s+["\']([^"\']+)["\']', text):
+        arguments[match.group(1)] = match.group(2)
+    return arguments
+
+
+def _parse_tool_code_fallback(text):
+    """Parse bounded fallback tool markup emitted by models without tool calling."""
+    if not text:
+        return []
+    source = str(text)[:100_000]
+    blocks = []
+    for opening, closing in _TOOL_CODE_TAGS:
+        blocks.extend(_extract_tagged_blocks(source, opening, closing))
+    if not blocks:
+        if '<tool' not in source:
+            return []
+        blocks = [source]
+
+    known_browser_tools = {
+        'browser_click', 'browser_evaluate', 'browser_extract', 'browser_navigate',
+        'browser_open', 'browser_screenshot', 'browser_scroll', 'browser_search',
+        'browser_type',
+    }
+    calls = []
+    for block in blocks[:20]:
+        structured_calls = []
+        for match in re.finditer(
+            r'<tool\s+name\s*=\s*["\']([^"\']+)["\']\s*([^<>]*?)/>',
+            block,
+        ):
+            structured_calls.append((match.group(1), match.group(2)))
+        for match in re.finditer(
+            r'<tool\s+name\s*=\s*["\']([^"\']+)["\']\s*>([^<]*(?:<param[^>]*>[^<]*</param>[^<]*)*)</tool>',
+            block,
+        ):
+            structured_calls.append((match.group(1), match.group(2)))
+        if structured_calls:
+            for name, body in structured_calls[:20 - len(calls)]:
+                calls.append({
+                    'name': name.strip(),
+                    'args': _parse_tool_arguments(body),
+                })
+            if len(calls) >= 20:
+                break
+            continue
+
+        nested = re.search(r"tool\s*=>\s*['\"]([^'\"]+)['\"]", block)
+        if nested:
+            calls.append({
+                'name': nested.group(1).strip(),
+                'args': _parse_tool_arguments(block),
+            })
+            continue
+
+        parts = block.split()
+        if not parts:
+            continue
+        name = parts[0]
+        if name not in known_browser_tools:
+            continue
+        arguments = _parse_tool_arguments(block)
+        if not arguments:
+            if name in {'browser_open', 'browser_navigate'} and len(parts) >= 2:
+                arguments['url'] = parts[1]
+            elif name == 'browser_search' and len(parts) >= 2:
+                arguments['query'] = ' '.join(parts[1:])
+            elif name in {'browser_click', 'browser_type'} and len(parts) >= 2:
+                arguments['selector'] = parts[1]
+                if name == 'browser_type' and len(parts) >= 3:
+                    arguments['text'] = ' '.join(parts[2:])
+            elif name == 'browser_extract' and len(parts) >= 2:
+                arguments['mode'] = parts[1]
+        calls.append({'name': name, 'args': arguments})
+    return calls
+
 def _request_tool_confirmation(tool_name, description):
     """Called by tools when user confirmation is required.
     In CLI mode: interactive input().

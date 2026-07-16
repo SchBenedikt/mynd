@@ -789,11 +789,6 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const cleanChats = chats.filter(c => (c.messages?.length || 0) > 0 || c.title !== 'Neuer Chat');
-    if (cleanChats.length !== chats.length) setChats(cleanChats);
-  }, [chats, setChats]);
-
-  useEffect(() => {
     if (chats.length === 0) { const initialChat = createEmptyChat(); setChats([initialChat]); setActiveChatId(initialChat.id); return; }
     if (!activeChatId) { setActiveChatId(chats[0].id); return; }
     const urlChat = typeof window !== 'undefined' ? new URL(window.location.href).searchParams.get('chat') : null;

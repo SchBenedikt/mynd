@@ -96,7 +96,11 @@ def auth_me():
         data = AUTH_USERS[username]
         return jsonify({
             'authenticated': True,
-            'user': {'name': data.get('name', username), 'username': username}
+            'user': {
+                'name': data.get('name', username),
+                'username': username,
+                'role': data.get('role', 'user'),
+            }
         })
     return jsonify({'authenticated': False})
 
@@ -112,7 +116,11 @@ def auth_login():
         AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
         return jsonify({
             'authenticated': True,
-            'user': {'name': AUTH_USERS[username].get('name', username), 'username': username},
+            'user': {
+                'name': AUTH_USERS[username].get('name', username),
+                'username': username,
+                'role': AUTH_USERS[username].get('role', 'user'),
+            },
             'token': token
         })
     return jsonify({'authenticated': False, 'error': 'Invalid credentials'}), 401
@@ -158,7 +166,7 @@ def auth_register():
     AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
     return jsonify({
         'success': True, 'authenticated': True,
-        'user': {'name': name, 'username': username}, 'token': token
+        'user': {'name': name, 'username': username, 'role': 'user'}, 'token': token
     })
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -225,7 +233,11 @@ def auth_profile():
         data = AUTH_USERS.get(username, {})
         return jsonify({
             'success': True,
-            'user': {'username': username, 'name': data.get('name', username)}
+            'user': {
+                'username': username,
+                'name': data.get('name', username),
+                'role': data.get('role', 'user'),
+            }
         })
     data = request.json or {}
     name = data.get('name', '').strip()
@@ -236,7 +248,12 @@ def auth_profile():
         if password:
             _set_password(AUTH_USERS[username], password)
         AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
-    return jsonify({'success': True, 'user': {'username': username, 'name': name or AUTH_USERS.get(username, {}).get('name', username)}})
+    current = AUTH_USERS.get(username, {})
+    return jsonify({'success': True, 'user': {
+        'username': username,
+        'name': name or current.get('name', username),
+        'role': current.get('role', 'user'),
+    }})
 
 @app.route('/api/admin/users', methods=['GET'])
 @require_admin
@@ -2049,4 +2066,3 @@ def agent_briefing():
         return jsonify({"success": True, "briefing": briefing})
     except Exception:
         return jsonify({"success": False, "error": "Request failed"})
-

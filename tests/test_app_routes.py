@@ -10,6 +10,7 @@ import app as app_module
 import app.auth as app_auth
 import app.routes as app_routes
 from app import app
+from core.tools import _parse_tool_code_fallback
 
 
 @pytest.fixture
@@ -54,6 +55,12 @@ class TestAuthAPI:
         # Should return 401 or 200 with no user
         assert resp.status_code in (200, 401)
 
+    def test_auth_me_exposes_role_for_ui_authorization(self, client):
+        response = client.get("/api/auth/me")
+
+        assert response.status_code == 200
+        assert response.get_json()["user"]["role"] == "admin"
+
     def test_refresh_rotates_token(self, client, monkeypatch, tmp_path):
         auth_file = tmp_path / "auth_users.json"
         monkeypatch.setattr(app_module, "AUTH_FILE", auth_file)
@@ -80,6 +87,30 @@ class TestAuthAPI:
         assert client.get(
             "/api/auth/me", headers={"Authorization": f"Bearer {new_token}"}
         ).get_json()["authenticated"] is True
+
+
+class TestToolFallbackParser:
+    def test_plain_model_response_has_no_fallback_calls(self):
+        assert _parse_tool_code_fallback("OK") == []
+
+    def test_browser_tool_code_is_parsed(self):
+        text = "<tool_code>browser_open https://example.com</tool_code>"
+
+        assert _parse_tool_code_fallback(text) == [
+            {"name": "browser_open", "args": {"url": "https://example.com"}}
+        ]
+
+    def test_structured_tool_formats_are_parsed(self):
+        text = (
+            '<tool_code><tool name="memory_set" key="topic" value="safe"/></tool_code>'
+            '<tool_call><tool name="search_documents">'
+            '<param name="query">release notes</param></tool></tool_call>'
+        )
+
+        assert _parse_tool_code_fallback(text) == [
+            {'name': 'memory_set', 'args': {'key': 'topic', 'value': 'safe'}},
+            {'name': 'search_documents', 'args': {'query': 'release notes'}},
+        ]
 
 
 class TestOllamaAPI:
