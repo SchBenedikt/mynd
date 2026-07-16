@@ -109,55 +109,6 @@ export function useForms({ activeChatId, appendMessageToChat, sendMessage }) {
     setIntegrationForm(prev => ({ ...prev, visible: false, submitting: false, loginFlowRunning: false, error: '' }));
   }, []);
 
-  const runNextcloudLoginFlow = useCallback(async () => {
-    const nextcloudUrl = String(integrationForm.values?.nextcloud_url || '').trim();
-    if (!nextcloudUrl) {
-      setIntegrationForm(prev => ({ ...prev, error: 'Please enter your Nextcloud URL first.' }));
-      return;
-    }
-    setIntegrationForm(prev => ({ ...prev, loginFlowRunning: true, error: '' }));
-    try {
-      const startRes = await apiFetch('/api/nextcloud/loginflow/start', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nextcloud_url: nextcloudUrl })
-      });
-      const startData = await safeReadJson(startRes);
-      if (!startRes.ok) {
-        setIntegrationForm(prev => ({ ...prev, loginFlowRunning: false, error: startData?.error || 'Could not start Nextcloud login flow.' }));
-        return;
-      }
-      if (startData?.login_url) window.open(startData.login_url, '_blank', 'noopener,noreferrer');
-      const result = await new Promise((resolve) => {
-        let attempts = 0;
-        const maxAttempts = 120;
-        const pollInterval = setInterval(async () => {
-          attempts += 1;
-          try {
-            const pollRes = await apiFetch('/api/nextcloud/loginflow/poll');
-            const pollData = await safeReadJson(pollRes);
-            if (!pollRes.ok) { clearInterval(pollInterval); resolve({ success: false, error: pollData?.error || 'Nextcloud login failed.' }); return; }
-            if (pollData?.status === 'connected') { clearInterval(pollInterval); resolve({ success: true, data: pollData }); return; }
-            if (attempts >= maxAttempts) { clearInterval(pollInterval); resolve({ success: false, error: 'Login timed out. Please try again.' }); }
-          } catch (err) { clearInterval(pollInterval); resolve({ success: false, error: err.message || 'Login polling failed.' }); }
-        }, 2000);
-      });
-      if (!result.success) {
-        setIntegrationForm(prev => ({ ...prev, loginFlowRunning: false, error: result.error || 'Nextcloud login failed.' }));
-        return;
-      }
-      setIntegrationForm(prev => ({ ...prev, visible: false, submitting: false, loginFlowRunning: false, error: '' }));
-      if (activeChatId) {
-        appendMessageToChat(activeChatId, {
-          role: 'assistant',
-          content: `Connected to Nextcloud as ${result.data?.display_name || result.data?.username || 'user'}.`,
-          id: createMessageId()
-        });
-      }
-      if (integrationForm.originalPrompt) sendMessage(integrationForm.originalPrompt);
-    } catch (err) {
-      setIntegrationForm(prev => ({ ...prev, loginFlowRunning: false, error: `Error: ${err.message}` }));
-    }
-  }, [integrationForm, activeChatId, appendMessageToChat, sendMessage]);
-
   const submitIntegrationForm = useCallback(async (e) => {
     e.preventDefault();
     const requiredFields = integrationForm.fields.filter((field) => field?.required);
@@ -202,7 +153,6 @@ export function useForms({ activeChatId, appendMessageToChat, sendMessage }) {
   return {
     calendarForm, setCalendarForm, submitCalendarForm, closeCalendarForm, resetCalendarForm,
     taskForm, setTaskForm, submitTaskForm, closeTaskForm, resetTaskForm,
-    integrationForm, setIntegrationForm, submitIntegrationForm, closeIntegrationForm, resetIntegrationForm,
-    runNextcloudLoginFlow
+    integrationForm, setIntegrationForm, submitIntegrationForm, closeIntegrationForm, resetIntegrationForm
   };
 }

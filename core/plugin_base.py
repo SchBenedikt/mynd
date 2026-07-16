@@ -1,3 +1,4 @@
+import hashlib
 import importlib
 import json
 import logging
@@ -98,6 +99,13 @@ def validate_plugin_tools(plugin):
 
 _registry = {}
 _config_cache = {}
+
+
+def _plugin_sha256(filepath):
+    try:
+        return hashlib.sha256(Path(filepath).read_bytes()).hexdigest()
+    except Exception:
+        return None
 
 
 def get_plugin_config():
@@ -218,8 +226,9 @@ def get_all_plugins():
     result = []
     for name, plugin in _registry.items():
         s = state.get(name, {})
+        sha = _plugin_sha256(PLUGIN_DIR / f'{name}.py') if (PLUGIN_DIR / f'{name}.py').exists() else None
         if plugin is None:
-            result.append({'name': name, 'description': '', 'version': '', 'tools': [], 'tool_count': 0, 'enabled': False})
+            result.append({'name': name, 'description': '', 'version': '', 'tools': [], 'tool_count': 0, 'enabled': False, 'sha256': sha})
         else:
             result.append({
                 'name': name,
@@ -228,14 +237,18 @@ def get_all_plugins():
                 'tools': [t.get('function', {}).get('name', '') for t in getattr(plugin, 'tools', [])],
                 'tool_count': len(getattr(plugin, 'tools', [])),
                 'enabled': s.get('enabled', True),
+                'sha256': sha,
             })
     return result
 
 def set_plugin_enabled(name, enabled):
     state = get_plugin_state()
-    if name not in state:
-        state[name] = {}
-    state[name]['enabled'] = enabled
+    entry = state.get(name, {})
+    entry['enabled'] = enabled
+    sha = _plugin_sha256(PLUGIN_DIR / f'{name}.py')
+    if sha:
+        entry['sha256'] = sha
+    state[name] = entry
     save_plugin_state(state)
     reload_plugins()
 
@@ -251,7 +264,8 @@ def uninstall_plugin(name):
 def install_from_github(url):
     raise RuntimeError(
         'Remote plugin installation is disabled. Review plugin source locally '
-        'and add it through the trusted repository workflow.'
+        'and add it through the trusted repository workflow. '
+        'Once installed, plugin integrity is tracked via SHA-256 in the plugin listing.'
     )
 
 def reload_plugins():

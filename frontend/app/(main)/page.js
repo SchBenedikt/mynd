@@ -908,7 +908,7 @@ export default function HomePage() {
               submitTaskForm={forms.submitTaskForm} closeTaskForm={forms.closeTaskForm}
               integrationForm={forms.integrationForm} setIntegrationForm={forms.setIntegrationForm}
               submitIntegrationForm={forms.submitIntegrationForm} closeIntegrationForm={forms.closeIntegrationForm}
-              runNextcloudLoginFlow={forms.runNextcloudLoginFlow}
+
               openPhotoPreview={openPhotoPreview}
               onEditMessage={(msg) => { setInputValue(msg.content || ''); inputRef.current?.focus(); }}
               onCopyMessage={(text) => navigator.clipboard.writeText(text)}

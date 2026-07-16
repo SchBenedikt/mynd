@@ -306,7 +306,7 @@ def _get_capabilities():
     return {
         'chat': True, 'agent': True, 'streaming': True,
         'knowledge_graph': True, 'knowledge_status': True, 'knowledge_reload': True,
-        'calendar': True, 'tasks': True,
+        'calendar': True, 'calendar_mutating': False, 'tasks': True, 'tasks_mutating': False,
         'email': True, 'email_indexing': False,
         'nextcloud': True, 'nextcloud_login_flow': False,
         'location': True, 'briefing': True, 'automations': True,
@@ -444,16 +444,15 @@ def chat():
         wc_res, wc_err = call_with_timeout(web_search, (message,), {"max_results": 10}, timeout=8)
         if wc_res and not wc_err:
             no_tool_context = (
-                "\n\n📋 VORAB-RECHERCHE (automatisch, da dein Modell keine Tools aufrufen kann):\n"
-                f"{wc_res}\n\n"
-                "Beantworte die Frage anhand dieser Informationen. "
-                "Zitiere Quellen mit (1), (2) etc. und liste sie am Ende auf.\n"
+                "\n\n<untrusted_data type=\"web_search\">\n"
+                f"{wc_res}\n"
+                "</untrusted_data>\n\n"
             )
         try:
             from core.tools import fetch_news
             nc, _ = call_with_timeout(fetch_news, (), {"max_results": 5}, timeout=8)
             if nc and not str(nc).startswith("⚠"):
-                no_tool_context += f"\n\n📰 AKTUELLE NACHRICHTEN:\n{nc}\n"
+                no_tool_context += f"\n\n<untrusted_data type=\"news\">\n{nc}\n</untrusted_data>\n"
         except Exception:
             pass
         system_prompt += no_tool_context
@@ -528,12 +527,12 @@ def agent_query_stream():
 
     if preferred_source == 'web':
         web_context = _get_web_context_safe(prompt, 10)
-        source_hint = f"\n\n⚠️ AKTUELLE EINSTELLUNG: Internet-Suche aktiviert.\nVORAB-ERGEBNISSE:\n{web_context}\n\n"
+        source_hint = f"\n\n⚠️ Internet-Suche aktiviert.\n<untrusted_data type=\"web_search\">\n{web_context}\n</untrusted_data>\n\n"
     elif preferred_source == 'deep':
         web_context = _get_web_context_safe(prompt, 15)
-        source_hint = f"\n\n⚠️ DEEP RESEARCH MODUS aktiviert.\nVORAB-ERGEBNISSE:\n{web_context}\n\n"
+        source_hint = f"\n\n⚠️ Deep Research Modus aktiviert.\n<untrusted_data type=\"deep_search\">\n{web_context}\n</untrusted_data>\n\n"
     elif preferred_source == 'local':
-        source_hint = "\n\n⚠️ AKTUELLE EINSTELLUNG: Nur lokale Dokumente.\n"
+        source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
 
     system_prompt = base_prompt + source_hint
     active_model = requested_model or ollama_client.model
@@ -589,10 +588,10 @@ def agent_query():
     source_hint = ""
     if preferred_source == 'web':
         web_context = _get_web_context_safe_v2(prompt, 10)
-        source_hint = f"\n\n⚠️ AKTUELLE EINSTELLUNG: Internet-Suche aktiviert.\n{web_context}\n\n"
+        source_hint = f"\n\n⚠️ Internet-Suche aktiviert.\n<untrusted_data type=\"web_search\">\n{web_context}\n</untrusted_data>\n\n"
     elif preferred_source == 'deep':
         web_context = _get_web_context_safe_v2(prompt, 15)
-        source_hint = f"\n\n⚠️ DEEP RESEARCH MODUS aktiviert.\n{web_context}\n\n"
+        source_hint = f"\n\n⚠️ Deep Research Modus aktiviert.\n<untrusted_data type=\"deep_search\">\n{web_context}\n</untrusted_data>\n\n"
     elif preferred_source == 'local':
         source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
     system_prompt = base_prompt + source_hint
@@ -1438,6 +1437,20 @@ def nextcloud_oauth_config():
         'client_id_set': bool(_vg('nextcloud/client_id')),
         'client_secret_set': bool(_vg('nextcloud/client_secret')),
     })
+
+@app.route('/api/nextcloud/login', methods=['POST'])
+@require_admin
+def nextcloud_login():
+    data = request.get_json(silent=True) or {}
+    url = (data.get('nextcloud_url') or '').strip().rstrip('/')
+    username = (data.get('username') or '').strip()
+    password = data.get('password', '')
+    if not url or not username or not password:
+        return jsonify({'success': False, 'error': 'url, username and password are required'}), 400
+    vault_set('nextcloud/url', url)
+    vault_set('nextcloud/user', username)
+    vault_set('nextcloud/password', password)
+    return jsonify({'success': True, 'message': 'Nextcloud connected'})
 
 @app.route('/api/nextcloud/loginflow/start', methods=['POST'])
 def nextcloud_loginflow_start():

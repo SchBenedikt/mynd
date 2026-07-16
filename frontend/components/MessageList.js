@@ -129,7 +129,7 @@ export default function MessageList({
   messagesEndRef, sendMessage,
   calendarForm, setCalendarForm, submitCalendarForm, closeCalendarForm,
   taskForm, setTaskForm, submitTaskForm, closeTaskForm,
-  integrationForm, setIntegrationForm, submitIntegrationForm, closeIntegrationForm, runNextcloudLoginFlow,
+  integrationForm, setIntegrationForm, submitIntegrationForm, closeIntegrationForm,
   openPhotoPreview, onEditMessage, onCopyMessage,
   theme, darkMode, contrastColor, setTheme, setDarkMode, setContrastColor,
   DESIGN_COLOR_PRESETS, THEME_LABEL_KEY,

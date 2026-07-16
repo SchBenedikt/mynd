@@ -46,6 +46,7 @@ export function AppProvider({ children }) {
   const [health, setHealth] = useState({ ollama: 'unknown', kb: 'unknown', embeddings: 'unknown' });
   const [projects, setProjects] = useState(loadProjects);
   const [activeProject, setActiveProject] = useState(null);
+  const [capabilities, setCapabilities] = useState(null);
 
   useEffect(() => {
     const token = (() => { try { return localStorage.getItem('mynd_token_v1'); } catch(e) { return null; } })();
@@ -54,6 +55,13 @@ export function AppProvider({ children }) {
       .then(r => r.json())
       .then(data => { if (data?.authenticated && data.user) setUser(data.user); })
       .catch(() => setUser(null));
+  }, []);
+
+  useEffect(() => {
+    apiFetch('/api/capabilities')
+      .then(r => r.json())
+      .then(data => { if (data?.success && data.capabilities) setCapabilities(data.capabilities); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -110,9 +118,10 @@ export function AppProvider({ children }) {
     showSettings, setShowSettings,
     user, setUser, health, setHealth,
     projects, setProjects, activeProject, setActiveProject,
+    capabilities, setCapabilities,
     startNewChat, openChat, deleteChat, renameChat, assignProjectToChat
   }), [
-    chats, activeChatId, showSettings, user, health, projects, activeProject,
+    chats, activeChatId, showSettings, user, health, projects, activeProject, capabilities,
     startNewChat, openChat, deleteChat, renameChat, assignProjectToChat
   ]);
 
