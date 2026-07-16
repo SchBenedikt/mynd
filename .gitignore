@@ -56,3 +56,4 @@ screenshots/*
 !screenshots/app-main.png
 !screenshots/chat-response.png
 quadratische_funktion.xlsx
+dogfood-output/
