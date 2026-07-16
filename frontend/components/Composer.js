@@ -66,7 +66,7 @@ export default function Composer({
           value={inputValue}
           placeholder={''}
           onChange={(e) => setInputValue(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && !e.ctrlKey && onSend(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && !e.ctrlKey && onSend(e.target.value)}
         />
         <button
           type="button"

@@ -83,12 +83,16 @@ export default function HomePage() {
 
   const appendMessageToChat = useCallback((chatId, message, originalUserText = null) => {
     const now = Date.now();
-    setChats((prevChats) => prevChats.map((chat) => {
-      if (chat.id !== chatId) return chat;
-      const nextMessages = [...(chat.messages || []), message];
-      const shouldUpdateTitle = chat.title === 'Neuer Chat' && message.role === 'user' && originalUserText;
-      return { ...chat, messages: nextMessages, title: shouldUpdateTitle ? buildChatTitleFromText(originalUserText) : chat.title, updatedAt: now };
-    }));
+    setChats((prevChats) => {
+      const found = prevChats.some(c => c.id === chatId);
+      if (!found) return prevChats;
+      return prevChats.map((chat) => {
+        if (chat.id !== chatId) return chat;
+        const nextMessages = [...(chat.messages || []), message];
+        const shouldUpdateTitle = chat.title === 'Neuer Chat' && message.role === 'user' && originalUserText;
+        return { ...chat, messages: nextMessages, title: shouldUpdateTitle ? buildChatTitleFromText(originalUserText) : chat.title, updatedAt: now };
+      });
+    });
   }, [setChats]);
 
   const updateMessageInChat = useCallback((chatId, messageId, updater) => {
@@ -244,7 +248,7 @@ export default function HomePage() {
       const targetId = activeChatId || createEmptyChat().id;
       if (!activeChatId) {
         const newChat = createEmptyChat();
-        setChats([newChat]);
+        setChats(prev => [newChat, ...prev]);
         setActiveChatId(newChat.id);
         queueMessage(text, newChat.id, { fromVoice: options.fromVoice });
         return;
@@ -256,7 +260,7 @@ export default function HomePage() {
     let targetChatId = options.chatId || activeChatId;
     if (!targetChatId) {
       const newChat = createEmptyChat();
-      setChats([newChat]);
+      setChats(prev => [newChat, ...prev]);
       setActiveChatId(newChat.id);
       targetChatId = newChat.id;
     }

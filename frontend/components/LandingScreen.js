@@ -50,7 +50,7 @@ export default function LandingScreen({
             value={inputValue}
             placeholder={t('askPlaceholder')}
             onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && onSend(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && onSend(e.target.value)}
           />
           <button type="button" className={`voice-btn ${isListening ? 'listening' : ''}`}
             onClick={onStartVoiceInput}
