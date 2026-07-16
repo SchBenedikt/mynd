@@ -65,7 +65,9 @@ def _linux_command(argv, cwd, allow_network):
         '--tmpfs', '/tmp',  # nosec B108
         '--bind', str(cwd), str(cwd), '--chdir', str(cwd),
     ]
-    for path in ('/usr', '/bin', '/lib', '/lib64', '/etc'):
+    # Hosted Python installations (including GitHub Actions) live below /opt.
+    # Bind it read-only so the sandbox can execute the current interpreter.
+    for path in ('/usr', '/bin', '/lib', '/lib64', '/etc', '/opt'):
         if Path(path).exists():
             command.extend(['--ro-bind', path, path])
     if not allow_network:

@@ -21,8 +21,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: pip install ruff
-      - run: ruff check app.py app/ core/ data/plugins/ tests/ --output-format=github
+      - run: pip install uv
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check app.py app/ core/ data/plugins/ tests/ --output-format=github
 
   test:
     runs-on: ubuntu-latest
@@ -31,9 +32,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install and enable Bubblewrap sandboxing
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: pip install uv
-      - run: uv sync --locked --dev
+      - run: uv sync --locked --extra dev
       - run: uv run pytest tests/ -v --tb=short --timeout=30 -x
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install uv
+      - run: uv sync --locked --extra dev
+      - run: uv run mypy --follow-imports=skip core/vault.py core/sandbox.py app/session_store.py app/audit.py
 
   frontend-build:
     runs-on: ubuntu-latest
@@ -57,6 +74,45 @@ jobs:
         working-directory: frontend
       - run: npm run lint --prefix frontend
 
+  browser-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: pip install uv
+      - run: uv sync --locked --extra dev
+      - run: uv run playwright install --with-deps chromium
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build --prefix frontend
+      - name: Start application
+        run: |
+          uv run python app.py > backend.log 2>&1 &
+          python -m http.server 3000 --directory frontend/out > frontend.log 2>&1 &
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:5001/api/health >/dev/null \
+              && curl --fail --silent http://127.0.0.1:3000/login.html >/dev/null \
+              && exit 0
+            sleep 1
+          done
+          cat backend.log frontend.log
+          exit 1
+      - run: uv run pytest tests/test_browser_smoke.py -v --tb=short --timeout=60
+        env:
+          MYND_BROWSER_BASE_URL: http://127.0.0.1:3000
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-smoke-logs
+          path: |
+            backend.log
+            frontend.log
+
   security:
     runs-on: ubuntu-latest
     steps:
@@ -64,8 +120,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - run: pip install bandit
-      - run: bandit -r app/ core/ data/plugins/ -ll -q
+      - run: pip install uv
+      - run: uv sync --locked --extra dev
+      - run: uv run bandit -r app/ core/ data/plugins/ -ll -q
+      - run: uv run pip-audit --local --skip-editable
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
