@@ -10,8 +10,11 @@ help:
 	@echo ""
 	@echo "  make test             Run all backend tests (pytest)"
 	@echo "  make test-fast        Run tests without network-dependent ones"
-	@echo "  make frontend-lint    Run Next.js build check"
+	@echo "  make lint             Run Ruff (backend)"
+	@echo "  make frontend-lint    Run ESLint with zero warnings allowed"
 	@echo "  make typecheck        Run mypy type-checking (backend)"
+	@echo "  make security         Run Bandit and dependency audits"
+	@echo "  make check            Run the complete local CI suite"
 	@echo "  make clean            Remove __pycache__, .pytest_cache, .next"
 
 setup:

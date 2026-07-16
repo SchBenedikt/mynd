@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { usePathname, useRouter } from 'next/navigation';
 import './AuthGate.css';
 import { apiFetch } from '../lib/api';
@@ -17,12 +17,12 @@ export default function AuthGate({ children }) {
   const [forceOpen, setForceOpen] = useState(false);
   const lastReplaceRef = useRef(0);
 
-  const guardedReplace = (url) => {
+  const guardedReplace = useCallback((url) => {
     const now = Date.now();
     if (now - lastReplaceRef.current < 2000) return;
     lastReplaceRef.current = now;
     router.replace(url);
-  };
+  }, [router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,21 +48,21 @@ export default function AuthGate({ children }) {
     ]).finally(() => { if (!cancelled) setReady(true); });
 
     return () => { cancelled = true; };
-  }, []);
+  }, [guardedReplace, pathname]);
 
   useEffect(() => {
     if (!ready) return;
     if (setupRequired && pathname !== '/setup') {
       guardedReplace('/setup');
     }
-  }, [ready, pathname, setupRequired]);
+  }, [ready, pathname, setupRequired, guardedReplace]);
 
   useEffect(() => {
     const langSet = (() => { try { return !!localStorage.getItem(LANGUAGE_KEY); } catch(e) { return true; } })();
     if (!langSet && pathname !== '/language') {
       guardedReplace('/language');
     }
-  }, [pathname]);
+  }, [pathname, guardedReplace]);
 
   useEffect(() => {
     const openHandler = () => {
@@ -110,7 +110,7 @@ export default function AuthGate({ children }) {
     if (pathname === '/language' || pathname?.startsWith('/setup') || pathname === '/login') return;
     if (user && !forceOpen) return;
     guardedReplace('/login');
-  }, [ready, pathname, user, forceOpen]);
+  }, [ready, pathname, user, forceOpen, guardedReplace]);
 
   if (!ready) return (
     <div className="authgate-skeleton">

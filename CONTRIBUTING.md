@@ -23,7 +23,7 @@ make dev
 2. Run `make check` locally before pushing.
 3. Keep changes focused — one feature or fix per PR.
 
-`make check` runs backend tests, Ruff, the frontend dependency audit, ESLint, and the production frontend build. Browser integration tests are excluded by the default pytest configuration and should be run explicitly when browser code changes.
+`make check` runs backend tests, Ruff, focused mypy checks, Bandit, Python and frontend dependency audits, ESLint with a zero-warning budget, and the production frontend build. Install Chromium with `uv run playwright install chromium` and run the browser smoke test when browser code changes; CI also runs it as a dedicated required check.
 
 ## Commit Messages
 

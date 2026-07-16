@@ -1,9 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { apiFetch, getApiBase } from '../../lib/api';
-
-const API_BASE = () => getApiBase();
+import { apiFetch } from '../../lib/api';
 const EMAIL_INDEXING_ENABLED = false;
 
 export default function IndexingTab({ tr, language }) {

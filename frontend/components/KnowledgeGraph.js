@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import styles from './KnowledgeGraph.module.css';
-import { apiFetch, getApiBase } from '../lib/api';
+import { apiFetch } from '../lib/api';
 
 const NodeTypeColors = {
   person: '#4F46E5',
@@ -111,6 +111,8 @@ export default function KnowledgeGraphComponent() {
         clearTimeout(refreshTimerRef.current);
       }
     };
+  // Initial graph loading is intentionally tied to mounting; refreshes are scheduled separately.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch related node data
@@ -288,6 +290,8 @@ export default function KnowledgeGraphComponent() {
         .attr('y', d => d.y);
     });
 
+  // D3 owns the rendered graph between data/filter changes; handler identity alone must not rebuild it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graphData, selectedTypes]);
 
   if (loading) {

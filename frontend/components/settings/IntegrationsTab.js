@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiFetch, getApiBase } from '../../lib/api';
+import { apiFetch } from '../../lib/api';
 
 const INTEGRATIONS = [
   { id: 'email',     icon: 'fas fa-envelope',   labelDe: 'E-Mail (IMAP/SMTP)',  labelEn: 'Email (IMAP/SMTP)' },
@@ -42,7 +42,6 @@ const FIELD_DEFS = {
 export default function IntegrationsTab({ tr, language }) {
   const [activeInt, setActiveInt] = useState('email');
   const [values, setValues] = useState({});
-  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
@@ -61,7 +60,6 @@ export default function IntegrationsTab({ tr, language }) {
       for (const e of entries) map[e.key] = e.value;
       setValues(map);
     } catch (e) { /* ignore */ }
-    setLoaded(true);
   };
 
   const loadPlugins = async () => {

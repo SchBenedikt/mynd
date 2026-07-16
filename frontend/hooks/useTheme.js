@@ -24,9 +24,7 @@ export function useTheme() {
   const [contrastColor, setContrastColorState] = useState(initial.contrastColor);
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') || 'gold';
     const savedDarkMode = localStorage.getItem('darkMode') || 'auto';
-    const savedContrast = localStorage.getItem('contrastColor');
 
     applyDarkMode(savedDarkMode);
 

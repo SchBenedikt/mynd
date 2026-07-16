@@ -1,9 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { apiFetch, getApiBase } from '../../lib/api';
-
-const API_BASE = () => getApiBase();
+import { apiFetch } from '../../lib/api';
 
 export default function ApiRefsTab({ tr, language }) {
   const [apiRefsContent, setApiRefsContent] = useState('');
@@ -49,6 +47,8 @@ export default function ApiRefsTab({ tr, language }) {
 
   useEffect(() => {
     loadApiRefs();
+  // Load the editor contents once when the settings tab mounts.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

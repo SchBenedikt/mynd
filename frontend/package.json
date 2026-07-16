@@ -6,7 +6,7 @@
     "dev": "next dev --hostname 0.0.0.0 -p 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint . --max-warnings=0"
   },
   "dependencies": {
     "@google/genai": "^1.48.0",

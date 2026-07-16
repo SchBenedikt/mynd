@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { apiFetch, getApiBase } from '../../lib/api';
+import { apiFetch } from '../../lib/api';
 
 function getAuthHeaders() {
   try {

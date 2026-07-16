@@ -2,11 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTheme } from '../../hooks/useTheme';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useSidebar } from '../../hooks/useSidebar';
 
-const SIDEBAR_COLLAPSED_KEY = 'mynd_sidebar_collapsed_v1';
 const PROJECTS_STORAGE_KEY = 'mynd_projects_v1';
 const CHAT_STORAGE_KEY = 'mynd_chat_history_v1';
 const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
@@ -21,8 +19,7 @@ function loadChats() {
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const { theme, darkMode, setTheme, setDarkMode } = useTheme();
-  const { language, setLanguage, t, languages } = useLanguage();
+  const { language, t } = useLanguage();
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
 
   const { isSidebarCollapsed, toggleSidebar, canAnimate } = useSidebar();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { apiFetch, getApiBase } from '../lib/api';
+import { apiFetch } from '../lib/api';
 
 const TOKEN_KEY = 'mynd_token_v1';
 const STORAGE_KEY = 'mynd_user_v1';

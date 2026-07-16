@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState } from 'react';
 import { useLanguage } from '../hooks/useLanguage';
 import { useApp } from '../lib/AppContext';
 import IntegrationsTab from './settings/IntegrationsTab';

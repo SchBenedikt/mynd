@@ -48,7 +48,7 @@ cd mynd
 # Install locked backend dependencies and frontend packages
 make setup
 
-# Optional: install Chromium for browser automation
+# Optional: install Chromium for browser automation and smoke tests
 uv run playwright install chromium
 
 # Start both
@@ -57,7 +57,7 @@ make dev
 
 Open **http://localhost:3000**. The API runs at `http://127.0.0.1:5001`.
 
-On first launch, the admin password is printed to the backend log. Change it immediately in **Settings → Profile**.
+On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log.
 
 ---
 
@@ -65,7 +65,10 @@ On first launch, the admin password is printed to the backend log. Change it imm
 
 - **Python** 3.12+
 - **Node.js** 22+ / npm 10+
+- **uv** — locked Python dependency management
 - **Ollama** (optional) — for local embeddings & inference
+- **Chromium via Playwright** (optional) — browser automation and smoke tests
+- **bubblewrap** (Linux, recommended) — OS-level isolation for shell and Python tools
 
 ---
 
@@ -167,6 +170,8 @@ Most configuration is available from the web UI:
 make test              # Backend tests (pytest)
 make lint              # Python lint (Ruff)
 make frontend-lint     # Frontend lint (ESLint)
+make security          # Bandit and dependency vulnerability audits
+make typecheck         # Focused backend type checks
 make check             # Full CI check
 make clean             # Remove caches & build output
 ```
@@ -208,6 +213,7 @@ MYND is **local-first** in the sense that application state, credentials, files,
 - **Configurable registration** — disabled by default
 - All `/api/` routes authenticated by default
 - Configurable confirmation modes for privileged tools
+- Workspace-restricted file access and optional bubblewrap sandboxing on Linux
 - Audit log for all privileged tool calls (`data/audit.jsonl`)
 
 > Existing plaintext vaults are encrypted automatically on first access. Back up the external vault key separately; losing it makes the encrypted vault unrecoverable.
