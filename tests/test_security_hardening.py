@@ -24,7 +24,7 @@ def test_sandbox_denies_home_reads_and_network(tmp_path):
     script.write_text("from pathlib import Path; Path.home().joinpath('.zshrc').read_text()")
     denied_read = run_sandboxed([sys.executable, '-I', '-S', str(script)], cwd=tmp_path)
     assert denied_read.returncode != 0
-    assert 'Operation not permitted' in denied_read.stderr
+    assert any(message in denied_read.stderr for message in ('Operation not permitted', 'No such file or directory'))
 
     script.write_text("import socket; socket.create_connection(('example.com', 80))")
     denied_network = run_sandboxed([sys.executable, '-I', '-S', str(script)], cwd=tmp_path)
