@@ -5,7 +5,7 @@ import pytest
 
 import app.audit as audit
 from app.agent_loop import _tool_requires_confirmation
-from core.sandbox import run_sandboxed
+from core.sandbox import _linux_command, run_sandboxed
 from core.tools import _validate_http_url
 
 
@@ -29,6 +29,15 @@ def test_sandbox_denies_home_reads_and_network(tmp_path):
     script.write_text("import socket; socket.create_connection(('example.com', 80))")
     denied_network = run_sandboxed([sys.executable, '-I', '-S', str(script)], cwd=tmp_path)
     assert denied_network.returncode != 0
+
+
+def test_linux_sandbox_mounts_hosted_python_read_only(monkeypatch, tmp_path):
+    monkeypatch.setattr('core.sandbox.shutil.which', lambda name: '/usr/bin/bwrap')
+
+    command = _linux_command(['/opt/python/bin/python', '-V'], tmp_path, False)
+
+    assert command[command.index('/opt') - 1] == '--ro-bind'
+    assert command[command.index('/opt') + 1] == '/opt'
 
 
 def test_audit_redacts_nested_secrets_and_omits_results(monkeypatch, tmp_path):
