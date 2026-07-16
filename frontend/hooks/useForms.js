@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { createMessageId, safeReadJson, parseBackendDateTimeToInput, formatDateTimeForBackend } from '../lib/pageUtils';
+import { createMessageId, safeReadJson, formatDateTimeForBackend } from '../lib/pageUtils';
 import { apiFetch } from '../lib/api';
 
 const defaultCalendarForm = {

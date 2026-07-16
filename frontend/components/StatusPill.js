@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { apiFetch, getApiBase } from '../lib/api';
+import { apiFetch } from '../lib/api';
 
 export default function StatusPill() {
   const [status, setStatus] = useState({ ollama: 'unknown', kb: 'unknown' });

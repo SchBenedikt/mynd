@@ -7,7 +7,7 @@ import { useSidebar } from '../hooks/useSidebar';
 import { useLanguage } from '../hooks/useLanguage';
 import SearchPopup from './SearchModal';
 import ChatContextMenu from './ChatContextMenu';
-import { apiFetch, getApiBase } from '../lib/api';
+import { apiFetch } from '../lib/api';
 
 const DAY_MS = 86400000;
 const WEEK_MS = 7 * DAY_MS;
@@ -17,10 +17,9 @@ export default function Sidebar() {
   const {
     chats, activeChatId, projects,
     openChat, startNewChat, deleteChat, renameChat,
-    assignProjectToChat, user, health,
-    setShowSettings
+    assignProjectToChat, user, health
   } = useApp();
-  const { isSidebarCollapsed, toggleSidebar, canAnimate } = useSidebar();
+  const { isSidebarCollapsed, toggleSidebar } = useSidebar();
   const { language, t } = useLanguage();
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
   const router = useRouter();

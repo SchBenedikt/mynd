@@ -1,9 +1,6 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useTheme } from '../../hooks/useTheme';
@@ -22,50 +19,42 @@ import { isChatModel, uniqueSortedModels } from '../../lib/modelUtils';
 import {
   CHAT_STORAGE_KEY, ACTIVE_CHAT_STORAGE_KEY, DISPLAY_NAME_STORAGE_KEY,
   BRIEFING_SEEN_KEY, TTS_PROVIDER_STORAGE_KEY, LOCATION_AUTO_RESOLVE_KEY,
-  createChatId, createMessageId, createEmptyChat, buildChatTitleFromText,
-  safeReadJson, buildFriendlyChatErrorMessage, getTodayDateTimeForInputs,
+  createMessageId, buildChatTitleFromText,
+  safeReadJson, buildFriendlyChatErrorMessage,
   normalizeTtsProvider, LANGUAGE_COMMANDS, THEME_COMMANDS, MODE_COMMANDS,
   NAMED_COLOR_COMMANDS, THEME_LABEL_KEY, DESIGN_COLOR_PRESETS
 } from '../../lib/pageUtils';
 
 export default function HomePage() {
-  const router = useRouter();
   const { theme, darkMode, contrastColor, setTheme, setDarkMode, setContrastColor } = useTheme();
-  const { language, setLanguage, t, languages } = useLanguage();
+  const { language, setLanguage, t } = useLanguage();
   const tr = useCallback((deText, enText) => (language === 'de' ? deText : enText), [language]);
-  const { chats, setChats, activeChatId, setActiveChatId, user, setUser, health, setHealth, projects, setProjects, activeProject, setActiveProject } = useApp();
+  const { chats, setChats, activeChatId, setActiveChatId, setUser, setHealth, projects, setProjects, activeProject, setActiveProject } = useApp();
 
   const sendMessageRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
-  const progressIntervalRef = useRef(null);
   const requestAbortRef = useRef(null);
 
   const voice = useVoice({ language, onTranscriptRef: sendMessageRef });
 
-  const [aiProtocol, setAiProtocol] = useState('http');
-  const [aiHost, setAiHost] = useState('127.0.0.1');
-  const [aiPort, setAiPort] = useState('11434');
-  const [aiModel, setAiModel] = useState('');
   const [aiModels, setAiModels] = useState([]);
   const [model, setModel] = useState('');
-  const [aiStatus, setAiStatus] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [personalGreeting, setPersonalGreeting] = useState('');
 
   const [securityStatus, setSecurityStatus] = useState(null);
   const [securityLoading, setSecurityLoading] = useState(false);
   const [proactiveBriefings, setProactiveBriefings] = useState([]);
-  const [indexingProgress, setIndexingProgress] = useState(0);
-  const [indexingStatus, setIndexingStatus] = useState('idle');
-  const [indexingStats, setIndexingStats] = useState('');
-  const [indexingDetails, setIndexingDetails] = useState({
+  const indexingProgress = 0;
+  const indexingStatus = 'idle';
+  const indexingStats = '';
+  const indexingDetails = {
     currentFile: '', processedFiles: 0, totalFiles: 0, elapsedTime: 0,
     errors: [], chunksCreated: 0, documentsProcessed: 0, processingSpeed: 0,
     lastIndexingStart: 0, lastIndexingEnd: 0, lastIndexingDuration: 0
-  });
+  };
 
-  const [searchQuery, setSearchQuery] = useState('');
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [, setGreetingTick] = useState(0);
   const [liveTools, setLiveTools] = useState({});
@@ -89,11 +78,8 @@ export default function HomePage() {
   });
 
   const activeChat = chats.find((chat) => chat.id === activeChatId) || null;
-  const messages = activeChat?.messages || [];
+  const messages = useMemo(() => activeChat?.messages || [], [activeChat]);
   const conversationActive = messages.length > 0;
-  const weatherInfo = securityStatus?.weather || null;
-
-  const languageLabel = useCallback((code) => languages.find((l) => l.code === code)?.label || code, [languages]);
 
   const appendMessageToChat = useCallback((chatId, message, originalUserText = null) => {
     const now = Date.now();
@@ -170,6 +156,8 @@ export default function HomePage() {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
+  // Geolocation is deliberately requested once per page lifetime; the latest status loader is used by the callback.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const normalizeText = useCallback((value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), []);
@@ -401,6 +389,8 @@ export default function HomePage() {
       setUploadedFiles([]);
       requestAbortRef.current = null;
     }
+  // The streaming request callback owns a single request snapshot; changing helper identities must not restart it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isThinking, activeChatId, chats, language, model, source, uploadedFiles, voice.speakAssistantText]);
 
   sendMessageRef.current = sendMessage;
@@ -442,24 +432,6 @@ export default function HomePage() {
 
   const forms = useForms({ activeChatId, appendMessageToChat, sendMessage });
 
-  const startNewChat = useCallback((sourceMode) => {
-    const newChat = createEmptyChat();
-    setChats((prev) => [newChat, ...prev]);
-    setActiveChatId(newChat.id);
-    if (sourceMode) setSource(sourceMode);
-    forms.resetCalendarForm();
-    forms.resetTaskForm();
-    forms.resetIntegrationForm();
-  }, [setChats, setActiveChatId, setSource, forms]);
-
-  const openChat = useCallback((chatId) => {
-    setActiveChatId(chatId);
-    forms.resetCalendarForm();
-    forms.resetTaskForm();
-    forms.resetIntegrationForm();
-    router.push(`/chat/${chatId}`, { scroll: false });
-  }, [setActiveChatId, forms, router]);
-
   const summarizeChat = useCallback(async (chatId, options = {}) => {
     const chat = chats.find((item) => item.id === chatId);
     if (!chat) return;
@@ -489,74 +461,11 @@ export default function HomePage() {
     } catch (err) { setChatSummaryPanel((prev) => ({ ...prev, loading: false, error: `Zusammenfassung fehlgeschlagen: ${err.message}` })); }
   }, [chats, language, setChats]);
 
-  const renameChat = useCallback((chatId) => {
-    const chat = chats.find((item) => item.id === chatId);
-    if (!chat) return;
-    const nextTitle = window.prompt('Chat umbenennen:', chat.title);
-    if (!nextTitle || !nextTitle.trim()) return;
-    const trimmed = nextTitle.trim();
-    setChats((prevChats) => prevChats.map((item) => (item.id === chatId ? { ...item, title: trimmed, updatedAt: Date.now() } : item)));
-  }, [chats, setChats]);
-
-  const deleteChat = useCallback((chatId) => {
-    const chat = chats.find((item) => item.id === chatId);
-    if (!chat) return;
-    const confirmed = window.confirm(`Chat "${chat.title}" wirklich loeschen?`);
-    if (!confirmed) return;
-    if (chatId === activeChatId) { forms.resetCalendarForm(); forms.resetTaskForm(); forms.resetIntegrationForm(); }
-    setChats((prevChats) => {
-      const remaining = prevChats.filter((item) => item.id !== chatId);
-      if (!remaining.length) { const newChat = createEmptyChat(); setActiveChatId(newChat.id); return [newChat]; }
-      if (chatId === activeChatId) setActiveChatId(remaining[0].id);
-      return remaining;
-    });
-  }, [chats, activeChatId, setChats, setActiveChatId, forms]);
-
-  const assignProjectToChat = useCallback((chatId, projectId) => {
-    setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, project: projectId } : c)));
-  }, [setChats]);
-
-  const sortedChats = useMemo(() => [...chats]
-    .filter(c => !activeProject || c.project === activeProject)
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
-  [chats, activeProject]);
-
-  const getWeekStart = useCallback((value) => {
-    const date = new Date(value.getFullYear(), value.getMonth(), value.getDate());
-    const day = date.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    date.setDate(date.getDate() + diff);
-    return date;
-  }, []);
-
-  const getChatGroupLabel = useCallback((chat) => {
-    const ts = chat.updatedAt || chat.createdAt || 0;
-    if (!ts) return 'Aelter';
-    const now = new Date();
-    const lastUpdated = new Date(ts);
-    const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfYesterday = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
-    const startOfWeek = getWeekStart(now);
-    const startOfLastWeek = new Date(startOfWeek.getTime() - 7 * 24 * 60 * 60 * 1000);
-    if (lastUpdated >= hourAgo) return 'Letzte Stunde';
-    if (lastUpdated >= startOfToday) return 'Heute';
-    if (lastUpdated >= startOfYesterday) return 'Gestern';
-    if (lastUpdated >= startOfWeek) return 'Diese Woche';
-    if (lastUpdated >= startOfLastWeek) return 'Letzte Woche';
-    return 'Aelter';
-  }, [getWeekStart]);
-
   const loadAIConfig = useCallback(async () => {
     try {
       const res = await apiFetch('/api/ai/config');
       const config = await safeReadJson(res);
       if (!res.ok || !config?.base_url) throw new Error(config?.error || `Request failed with status ${res.status}`);
-      const url = new URL(config.base_url);
-      setAiProtocol(url.protocol.replace(':', ''));
-      setAiHost(url.hostname);
-      setAiPort(url.port || '11434');
-      setAiModel(config.model);
       setModel(config.model);
       const hasServerTtsProvider = Object.prototype.hasOwnProperty.call(config, 'tts_provider');
       const storedTtsProvider = typeof window !== 'undefined' ? window.localStorage.getItem(TTS_PROVIDER_STORAGE_KEY) : '';
@@ -564,8 +473,7 @@ export default function HomePage() {
       voice.setTtsProvider(resolvedTtsProvider);
       if (typeof window !== 'undefined') window.localStorage.setItem(TTS_PROVIDER_STORAGE_KEY, resolvedTtsProvider);
       voice.setSelectedVoiceUri(String(config.browser_tts_voice_uri || ''));
-      setAiStatus('Loaded');
-    } catch (err) { setAiStatus('Error loading config'); }
+    } catch (err) { console.error('Error loading AI config:', err); }
   }, [voice]);
 
   const loadOllamaModels = useCallback(async () => {
@@ -575,17 +483,6 @@ export default function HomePage() {
       setAiModels(uniqueSortedModels(data.models).filter(isChatModel));
     } catch (err) { console.error('Error loading models:', err); }
   }, []);
-
-  const saveAIConfig = useCallback(async () => {
-    try {
-      const baseUrl = `${aiProtocol}://${aiHost}:${aiPort}`;
-      const res = await apiFetch('/api/ai/config', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base_url: baseUrl, model: aiModel })
-      });
-      if (res.ok) { setAiStatus('Saved successfully'); updateStatus(); }
-      else setAiStatus('Error saving');
-    } catch (err) { setAiStatus('Error: ' + err.message); }
-  }, [aiProtocol, aiHost, aiPort, aiModel]);
 
   const updateStatus = useCallback(async () => {
     try {
@@ -629,49 +526,6 @@ export default function HomePage() {
       setProactiveBriefings(items.filter((item) => item?.content));
     } catch (err) { console.error('Could not load proactive briefings:', err); }
   }, []);
-
-  const startIndexing = useCallback(async () => {
-    try {
-      const configRes = await apiFetch('/api/indexing/config');
-      if (configRes.ok) {
-        const config = await configRes.json();
-        if (!config.url || !config.username) { setIndexingStatus('error: Nextcloud configuration required. Please configure in Settings first.'); return; }
-      }
-      const res = await apiFetch('/api/indexing/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-      if (res.ok) {
-        setIndexingStatus('running');
-        if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = setInterval(async () => {
-          try {
-            const pres = await apiFetch('/api/indexing/progress');
-            if (pres.ok) {
-              const data = await pres.json();
-              setIndexingProgress(Math.round(data.progress_percentage || 0));
-              const processingSpeed = data.elapsed_time > 0 ? (data.processed_files / data.elapsed_time).toFixed(1) : 0;
-              setIndexingDetails({
-                currentFile: data.current_file || '', processedFiles: data.processed_files || 0, totalFiles: data.total_files || 0,
-                elapsedTime: Math.round(data.elapsed_time) || 0, errors: data.errors || [], chunksCreated: 0,
-                documentsProcessed: data.processed_files || 0, processingSpeed: parseFloat(processingSpeed),
-                lastIndexingStart: data.last_indexing_start || 0, lastIndexingEnd: data.last_indexing_end || 0, lastIndexingDuration: data.last_indexing_duration || 0
-              });
-              const timeRemaining = data.progress_percentage > 0 && data.elapsed_time > 0
-                ? Math.round((data.elapsed_time / data.progress_percentage) * (100 - data.progress_percentage)) : 0;
-              setIndexingStats(`${data.processed_files || 0}/${data.total_files || 0} ${t('files').toLowerCase()} | ${Math.round(data.elapsed_time || 0)}s ${t('elapsed').toLowerCase()} | ${processingSpeed} ${t('files').toLowerCase()}/s | ${timeRemaining > 0 ? `~${timeRemaining}s` : '...'}`);
-              if (data.status === 'completed' || data.status === 'error') {
-                setIndexingStatus(data.status);
-                if (data.status === 'completed') setIndexingDetails(prev => ({ ...prev, chunksCreated: data.processed_files * 10 }));
-                clearInterval(progressIntervalRef.current);
-              }
-            } else if (pres.status === 500) { console.error('Server error during indexing progress check'); setIndexingStatus('error: Server error'); clearInterval(progressIntervalRef.current); }
-            else { console.error('Unexpected response:', pres.status, pres.statusText); const errorText = await pres.text(); console.error('Error response:', errorText); setIndexingStatus(`error: ${pres.status}`); }
-          } catch (err) {
-            console.error('Update progress error:', err);
-            if (err.message.includes('JSON')) { setIndexingStatus('error: Invalid response from server'); clearInterval(progressIntervalRef.current); }
-          }
-        }, 500);
-      } else { const data = await res.json(); setIndexingStatus('error: ' + data.error); }
-    } catch (err) { setIndexingStatus('error: ' + err.message); }
-  }, [t]);
 
   const getImageDownloadUrl = useCallback((thumbnailUrl) => {
     if (!thumbnailUrl) return '';
@@ -737,12 +591,6 @@ export default function HomePage() {
     }
   }), []);
 
-  const renderWeatherMiniIcon = useCallback((iconType) => {
-    if (iconType === 'rain') return <span className="weather-mini-icon rain" aria-hidden="true"><i className="fas fa-cloud"></i><span className="rain-drop drop-1"></span><span className="rain-drop drop-2"></span><span className="rain-drop drop-3"></span></span>;
-    if (iconType === 'cloud') return <span className="weather-mini-icon cloud" aria-hidden="true"><i className="fas fa-cloud"></i></span>;
-    return <span className="weather-mini-icon sun" aria-hidden="true"><i className="fas fa-sun"></i></span>;
-  }, []);
-
   useEffect(() => {
     if (!messagesEndRef.current) return;
     const el = messagesEndRef.current;
@@ -771,6 +619,8 @@ export default function HomePage() {
     const securityInterval = setInterval(loadSecurityStatus, 60000);
     const briefingInterval = setInterval(loadProactiveBriefings, 10 * 60 * 1000);
     return () => { clearInterval(statusInterval); clearInterval(securityInterval); clearInterval(briefingInterval); window.removeEventListener('popstate', onPop); };
+  // Bootstrap and polling are installed once and cleaned up on unmount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

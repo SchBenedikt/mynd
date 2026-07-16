@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import './setup/SetupWizard.css';
-import { apiFetch, getApiBase } from '../lib/api';
+import { apiFetch } from '../lib/api';
 
 const SETUP_FLOW_KEY = 'mynd_setup_flow_v1';
 
@@ -32,8 +32,6 @@ export default function SetupWizard() {
     baseUrl: 'http://127.0.0.1:11434', model: '', embeddingModel: ''
   });
   const [aiModels, setAiModels] = useState([]);
-  const [aiSaving, setAiSaving] = useState(false);
-  const [aiDone, setAiDone] = useState(false);
   const [authConfigForm, setAuthConfigForm] = useState({
     allowRegistration: false, requireLogin: true
   });
@@ -74,7 +72,7 @@ export default function SetupWizard() {
   }, [setupMode, nextcloudConfigLoaded]);
 
   useEffect(() => {
-    if (setupMode === 'ai' && aiModels.length === 0 && !aiDone) {
+    if (setupMode === 'ai' && aiModels.length === 0) {
       apiFetch('/api/ollama/models')
         .then(r => r.json())
         .then(data => setAiModels(Array.isArray(data?.models) ? data.models : []))
@@ -88,7 +86,7 @@ export default function SetupWizard() {
         })
         .catch((e) => console.warn('System config:', e?.message));
     }
-  }, [setupMode, aiModels, aiDone]);
+  }, [setupMode, aiModels]);
 
   const setupAlreadyFinished = Boolean(setupStatus && !setupStatus.needs_setup && !setupFlowStarted);
   useEffect(() => { if (setupAlreadyFinished) router.replace('/'); }, [setupAlreadyFinished, router]);

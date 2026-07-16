@@ -1,9 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { apiFetch, getApiBase } from '../../lib/api';
-
-const API_BASE = () => getApiBase();
+import { apiFetch } from '../../lib/api';
 
 export default function VaultTab({ tr, language }) {
   const [vaultEntries, setVaultEntries] = useState([]);
@@ -75,6 +73,8 @@ export default function VaultTab({ tr, language }) {
 
   useEffect(() => {
     loadVaultEntries();
+  // Load vault metadata once when the tab mounts.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

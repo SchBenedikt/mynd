@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { apiFetch, getApiBase } from '../../lib/api';
+import { apiFetch } from '../../lib/api';
 
 export default function MemoryTab({ tr, language }) {
   const [items, setItems] = useState([]);
@@ -68,6 +68,8 @@ export default function MemoryTab({ tr, language }) {
 
   useEffect(() => {
     loadMemory();
+  // Load persistent memory once when the tab mounts.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

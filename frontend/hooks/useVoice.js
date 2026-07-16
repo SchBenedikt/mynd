@@ -243,6 +243,8 @@ export function useVoice({ language, onTranscriptRef }) {
 
     if (ttsProvider === 'gemini') { speakWithGemini(); return; }
     speakWithBrowser();
+  // Playback helpers operate on refs and the current request; changing their function identity must not recreate speech mid-flight.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language, stopAudioPlayback, speechCapabilities.output, selectedVoiceUri, ttsProvider]);
 
   const startVoiceInput = useCallback(() => {
@@ -265,11 +267,9 @@ export function useVoice({ language, onTranscriptRef }) {
     recognition.maxAlternatives = 1;
     recognition.onstart = () => { setVoiceError(''); setIsListening(true); };
     recognition.onresult = (event) => {
-      let interimTranscript = '';
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const text = event.results[i][0]?.transcript || '';
         if (event.results[i].isFinal) finalTranscript += ` ${text}`;
-        else interimTranscript += ` ${text}`;
       }
     };
     recognition.onerror = (event) => {

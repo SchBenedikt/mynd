@@ -7,7 +7,12 @@ const eslintConfig = [
   ...nextVitals,
   {
     rules: {
-      'no-unused-vars': 'warn',
+      'no-unused-vars': ['error', {
+        args: 'none',
+        caughtErrors: 'none',
+        destructuredArrayIgnorePattern: '^_',
+      }],
+      'react-hooks/exhaustive-deps': 'error',
       'no-console': 'off',
       'react/no-unescaped-entities': 'off',
       '@next/next/no-img-element': 'off',

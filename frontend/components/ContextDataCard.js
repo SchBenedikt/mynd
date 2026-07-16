@@ -142,7 +142,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
     return () => {
       cancelled = true;
     };
-  }, [fetchUrl, isPhoto, isWeather]);
+  }, [fetchUrl, isContacts, isEmail, isPhoto, isWeather]);
 
   const weatherDays = Array.isArray(card?.forecast_days) ? card.forecast_days : [];
   const safeWeatherIndex = weatherDays.length > 0 ? Math.max(0, Math.min(weatherIndex, weatherDays.length - 1)) : 0;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { apiFetch, getApiBase } from '../lib/api';
+import { apiFetch } from '../lib/api';
 
 const safeReadJson = async (response) => {
   const text = await response.text();
@@ -44,7 +44,6 @@ export default function SuggestionsPanel({
   // Start with sensible defaults so UI is immediately responsive
   const [suggestions, setSuggestions] = useState(getDefaultSuggestions(language || 'de'));
   const [loading, setLoading] = useState(false);
-  const [timePeriod, setTimePeriod] = useState('morning');
   const [isPersonalized, setIsPersonalized] = useState(false);
 
   useEffect(() => {
@@ -55,6 +54,8 @@ export default function SuggestionsPanel({
     const interval = setInterval(fetchSuggestions, 30 * 60 * 1000);
 
     return () => clearInterval(interval);
+  // Refresh only when the inputs that change suggestion content change; the interval owns subsequent refreshes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language, chatHistory?.length]);
 
   const fetchSuggestions = async () => {
@@ -84,7 +85,6 @@ export default function SuggestionsPanel({
         if (filtered.length > 0) {
           setSuggestions(filtered);
         }
-        setTimePeriod(data.time_period || 'morning');
         setIsPersonalized(data.personalized || false);
       }
       // else: keep existing defaults

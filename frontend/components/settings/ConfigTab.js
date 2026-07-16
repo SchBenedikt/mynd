@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { apiFetch, getApiBase } from '../../lib/api';
+import { apiFetch } from '../../lib/api';
 import {
   getModelBaseName,
   normalizeModelName,
@@ -44,7 +43,6 @@ const geminiVoices = [
 ];
 
 export default function ConfigTab({ tr, language }) {
-  const router = useRouter();
   const [aiProtocol, setAiProtocol] = useState('http');
   const [aiHost, setAiHost] = useState('127.0.0.1');
   const [aiPort, setAiPort] = useState('11434');
@@ -349,13 +347,15 @@ export default function ConfigTab({ tr, language }) {
       loadEmbeddingStatus();
     }, 8000);
     return () => clearInterval(statusInterval);
+  // Configuration bootstrap and its polling interval are installed once and cleaned up on unmount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!aiModels.length) return;
     setAiModel((currentValue) => resolveModelOption(aiModelOptions, currentValue));
     setEmbeddingModel((currentValue) => resolveModelOption(embeddingModelOptions, currentValue));
-  }, [aiModels]);
+  }, [aiModels, aiModelOptions, embeddingModelOptions]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

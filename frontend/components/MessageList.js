@@ -47,7 +47,6 @@ function CollapsibleSources({ sources }) {
 }
 
 function LiveTools({ tools, thinking }) {
-  const hasTools = Array.isArray(tools) && tools.length > 0;
   const mergedThinking = (tools || []).filter(t => t.tool === 'think').map(t => t.args?.thought || '').join('').trim() || (thinking || '').trim();
   const actionTools = (tools || []).filter(t => t.tool !== 'think' && t.tool !== 'status');
   if (actionTools.length === 0 && !mergedThinking) return null;

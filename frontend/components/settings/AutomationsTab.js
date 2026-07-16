@@ -1,9 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { apiFetch, getApiBase } from '../../lib/api';
-
-const API_BASE = () => getApiBase();
+import { apiFetch } from '../../lib/api';
 
 export default function AutomationsTab({ tr, language }) {
   const [automations, setAutomations] = useState([]);
