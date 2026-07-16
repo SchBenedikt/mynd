@@ -19,7 +19,7 @@ import { isChatModel, uniqueSortedModels } from '../../lib/modelUtils';
 import {
   CHAT_STORAGE_KEY, ACTIVE_CHAT_STORAGE_KEY, DISPLAY_NAME_STORAGE_KEY,
   BRIEFING_SEEN_KEY, TTS_PROVIDER_STORAGE_KEY, LOCATION_AUTO_RESOLVE_KEY,
-  createMessageId, buildChatTitleFromText,
+  createMessageId, createEmptyChat, buildChatTitleFromText,
   safeReadJson, buildFriendlyChatErrorMessage,
   normalizeTtsProvider, LANGUAGE_COMMANDS, THEME_COMMANDS, MODE_COMMANDS,
   NAMED_COLOR_COMMANDS, THEME_LABEL_KEY, DESIGN_COLOR_PRESETS
@@ -273,6 +273,7 @@ export default function HomePage() {
     setIsThinking(true);
     const abortController = new AbortController();
     requestAbortRef.current = abortController;
+    let assistantMessageId = null;
     try {
       const currentMessages = chats.find((chat) => chat.id === targetChatId)?.messages || [];
       const contextMessages = options.messageId ? currentMessages : [...currentMessages, { role: 'user', content: text, id: userMessageId }];
@@ -302,7 +303,7 @@ export default function HomePage() {
         insertMessageAfter(targetChatId, userMessageId, { role: 'assistant', content: errorMessage, id: createMessageId() });
         return;
       }
-      const assistantMessageId = createMessageId();
+      assistantMessageId = createMessageId();
       insertMessageAfter(targetChatId, userMessageId, { role: 'assistant', content: '', id: assistantMessageId });
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -373,7 +374,13 @@ export default function HomePage() {
             clearActiveThinkTool();
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
-            setPendingToolConfirm({ confirmationId: event.confirmation_id, tool: event.tool, description: event.description });
+            setPendingToolConfirm({
+              confirmationId: event.confirmation_id,
+              tool: event.tool,
+              description: event.description,
+              chatId: targetChatId,
+              messageId: assistantMessageId,
+            });
           }
         }
       }
@@ -383,7 +390,11 @@ export default function HomePage() {
       const friendlyMessage = isTimeout
         ? '\u26a0\ufe0f Die Anfrage hat zu lange gedauert. Bitte versuche es mit einer k\u00fcrzeren oder einfacheren Formulierung erneut.'
         : (err?.message || '\u26a0\ufe0f Die Anfrage konnte nicht verarbeitet werden. Bitte versuche es erneut.');
-      updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: (msg.content || '') + '\n\n' + friendlyMessage }));
+      if (assistantMessageId) {
+        updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: (msg.content || '') + '\n\n' + friendlyMessage }));
+      } else {
+        insertMessageAfter(targetChatId, userMessageId, { role: 'assistant', content: friendlyMessage, id: createMessageId() });
+      }
     } finally {
       setIsThinking(false);
       setUploadedFiles([]);
@@ -887,8 +898,10 @@ export default function HomePage() {
                   try {
                     const res = await apiFetch('/api/tool/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ confirmation_id: toolInfo.confirmationId, confirmed: true }) });
                     const data = await res.json();
-                    if (data.success) { insertMessageAfter(activeChatId, userMessageId, { role: 'assistant', content: `✅ Tool ausgef\u00fchrt:\n\`\`\`\n${data.result}\n\`\`\``, id: createMessageId() }); }
-                    else { insertMessageAfter(activeChatId, userMessageId, { role: 'assistant', content: `\u274c Fehler: ${data.error}`, id: createMessageId() }); }
+                    const resultContent = data.success
+                      ? `✅ Tool ausgef\u00fchrt:\n\`\`\`\n${data.result}\n\`\`\``
+                      : `\u274c Fehler: ${data.error}`;
+                    updateMessageInChat(toolInfo.chatId, toolInfo.messageId, (msg) => ({ ...msg, content: resultContent }));
                   } catch (e) { console.error('Tool confirm error:', e); }
                 }}>
                   <i className="fas fa-check"></i> {tr('Erlauben', 'Allow')}

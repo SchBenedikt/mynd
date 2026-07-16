@@ -12,6 +12,7 @@ const eslintConfig = [
         caughtErrors: 'none',
         destructuredArrayIgnorePattern: '^_',
       }],
+      'no-undef': 'error',
       'react-hooks/exhaustive-deps': 'error',
       'no-console': 'off',
       'react/no-unescaped-entities': 'off',
