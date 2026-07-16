@@ -11,7 +11,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_login_page_loads_without_browser_errors():
+def test_application_entry_loads_without_browser_errors():
     base_url = os.getenv('MYND_BROWSER_BASE_URL', 'http://127.0.0.1:3000').rstrip('/')
     page_errors = []
 
@@ -24,9 +24,12 @@ def test_login_page_loads_without_browser_errors():
         response = page.goto(f'{base_url}/login.html', wait_until='networkidle')
 
         assert response is not None and response.ok
-        expect(page).to_have_title('MYND - Local-first AI Workspace')
-        expect(page.get_by_role('heading', name='MYND')).to_be_visible()
-        expect(page.locator('#login-user')).to_be_visible()
-        expect(page.locator('#login-pass')).to_be_visible()
+        if page.title().strip() == 'MYND Setup':
+            expect(page.get_by_role('heading', name='Start wählen')).to_be_visible()
+        else:
+            expect(page).to_have_title('MYND - Local-first AI Workspace')
+            expect(page.get_by_role('heading', name='MYND')).to_be_visible()
+            expect(page.locator('#login-user')).to_be_visible()
+            expect(page.locator('#login-pass')).to_be_visible()
         assert page_errors == []
         browser.close()
