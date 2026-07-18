@@ -27,6 +27,12 @@ def test_application_entry_loads_without_browser_errors():
 
         response = page.goto(f'{base_url}/login', wait_until='networkidle')
 
+        # Python's static CI server prefers the generated ``login/`` directory
+        # over Next's sibling ``login.html`` export. Follow the exported page
+        # explicitly when that server returns a directory listing.
+        if page.title().startswith('Directory listing for /login'):
+            response = page.goto(f'{base_url}/login.html', wait_until='networkidle')
+
         assert response is not None and response.ok
         if page.title().strip() == 'MYND Setup | MYND':
             expect(page.get_by_role('heading', name='Start wählen')).to_be_visible()
