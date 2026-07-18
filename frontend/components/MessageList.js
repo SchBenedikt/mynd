@@ -165,7 +165,7 @@ export default function MessageList({
 
           return (
           <div key={msg.id} className={`message ${msg.role} ${msg.queued ? 'queued' : ''}`}>
-            <div className="bubble" data-msg-id={msg.id}>
+            <div className={`bubble${msg.isStreaming ? ' streaming' : ''}`} data-msg-id={msg.id}>
               {msg.role === 'assistant' && <LiveTools tools={trace} thinking={msg.thinking} />}
               {msg.role === 'assistant' && msg.researchStats && msg.researchStats.length > 0 && (
                 <ResearchStats stats={msg.researchStats} />

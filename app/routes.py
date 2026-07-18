@@ -39,6 +39,7 @@ from app.config import (
     AI_CONFIG_FILE,
     AUTH_CONFIG_FILE,
     AUTH_FILE,
+    BROWSER_DOWNLOADS_DIR,
     BROWSER_SCREENSHOTS_DIR,
     CHUNKS,
     DATA_DIR,
@@ -692,6 +693,15 @@ def serve_generated(filename):
 @require_auth
 def serve_browser_screenshot(filename):
     root = BROWSER_SCREENSHOTS_DIR.resolve()
+    candidate = (root / filename).resolve(strict=False)
+    if candidate != root and root not in candidate.parents:
+        return jsonify({'success': False, 'error': 'Forbidden'}), 403
+    return send_from_directory(root, candidate.relative_to(root))
+
+@require_auth
+@app.route('/data/browser_downloads/<path:filename>')
+def serve_browser_download(filename):
+    root = BROWSER_DOWNLOADS_DIR.resolve()
     candidate = (root / filename).resolve(strict=False)
     if candidate != root and root not in candidate.parents:
         return jsonify({'success': False, 'error': 'Forbidden'}), 403

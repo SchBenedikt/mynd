@@ -116,6 +116,17 @@ def _ensure_browser():
     )
     tl.context.set_default_timeout(15000)
     tl.context.set_default_navigation_timeout(30000)
+    # Auto-download handler: save files to browser_downloads/
+    def _handle_download(download):
+        _download_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r'[^\w\.\-]', '_', download.suggested_filename)
+        fpath = _download_dir / safe_name
+        try:
+            download.save_as(str(fpath))
+            logger.info("Download saved: %s", safe_name)
+        except Exception as e:
+            logger.warning("Download failed: %s", e)
+    tl.context.on("download", _handle_download)
     tl.pages = {}
     tl.active_tab = None
     _screenshot_dir.mkdir(parents=True, exist_ok=True)
@@ -1030,20 +1041,59 @@ def browser_pdf() -> str:
     with _browser_lock:
         page = _get_page()
         try:
-            _screenshot_dir.mkdir(parents=True, exist_ok=True)
+            _download_dir.mkdir(parents=True, exist_ok=True)
             ts = int(time.time() * 1000)
             fname = f"page_{ts}.pdf"
-            fpath = _screenshot_dir / fname
+            fpath = _download_dir / fname
             page.pdf(path=str(fpath), format="A4", print_background=True,
                      margin={"top": "1cm", "bottom": "1cm", "left": "1cm", "right": "1cm"})
             return json.dumps({
                 "success": True,
-                "pdf": f"data/browser_screenshots/{fname}",
+                "pdf": f"data/browser_downloads/{fname}",
                 "url": page.url,
                 "title": page.title(),
             })
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
+
+
+def browser_list_downloads():
+    """Liste alle heruntergeladenen Dateien im Download-Verzeichnis."""
+    try:
+        _download_dir.mkdir(parents=True, exist_ok=True)
+        files = sorted(_download_dir.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True)
+        if not files:
+            return json.dumps({"success": True, "files": [], "count": 0})
+        result = []
+        for f in files:
+            stat = f.stat()
+            result.append({
+                "name": f.name,
+                "size": stat.st_size,
+                "modified": stat.st_mtime,
+                "path": f"data/browser_downloads/{f.name}",
+            })
+        return json.dumps({"success": True, "files": result, "count": len(result)}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def browser_get_download(filename):
+    """Hole den Pfad einer bestimmten heruntergeladenen Datei."""
+    try:
+        _download_dir.mkdir(parents=True, exist_ok=True)
+        safe = re.sub(r'[^\w\.\-]', '_', filename)
+        fpath = _download_dir / safe
+        if not fpath.exists():
+            return json.dumps({"success": False, "error": f"Datei nicht gefunden: {filename}"})
+        return json.dumps({
+            "success": True,
+            "name": fpath.name,
+            "path": f"data/browser_downloads/{fpath.name}",
+            "size": fpath.stat().st_size,
+        }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
 
 
 def browser_cookies(action: str = "get", name: str = "", value: str = "",
@@ -1438,6 +1488,8 @@ _TOOLS = [
     {"type": "function", "function": {"name": "browser_close_tab", "description": "Close tab.", "parameters": {"type": "object", "properties": {"tab_id": {"type": "string"}}}}},
     {"type": "function", "function": {"name": "browser_fill_form", "description": "Fill multiple form fields at once.", "parameters": {"type": "object", "properties": {"form_selector": {"type": "string"}, "fields": {"type": "string", "description": "JSON: {\"#email\": \"val\"}"}}, "required": ["fields"]}}},
     {"type": "function", "function": {"name": "browser_pdf", "description": "Save page as PDF.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "browser_list_downloads", "description": "Liste alle heruntergeladenen Dateien auf.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "browser_get_download", "description": "Hole den Pfad einer heruntergeladenen Datei.", "parameters": {"type": "object", "properties": {"filename": {"type": "string", "description": "Dateiname"}}, "required": ["filename"]}}},
     {
         "type": "function",
         "function": {
@@ -1525,6 +1577,8 @@ _TOOL_MAP = {
     "browser_close_tab": browser_close_tab,
     "browser_fill_form": browser_fill_form,
     "browser_pdf": browser_pdf,
+    "browser_list_downloads": browser_list_downloads,
+    "browser_get_download": browser_get_download,
     "browser_cookies": browser_cookies,
     "browser_set_viewport": browser_set_viewport,
     "browser_get_performance": browser_get_performance,
@@ -1579,6 +1633,10 @@ ADVANCED:
   browser_dialog_handler(auto_accept?)
   browser_accessibility_snapshot()
   browser_pdf()
+  browser_list_downloads() / browser_get_download(filename) — manage downloads
+
+DOWNLOADS: Files are auto-saved to data/browser_downloads/ when clicking download links.
+Use browser_list_downloads() to see all downloaded files, browser_get_download() to get a path.
 
 CSS selectors: 'button.submit', '#email', 'input[name="q"]', 'a[href="/about"]'
 Tip: browser_search() first, then browser_open() for detailed content.

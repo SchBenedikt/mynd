@@ -24,7 +24,6 @@ const INTEGRATIONS = [
   { icon: 'fa-camera', name: 'Immich' },
   { icon: 'fa-cloud', name: 'Nextcloud' },
   { icon: 'fa-database', name: 'TrueNAS' },
-  { icon: 'fa-video', name: 'Reolink' },
   { icon: 'fa-envelope', name: 'E-Mail' },
   { icon: 'fa-code', name: 'Python' },
   { icon: 'fa-docker', name: 'Docker' },

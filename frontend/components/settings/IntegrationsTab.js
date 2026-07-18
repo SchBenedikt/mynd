@@ -4,11 +4,15 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api';
 
 const INTEGRATIONS = [
-  { id: 'email',     icon: 'fas fa-envelope',   labelDe: 'E-Mail (IMAP/SMTP)',  labelEn: 'Email (IMAP/SMTP)' },
-  { id: 'immich',    icon: 'fas fa-camera',      labelDe: 'Immich',              labelEn: 'Immich' },
-  { id: 'truenas',   icon: 'fas fa-server',      labelDe: 'TrueNAS',             labelEn: 'TrueNAS' },
-  { id: 'server',    icon: 'fas fa-terminal',    labelDe: 'Server',              labelEn: 'Server' },
-  { id: 'plugins',   icon: 'fas fa-puzzle-piece', labelDe: 'Plugin Manager',     labelEn: 'Plugin Manager' },
+  { id: 'email',         icon: 'fas fa-envelope',      labelDe: 'E-Mail (IMAP/SMTP)', labelEn: 'Email (IMAP/SMTP)' },
+  { id: 'immich',        icon: 'fas fa-camera',         labelDe: 'Immich',             labelEn: 'Immich' },
+  { id: 'nextcloud',     icon: 'fas fa-cloud',          labelDe: 'Nextcloud',           labelEn: 'Nextcloud' },
+  { id: 'homeassistant', icon: 'fas fa-home',           labelDe: 'Home Assistant',      labelEn: 'Home Assistant' },
+  { id: 'truenas',       icon: 'fas fa-server',         labelDe: 'TrueNAS',             labelEn: 'TrueNAS' },
+  { id: 'server',        icon: 'fas fa-terminal',       labelDe: 'Server (SSH)',        labelEn: 'Server (SSH)' },
+  { id: 'spotify',       icon: 'fab fa-spotify',        labelDe: 'Spotify',             labelEn: 'Spotify' },
+  { id: 'discord',       icon: 'fab fa-discord',        labelDe: 'Discord',             labelEn: 'Discord' },
+  { id: 'plugins',       icon: 'fas fa-puzzle-piece',   labelDe: 'Plugin Manager',      labelEn: 'Plugin Manager' },
 ];
 
 const FIELD_DEFS = {
@@ -26,6 +30,15 @@ const FIELD_DEFS = {
     { key: 'immich/url',    labelDe: 'Immich URL',     labelEn: 'Immich URL',    type: 'text', placeholder: 'https://immich.example.org' },
     { key: 'immich/api_key', labelDe: 'API-Key',        labelEn: 'API Key',       type: 'password' },
   ],
+  nextcloud: [
+    { key: 'nextcloud/url',      labelDe: 'Nextcloud URL',      labelEn: 'Nextcloud URL',      type: 'text', placeholder: 'https://nc.example.org' },
+    { key: 'nextcloud/user',     labelDe: 'Nextcloud Benutzer',  labelEn: 'Nextcloud User',     type: 'text' },
+    { key: 'nextcloud/password', labelDe: 'Nextcloud Passwort',  labelEn: 'Nextcloud Password', type: 'password' },
+  ],
+  homeassistant: [
+    { key: 'homeassistant/url',   labelDe: 'Home Assistant URL', labelEn: 'Home Assistant URL', type: 'text', placeholder: 'http://192.168.178.44:8123' },
+    { key: 'homeassistant/token', labelDe: 'Langzeit-Zugriffstoken', labelEn: 'Long-Lived Access Token', type: 'password' },
+  ],
   truenas: [
     { key: 'truenas/ip',       labelDe: 'TrueNAS IP',       labelEn: 'TrueNAS IP',       type: 'text', placeholder: '192.168.178.44' },
     { key: 'truenas/user',     labelDe: 'TrueNAS Benutzer',  labelEn: 'TrueNAS User',     type: 'text', placeholder: 'admin' },
@@ -36,6 +49,15 @@ const FIELD_DEFS = {
     { key: 'server/user', labelDe: 'Server Benutzer', labelEn: 'Server User', type: 'text', placeholder: 'root' },
     { key: 'server/password', labelDe: 'Server Passwort', labelEn: 'Server Password', type: 'password' },
     { key: 'server/port', labelDe: 'Server Port', labelEn: 'Server Port', type: 'text', default: '22' },
+  ],
+  spotify: [
+    { key: 'spotify/client_id',     labelDe: 'Client-ID',          labelEn: 'Client ID',          type: 'text' },
+    { key: 'spotify/client_secret', labelDe: 'Client-Secret',      labelEn: 'Client Secret',      type: 'password' },
+    { key: 'spotify/refresh_token', labelDe: 'Refresh-Token',       labelEn: 'Refresh Token',      type: 'password' },
+  ],
+  discord: [
+    { key: 'discord/bot_token', labelDe: 'Bot-Token',            labelEn: 'Bot Token',           type: 'password' },
+    { key: 'discord/guild_id',  labelDe: 'Server-ID (optional)', labelEn: 'Guild ID (optional)', type: 'text' },
   ],
 };
 
@@ -129,6 +151,16 @@ export default function IntegrationsTab({ tr, language }) {
     } catch (e) { alert(String(e)); }
   };
 
+  const testConnection = async (integrationId) => {
+    setMsg(''); setErr('');
+    try {
+      const r = await apiFetch(`/api/registry/${integrationId}/test`, { method: 'POST' });
+      const d = await r.json();
+      if (d.success) setMsg(t('Verbindung erfolgreich!', 'Connection successful!'));
+      else setErr(d.error || t('Verbindung fehlgeschlagen', 'Connection failed'));
+    } catch (e) { setErr(e.message); }
+  };
+
   const currentFields = FIELD_DEFS[activeInt] || [];
   const intLabel = INTEGRATIONS.find(i => i.id === activeInt);
 
@@ -220,6 +252,8 @@ export default function IntegrationsTab({ tr, language }) {
     );
   }
 
+  const hasTest = ['immich', 'nextcloud', 'homeassistant', 'truenas', 'spotify', 'discord'].includes(activeInt);
+
   return (
     <div className="settings-panel" style={{ padding: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div className="integrations-layout">
@@ -242,8 +276,14 @@ export default function IntegrationsTab({ tr, language }) {
             {t(intLabel?.labelDe, intLabel?.labelEn)}
           </div>
           <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1.25rem' }}>
-            {t('Alle Werte werden lokal im Tresor gespeichert. Bestehende Passwörter bleiben erhalten, wenn du das Feld leer lässt.',
-              'All values are stored locally in the vault. Existing passwords are preserved when left empty.')}
+            {activeInt === 'spotify'
+              ? t('Benötigt eine Spotify App im Developer Dashboard. Client-ID und -Secret eintragen, dann Authorization Code Grant durchführen.',
+                 'Requires a Spotify App in the Developer Dashboard. Enter Client ID and Secret, then perform Authorization Code Grant.')
+              : activeInt === 'discord'
+              ? t('Erstelle einen Discord Bot im Developer Portal und trage den Token ein. Optionales Guild-ID-Filter für Server-spezifische Befehle.',
+                 'Create a Discord Bot in the Developer Portal and enter the token. Optional guild ID filter for server-specific commands.')
+              : t('Alle Werte werden lokal im Tresor gespeichert. Bestehende Passwörter bleiben erhalten, wenn du das Feld leer lässt.',
+                 'All values are stored locally in the vault. Existing passwords are preserved when left empty.')}
           </p>
 
           {activeInt === 'email' ? <EmailAccountsSection tr={tr} language={language} values={values} setVal={setVal} isSet={isSet} /> : (
@@ -274,11 +314,17 @@ export default function IntegrationsTab({ tr, language }) {
           {msg && <div className="status-text" style={{ color: 'var(--success)', marginBottom: '0.75rem' }}>{msg}</div>}
           {err && <div className="status-text" style={{ color: '#ef4444', marginBottom: '0.75rem' }}>{err}</div>}
 
-          <div className="button-group" style={{ marginTop: '0.5rem' }}>
+          <div className="button-group" style={{ marginTop: '0.5rem', display: 'flex', gap: 8 }}>
             <button className="btn primary" onClick={saveIntegration} disabled={saving}>
               <i className="fas fa-save" style={{ marginRight: 6 }}></i>
               {saving ? t('Speichere…', 'Saving…') : t('Im Tresor speichern', 'Save to Vault')}
             </button>
+            {hasTest && (
+              <button className="btn" onClick={() => testConnection(activeInt)}>
+                <i className="fas fa-plug" style={{ marginRight: 6 }}></i>
+                {t('Verbindung testen', 'Test Connection')}
+              </button>
+            )}
           </div>
           </>  
           )}
@@ -330,7 +376,6 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      // Also save individual vault keys for backward compat
       if (name === 'default') {
         for (const f of EMAIL_FIELDS) {
           if (form[f.key]) {

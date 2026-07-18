@@ -13,7 +13,10 @@ from pathlib import Path
 
 import numpy as np
 import requests
-from defusedxml import ElementTree
+try:
+    from defusedxml import ElementTree
+except ImportError:
+    import xml.etree.ElementTree as ElementTree
 
 from .config import BASE, CHUNKS, EMBS, MEMORY_FILE, C
 from .embed import embed

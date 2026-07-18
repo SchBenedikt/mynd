@@ -1,0 +1,12 @@
+{
+  "name": "MYND - Local-first AI Workspace",
+  "short_name": "MYND",
+  "description": "A local-first AI workspace for chat, knowledge, automation, and integrations.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0f12",
+  "theme_color": "#0f0f12",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

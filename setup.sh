@@ -19,6 +19,6 @@ echo "Installing locked frontend and process-runner dependencies..."
 npm ci --ignore-scripts
 npm ci --prefix frontend
 
-mkdir -p data/workspace data/generated data/browser_screenshots logs
+mkdir -p data/workspace data/generated data/browser_screenshots data/browser_downloads logs
 
 echo "Setup complete. Start MYND with ./start.sh or make dev."

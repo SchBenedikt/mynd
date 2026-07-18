@@ -6,7 +6,10 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
-from defusedxml import ElementTree
+try:
+    from defusedxml import ElementTree
+except ImportError:
+    import xml.etree.ElementTree as ElementTree
 from requests.auth import HTTPBasicAuth
 
 from core.vault import load_vault
@@ -588,6 +591,255 @@ def nextcloud_search(query, folder=""):
         return f"❌ {e}"
 
 
+def nextcloud_get_previews(path, x=400, y=400):
+    """Hole eine Vorschau-URL für eine Datei."""
+    try:
+        url, dav, user, pw = _nc()
+        auth = HTTPBasicAuth(user, pw)
+        preview_url = f"{url.rstrip('/')}/index.php/core/preview.png?file={path}&x={x}&y={y}&a=1"
+        r = requests.head(preview_url, auth=auth, timeout=10)
+        if r.status_code == 200:
+            return f"🖼️ Vorschau: {preview_url}"
+        return f"⚠️ Keine Vorschau verfügbar für '{path}' (Status {r.status_code})"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def nextcloud_get_notifications():
+    """Rufe Nextcloud-Benachrichtigungen ab."""
+    try:
+        url, dav, user, pw = _nc()
+        auth = HTTPBasicAuth(user, pw)
+        noti_url = f"{url.rstrip('/')}/ocs/v2.php/apps/notifications/api/v2/notifications?format=json"
+        r = requests.get(noti_url, auth=auth, headers={"OCS-APIRequest": "true"}, timeout=15)
+        if r.status_code == 200:
+            data = r.json().get("ocs", {}).get("data", [])
+            if not data:
+                return "✅ Keine Benachrichtigungen."
+            lines = [f"🔔 **{len(data)} Benachrichtigungen**"]
+            for n in data[:20]:
+                app = n.get("app", "")
+                subject = n.get("subject", "")
+                lines.append(f"  • [{app}] {subject}")
+            return "\n".join(lines)
+        return f"❌ Fehler {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def nextcloud_create_share_link(path, password="", expire_days=None, permissions=1):
+    """Erstelle einen öffentlichen Share-Link mit Passwort und Ablaufdatum."""
+    try:
+        url, dav, user, pw = _nc()
+        auth = HTTPBasicAuth(user, pw)
+        share_url = f"{url.rstrip('/')}/ocs/v2.php/apps/files_sharing/api/v1/shares?format=json"
+        data = {"path": path, "shareType": 3, "permissions": int(permissions)}
+        if password:
+            data["password"] = password
+        if expire_days:
+            from datetime import datetime, timedelta
+            expire = (datetime.now() + timedelta(days=int(expire_days))).strftime("%Y-%m-%d")
+            data["expireDate"] = expire
+        r = requests.post(share_url, data=data, auth=auth,
+                          headers={"OCS-APIRequest": "true"}, timeout=15)
+        if r.status_code in (200, 201):
+            result = r.json()
+            d = result.get("ocs", {}).get("data", {})
+            link = d.get("url", d.get("link", ""))
+            lines = ["🔗 **Share-Link erstellt**"]
+            if link:
+                lines.append(f"  Link: {link}")
+            if password:
+                lines.append(f"  Passwort: `{password}`")
+            if expire_days:
+                lines.append(f"  Läuft ab: {expire}")
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}: {r.text[:300]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def nextcloud_list_tags():
+    """Liste alle Nextcloud-System-Tags auf."""
+    try:
+        url, dav, user, pw = _nc()
+        auth = HTTPBasicAuth(user, pw)
+        tag_url = f"{url.rstrip('/')}/ocs/v2.php/apps/systemtags/tags?format=json"
+        r = requests.get(tag_url, auth=auth, headers={"OCS-APIRequest": "true"}, timeout=15)
+        if r.status_code == 200:
+            tags = r.json().get("ocs", {}).get("data", [])
+            if not tags:
+                return "📭 Keine Tags vorhanden."
+            lines = ["🏷️ **System-Tags**"]
+            for t in tags:
+                name = t.get("name", "")
+                tag_id = t.get("id", "")
+                user_visible = t.get("userVisible", True)
+                lines.append(f"  • `{name}` (ID: {tag_id})")
+            return "\n".join(lines)
+        return f"❌ Fehler {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def nextcloud_search_tags(tag):
+    """Suche Dateien nach System-Tag."""
+    try:
+        url, dav, user, pw = _nc()
+        auth = HTTPBasicAuth(user, pw)
+        search_url = f"{url.rstrip('/')}/ocs/v2.php/apps/systemtags/tags?format=json"
+        r = requests.get(search_url, auth=auth, headers={"OCS-APIRequest": "true"}, timeout=15)
+        if r.status_code != 200:
+            return f"❌ Fehler {r.status_code}"
+        tags = r.json().get("ocs", {}).get("data", [])
+        tag_id = None
+        for t in tags:
+            if t.get("name", "").lower() == tag.lower():
+                tag_id = t.get("id")
+                break
+        if not tag_id:
+            return f"❌ Tag '{tag}' nicht gefunden."
+        files_url = f"{url.rstrip('/')}/ocs/v2.php/apps/systemtags/tags/{tag_id}/files?format=json"
+        r2 = requests.get(files_url, auth=auth, headers={"OCS-APIRequest": "true"}, timeout=15)
+        if r2.status_code == 200:
+            files = r2.json().get("ocs", {}).get("data", [])
+            if not files:
+                return f"📭 Keine Dateien mit Tag '{tag}'."
+            lines = [f"📂 **{len(files)} Dateien mit Tag '{tag}'**"]
+            for f in files[:30]:
+                name = f.get("name", "")
+                lines.append(f"  • {name}")
+            return "\n".join(lines)
+        return f"❌ Fehler {r2.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def nextcloud_get_versions(path):
+    """Liste die Versionen einer Datei auf."""
+    try:
+        url, dav, user, pw = _nc()
+        auth = HTTPBasicAuth(user, pw)
+        full_path = f"{url}{dav}/{path.lstrip('/')}"
+        ver_url = f"{url.rstrip('/')}/remote.php/dav/versions/{user}/versions/{path}"
+        r = requests.request("PROPFIND", full_path, auth=auth,
+                            headers={"Depth": "0"}, timeout=15)
+        if r.status_code not in (207, 200):
+            return f"❌ Datei nicht gefunden: {path}"
+        r2 = requests.request("PROPFIND", ver_url, auth=auth,
+                              headers={"Depth": "1"}, timeout=15)
+        if r2.status_code not in (207, 200):
+            return f"ℹ️ Keine Versionen für '{path}' oder Versionierung nicht aktiviert."
+        versions = []
+        for match in re.finditer(r'<d:response>.*?<d:href>(.*?)</d:href>.*?<d:getlastmodified>(.*?)</d:getlastmodified>.*?<d:getcontentlength>(.*?)</d:getcontentlength>', r2.text, re.DOTALL):
+            vhref = match.group(1)
+            vdate = match.group(2)
+            vsize = match.group(3)
+            vid = vhref.rstrip("/").split("/")[-1]
+            versions.append(f"  • {vdate} ({vsize} Bytes) - ID: `{vid}`")
+        if not versions:
+            return f"ℹ️ Keine Versionen gefunden."
+        return f"📋 **Versionen von '{path}'**\n" + "\n".join(versions)
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def nextcloud_restore_version(path, version_id):
+    """Stelle eine frühere Version einer Datei wieder her."""
+    try:
+        url, dav, user, pw = _nc()
+        auth = HTTPBasicAuth(user, pw)
+        # WebDAV COPY to restore: copy from version to current path
+        src_url = f"{url.rstrip('/')}/remote.php/dav/versions/{user}/versions/{path}/{version_id}"
+        dest_url = f"{url}{dav}/{path.lstrip('/')}"
+        r = requests.request("COPY", src_url, auth=auth, headers={"Destination": dest_url}, timeout=15)
+        if r.status_code in (200, 201, 204):
+            return f"✅ Version `{version_id}` von '{path}' wiederhergestellt."
+        return f"❌ Wiederherstellung fehlgeschlagen (Status {r.status_code})"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def nextcloud_create_contact(fn, email="", tel="", org="", addressbook="Standard"):
+    """Erstelle einen neuen Kontakt im Nextcloud-Adressbuch."""
+    try:
+        url, dav, user, pw = _nc()
+        auth = HTTPBasicAuth(user, pw)
+        books = _carddav_discover(url, user, auth)
+        target_href = None
+        for bname, bhref in books:
+            if bname.lower() == addressbook.lower() or addressbook.lower() in bname.lower():
+                target_href = bhref
+                break
+        if not target_href and books:
+            target_href = books[0][1]
+        if not target_href:
+            return "❌ Kein Adressbuch gefunden."
+        uid = f"uid-{int(time.time())}@local"
+        lines = ["BEGIN:VCARD", "VERSION:3.0", f"UID:{uid}", f"FN:{fn}"]
+        n_parts = fn.split(None, 1)
+        if len(n_parts) == 2:
+            lines.append(f"N:{n_parts[1]};{n_parts[0]}")
+        else:
+            lines.append(f"N:{fn};")
+        if email:
+            lines.append(f"EMAIL;TYPE=INTERNET:{email}")
+        if tel:
+            lines.append(f"TEL:{tel}")
+        if org:
+            lines.append(f"ORG:{org}")
+        lines.append("END:VCARD")
+        vcard = "\r\n".join(lines)
+        contact_url = _abs_url(url, target_href) + uid + ".vcf"
+        r = requests.put(contact_url, data=vcard, auth=auth,
+                         headers={"Content-Type": "text/vcard; charset=utf-8"}, timeout=15)
+        if r.status_code in (200, 201, 204):
+            return f"✅ Kontakt **{fn}** erstellt (UID: `{uid}`)"
+        return f"❌ Fehler {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def nextcloud_update_contact(uid, fn="", email="", tel="", org=""):
+    """Aktualisiere einen bestehenden Kontakt."""
+    try:
+        url, dav, user, pw = _nc()
+        auth = HTTPBasicAuth(user, pw)
+        books = _carddav_discover(url, user, auth)
+        vcard = None
+        for ab_name, ab_href in books:
+            r = requests.get(_abs_url(url, ab_href) + uid + '.vcf', auth=auth, timeout=15)
+            if r.status_code == 200:
+                vcard = r.text
+                contact_ab_href = ab_href
+                break
+        if not vcard:
+            return f"❌ Kontakt {uid} nicht gefunden."
+        if fn:
+            vcard = re.sub(r'FN[;:].*', f'FN:{fn}', vcard)
+            n_match = re.search(r'N[;:].*', vcard)
+            n_parts = fn.split(None, 1)
+            if len(n_parts) == 2:
+                new_n = f"N:{n_parts[1]};{n_parts[0]}"
+            else:
+                new_n = f"N:{fn};"
+            vcard = re.sub(r'N[;:].*', new_n, vcard) if n_match else vcard + f"\r\n{new_n}"
+        if email:
+            vcard = re.sub(r'EMAIL[;:].*?:.*', f'EMAIL;TYPE=INTERNET:{email}', vcard) if re.search(r'EMAIL', vcard) else vcard + f"\r\nEMAIL;TYPE=INTERNET:{email}"
+        if tel:
+            vcard = re.sub(r'TEL[;:].*', f'TEL:{tel}', vcard) if re.search(r'TEL', vcard) else vcard + f"\r\nTEL:{tel}"
+        if org:
+            vcard = re.sub(r'ORG[;:].*', f'ORG:{org}', vcard) if re.search(r'ORG', vcard) else vcard + f"\r\nORG:{org}"
+        contact_url = _abs_url(url, contact_ab_href) + uid + ".vcf"
+        r = requests.put(contact_url, data=vcard.encode("utf-8"), auth=auth,
+                         headers={"Content-Type": "text/vcard; charset=utf-8"}, timeout=15)
+        if r.status_code in (200, 201, 204):
+            return f"✅ Kontakt `{uid}` aktualisiert."
+        return f"❌ Fehler {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
 TOOLS = [
     {"type":"function","function":{"name":"nextcloud_list","description":"Liste den Inhalt eines Nextcloud-Ordners. Pfad relativ zum WebDAV-Root, z.B. 'Privat' oder 'Geteilt/2021'. Leer lassen für Root.","parameters":{"type":"object","properties":{"folder":{"type":"string","description":"Ordnerpfad relativ zum WebDAV-Root (optional, leer = Root)"}},"required":[]}}},  # noqa: E501
     {"type":"function","function":{"name":"nextcloud_read_file","description":"Lese den Inhalt einer Datei von Nextcloud. Pfad relativ zum WebDAV-Root, z.B. 'Privat/datei.md'. Extrahiert Text aus .md, .txt, .docx, .pdf.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Dateipfad relativ zum WebDAV-Root"}},"required":["path"]}}},  # noqa: E501
@@ -604,6 +856,15 @@ TOOLS = [
     {"type":"function","function":{"name":"nextcloud_contact_get","description":"Rufe einen einzelnen Nextcloud-Kontakt per UID ab. Liefert die vollständige vCard. Die UID bekommst du aus nextcloud_contact_search.","parameters":{"type":"object","properties":{"uid":{"type":"string","description":"Die UID des Kontakts (aus nextcloud_contact_search)"}},"required":["uid"]}}},  # noqa: E501
     {"type":"function","function":{"name":"nextcloud_share_link","description":"Erstelle einen öffentlichen Share-Link für eine Datei oder einen Ordner auf Nextcloud. Pfad relativ zum Nextcloud-Root (z.B. 'Privat/Urlaub/foto.jpg').","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Datei- oder Ordnerpfad relativ zum WebDAV-Root"},"share_type":{"type":"integer","description":"3=öffentlicher Link (default), 0=Benutzer, 1=Gruppe"},"permissions":{"type":"integer","description":"1=lesen (default), 2=ändern, 3=lesen+ändern, 7=voll"}},"required":["path"]}}},  # noqa: E501
     {"type":"function","function":{"name":"nextcloud_search","description":"Volltextsuche in Nextcloud-Dateien. Durchsucht Dateinamen und -inhalte (falls Full-Text-Search aktiviert).","parameters":{"type":"object","properties":{"query":{"type":"string","description":"Suchbegriff"},"folder":{"type":"string","description":"Optional: Ordner einschränken (z.B. 'Privat')"}},"required":["query"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"nextcloud_get_previews","description":"Hole eine Vorschau-URL für eine Datei.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Dateipfad relativ zum WebDAV-Root"},"x":{"type":"integer","description":"Breite (default 400)"},"y":{"type":"integer","description":"Höhe (default 400)"}},"required":["path"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"nextcloud_get_notifications","description":"Rufe Nextcloud-Benachrichtigungen ab.","parameters":{"type":"object","properties":{}}}},
+    {"type":"function","function":{"name":"nextcloud_create_share_link","description":"Erstelle einen öffentlichen Share-Link mit Passwort und Ablaufdatum.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Datei- oder Ordnerpfad"},"password":{"type":"string","description":"Optional: Passwort"},"expire_days":{"type":"integer","description":"Optional: Tage bis Ablauf"},"permissions":{"type":"integer","description":"1=lesen, 2=ändern, 3=lesen+ändern"}},"required":["path"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"nextcloud_list_tags","description":"Liste alle Nextcloud-System-Tags auf.","parameters":{"type":"object","properties":{}}}},
+    {"type":"function","function":{"name":"nextcloud_search_tags","description":"Suche Dateien nach System-Tag.","parameters":{"type":"object","properties":{"tag":{"type":"string","description":"Tag-Name (z.B. wichtig)"}},"required":["tag"]}}},
+    {"type":"function","function":{"name":"nextcloud_get_versions","description":"Liste die Versionen einer Datei auf.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Dateipfad relativ zum WebDAV-Root"}},"required":["path"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"nextcloud_restore_version","description":"Stelle eine frühere Version einer Datei wieder her.","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Dateipfad"},"version_id":{"type":"string","description":"Version-ID"}},"required":["path","version_id"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"nextcloud_create_contact","description":"Erstelle einen neuen Kontakt im Nextcloud-Adressbuch.","parameters":{"type":"object","properties":{"fn":{"type":"string","description":"Vollständiger Name"},"email":{"type":"string","description":"E-Mail (optional)"},"tel":{"type":"string","description":"Telefon (optional)"},"org":{"type":"string","description":"Firma (optional)"}},"required":["fn"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"nextcloud_update_contact","description":"Aktualisiere einen bestehenden Kontakt.","parameters":{"type":"object","properties":{"uid":{"type":"string","description":"UID des Kontakts"},"fn":{"type":"string","description":"Neuer Name (optional)"},"email":{"type":"string","description":"Neue E-Mail (optional)"},"tel":{"type":"string","description":"Neue Telefonnummer (optional)"}},"required":["uid"]}}},  # noqa: E501
 ]
 
 TOOL_MAP = {
@@ -622,6 +883,15 @@ TOOL_MAP = {
     "nextcloud_contact_get": nextcloud_contact_get,
     "nextcloud_share_link": nextcloud_share_link,
     "nextcloud_search": nextcloud_search,
+    "nextcloud_get_previews": nextcloud_get_previews,
+    "nextcloud_get_notifications": nextcloud_get_notifications,
+    "nextcloud_create_share_link": nextcloud_create_share_link,
+    "nextcloud_list_tags": nextcloud_list_tags,
+    "nextcloud_search_tags": nextcloud_search_tags,
+    "nextcloud_get_versions": nextcloud_get_versions,
+    "nextcloud_restore_version": nextcloud_restore_version,
+    "nextcloud_create_contact": nextcloud_create_contact,
+    "nextcloud_update_contact": nextcloud_update_contact,
 }
 
 PROMPT_EXTRA = (
@@ -641,4 +911,13 @@ PROMPT_EXTRA = (
     "  - **nextcloud_contact_get**: Einzelnen Kontakt per UID abrufen\n"
     "  - **nextcloud_share_link(path, share_type=3, permissions=1)**: Öffentlichen Share-Link erstellen\n"
     "  - **nextcloud_search(query, folder='')**: Volltextsuche in Dateien\n"
+    "  - **nextcloud_get_previews(path, x=400, y=400)**: Vorschau-URL für eine Datei\n"
+    "  - **nextcloud_get_notifications()**: Benachrichtigungen abrufen\n"
+    "  - **nextcloud_create_share_link(path, password='', expire_days, permissions=1)**: Share-Link mit Passwort/Ablauf\n"
+    "  - **nextcloud_list_tags()**: System-Tags auflisten\n"
+    "  - **nextcloud_search_tags(tag)**: Dateien nach Tag suchen\n"
+    "  - **nextcloud_get_versions(path)**: Datei-Versionen anzeigen\n"
+    "  - **nextcloud_restore_version(path, version_id)**: Version wiederherstellen\n"
+    "  - **nextcloud_create_contact(fn, email, tel, org)**: Neuen Kontakt erstellen\n"
+    "  - **nextcloud_update_contact(uid, fn, email, tel, org)**: Kontakt aktualisieren\n"
     "  API-Pfade: WebDAV /remote.php/dav/files/BENUTZER/, CalDAV /remote.php/dav/calendars/BENUTZER/, CardDAV /remote.php/dav/addressbooks/BENUTZER/, OCS /ocs/v1.php/\n")

@@ -60,7 +60,7 @@ def _connect_imap(account="default"):
     ck = _acct_keys(account)
     host, port, user, pw = ck["imap_server"], ck["imap_port"], ck["imap_user"], ck["imap_password"]
     if not host or not user or not pw:
-        return None, f"❌ IMAP-Zugangsdaten fehlen für '{account}'."
+        return None, f"❌ IMAP-Zugangsdaten fehlen fur '{account}'."
     c = imaplib.IMAP4_SSL(host, port, timeout=15)
     c.login(user, pw)
     return c, None
@@ -69,7 +69,7 @@ def _connect_smtp(account="default"):
     ck = _acct_keys(account)
     host, port, user, pw = ck["smtp_server"], ck["smtp_port"], ck["smtp_user"], ck["smtp_password"]
     if not host or not user or not pw:
-        return None, f"❌ SMTP-Zugangsdaten fehlen für '{account}'."
+        return None, f"❌ SMTP-Zugangsdaten fehlen fur '{account}'."
     s = smtplib.SMTP(host, port, timeout=15)
     s.starttls()
     s.login(user, pw)
@@ -159,11 +159,158 @@ def email_send(to, subject, body, cc="", bcc="", account="default"):
 def email_list_accounts():
     return _list_accounts()
 
+def email_get_unread_count(mailbox="INBOX", account="default"):
+    c = None
+    try:
+        c, err = _connect_imap(account)
+        if err:
+            return err
+        c.select(mailbox)
+        _, data = c.search(None, "UNSEEN")
+        ids = data[0].split() if data[0] else []
+        _, total_data = c.search(None, "ALL")
+        total = total_data[0].split() if total_data[0] else []
+        c.logout()
+        return f" {account}/{mailbox}: {len(ids)} ungelesen von {len(total)} gesamt"
+    except Exception as e:
+        return f"❌ {e}"
+    finally:
+        if c:
+            try:
+                c.logout()
+            except Exception:
+                pass
+
+def email_get_folder_structure(account="default"):
+    c = None
+    try:
+        c, err = _connect_imap(account)
+        if err:
+            return err
+        _, folders = c.list()
+        c.logout()
+        lines = [" Ordnerstruktur:"]
+        for f in folders:
+            if f:
+                decoded = f.decode('utf-8', errors='replace')
+                parts = decoded.split(' "/" ')
+                folder_name = parts[-1] if len(parts) > 1 else decoded
+                if "/" in folder_name:
+                    depth = folder_name.count("/")
+                    indent = "  " * depth
+                else:
+                    indent = ""
+                lines.append(f"{indent} {folder_name.split('/')[-1]}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ {e}"
+    finally:
+        if c:
+            try:
+                c.logout()
+            except Exception:
+                pass
+
+def email_move_message(mail_id, from_mailbox="INBOX", to_mailbox="", account="default"):
+    c = None
+    try:
+        if not to_mailbox:
+            return "❌ Zielordner fehlt (to_mailbox)"
+        c, err = _connect_imap(account)
+        if err:
+            return err
+        c.select(from_mailbox)
+        r = c.copy(mail_id.encode(), to_mailbox)
+        if r[0] == "OK":
+            c.store(mail_id.encode(), "+FLAGS", "\\Deleted")
+            c.expunge()
+            c.logout()
+            return f"✅ {mail_id} von {from_mailbox} nach {to_mailbox} verschoben"
+        c.logout()
+        return f"❌ Kopieren fehlgeschlagen: {r}"
+    except Exception as e:
+        return f"❌ {e}"
+    finally:
+        if c:
+            try:
+                c.logout()
+            except Exception:
+                pass
+
+def email_delete_message(mail_id, mailbox="INBOX", account="default"):
+    c = None
+    try:
+        c, err = _connect_imap(account)
+        if err:
+            return err
+        c.select(mailbox)
+        c.store(mail_id.encode(), "+FLAGS", "\\Deleted")
+        c.expunge()
+        c.logout()
+        return f"✅ {mail_id} aus {mailbox} geloscht"
+    except Exception as e:
+        return f"❌ {e}"
+    finally:
+        if c:
+            try:
+                c.logout()
+            except Exception:
+                pass
+
+def email_set_seen(mail_id, mailbox="INBOX", seen=True, account="default"):
+    c = None
+    try:
+        c, err = _connect_imap(account)
+        if err:
+            return err
+        c.select(mailbox)
+        if seen:
+            c.store(mail_id.encode(), "+FLAGS", "\\Seen")
+        else:
+            c.store(mail_id.encode(), "-FLAGS", "\\Seen")
+        c.logout()
+        status = "gelesen" if seen else "ungelesen"
+        return f"✅ {mail_id} in {mailbox} als {status} markiert"
+    except Exception as e:
+        return f"❌ {e}"
+    finally:
+        if c:
+            try:
+                c.logout()
+            except Exception:
+                pass
+
+def email_create_folder(folder_name, account="default"):
+    c = None
+    try:
+        c, err = _connect_imap(account)
+        if err:
+            return err
+        r = c.create(folder_name)
+        c.logout()
+        if r[0] == "OK":
+            return f"✅ Ordner '{folder_name}' erstellt"
+        return f"❌ Fehler: {r}"
+    except Exception as e:
+        return f"❌ {e}"
+    finally:
+        if c:
+            try:
+                c.logout()
+            except Exception:
+                pass
+
 TOOLS = [
     {"type":"function","function":{"name":"email_search","description":"Durchsuche IMAP-Postfach (z.B. 'FROM ben@x.de', 'SUBJECT meeting', 'SINCE 01-Jun-2026', 'UNANSWERED', 'UNSEEN'). Standard: ALL = neueste 20.","parameters":{"type":"object","properties":{"query":{"type":"string","description":"IMAP-Suchfilter","default":"ALL"},"mailbox":{"type":"string","description":"Postfach","default":"INBOX"},"max_results":{"type":"integer","description":"Max Ergebnisse","default":20},"account":{"type":"string","description":"E-Mail-Konto (optional, default='default')"}},"required":[]}}},  # noqa: E501
     {"type":"function","function":{"name":"email_read","description":"Lese eine Email per ID (aus email_search). Rückgabe: Von, Datum, Betreff, Body.","parameters":{"type":"object","properties":{"mail_id":{"type":"string","description":"Email-ID aus email_search"},"mailbox":{"type":"string","description":"Postfach","default":"INBOX"},"account":{"type":"string","description":"E-Mail-Konto (optional, default='default')"}},"required":["mail_id"]}}},  # noqa: E501
     {"type":"function","function":{"name":"email_send","description":"Sende eine Email via SMTP. Pflicht: to, subject, body. Optional: cc, bcc.","parameters":{"type":"object","properties":{"to":{"type":"string","description":"Empfänger (Email-Adresse)"},"subject":{"type":"string","description":"Betreff"},"body":{"type":"string","description":"Nachrichtentext"},"cc":{"type":"string","description":"CC (optional)"},"bcc":{"type":"string","description":"BCC (optional)"},"account":{"type":"string","description":"E-Mail-Konto (optional, default='default')"}},"required":["to","subject","body"]}}},  # noqa: E501
     {"type":"function","function":{"name":"email_list_accounts","description":"Liste alle konfigurierten E-Mail-Konten auf.","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"email_get_unread_count","description":"Schnelle Anzahl ungelesener Nachrichten in einem Postfach (z.B. 'INBOX').","parameters":{"type":"object","properties":{"mailbox":{"type":"string","description":"Postfach (default: INBOX)"},"account":{"type":"string","description":"E-Mail-Konto (optional, default='default')"}},"required":[]}}},
+    {"type":"function","function":{"name":"email_get_folder_structure","description":"Zeige die komplette IMAP-Ordnerstruktur (alle Ordner/Mailboxen).","parameters":{"type":"object","properties":{"account":{"type":"string","description":"E-Mail-Konto (optional, default='default')"}},"required":[]}}},
+    {"type":"function","function":{"name":"email_move_message","description":"Verschiebe eine Email zwischen Ordnern (z.B. von INBOX nach Archiv).","parameters":{"type":"object","properties":{"mail_id":{"type":"string","description":"Email-ID"},"from_mailbox":{"type":"string","description":"Quellordner (default: INBOX)"},"to_mailbox":{"type":"string","description":"Zielordner"},"account":{"type":"string","description":"E-Mail-Konto (optional, default='default')"}},"required":["mail_id","to_mailbox"]}}},
+    {"type":"function","function":{"name":"email_delete_message","description":"Lösche eine Email (verschiebe in Papierkorb/Trash).","parameters":{"type":"object","properties":{"mail_id":{"type":"string","description":"Email-ID"},"mailbox":{"type":"string","description":"Postfach (default: INBOX)"},"account":{"type":"string","description":"E-Mail-Konto (optional, default='default')"}},"required":["mail_id"]}}},
+    {"type":"function","function":{"name":"email_set_seen","description":"Markiere eine Email als gelesen oder ungelesen.","parameters":{"type":"object","properties":{"mail_id":{"type":"string","description":"Email-ID"},"mailbox":{"type":"string","description":"Postfach (default: INBOX)"},"seen":{"type":"boolean","description":"True = gelesen, False = ungelesen (default: True)"},"account":{"type":"string","description":"E-Mail-Konto (optional, default='default')"}},"required":["mail_id"]}}},
+    {"type":"function","function":{"name":"email_create_folder","description":"Erstelle einen neuen IMAP-Ordner/Mailbox.","parameters":{"type":"object","properties":{"folder_name":{"type":"string","description":"Name des neuen Ordners"},"account":{"type":"string","description":"E-Mail-Konto (optional, default='default')"}},"required":["folder_name"]}}},
 ]
 
 TOOL_MAP = {
@@ -171,6 +318,12 @@ TOOL_MAP = {
     "email_read": email_read,
     "email_send": email_send,
     "email_list_accounts": email_list_accounts,
+    "email_get_unread_count": email_get_unread_count,
+    "email_get_folder_structure": email_get_folder_structure,
+    "email_move_message": email_move_message,
+    "email_delete_message": email_delete_message,
+    "email_set_seen": email_set_seen,
+    "email_create_folder": email_create_folder,
 }
 
 PROMPT_EXTRA = (
@@ -184,6 +337,12 @@ PROMPT_EXTRA = (
     "  - **email_read**: Email mit ID lesen\n"
     "  - **email_send**: Email senden (to, subject, body, account)\n"
     "  - **email_list_accounts**: Alle konfigurierten Konten auflisten\n"
+    "  - **email_get_unread_count**: Anzahl ungelesener Nachrichten\n"
+    "  - **email_get_folder_structure**: IMAP-Ordnerstruktur anzeigen\n"
+    "  - **email_move_message**: Email zwischen Ordnern verschieben\n"
+    "  - **email_delete_message**: Email löschen\n"
+    "  - **email_set_seen**: Email als gelesen/ungelesen markieren\n"
+    "  - **email_create_folder**: Neuen IMAP-Ordner erstellen\n"
     "  Standard-Konto (default): vault email/imap_server, email/imap_user, email/imap_password\n"
     "  Weitere Konten: vault email/accounts/NAME/imap_server etc.\n"
 )
