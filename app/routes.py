@@ -692,20 +692,12 @@ def serve_generated(filename):
 @app.route('/data/browser_screenshots/<path:filename>')
 @require_auth
 def serve_browser_screenshot(filename):
-    root = BROWSER_SCREENSHOTS_DIR.resolve()
-    candidate = (root / filename).resolve(strict=False)
-    if candidate != root and root not in candidate.parents:
-        return jsonify({'success': False, 'error': 'Forbidden'}), 403
-    return send_from_directory(root, candidate.relative_to(root))
+    return send_from_directory(BROWSER_SCREENSHOTS_DIR, filename)
 
-@require_auth
 @app.route('/data/browser_downloads/<path:filename>')
+@require_auth
 def serve_browser_download(filename):
-    root = BROWSER_DOWNLOADS_DIR.resolve()
-    candidate = (root / filename).resolve(strict=False)
-    if candidate != root and root not in candidate.parents:
-        return jsonify({'success': False, 'error': 'Forbidden'}), 403
-    return send_from_directory(root, candidate.relative_to(root))
+    return send_from_directory(BROWSER_DOWNLOADS_DIR, filename)
 
 @app.route('/api/upload', methods=['POST'])
 def upload_file():

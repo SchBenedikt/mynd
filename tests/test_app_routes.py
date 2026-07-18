@@ -176,6 +176,26 @@ class TestSecurityAPI:
         assert response.status_code == 401
         assert response.get_json()["authenticated"] is False
 
+    def test_browser_downloads_require_auth_and_confine_paths(self, client, monkeypatch, tmp_path):
+        downloads = tmp_path / "downloads"
+        downloads.mkdir()
+        (downloads / "report.txt").write_text("safe")
+        (tmp_path / "secret.txt").write_text("secret")
+        monkeypatch.setattr(app_routes, "BROWSER_DOWNLOADS_DIR", downloads)
+
+        unauthenticated = client.get(
+            "/data/browser_downloads/report.txt",
+            headers={"Authorization": ""},
+        )
+        assert unauthenticated.status_code == 401
+
+        download = client.get("/data/browser_downloads/report.txt")
+        assert download.status_code == 200
+        assert download.data == b"safe"
+
+        traversal = client.get("/data/browser_downloads/../secret.txt")
+        assert traversal.status_code == 404
+
     def test_tool_confirmation_is_owner_bound_and_single_use(self, client):
         app_module.AUTH_USERS["other-user"] = {
             "name": "Other",
