@@ -171,6 +171,17 @@ class TestSecurityAPI:
         resp = client.get("/api/security/status")
         assert resp.status_code == 200
 
+    def test_api_allows_any_browser_origin_without_csp(self, client, monkeypatch):
+        monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "*")
+        response = client.get(
+            "/api/capabilities",
+            headers={"Origin": "https://any-domain.example"},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["Access-Control-Allow-Origin"] == "https://any-domain.example"
+        assert "Content-Security-Policy" not in response.headers
+
     def test_sensitive_routes_require_authentication(self, client):
         response = client.get("/api/vault/entries", headers={"Authorization": ""})
         assert response.status_code == 401

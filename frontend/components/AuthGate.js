@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useRef } from "react";
 import { usePathname, useRouter } from 'next/navigation';
 import './AuthGate.css';
 import { apiFetch } from '../lib/api';
+import LandingPage from './LandingPage';
 
 const LANGUAGE_KEY = 'mynd_language';
 const TOKEN_KEY = 'mynd_token_v1';
@@ -59,7 +60,7 @@ export default function AuthGate({ children }) {
 
   useEffect(() => {
     const langSet = (() => { try { return !!localStorage.getItem(LANGUAGE_KEY); } catch(e) { return true; } })();
-    if (!langSet && pathname !== '/language') {
+    if (!langSet && pathname !== '/' && pathname !== '/language') {
       guardedReplace('/language');
     }
   }, [pathname, guardedReplace]);
@@ -107,7 +108,7 @@ export default function AuthGate({ children }) {
 
   useEffect(() => {
     if (!ready) return;
-    if (pathname === '/language' || pathname?.startsWith('/setup') || pathname === '/login') return;
+    if (pathname === '/' || pathname === '/language' || pathname?.startsWith('/setup') || pathname === '/login') return;
     if (user && !forceOpen) return;
     guardedReplace('/login');
   }, [ready, pathname, user, forceOpen, guardedReplace]);
@@ -142,5 +143,6 @@ export default function AuthGate({ children }) {
   if (pathname?.startsWith('/setup')) return children;
   if (pathname === '/login') return children;
   if (user && !forceOpen) return children;
+  if (pathname === '/') return <LandingPage />;
   return null;
 }

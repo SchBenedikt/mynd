@@ -19,9 +19,13 @@ def test_application_entry_loads_without_browser_errors():
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page()
         page.on('pageerror', lambda error: page_errors.append(str(error)))
+        page.route(
+            '**/api/setup/status',
+            lambda route: route.fulfill(json={'success': True, 'needs_setup': False}),
+        )
         page.add_init_script("localStorage.setItem('mynd_language', 'en')")
 
-        response = page.goto(f'{base_url}/login.html', wait_until='networkidle')
+        response = page.goto(f'{base_url}/login', wait_until='networkidle')
 
         assert response is not None and response.ok
         if page.title().strip() == 'MYND Setup | MYND':
@@ -35,13 +39,58 @@ def test_application_entry_loads_without_browser_errors():
         browser.close()
 
 
+def test_unauthenticated_root_stays_public_and_offers_sign_in():
+    base_url = os.getenv('MYND_BROWSER_BASE_URL', 'http://127.0.0.1:3000').rstrip('/')
+    page_errors = []
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        context = browser.new_context(service_workers='block')
+        context.clear_cookies()
+        page = context.new_page()
+        page.on('pageerror', lambda error: page_errors.append(str(error)))
+        def fulfill_unauthenticated_api(route):
+            if route.request.url.endswith('/api/setup/status'):
+                payload = {'success': True, 'needs_setup': False}
+            elif route.request.url.endswith('/api/auth/me'):
+                payload = {'authenticated': False, 'user': None}
+            else:
+                payload = {'success': True}
+            route.fulfill(json=payload)
+
+        page.route('**/api/**', fulfill_unauthenticated_api)
+        page.add_init_script(
+            """
+            localStorage.clear();
+            sessionStorage.clear();
+            localStorage.setItem('mynd_token_v1', 'deliberately-invalid-smoke-token');
+            localStorage.removeItem('mynd_language');
+            """
+        )
+
+        response = page.goto(f'{base_url}/', wait_until='networkidle')
+
+        assert response is not None and response.ok
+        expect(page).to_have_url(f'{base_url}/')
+        public_landing = page.locator('.lp[data-auth-view="public"]')
+        expect(public_landing).to_be_visible()
+        sign_in = page.get_by_test_id('landing-login')
+        expect(sign_in).to_have_count(1)
+        expect(sign_in).to_have_attribute('href', '/login')
+        expect(page.locator('[data-auth-view="workspace"]')).to_have_count(0)
+        assert page_errors == []
+        browser.close()
+
+
 def test_authenticated_user_can_create_new_chats_from_empty_state():
     base_url = os.getenv('MYND_BROWSER_BASE_URL', 'http://127.0.0.1:3000').rstrip('/')
     page_errors = []
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context(service_workers='block')
+        context.clear_cookies()
+        page = context.new_page()
         page.on('pageerror', lambda error: page_errors.append(str(error)))
         def fulfill_authenticated_api(route):
             if route.request.url.endswith('/api/setup/status'):
@@ -68,6 +117,8 @@ def test_authenticated_user_can_create_new_chats_from_empty_state():
         response = page.goto(f'{base_url}/', wait_until='networkidle')
 
         assert response is not None and response.ok
+        expect(page.locator('[data-auth-view="workspace"]')).to_be_visible()
+        expect(page.locator('[data-auth-view="public"]')).to_have_count(0)
         new_chat_button = page.locator('.primary-nav .nav-item').first
         expect(new_chat_button).to_be_visible()
         expect(page.locator('.landing')).to_be_visible()
