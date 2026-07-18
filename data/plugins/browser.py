@@ -6,6 +6,7 @@ iframe/shadow DOM support, mobile emulation, retry logic.
 
 import json
 import logging
+import re
 import threading
 import time
 from pathlib import Path

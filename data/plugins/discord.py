@@ -1,6 +1,5 @@
 import json
 import threading
-import time
 from pathlib import Path
 
 import requests
@@ -171,8 +170,6 @@ def discord_get_guild_info(guild_id=None):
     owner_id = data.get("owner_id", "?")
     members = data.get("approximate_member_count", "?")
     online = data.get("approximate_presence_count", "?")
-    channels = data.get("channels", [])
-    roles = data.get("roles", [])
     icon_hash = data.get("icon", "")
     icon_url = f"https://cdn.discordapp.com/icons/{guild_id}/{icon_hash}.png" if icon_hash else ""
     features = ", ".join(data.get("features", []))
@@ -209,7 +206,6 @@ def discord_get_guild_roles(guild_id=None):
         rname = r.get("name", "?")
         rid = r.get("id", "")
         color = r.get("color", 0)
-        perms = int(r.get("permissions", "0"))
         mentionable = r.get("mentionable", False)
         hoist = r.get("hoist", False)
         tags = []

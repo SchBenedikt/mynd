@@ -2,14 +2,12 @@ import html as _html
 import json
 import os
 import re
+import time
 from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
-try:
-    from defusedxml import ElementTree
-except ImportError:
-    import xml.etree.ElementTree as ElementTree
+from defusedxml import ElementTree
 from requests.auth import HTTPBasicAuth
 
 from core.vault import load_vault
@@ -674,7 +672,6 @@ def nextcloud_list_tags():
             for t in tags:
                 name = t.get("name", "")
                 tag_id = t.get("id", "")
-                user_visible = t.get("userVisible", True)
                 lines.append(f"  • `{name}` (ID: {tag_id})")
             return "\n".join(lines)
         return f"❌ Fehler {r.status_code}: {r.text[:200]}"
@@ -738,7 +735,7 @@ def nextcloud_get_versions(path):
             vid = vhref.rstrip("/").split("/")[-1]
             versions.append(f"  • {vdate} ({vsize} Bytes) - ID: `{vid}`")
         if not versions:
-            return f"ℹ️ Keine Versionen gefunden."
+            return "ℹ️ Keine Versionen gefunden."
         return f"📋 **Versionen von '{path}'**\n" + "\n".join(versions)
     except Exception as e:
         return f"❌ {e}"

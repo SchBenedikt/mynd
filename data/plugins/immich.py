@@ -597,7 +597,6 @@ def immich_add_photos_to_album(album_id, asset_ids):
         r = requests.put(f"{base}/albums/{album_id}/assets",
                          json={"ids": ids}, headers=h, timeout=30)
         if r.status_code in (200, 204):
-            result = r.json() if r.text else {}
             count = len(ids)
             return f"✅ {count} Fotos zu Album hinzugefügt."
         return f"❌ Fehler (Status {r.status_code}): {r.text[:200]}"
@@ -616,7 +615,7 @@ def immich_remove_photos_from_album(album_id, asset_ids):
         r = requests.delete(f"{base}/albums/{album_id}/assets",
                             json={"ids": ids}, headers=h, timeout=30)
         if r.status_code in (200, 204):
-            return f"✅ Fotos aus Album entfernt."
+            return "✅ Fotos aus Album entfernt."
         return f"❌ Fehler (Status {r.status_code}): {r.text[:200]}"
     except Exception as e:
         return f"❌ {e}"
@@ -678,11 +677,11 @@ def immich_list_shared_links():
             if not links:
                 return "📭 Keine geteilten Links."
             lines = ["🔗 **Geteilte Links**"]
-            for l in links:
-                key = l.get("key", "")
-                link_type = l.get("type", "?")
-                desc = l.get("description", "")
-                expires = l.get("expiresAt", "kein Ablauf")
+            for link in links:
+                key = link.get("key", "")
+                link_type = link.get("type", "?")
+                desc = link.get("description", "")
+                expires = link.get("expiresAt", "kein Ablauf")
                 lines.append(f"  • `{key}` ({link_type}) - {desc} - Ablauf: {expires}")
             return "\n".join(lines)
         return f"❌ Status {r.status_code}"

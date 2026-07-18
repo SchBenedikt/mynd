@@ -2,7 +2,7 @@ import base64
 import json
 import threading
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -384,7 +384,7 @@ def homeassistant_get_history(entity_id, timestamp=""):
         return err
     try:
         if not timestamp:
-            timestamp = datetime.now(timezone.utc).isoformat()
+            timestamp = datetime.now(UTC).isoformat()
         r = requests.get(f"{url}/api/history/period/{timestamp}", params={"filter_entity_id": entity_id}, headers=headers, timeout=15)
         if r.status_code == 200:
             data = r.json()
@@ -409,7 +409,7 @@ def homeassistant_get_logbook(timestamp=""):
         return err
     try:
         if not timestamp:
-            timestamp = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+            timestamp = (datetime.now(UTC) - timedelta(days=1)).isoformat()
         r = requests.get(f"{url}/api/logbook/{timestamp}", headers=headers, timeout=15)
         if r.status_code == 200:
             entries = r.json()
