@@ -7,7 +7,7 @@ export default function MainLayout({ children }) {
   const { isSidebarCollapsed, canAnimate } = useSidebar();
 
   return (
-    <div className={`container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}${!canAnimate ? ' no-animate' : ''}`}>
+    <div className={`container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}${!canAnimate ? ' no-animate' : ''}`} data-auth-view="workspace">
       <Sidebar />
       {children}
     </div>
