@@ -45,10 +45,14 @@ def add_cors_headers(response):
     response.headers['Referrer-Policy'] = 'same-origin'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['Content-Security-Policy'] = (
-        "default-src 'self'; img-src 'self' data: https:; media-src 'self' data: blob:; "
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
         "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
-        "font-src 'self' data: https://cdnjs.cloudflare.com; connect-src 'self' http: https: ws: wss:; "
-        "script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        "img-src 'self' data: https: http:; "
+        "font-src 'self' data: https://cdnjs.cloudflare.com; "
+        "connect-src 'self' http: https: ws: wss:; "
+        "media-src 'self' data: blob:; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     )
     return response
 

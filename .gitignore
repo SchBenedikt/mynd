@@ -7,6 +7,7 @@ data/*
 data/plugins/*.json
 data/plugins/__pycache__/
 data/browser_screenshots/
+data/browser_downloads/
 parsed_docs/
 logs/
 

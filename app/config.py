@@ -27,11 +27,13 @@ VAULT_FILE = DATA_DIR / 'vault.json'
 API_REFS_PATH = DATA_DIR / 'api_refs.json'
 SECURITY_MODE_FILE = DATA_DIR / 'security_mode.json'
 BROWSER_SCREENSHOTS_DIR = DATA_DIR / 'browser_screenshots'
+BROWSER_DOWNLOADS_DIR = DATA_DIR / 'browser_downloads'
 UPLOAD_DIR = DATA_DIR / 'uploads'
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(GENERATED_DIR, exist_ok=True)
 os.makedirs(BROWSER_SCREENSHOTS_DIR, exist_ok=True)
+os.makedirs(BROWSER_DOWNLOADS_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO)

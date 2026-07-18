@@ -2,6 +2,7 @@ import base64
 import json
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -57,7 +58,6 @@ def _fetch_states(url, headers):
 
 def _extract_area(eid, attrs):
     name = (attrs.get("friendly_name") or eid).lower()
-    # Check if entity_id or name contains area keywords
     area_keywords = {
         "wohnzimmer": "Wohnzimmer", "schlafzimmer": "Schlafzimmer",
         "küche": "Küche", "kueche": "Küche",
@@ -361,7 +361,6 @@ def homeassistant_call_service(domain, service, entity_id, data=""):
 
 
 def homeassistant_get_camera_snapshot(entity_id):
-    """Holt ein Live-Kamerabild aus Home Assistant als Base64."""
     url, headers, err = _conn()
     if err:
         return err
@@ -370,8 +369,6 @@ def homeassistant_get_camera_snapshot(entity_id):
         if r.status_code != 200:
             return f"❌ Kamera {entity_id} nicht gefunden (Status {r.status_code})"
         state = r.json().get("state", "")
-        # Try HA camera proxy
-        # HA exposes /api/camera_proxy/{camera_entity_id} for live snapshots
         img_r = requests.get(f"{url}/api/camera_proxy/{entity_id}", headers=headers, timeout=15)
         if img_r.status_code == 200:
             b64 = base64.b64encode(img_r.content).decode()
@@ -379,6 +376,244 @@ def homeassistant_get_camera_snapshot(entity_id):
         return f"❌ Live-Bild nicht verfügbar (Status {img_r.status_code}) – Kamera-ID: `{entity_id}` (Status: {state})"
     except Exception as e:
         return f"❌ {e}"
+
+
+def homeassistant_get_history(entity_id, timestamp=""):
+    url, headers, err = _conn()
+    if err:
+        return err
+    try:
+        if not timestamp:
+            timestamp = datetime.now(UTC).isoformat()
+        r = requests.get(f"{url}/api/history/period/{timestamp}", params={"filter_entity_id": entity_id}, headers=headers, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            if not data:
+                return f"Keine Historie für {entity_id}"
+            lines = [f" Historie für {entity_id}:"]
+            for entry in data:
+                if isinstance(entry, list):
+                    for e in entry:
+                        state = e.get("state", "?")
+                        dt = (e.get("last_changed", "") or "")[:19]
+                        lines.append(f"  {dt} → {state}")
+            return "\n".join(lines[:100])
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def homeassistant_get_logbook(timestamp=""):
+    url, headers, err = _conn()
+    if err:
+        return err
+    try:
+        if not timestamp:
+            timestamp = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+        r = requests.get(f"{url}/api/logbook/{timestamp}", headers=headers, timeout=15)
+        if r.status_code == 200:
+            entries = r.json()
+            if not entries:
+                return "Keine Logbook-Einträge."
+            lines = ["📋 Logbook-Einträge:"]
+            for e in entries[-50:]:
+                when = (e.get("when", "") or "")[:19]
+                name = e.get("name", e.get("entity_id", "?"))
+                state = e.get("state", "")
+                lines.append(f"  {when} | {name} → {state}")
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def homeassistant_get_energy_data():
+    url, headers, err = _conn()
+    if err:
+        return err
+    try:
+        r = requests.get(f"{url}/api/energy/usage", headers=headers, timeout=15)
+        if r.status_code == 200:
+            return json.dumps(r.json(), ensure_ascii=False, indent=2)[:4000]
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def homeassistant_get_weather_forecast(entity_id):
+    url, headers, err = _conn()
+    if err:
+        return err
+    try:
+        r = requests.get(f"{url}/api/states/{entity_id}", headers=headers, timeout=15)
+        if r.status_code != 200:
+            return f"❌ Wetter-Entität {entity_id} nicht gefunden (Status {r.status_code})"
+        state = r.json()
+        attrs = state.get("attributes", {})
+        fn = attrs.get("friendly_name", entity_id)
+        lines = [f"🌤 **{fn}**"]
+        lines.append(f"  Aktuell: {state.get('state', '?')}")
+        for key in ("temperature", "humidity", "pressure", "wind_speed", "wind_bearing", "visibility", "uv_index"):
+            if key in attrs:
+                unit = ""
+                if key == "temperature":
+                    unit = "°C"
+                elif key == "humidity":
+                    unit = "%"
+                elif key == "pressure":
+                    unit = " hPa"
+                elif key == "wind_speed":
+                    unit = " km/h"
+                lines.append(f"  {key.replace('_',' ').title()}: {attrs[key]}{unit}")
+        forecast = attrs.get("forecast", [])
+        if forecast:
+            lines.append(f"\n  Vorhersage ({len(forecast)} Tage):")
+            for day in forecast[:7]:
+                dt = day.get("datetime", "?")[:10]
+                temp = day.get("temperature", "?")
+                cond = day.get("condition", "?")
+                lines.append(f"    {dt}: {temp}°C, {cond}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def homeassistant_update_entity(entity_id, state, attributes=""):
+    url, headers, err = _conn()
+    if err:
+        return err
+    try:
+        payload = {"state": state}
+        if attributes:
+            if isinstance(attributes, str):
+                try:
+                    payload["attributes"] = json.loads(attributes)
+                except json.JSONDecodeError:
+                    return "❌ attributes ist kein gültiges JSON"
+            else:
+                payload["attributes"] = attributes
+        r = requests.post(f"{url}/api/states/{entity_id}", json=payload, headers=headers, timeout=15)
+        if r.status_code in (200, 201):
+            return f"✅ {entity_id} aktualisiert → {state}"
+        return f"❌ Status {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def homeassistant_list_device_info():
+    url, headers, err = _conn()
+    if err:
+        return err
+    try:
+        r = requests.get(f"{url}/api/devices", headers=headers, timeout=15)
+        if r.status_code == 200:
+            devices = r.json()
+            if not devices:
+                return "Keine Geräte gefunden."
+            lines = ["📟 **Geräte**"]
+            for d in devices[:100]:
+                name = d.get("name", d.get("id", "?"))
+                model = d.get("model", d.get("model_id", ""))
+                manufacturer = d.get("manufacturer", "")
+                area = d.get("area_id", "")
+                parts = [f"  • **{name}**"]
+                if manufacturer:
+                    parts[0] += f" ({manufacturer}"
+                    if model:
+                        parts[0] += f" {model}"
+                    parts[0] += ")"
+                if area:
+                    parts.append(f" 📍{area}")
+                lines.append(" ".join(parts))
+            if len(devices) > 100:
+                lines.append(f"  ... +{len(devices)-100} weitere")
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def homeassistant_list_areas():
+    url, headers, err = _conn()
+    if err:
+        return err
+    try:
+        r = requests.get(f"{url}/api/areas", headers=headers, timeout=15)
+        if r.status_code == 200:
+            areas = r.json()
+            if not areas:
+                return "Keine Bereiche gefunden."
+            lines = ["📍 **Bereiche**"]
+            for a in areas:
+                name = a.get("name", a.get("area_id", "?"))
+                aid = a.get("area_id", "")
+                lines.append(f"  • **{name}** (`{aid}`)")
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def homeassistant_list_entities_by_area(area_name):
+    url, headers, err = _conn()
+    if err:
+        return err
+    try:
+        states, err = _fetch_states(url, headers)
+        if err:
+            return f"❌ {err}"
+        q = area_name.lower().strip()
+        matches = []
+        for s in states:
+            eid = s.get("entity_id", "")
+            attrs = s.get("attributes", {})
+            area = _extract_area(eid, attrs).lower()
+            if q == area or q in eid.lower() or q in attrs.get("friendly_name", "").lower():
+                if area:
+                    matches.append(s)
+        if not matches:
+            return f"❌ Keine Entitäten im Bereich '{area_name}' gefunden."
+        lines = [f"📍 Entitäten im Bereich **{area_name}** ({len(matches)}):"]
+        for s in matches[:50]:
+            lines.append(f"  {_format_entity(s)}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def homeassistant_trigger_automation(entity_id):
+    return homeassistant_call_service("automation", "trigger", entity_id)
+
+
+def homeassistant_get_camera_stream(entity_id):
+    url, headers, err = _conn()
+    if err:
+        return err
+    try:
+        r = requests.get(f"{url}/api/states/{entity_id}", headers=headers, timeout=15)
+        if r.status_code != 200:
+            return f"❌ Kamera {entity_id} nicht gefunden (Status {r.status_code})"
+        state = r.json()
+        attrs = state.get("attributes", {})
+        stream_source = attrs.get("stream_source", "")
+        frontend_stream = attrs.get("frontend_stream_url", "")
+        access_token = attrs.get("access_token", "")
+        lines = [f"📷 **{attrs.get('friendly_name', entity_id)}**"]
+        if frontend_stream:
+            lines.append(f"  Frontend-Stream: {frontend_stream}")
+        if stream_source:
+            lines.append(f"  Stream-URL: {stream_source}")
+        if access_token:
+            lines.append(f"  Access-Token: {access_token}")
+        entity_picture = attrs.get("entity_picture", "")
+        if entity_picture:
+            lines.append(f"  Snapshot: {url}{entity_picture}")
+        if not any([frontend_stream, stream_source, access_token, entity_picture]):
+            lines.append("  (keine Stream-URL in den Attributen)")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ {e}"
+
 
 TOOLS = [
     {"type":"function","function":{"name":"homeassistant_get_states","description":"Liste ALLE Entitäten nach Domain gefiltert (z.B. 'light', 'sensor', 'switch', '' für alle). Jede Entität zeigt Name, Entity-ID, Raum und Status.","parameters":{"type":"object","properties":{"domain":{"type":"string","description":"Domain-Filter: 'light', 'sensor', 'switch', 'climate', '' (alle)."}},"required":[]}}},  # noqa: E501
@@ -394,6 +629,16 @@ TOOLS = [
     {"type":"function","function":{"name":"homeassistant_list_scripts","description":"Liste alle verfügbaren Skripte/Automationen auf.","parameters":{"type":"object","properties":{},"required":[]}}},
     {"type":"function","function":{"name":"homeassistant_run_script","description":"Führe ein Skript aus. VORHER homeassistant_list_scripts() für verfügbare Skripte.","parameters":{"type":"object","properties":{"entity_id":{"type":"string","description":"Entity-ID des Skripts (z.B. script.guten_morgen)"}},"required":["entity_id"]}}},  # noqa: E501
     {"type":"function","function":{"name":"homeassistant_get_camera_snapshot","description":"Live-Kamerabild von einer Home-Assistant-Kamera abrufen. Gibt Base64-Bild zurück. Vorher camera-Entity mit homeassistant_find('camera') finden.","parameters":{"type":"object","properties":{"entity_id":{"type":"string","description":"Entity-ID der Kamera (z.B. camera.terasse_standardauflosung)"}},"required":["entity_id"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"homeassistant_get_history","description":"Rufe den Verlauf/History einer Entität ab seit einem bestimmten Zeitpunkt. Zeigt Zustandsänderungen mit Zeitstempeln.","parameters":{"type":"object","properties":{"entity_id":{"type":"string","description":"Entity-ID"},"timestamp":{"type":"string","description":"ISO-Zeitstempel (optional, default: jetzt)"}},"required":["entity_id"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"homeassistant_get_logbook","description":"Rufe Logbook-Einträge ab (Ereignis-Log von Home Assistant). Zeigt wer/was sich wann geändert hat.","parameters":{"type":"object","properties":{"timestamp":{"type":"string","description":"ISO-Zeitstempel (optional, default: 24h zurück)"}},"required":[]}}},  # noqa: E501
+    {"type":"function","function":{"name":"homeassistant_get_energy_data","description":"Hole Energie-Dashboard-Daten von Home Assistant (Stromverbrauch, Solar, etc.).","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"homeassistant_get_weather_forecast","description":"Hole Wettervorhersage von einer Wetter-Entity (z.B. weather.home). Liefert aktuelle Werte + 7-Tage-Vorhersage.","parameters":{"type":"object","properties":{"entity_id":{"type":"string","description":"Entity-ID der Wetter-Entität (z.B. weather.home)"}},"required":["entity_id"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"homeassistant_update_entity","description":"AKTUALISIERE den Status und/oder Attribute einer Entität (POST /api/states/{entity_id}).","parameters":{"type":"object","properties":{"entity_id":{"type":"string","description":"Entity-ID"},"state":{"type":"string","description":"Neuer Status"},"attributes":{"type":"string","description":"Attribute als JSON-String (optional)"}},"required":["entity_id","state"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"homeassistant_list_device_info","description":"Liste ALLE Geräte mit Hersteller, Modell und Bereich auf (GET /api/devices).","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"homeassistant_list_areas","description":"Liste ALLE Bereiche/Räume auf, die in Home Assistant konfiguriert sind (GET /api/areas).","parameters":{"type":"object","properties":{},"required":[]}}},
+    {"type":"function","function":{"name":"homeassistant_list_entities_by_area","description":"Liste alle Entitäten in einem bestimmten Bereich/Raum. Z.B. 'Wohnzimmer' oder 'Küche'.","parameters":{"type":"object","properties":{"area_name":{"type":"string","description":"Name des Bereichs (z.B. Wohnzimmer, Küche, Büro)"}},"required":["area_name"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"homeassistant_trigger_automation","description":"Triggere eine Automation manuell (POST /api/services/automation/trigger).","parameters":{"type":"object","properties":{"entity_id":{"type":"string","description":"Entity-ID der Automation (z.B. automation.bewasserung)"}},"required":["entity_id"]}}},  # noqa: E501
+    {"type":"function","function":{"name":"homeassistant_get_camera_stream","description":"Hole die Stream-URL einer Kamera-Entität (aus den Attributen: stream_source, frontend_stream_url).","parameters":{"type":"object","properties":{"entity_id":{"type":"string","description":"Entity-ID der Kamera"}},"required":["entity_id"]}}},  # noqa: E501
 ]
 
 TOOL_MAP = {
@@ -410,6 +655,16 @@ TOOL_MAP = {
     "homeassistant_list_scripts": homeassistant_list_scripts,
     "homeassistant_run_script": homeassistant_run_script,
     "homeassistant_get_camera_snapshot": homeassistant_get_camera_snapshot,
+    "homeassistant_get_history": homeassistant_get_history,
+    "homeassistant_get_logbook": homeassistant_get_logbook,
+    "homeassistant_get_energy_data": homeassistant_get_energy_data,
+    "homeassistant_get_weather_forecast": homeassistant_get_weather_forecast,
+    "homeassistant_update_entity": homeassistant_update_entity,
+    "homeassistant_list_device_info": homeassistant_list_device_info,
+    "homeassistant_list_areas": homeassistant_list_areas,
+    "homeassistant_list_entities_by_area": homeassistant_list_entities_by_area,
+    "homeassistant_trigger_automation": homeassistant_trigger_automation,
+    "homeassistant_get_camera_stream": homeassistant_get_camera_stream,
 }
 
 PROMPT_EXTRA = (
@@ -426,6 +681,16 @@ PROMPT_EXTRA = (
     "  9. **homeassistant_list_scripts**: Alle Skripte/Automationen anzeigen\n"
     "  10. **homeassistant_run_script(entity_id)**: Skript ausführen (z.B. script.guten_morgen)\n"
     "  11. **homeassistant_get_camera_snapshot(entity_id)**: Live-Kamerabild abrufen (Base64)\n"
+    "  12. **homeassistant_get_history(entity_id, timestamp)**: Verlauf/History einer Entität\n"
+    "  13. **homeassistant_get_logbook(timestamp)**: Logbook-Einträge abrufen\n"
+    "  14. **homeassistant_get_energy_data()**: Energie-Dashboard-Daten\n"
+    "  15. **homeassistant_get_weather_forecast(entity_id)**: Wettervorhersage\n"
+    "  16. **homeassistant_update_entity(entity_id, state, attributes)**: Status/Attribute setzen\n"
+    "  17. **homeassistant_list_device_info()**: Alle Geräte auflisten\n"
+    "  18. **homeassistant_list_areas()**: Alle Bereiche auflisten\n"
+    "  19. **homeassistant_list_entities_by_area(area_name)**: Entitäten in Bereich\n"
+    "  20. **homeassistant_trigger_automation(entity_id)**: Automation triggern\n"
+    "  21. **homeassistant_get_camera_stream(entity_id)**: Kamera-Stream-URL abrufen\n"
     "  Vault: homeassistant/url, homeassistant/token\n"
     "  BEISPIELE:\n"
     "    'Schalte Nanoleaf ein auf rot' → homeassistant_find('Nano') → homeassistant_light_set('light.canvas_48e9', power=True, color='rot')\n"

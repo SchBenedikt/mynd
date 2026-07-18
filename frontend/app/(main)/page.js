@@ -258,14 +258,14 @@ export default function HomePage() {
     }
     text = text.trim();
     let targetChatId = options.chatId || activeChatId;
+    const userMessageId = options.messageId || createMessageId();
     if (!targetChatId) {
-      const newChat = createEmptyChat();
+      const now = Date.now();
+      const newChat = { id: createMessageId(), title: buildChatTitleFromText(text), messages: [{ role: 'user', content: text, id: userMessageId }], createdAt: now, updatedAt: now, project: null };
       setChats(prev => [newChat, ...prev]);
       setActiveChatId(newChat.id);
       targetChatId = newChat.id;
-    }
-    const userMessageId = options.messageId || createMessageId();
-    if (options.messageId) {
+    } else if (options.messageId) {
       updateMessageInChat(targetChatId, options.messageId, (msg) => ({ ...msg, queued: false }));
     } else {
       appendMessageToChat(targetChatId, { role: 'user', content: text, id: userMessageId }, text);
@@ -333,7 +333,7 @@ export default function HomePage() {
             syncLiveTools();
           } else if (event.type === 'content') {
             clearActiveThinkTool();
-            updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: (msg.content || '') + event.content }));
+            updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: (msg.content || '') + event.content, isStreaming: true }));
           } else if (event.type === 'think') {
             const thinkChunk = String(event.content || '');
             if (!thinkChunk) continue;
@@ -361,14 +361,14 @@ export default function HomePage() {
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
             updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({
-              ...msg, content: event.response, researchStats: event.research_stats || [], files: event.files || [], streamTrace: [...msgTools]
+              ...msg, content: event.response, researchStats: event.research_stats || [], files: event.files || [], streamTrace: [...msgTools], isStreaming: false
             }));
             if (options.fromVoice) voice.speakAssistantText(event.response);
           } else if (event.type === 'error') {
             clearActiveThinkTool();
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
-            updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: `\u26a0\ufe0f Fehler: ${event.error}`, streamTrace: [...msgTools] }));
+            updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: `\u26a0\ufe0f Fehler: ${event.error}`, streamTrace: [...msgTools], isStreaming: false }));
           } else if (event.type === 'needs_input') {
             clearActiveThinkTool();
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');

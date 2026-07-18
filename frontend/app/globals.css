@@ -2985,9 +2985,18 @@ body {
   border-radius: var(--radius-lg);
   padding: 0.65rem 0.85rem;
   line-height: 1.45;
-  white-space: normal;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
   font-size: 0.925rem;
   transition: border-color var(--transition);
+}
+
+.bubble.streaming p {
+  margin: 0.1em 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .bubble::selection {
@@ -3134,6 +3143,9 @@ body {
 
 .message.assistant .bubble p {
   margin: 0.2em 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .message.assistant .bubble ul {

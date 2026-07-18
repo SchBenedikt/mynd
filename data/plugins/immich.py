@@ -417,6 +417,89 @@ TOOLS = [
             "description": {"type": "string", "description": "Optionale Beschreibung"}
         }, "required": ["title"]}
     }},
+    {"type": "function", "function": {
+        "name": "immich_delete_album",
+        "description": "Lösche ein Album in Immich.",
+        "parameters": {"type": "object", "properties": {
+            "album_id": {"type": "string", "description": "Album-ID"}
+        }, "required": ["album_id"]}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_add_photos_to_album",
+        "description": "Füge Fotos zu einem Album hinzu.",
+        "parameters": {"type": "object", "properties": {
+            "album_id": {"type": "string", "description": "Album-ID"},
+            "asset_ids": {"type": "string", "description": "Komma-getrennte Liste von Asset-IDs"}
+        }, "required": ["album_id", "asset_ids"]}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_remove_photos_from_album",
+        "description": "Entferne Fotos aus einem Album.",
+        "parameters": {"type": "object", "properties": {
+            "album_id": {"type": "string", "description": "Album-ID"},
+            "asset_ids": {"type": "string", "description": "Komma-getrennte Liste von Asset-IDs"}
+        }, "required": ["album_id", "asset_ids"]}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_list_tags",
+        "description": "Liste alle Tags in Immich auf.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_get_tag_photos",
+        "description": "Hole Fotos mit einem bestimmten Tag.",
+        "parameters": {"type": "object", "properties": {
+            "tag_id": {"type": "string", "description": "Tag-ID aus immich_list_tags"}
+        }, "required": ["tag_id"]}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_list_shared_links",
+        "description": "Liste alle geteilten Links in Immich auf.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_create_shared_link",
+        "description": "Erstelle einen geteilten Link für ein Foto oder Album.",
+        "parameters": {"type": "object", "properties": {
+            "type": {"type": "string", "enum": ["INDIVIDUAL", "ALBUM"], "description": "INDIVIDUAL für einzelnes Foto, ALBUM für Album"},
+            "id": {"type": "string", "description": "Asset-ID oder Album-ID"},
+            "description": {"type": "string", "description": "Optionale Beschreibung"}
+        }, "required": ["type", "id"]}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_list_duplicates",
+        "description": "Liste doppelte Fotos in Immich auf.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_get_memories",
+        "description": "Hole Erinnerungen/On-This-Day von Immich.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_get_map_markers",
+        "description": "Hole Geo-Marker für alle Fotos mit GPS-Koordinaten.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_archive_asset",
+        "description": "Archiviere ein Foto (entferne es aus der Hauptansicht).",
+        "parameters": {"type": "object", "properties": {
+            "asset_id": {"type": "string", "description": "Asset-ID"}
+        }, "required": ["asset_id"]}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_trash_assets",
+        "description": "Verschiebe Fotos in den Papierkorb.",
+        "parameters": {"type": "object", "properties": {
+            "asset_ids": {"type": "string", "description": "Komma-getrennte Liste von Asset-IDs"}
+        }, "required": ["asset_ids"]}
+    }},
+    {"type": "function", "function": {
+        "name": "immich_empty_trash",
+        "description": "Leere den Papierkorb endgültig.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
 ]
 
 def immich_upload_photo(image_url, album_id="", description=""):
@@ -488,6 +571,265 @@ def immich_create_album(title, description=""):
         return f"❌ {e}"
 
 
+def immich_delete_album(album_id):
+    """Lösche ein Album."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        r = requests.delete(f"{base}/albums/{album_id}", headers=h, timeout=15)
+        if r.status_code in (200, 204):
+            return f"✅ Album `{album_id}` gelöscht."
+        return f"❌ Fehler (Status {r.status_code}): {r.text[:200]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_add_photos_to_album(album_id, asset_ids):
+    """Füge Fotos zu einem Album hinzu."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        ids = [a.strip() for a in asset_ids.split(",")]
+        r = requests.put(f"{base}/albums/{album_id}/assets",
+                         json={"ids": ids}, headers=h, timeout=30)
+        if r.status_code in (200, 204):
+            count = len(ids)
+            return f"✅ {count} Fotos zu Album hinzugefügt."
+        return f"❌ Fehler (Status {r.status_code}): {r.text[:200]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_remove_photos_from_album(album_id, asset_ids):
+    """Entferne Fotos aus einem Album."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        ids = [a.strip() for a in asset_ids.split(",")]
+        r = requests.delete(f"{base}/albums/{album_id}/assets",
+                            json={"ids": ids}, headers=h, timeout=30)
+        if r.status_code in (200, 204):
+            return "✅ Fotos aus Album entfernt."
+        return f"❌ Fehler (Status {r.status_code}): {r.text[:200]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_list_tags():
+    """Liste alle Tags auf."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        r = requests.get(f"{base}/tags", headers=h, timeout=15)
+        if r.status_code == 200:
+            tags = r.json()
+            if not tags:
+                return "📭 Keine Tags vorhanden."
+            lines = ["🏷️ **Tags**"]
+            for t in tags:
+                name = t.get("name", "?")
+                tid = t.get("id", "")
+                count = t.get("value", t.get("assetCount", 0))
+                lines.append(f"  • **{name}** (ID: `{tid}`, {count} Fotos)")
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_get_tag_photos(tag_id):
+    """Hole Fotos mit einem bestimmten Tag."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        r = requests.get(f"{base}/tags/{tag_id}/assets", headers=h, timeout=15)
+        if r.status_code == 200:
+            assets = r.json()
+            if not assets:
+                return "(keine Fotos mit diesem Tag)"
+            lines = [_format_asset(a) for a in assets[:50]]
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_list_shared_links():
+    """Liste alle geteilten Links."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        r = requests.get(f"{base}/shared-links", headers=h, timeout=15)
+        if r.status_code == 200:
+            links = r.json()
+            if not links:
+                return "📭 Keine geteilten Links."
+            lines = ["🔗 **Geteilte Links**"]
+            for link in links:
+                key = link.get("key", "")
+                link_type = link.get("type", "?")
+                desc = link.get("description", "")
+                expires = link.get("expiresAt", "kein Ablauf")
+                lines.append(f"  • `{key}` ({link_type}) - {desc} - Ablauf: {expires}")
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_create_shared_link(type, id, description=""):
+    """Erstelle einen geteilten Link."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        body = {"type": type, "assetIds": [id]} if type == "INDIVIDUAL" else {"type": type, "albumId": id}
+        if description:
+            body["description"] = description
+        r = requests.post(f"{base}/shared-links", json=body, headers=h, timeout=15)
+        if r.status_code in (200, 201):
+            result = r.json()
+            key = result.get("key", "")
+            url = result.get("link", f"{base.replace('/api', '/share')}/{key}")
+            return f"✅ Geteilter Link erstellt: {url}"
+        return f"❌ Status {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_list_duplicates():
+    """Liste doppelte Fotos."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        r = requests.get(f"{base}/duplicates", headers=h, timeout=15)
+        if r.status_code == 200:
+            dups = r.json()
+            if not dups:
+                return "✅ Keine Duplikate gefunden."
+            lines = [f"📸 **{len(dups)} Duplikat-Gruppen**"]
+            for d in dups[:20]:
+                assets = d.get("assets", [])
+                ids = ", ".join(a.get("id", "?") for a in assets[:3])
+                lines.append(f"  • {d.get('assetId', '?')} -> {ids}")
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_get_memories():
+    """Hole Erinnerungen."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        r = requests.get(f"{base}/memories", headers=h, timeout=15)
+        if r.status_code == 200:
+            memories = r.json()
+            if isinstance(memories, dict):
+                memories = memories.get("memories", memories.get("items", []))
+            if not memories:
+                return "📭 Keine Erinnerungen für heute."
+            lines = ["📅 **Erinnerungen**"]
+            for m in memories[:10]:
+                title = m.get("title", "Erinnerung")
+                dt = m.get("createdAt", "")[:10]
+                lines.append(f"  • **{title}** ({dt})")
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_get_map_markers():
+    """Hole Geo-Marker."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        r = requests.get(f"{base}/map/markers", params={"fileCreatedAfter": "2020-01-01"}, headers=h, timeout=15)
+        if r.status_code == 200:
+            markers = r.json()
+            if not markers:
+                return "📭 Keine Fotos mit GPS-Koordinaten."
+            lines = [f"📍 **{len(markers)} Geo-Marker**"]
+            for m in markers[:30]:
+                lat = m.get("lat", m.get("latitude", "?"))
+                lon = m.get("lon", m.get("longitude", "?"))
+                count = m.get("count", 1)
+                city = m.get("city", "")
+                label = f" in {city}" if city else ""
+                lines.append(f"  • ({lat}, {lon}){label} - {count} Fotos")
+            return "\n".join(lines)
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_archive_asset(asset_id):
+    """Archiviere ein Foto."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        r = requests.put(f"{base}/assets/{asset_id}/archive", headers=h, timeout=15)
+        if r.status_code in (200, 204):
+            return f"✅ Asset `{asset_id}` archiviert."
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_trash_assets(asset_ids):
+    """Verschiebe Fotos in den Papierkorb."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        ids = [a.strip() for a in asset_ids.split(",")]
+        r = requests.post(f"{base}/trash/assets", json={"ids": ids}, headers=h, timeout=15)
+        if r.status_code in (200, 204):
+            return f"✅ {len(ids)} Fotos in den Papierkorb verschoben."
+        return f"❌ Status {r.status_code}: {r.text[:200]}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
+def immich_empty_trash():
+    """Leere den Papierkorb."""
+    try:
+        base, err = _base()
+        if err: return err
+        h, err = _headers()
+        if err: return err
+        r = requests.post(f"{base}/trash/empty", headers=h, timeout=30)
+        if r.status_code in (200, 204):
+            return "✅ Papierkorb geleert."
+        return f"❌ Status {r.status_code}"
+    except Exception as e:
+        return f"❌ {e}"
+
+
 TOOL_MAP = {
     'immich_api_request': immich_api_request,
     'immich_search_photos': immich_search_photos,
@@ -497,6 +839,19 @@ TOOL_MAP = {
     'immich_get_server_stats': immich_get_server_stats,
     'immich_upload_photo': immich_upload_photo,
     'immich_create_album': immich_create_album,
+    'immich_delete_album': immich_delete_album,
+    'immich_add_photos_to_album': immich_add_photos_to_album,
+    'immich_remove_photos_from_album': immich_remove_photos_from_album,
+    'immich_list_tags': immich_list_tags,
+    'immich_get_tag_photos': immich_get_tag_photos,
+    'immich_list_shared_links': immich_list_shared_links,
+    'immich_create_shared_link': immich_create_shared_link,
+    'immich_list_duplicates': immich_list_duplicates,
+    'immich_get_memories': immich_get_memories,
+    'immich_get_map_markers': immich_get_map_markers,
+    'immich_archive_asset': immich_archive_asset,
+    'immich_trash_assets': immich_trash_assets,
+    'immich_empty_trash': immich_empty_trash,
 }
 
 PROMPT_EXTRA = (
@@ -511,6 +866,19 @@ PROMPT_EXTRA = (
     '  - immich_list_albums / immich_get_album_photos(album_id, size=50) / immich_list_people / immich_get_server_stats\n'
     '  - immich_upload_photo(image_url, album_id="", description=""): Foto von URL hochladen\n'
     '  - immich_create_album(title, description=""): Neues Album erstellen\n'
+    '  - immich_delete_album(album_id): Album löschen\n'
+    '  - immich_add_photos_to_album(album_id, asset_ids): Fotos zu Album hinzufügen\n'
+    '  - immich_remove_photos_from_album(album_id, asset_ids): Fotos aus Album entfernen\n'
+    '  - immich_list_tags(): Tags auflisten\n'
+    '  - immich_get_tag_photos(tag_id): Fotos eines Tags abrufen\n'
+    '  - immich_list_shared_links(): Geteilte Links auflisten\n'
+    '  - immich_create_shared_link(type, id, description=""): Geteilten Link erstellen\n'
+    '  - immich_list_duplicates(): Doppelte Fotos anzeigen\n'
+    '  - immich_get_memories(): Erinnerungen abrufen\n'
+    '  - immich_get_map_markers(): Fotos mit GPS-Koordinaten anzeigen\n'
+    '  - immich_archive_asset(asset_id): Foto archivieren\n'
+    '  - immich_trash_assets(asset_ids): Fotos in Papierkorb verschieben\n'
+    '  - immich_empty_trash(): Papierkorb leeren\n'
     '  - immich_api_request(endpoint="/...", method="GET", params={}, body={}): GENERISCHER AUFRUF\n'
     '    für alle 254 Endpoints aus immich_endpoints.json (v3 OpenAPI-Spezifikation).\n'
     '  WICHTIG: Bei Fragen nach "Fotos von gestern/heute/dieser Woche/diesem Monat" IMMER date_from verwenden!\n'
