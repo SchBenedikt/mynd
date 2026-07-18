@@ -24,7 +24,7 @@ def test_application_entry_loads_without_browser_errors():
         response = page.goto(f'{base_url}/login.html', wait_until='networkidle')
 
         assert response is not None and response.ok
-        if page.title().strip() == 'MYND Setup':
+        if page.title().strip() == 'MYND Setup | MYND':
             expect(page.get_by_role('heading', name='Start wählen')).to_be_visible()
         else:
             expect(page).to_have_title('MYND - Local-first AI Workspace')
