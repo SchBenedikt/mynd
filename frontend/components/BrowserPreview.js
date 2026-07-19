@@ -13,9 +13,23 @@ function backendBase() {
 
 function safeScreenshotSrc(screenshot) {
   if (!screenshot) return '';
-  if (screenshot.toLowerCase().startsWith('javascript:')) return '';
-  if (screenshot.startsWith('http://') || screenshot.startsWith('https://')) return screenshot;
-  return `${backendBase()}/${screenshot}`;
+
+  const isRelative = !screenshot.startsWith('http://') && !screenshot.startsWith('https://');
+  const base = isRelative ? backendBase() : undefined;
+  try {
+    const url = new URL(screenshot, base);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.href;
+  } catch {}
+  return '';
+}
+
+function safeUrl(url) {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+  } catch {}
+  return '';
 }
 
 export default function BrowserPreview({ screenshot, title, url, textPreview, compact = false }) {
@@ -65,7 +79,7 @@ export default function BrowserPreview({ screenshot, title, url, textPreview, co
         {title && <span className="browser-preview__title">{title}</span>}
         {domain && <span className="browser-preview__domain">{domain}</span>}
         {url && (
-          <a href={url} target="_blank" rel="noopener noreferrer" className="browser-preview__link">
+          <a href={safeUrl(url)} target="_blank" rel="noopener noreferrer" className="browser-preview__link">
             ↗
           </a>
         )}
