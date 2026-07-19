@@ -1,6 +1,7 @@
 import base64
 import ipaddress
 import json
+import logging
 import os
 import re
 import shlex
@@ -21,6 +22,7 @@ from .sandbox import SandboxUnavailableError, run_sandboxed
 from .vault import _vault_get, vault_delete, vault_get, vault_list, vault_set
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
+logger = logging.getLogger(__name__)
 try:
     from ddgs import DDGS
     _DDGS_AVAILABLE = True
@@ -296,9 +298,10 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
     except FileNotFoundError:
         if 'keyfile' in locals() and keyfile: os.unlink(keyfile)
         return "❌ sshpass nicht installiert. `brew install sshpass` oder SSH-Key verwenden."
-    except Exception as e:
+    except Exception:
         if 'keyfile' in locals() and keyfile: os.unlink(keyfile)
-        return f"❌ {e}"
+        logger.exception("execute_ssh failed")
+        return "❌ SSH-Ausführung fehlgeschlagen."
 
 
 def search_documents(query, top_k=10):
@@ -512,10 +515,12 @@ def http_request(method="GET", url="", headers=None, body="", auth_user="", auth
         return out
     except requests.exceptions.Timeout:
         return "⏱ Timeout (60s)"
-    except (ValueError, requests.exceptions.SSLError) as e:
-        return f"❌ Request blocked: {e}"
-    except Exception as e:
-        return f"❌ {e}"
+    except (ValueError, requests.exceptions.SSLError):
+        logger.exception("http_request blocked due to validation/SSL error")
+        return "❌ Request blocked."
+    except Exception:
+        logger.exception("http_request failed")
+        return "❌ Anfrage fehlgeschlagen."
 
 
 def image_search(query, max_results=6):
@@ -767,8 +772,9 @@ def create_plan(steps, description=""):
                 lines[-1] = lines[-1][:-2] + "...**"
         lines.append(f"\n{plan['total_steps']} Schritte insgesamt.")
         return "\n".join(lines)
-    except Exception as e:
-        return f"❌ Plan-Erstellung fehlgeschlagen: {e}"
+    except Exception:
+        logger.exception("create_plan failed")
+        return "❌ Plan-Erstellung fehlgeschlagen."
 
 
 # ── agent-browser Integration ───────────────────────────────
