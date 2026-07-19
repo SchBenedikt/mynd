@@ -255,26 +255,31 @@ export default function GuidePage() {
   const content = GUIDE[activeSection]?.[lang] || GUIDE[activeSection]?.de;
 
   return (
-    <div className="guide-page" lang={lang}>
-      <nav className="guide-nav">
-        <div className="guide-nav-inner">
-          <Link href="/" className="guide-logo">
-            <span className="guide-logo-mark" aria-hidden="true"><i /></span>
+    <div className="lp-guide" lang={lang}>
+      <nav className="lp-guide-nav">
+        <div className="lp-guide-nav-inner">
+          <Link href="/" className="lp-guide-logo">
+            <span className="lp-guide-logo-mark" aria-hidden="true"><i /></span>
             <span>MYND</span>
           </Link>
-          <button className="guide-lang-toggle" type="button" onClick={() => setLang(l => l === 'de' ? 'en' : 'de')}>
+          <div className="lp-guide-nav-links">
+            <Link href="/guide">{t('Anleitung', 'Guide')}</Link>
+            <Link href="/developers">{t('Entwickler', 'Developers')}</Link>
+            <Link href="/login">{t('Anmelden', 'Sign in')}</Link>
+          </div>
+          <button className="lp-guide-lang-toggle" type="button" onClick={() => setLang(l => l === 'de' ? 'en' : 'de')}>
             {lang === 'de' ? 'EN' : 'DE'}
           </button>
         </div>
       </nav>
 
-      <div className="guide-layout">
-        <aside className="guide-sidebar">
+      <div className="lp-guide-layout">
+        <aside className="lp-guide-sidebar">
           <nav aria-label={t('Navigation', 'Navigation')}>
             {SECTIONS.map(s => (
               <button
                 key={s.id}
-                className={`guide-sidebar-link${activeSection === s.id ? ' active' : ''}`}
+                className={`lp-guide-sidebar-link${activeSection === s.id ? ' active' : ''}`}
                 onClick={() => setActiveSection(s.id)}
               >
                 <i className={`fas ${s.icon}`} />
@@ -284,25 +289,25 @@ export default function GuidePage() {
           </nav>
         </aside>
 
-        <main className="guide-main">
+        <main className="lp-guide-main">
           {content && (
             <>
-              <h1 className="guide-title">
+              <h1 className="lp-guide-title">
                 <i className={`fas ${SECTIONS.find(s => s.id === activeSection)?.icon}`} />
                 {' '}{content.title}
               </h1>
-              <p className="guide-intro">{content.intro}</p>
-              <div className="guide-steps">
+              <p className="lp-guide-intro">{content.intro}</p>
+              <div className="lp-guide-steps">
                 {content.steps.map((step, i) => (
-                  <div key={i} className="guide-step">
-                    <h2 className="guide-step-heading">{step.h}</h2>
+                  <div key={i} className="lp-guide-step">
+                    <h2 className="lp-guide-step-heading">{step.h}</h2>
                     <p>{step.p}</p>
                   </div>
                 ))}
               </div>
             </>
           )}
-          <div className="guide-footer">
+          <div className="lp-guide-footer">
             <Link href="/developers">{t('Entwickler-Dokumentation', 'Developer Documentation')}</Link>
             {' · '}
             <Link href="/login">{t('Zum Login', 'Go to Login')}</Link>

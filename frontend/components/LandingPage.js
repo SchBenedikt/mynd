@@ -79,10 +79,10 @@ const SCENARIOS = [
 ];
 
 const METHOD_STEPS = [
-  { icon: 'fa-message', title_de: 'Du stellst eine Frage', title_en: 'You ask a question', desc_de: 'Die Frage bestimmt, welche Quelle MYND anzapft.', desc_en: 'The question determines which source MYND queries.' },
-  { icon: 'fa-puzzle-piece', title_de: 'MYND sucht in der richtigen Quelle', title_en: 'MYND searches the right source', desc_de: 'Nur aktive und freigegebene Plugins werden verwendet.', desc_en: 'Only active and approved plugins are used.' },
-  { icon: 'fa-list-check', title_de: 'Die Antwort zeigt die Herkunft', title_en: 'The answer shows its origin', desc_de: 'Jede Info bleibt mit Zeit und Quelle verknüpfbar.', desc_en: 'Every piece stays linked to its time and source.' },
-  { icon: 'fa-shield-halved', title_de: 'Änderungen brauchen dein OK', title_en: 'Changes need your OK', desc_de: 'Bevor MYND etwas schreibt oder schaltet, fragt es nach.', desc_en: 'Before MYND writes or switches anything, it asks.' },
+  { icon: 'fa-message', title_de: 'Du stellst eine Frage', title_en: 'You ask a question', desc_de: 'MYND ermittelt selbstständig, welcher deiner Dienste die Antwort kennt.', desc_en: 'MYND independently determines which of your services has the answer.' },
+  { icon: 'fa-puzzle-piece', title_de: 'MYND durchsucht deine Dienste', title_en: 'MYND searches your services', desc_de: 'Nextcloud, Home Assistant, Immich, E-Mail, Spotify, Discord — alles aus einer Hand.', desc_en: 'Nextcloud, Home Assistant, Immich, Email, Spotify, Discord — all in one place.' },
+  { icon: 'fa-list-check', title_de: 'Antworten mit Quellennachweis', title_en: 'Answers with source proof', desc_de: 'Jede Antwort zeigt transparent, woher die Information stammt.', desc_en: 'Every answer transparently shows where the information came from.' },
+  { icon: 'fa-shield-halved', title_de: 'Du behältst die Kontrolle', title_en: 'You stay in control', desc_de: 'Wähle zwischen drei Betriebsmodi — von voll autonom bis reiner Vorschlagsmodus.', desc_en: 'Choose from three operating modes — fully autonomous to suggestions only.' },
 ];
 
 const INTEGRATIONS = [
@@ -248,21 +248,21 @@ export default function LandingPage() {
       <section className="lp-hero" id="top">
         <div className="lp-shell lp-hero-grid" id="main-content">
           <div className="lp-hero-copy">
-            <p className="lp-eyebrow"><span className="lp-live-dot" /> {t('Personal AI · auf deiner Infrastruktur', 'Personal AI · on your infrastructure')}</p>
-            <h1>{t('Nutze dein zweites Gehirn.', 'Use your second brain.')} <em>{t('Nicht irgendeine KI.', 'Not just any AI.')}</em></h1>
+            <p className="lp-eyebrow"><span className="lp-live-dot" /> {t('Deine persönliche KI · Deine Infrastruktur', 'Your personal AI · Your infrastructure')}</p>
+            <h1>{t('MYND ist dein zweites Gehirn.', 'MYND is your second brain.')} <em>{t('Es kennt deine Welt.', 'It knows your world.')}</em></h1>
             <p className="lp-hero-lede">
               {t(
-                'MYND durchsucht genau die Dienste, die du freigibst — und zeigt dir, woher jede Antwort kommt.',
-                'MYND searches exactly the services you approve — and shows where every answer came from.'
+                'Stell Fragen zu deinen Dateien, Geräten, Fotos und Nachrichten — MYND durchsucht all deine vernetzten Dienste und zeigt dir, woher jede Antwort stammt. Lokal. Privat. Deine Kontrolle.',
+                'Ask questions about your files, devices, photos and messages — MYND searches all your connected services and shows where every answer came from. Local. Private. Your control.'
               )}
             </p>
             <div className="lp-hero-actions">
               <Link href="/login" className="lp-primary-cta">
-                <span>{t('Anmelden', 'Sign in')}</span>
+                <span>{t('Kostenlos starten', 'Get started free')}</span>
                 <i className="fas fa-arrow-right" aria-hidden="true" />
               </Link>
               <a href="#method" className="lp-secondary-cta">
-                {t('So läuft eine Abfrage ab', 'See how a query runs')}
+                {t('So arbeitet MYND', 'See how MYND works')}
                 <i className="fas fa-arrow-down" aria-hidden="true" />
               </a>
             </div>
@@ -333,9 +333,9 @@ export default function LandingPage() {
 
       <aside className="lp-ticker" aria-label={t('Systemprinzipien', 'System principles')}>
         <div className="lp-shell lp-ticker-track">
-          <p><span>01</span><strong>{t('Lokal betrieben', 'Runs locally')}</strong><small>{t('Auf deinem Server oder Rechner', 'On your own server or machine')}</small></p>
-          <p><span>02</span><strong>{t('Quellen bleiben sichtbar', 'Sources stay visible')}</strong><small>{t('Antworten mit Herkunftsnachweis', 'Answers with source attribution')}</small></p>
-          <p><span>03</span><strong>{t('Drei Betriebsmodi', 'Three operating modes')}</strong><small>{t('Von voll autonom bis reiner Vorschlagsmodus', 'From fully autonomous to suggestions only')}</small></p>
+          <p><span>01</span><strong>{t('Lokal & privat', 'Local & private')}</strong><small>{t('Deine Daten bleiben auf deiner Infrastruktur', 'Your data stays on your infrastructure')}</small></p>
+          <p><span>02</span><strong>{t('Alle Dienste vernetzt', 'All services connected')}</strong><small>{t('Nextcloud, Home Assistant, Immich, E-Mail und mehr', 'Nextcloud, Home Assistant, Immich, Email and more')}</small></p>
+          <p><span>03</span><strong>{t('Volle Transparenz', 'Full transparency')}</strong><small>{t('Jede Antwort zeigt ihre Quellen', 'Every answer shows its sources')}</small></p>
         </div>
       </aside>
 
