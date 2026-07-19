@@ -159,7 +159,7 @@ const MODES = [
 ];
 
 export default function LandingPage() {
-  const [lang, setLang] = useState('de');
+  const [lang, setLang] = useState('en');
   const [active, setActive] = useState(0);
   const [expandedInt, setExpandedInt] = useState(null);
 
@@ -390,6 +390,42 @@ export default function LandingPage() {
                     </div>
                   </div>
                 )}
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="lp-questions lp-section" id="questions">
+        <div className="lp-shell">
+          <header className="lp-section-header">
+            <div>
+              <p className="lp-kicker">{t('Beispielfragen', 'Example questions')}</p>
+              <h2>{t('Was du MYND fragen kannst.', 'What you can ask MYND.')}</h2>
+            </div>
+            <p>{t('Ob Alltag, Beruf oder Smart Home — MYND versteht dich und findet die passende Antwort in deinen Daten.', 'Whether daily life, work or smart home — MYND understands you and finds the right answer in your data.')}</p>
+          </header>
+          <div className="lp-question-list">
+            {[
+              { q_de: 'Wie ist die Temperatur im Wohnzimmer?', q_en: 'What\'s the temperature in the living room?', a_de: 'MYND fragt Home Assistant und zeigt den aktuellen Wert inkl. Luftfeuchtigkeit und Heizungsstatus.', a_en: 'MYND asks Home Assistant and shows the current value including humidity and heating status.' },
+              { q_de: 'Zeige Fotos von letztem Urlaub', q_en: 'Show photos from my last vacation', a_de: 'MYND sucht in Immich nach Aufnahmen aus dem Zeitraum und zeigt die Bilder mit Metadaten.', a_en: 'MYND searches Immich for photos from that period and shows them with metadata.' },
+              { q_de: 'Suche die Rechnung vom Januar', q_en: 'Find the January invoice', a_de: 'MYND durchsucht Nextcloud und E-Mails gleichzeitig nach dem Dokument.', a_en: 'MYND searches Nextcloud and emails simultaneously for the document.' },
+              { q_de: 'Fasse meine ungelesenen Mails zusammen', q_en: 'Summarize my unread emails', a_de: 'MYND ruft die neuesten Nachrichten per IMAP ab und erstellt eine Zusammenfassung.', a_en: 'MYND fetches the latest messages via IMAP and creates a summary.' },
+              { q_de: 'Spiele Musik zum Lernen', q_en: 'Play music for studying', a_de: 'MYND startet eine passende Spotify-Playlist auf deinem aktiven Gerät.', a_en: 'MYND starts a suitable Spotify playlist on your active device.' },
+              { q_de: 'Was lief heute im Discord?', q_en: 'What happened on Discord today?', a_de: 'MYND liest die neuesten Nachrichten aus deinen Discord-Kanälen.', a_en: 'MYND reads the latest messages from your Discord channels.' },
+              { q_de: 'Wie voll ist mein NAS?', q_en: 'How full is my NAS?', a_de: 'MYND fragt TrueNAS nach Speicherstatus und zeigt Pool-Auslastung.', a_en: 'MYND queries TrueNAS for storage status and shows pool utilization.' },
+              { q_de: 'Erstelle eine Zusammenfassung dieser Webseite', q_en: 'Summarize this webpage', a_de: 'MYND öffnet die URL im Cloud-Browser und extrahiert den Hauptinhalt.', a_en: 'MYND opens the URL in the cloud browser and extracts the main content.' },
+            ].map((item, i) => (
+              <article key={i} className="lp-question">
+                <div className="lp-question-number">{String(i + 1).padStart(2, '0')}</div>
+                <div className="lp-question-body">
+                  <h3>{t(item.q_de, item.q_en)}</h3>
+                  <p>{t(item.a_de, item.a_en)}</p>
+                </div>
+                <div className="lp-question-sources">
+                  <span className="lp-meta-label">{t('QUELLEN', 'SOURCES')}</span>
+                  <span className="lp-source-chip">{t('Live-Daten', 'Live data')}</span>
+                </div>
               </article>
             ))}
           </div>
