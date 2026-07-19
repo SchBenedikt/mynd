@@ -16,6 +16,7 @@ html:has(.lp-dev) body {
   --lp-accent: #91a0ff;
   --lp-accent-strong: #7185ff;
   --lp-accent-soft: rgba(145, 160, 255, 0.12);
+  --lp-grid: rgba(255,255,255,.018);
   --lp-mono: var(--font-ibm-plex-mono), monospace;
   color: var(--lp-ink);
   background: var(--lp-bg);
@@ -24,11 +25,29 @@ html:has(.lp-dev) body {
   isolation: isolate;
 }
 
+[data-mode="light"] .lp-dev {
+  --lp-bg: #f4f6fb;
+  --lp-bg-raised: #eef0f6;
+  --lp-panel: #ffffff;
+  --lp-ink: #151820;
+  --lp-body: #464b5a;
+  --lp-muted: #7c8295;
+  --lp-dim: #a5abbe;
+  --lp-line: rgba(0, 0, 0, 0.09);
+  --lp-line-strong: rgba(0, 0, 0, 0.16);
+  --lp-accent: #6b7dff;
+  --lp-accent-strong: #5570f0;
+  --lp-accent-soft: rgba(107, 125, 255, 0.08);
+  --lp-grid: rgba(0,0,0,.035);
+}
+
+[data-mode="light"] .lp-dev-nav { background: rgba(244, 246, 251, .91); }
+
 .lp-dev::before {
   position: fixed; inset: 0; z-index: -1;
   background-image:
-    linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+    linear-gradient(var(--lp-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--lp-grid) 1px, transparent 1px);
   background-size: 64px 64px;
   mask-image: linear-gradient(to bottom, rgba(0,0,0,.7), transparent 48%);
   content: ''; pointer-events: none;
