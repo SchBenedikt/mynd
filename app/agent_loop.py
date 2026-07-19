@@ -8,12 +8,12 @@ import core.tools as _ct
 
 # Plugin references
 from app.config import DATA_DIR, GENERATED_DIR, VAULT_FILE, _app_lock, logger
+from app.helpers import load_security_mode
 from app.session_store import agent_sessions
 from app.state import _PENDING_TOOL_CONFIRMS, _PRIVILEGED_TOOL_NAMES, _PRIVILEGED_TOOL_PREFIXES, _audit_log
 from core.llm import chat_with_tools, chat_with_tools_stream
 from core.plugin_base import get_all_tools
 from core.tools import CORE_MAP, CORE_TOOLS, execute_ssh, http_request, safe_http_request, think, vault_set
-from app.helpers import load_security_mode
 from core.vault import load_vault
 
 plugins_loaded = False
