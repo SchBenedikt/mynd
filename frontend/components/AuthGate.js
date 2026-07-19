@@ -28,6 +28,9 @@ export default function AuthGate({ children }) {
   useEffect(() => {
     let cancelled = false;
     const storedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } })();
+    const timeout = setTimeout(() => {
+      if (!cancelled) setReady(true);
+    }, 4000);
     Promise.allSettled([
       storedToken
         ? apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${storedToken}` } })
@@ -46,9 +49,11 @@ export default function AuthGate({ children }) {
           setSetupRequired(needsSetup);
           if (needsSetup && pathname !== '/setup') guardedReplace('/setup');
         })
-    ]).finally(() => { if (!cancelled) setReady(true); });
-
-    return () => { cancelled = true; };
+    ]).finally(() => {
+      clearTimeout(timeout);
+      if (!cancelled) setReady(true);
+    });
+    return () => { cancelled = true; clearTimeout(timeout); };
   }, [guardedReplace, pathname]);
 
   useEffect(() => {
