@@ -159,7 +159,7 @@ const MODES = [
 ];
 
 export default function LandingPage() {
-  const [lang, setLang] = useState('de');
+  const [lang, setLang] = useState('en');
   const [active, setActive] = useState(0);
   const [expandedInt, setExpandedInt] = useState(null);
 
