@@ -347,3 +347,22 @@ def load_security_mode():
 
 def save_security_mode(mode):
     (DATA_DIR / 'security_mode.json').write_text(json.dumps({'mode': mode}, indent=2))
+
+
+_STACK_TRACE_PATTERNS = (
+    'Traceback (most recent call last)',
+    '  File "',
+    'Error: ',
+    'Exception: ',
+    'Warning: ',
+)
+
+
+def sanitize_response_text(text):
+    if not isinstance(text, str):
+        return "⚠️ Ein interner Fehler ist aufgetreten."
+    for pattern in _STACK_TRACE_PATTERNS:
+        if pattern in text:
+            logger.warning('sanitize_response_text blocked a potential stack trace leak')
+            return "⚠️ Ein interner Fehler ist aufgetreten."
+    return text

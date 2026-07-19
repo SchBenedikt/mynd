@@ -60,6 +60,7 @@ from app.helpers import (
     _save_memory,
     knowledge_base,
     load_security_mode,
+    sanitize_response_text,
     save_security_mode,
 )
 from app.ollama_client import load_ai_config, ollama_client, save_ai_config
@@ -494,7 +495,7 @@ def chat():
         })
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
-    return jsonify({'response': content})
+    return jsonify({'response': sanitize_response_text(content)})
 
 @app.route('/api/chat/summarize', methods=['POST'])
 def chat_summarize():
@@ -634,7 +635,7 @@ def agent_query():
         })
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
-    return jsonify({'success': True, 'response': content})
+    return jsonify({'success': True, 'response': sanitize_response_text(content)})
 
 def _get_web_context_safe_v2(query, max_results):
     try:
@@ -682,7 +683,7 @@ def agent_input():
         })
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
-    return jsonify({'success': True, 'response': content})
+    return jsonify({'success': True, 'response': sanitize_response_text(content)})
 
 # ── /api/generated/* ───────────────────────────────────────
 @app.route('/api/generated/<path:filename>')
@@ -1940,8 +1941,12 @@ def update_automation(aid):
 
 @app.route('/api/automations/<aid>', methods=['DELETE'])
 def delete_automation(aid):
-    automation_engine.delete_automation(aid)
-    return jsonify({'success': True})
+    try:
+        automation_engine.delete_automation(aid)
+        return jsonify({'success': True})
+    except Exception:
+        logger.exception(f'delete_automation({aid}) failed')
+        return jsonify({'success': False, 'error': 'Delete failed'}), 500
 
 @app.route('/api/automations/<aid>/test', methods=['POST'])
 def test_automation(aid):

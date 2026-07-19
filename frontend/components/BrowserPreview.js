@@ -13,7 +13,10 @@ function backendBase() {
 
 function safeScreenshotSrc(screenshot) {
   if (!screenshot) return '';
-  if (screenshot.toLowerCase().startsWith('javascript:')) return '';
+  const lower = screenshot.toLowerCase().trim();
+  if (lower.startsWith('javascript:')) return '';
+  if (lower.startsWith('data:')) return '';
+  if (lower.startsWith('vbscript:')) return '';
   if (screenshot.startsWith('http://') || screenshot.startsWith('https://')) return screenshot;
   return `${backendBase()}/${screenshot}`;
 }
