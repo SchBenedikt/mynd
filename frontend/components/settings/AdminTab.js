@@ -15,7 +15,7 @@ export default function AdminTab({ tr, language }) {
   const [authConfigMsg, setAuthConfigMsg] = useState('');
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [newUser, setNewUser] = useState({ username: '', password: '', name: '' });
+  const [newUser, setNewUser] = useState({ username: '', password: '', name: '', role: 'user' });
   const [userMsg, setUserMsg] = useState('');
   const [userError, setUserError] = useState('');
 
@@ -176,7 +176,7 @@ export default function AdminTab({ tr, language }) {
                     <div className="user-row-admin-avatar">{(u.name || u.username || '?')[0].toUpperCase()}</div>
                     <div>
                       <div className="user-row-admin-name">{u.name || u.username}</div>
-                      <div className="user-row-admin-username">{u.username}{u.username === 'admin' ? ` (${tr('Admin', 'Admin')})` : ''}</div>
+                      <div className="user-row-admin-username">{u.username}{u.role === 'admin' ? ` (${tr('Admin', 'Admin')})` : ''}</div>
                     </div>
                   </div>
                   <div className="user-row-admin-actions">
@@ -204,6 +204,11 @@ export default function AdminTab({ tr, language }) {
                   placeholder={tr('Anzeigename', 'Display name')} />
                 <input type="password" value={newUser.password} onChange={(e) => setNewUser({...newUser,password:e.target.value})}
                   placeholder={tr('Passwort', 'Password')} />
+                <select value={newUser.role} onChange={(e) => setNewUser({...newUser,role:e.target.value})}
+                  style={{padding:'0.5rem',borderRadius:'8px',border:'1px solid var(--line)',background:'var(--bg)',color:'var(--ink)'}}>
+                  <option value="user">{tr('Benutzer', 'User')}</option>
+                  <option value="admin">{tr('Admin', 'Admin')}</option>
+                </select>
                 <button type="submit" className="btn primary">
                   <i className="fas fa-plus" style={{marginRight:'0.4rem'}}></i>
                   {tr('Erstellen', 'Create')}

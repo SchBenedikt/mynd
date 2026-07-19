@@ -8,6 +8,7 @@ import core.tools as _ct
 
 # Plugin references
 from app.config import DATA_DIR, GENERATED_DIR, VAULT_FILE, _app_lock, logger
+from app.helpers import load_security_mode
 from app.session_store import agent_sessions
 from app.state import _PENDING_TOOL_CONFIRMS, _PRIVILEGED_TOOL_NAMES, _PRIVILEGED_TOOL_PREFIXES, _audit_log
 from core.llm import chat_with_tools, chat_with_tools_stream
@@ -36,6 +37,9 @@ _CONFIRMATION_REQUIRED_TOOLS = frozenset({
 
 
 def _tool_requires_confirmation(name, args):
+    mode = load_security_mode().get('mode', 'standard')
+    if mode == 'admin':
+        return False
     if name in _CONFIRMATION_REQUIRED_TOOLS:
         return True
     if name in {'http_request', 'nextcloud_request', 'immich_api_request', 'truenas_api_request'}:
@@ -65,7 +69,9 @@ def load_plugins():
     _load_plugins()
     PLUGIN_TOOLS, PLUGIN_TOOL_MAP = _get_all_tools()
     AGENT_TOOLS = [*CORE_TOOLS, *PLUGIN_TOOLS]
-    WEB_TOOL_MAP = {**CORE_MAP, **PLUGIN_TOOL_MAP, 'prompt_user': web_prompt_user}
+    new_map = {**CORE_MAP, **PLUGIN_TOOL_MAP, 'prompt_user': web_prompt_user}
+    WEB_TOOL_MAP.clear()
+    WEB_TOOL_MAP.update(new_map)
     plugins_loaded = True
 
 

@@ -263,7 +263,7 @@ def admin_users_list():
     from app.state import AUTH_USERS
     return jsonify({
         'success': True,
-        'users': [{'username': u, 'name': d.get('name', '')} for u, d in AUTH_USERS.items()]
+        'users': [{'username': u, 'name': d.get('name', ''), 'role': d.get('role', 'user')} for u, d in AUTH_USERS.items()]
     })
 
 @app.route('/api/admin/users/create', methods=['POST'])
@@ -278,12 +278,15 @@ def admin_users_create():
         return jsonify({'success': False, 'error': 'Username and password required'}), 400
     if username in AUTH_USERS:
         return jsonify({'success': False, 'error': 'User already exists'}), 409
+    role = data.get('role', 'user')
+    if role not in ('user', 'admin'):
+        return jsonify({'success': False, 'error': 'Role must be user or admin'}), 400
     AUTH_USERS[username] = {
         'password_hash': generate_password_hash(password),
-        'name': name or username, 'role': 'user',
+        'name': name or username, 'role': role,
     }
     AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
-    return jsonify({'success': True, 'user': {'username': username, 'name': name or username}})
+    return jsonify({'success': True, 'user': {'username': username, 'name': name or username, 'role': role}})
 
 @app.route('/api/admin/users/delete', methods=['POST'])
 @require_admin
