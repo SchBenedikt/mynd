@@ -188,9 +188,9 @@ export default function IntegrationsTab({ tr, language }) {
                   {t('Plugin Manager', 'Plugin Manager')}
                 </div>
                 <p style={{ fontSize: '0.85rem', color: 'var(--muted)', margin: '0.25rem 0 0' }}>
-                  {t(`${plugins.length} Plugin(s)`, `${plugins.length} plugin(s)`)}
+                  {t(`${plugins.filter(p => p.name !== 'system' && p.name !== 'python_exec').length} Plugin(s)`, `${plugins.filter(p => p.name !== 'system' && p.name !== 'python_exec').length} plugin(s)`)}
                   {' · '}
-                  {t(`${plugins.filter(p => p.enabled).length} aktiv`, `${plugins.filter(p => p.enabled).length} active`)}
+                  {t(`${plugins.filter(p => p.name !== 'system' && p.name !== 'python_exec' && p.enabled).length} aktiv`, `${plugins.filter(p => p.name !== 'system' && p.name !== 'python_exec' && p.enabled).length} active`)}
                 </p>
               </div>
             </div>
@@ -205,7 +205,7 @@ export default function IntegrationsTab({ tr, language }) {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {plugins.map(p => (
+                {plugins.filter(p => p.name !== 'system' && p.name !== 'python_exec').map(p => (
                   <div key={p.name} style={{ border: '1px solid var(--line)', borderRadius: 'var(--radius)', padding: '1rem', background: 'var(--card-bg)', opacity: p.enabled ? 1 : 0.45 }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                       <label style={{ position: 'relative', display: 'inline-block', width: 36, height: 20, flexShrink: 0, marginTop: 2 }}>

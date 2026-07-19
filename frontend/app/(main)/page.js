@@ -880,15 +880,16 @@ export default function HomePage() {
       )}
       {pendingToolConfirm && (
         <div className="modal-overlay" onClick={() => setPendingToolConfirm(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{maxWidth: '480px'}}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{maxWidth:'420px'}}>
             <div className="modal-head">
-              <strong>{tr('Tool-Best\u00e4tigung', 'Tool Confirmation')}</strong>
+              <strong><i className="fas fa-shield-halved" style={{color:'var(--accent)',marginRight:8}}></i>{tr('Tool-Best\u00e4tigung', 'Tool Confirmation')}</strong>
               <button className="modal-x" onClick={() => setPendingToolConfirm(null)}>&times;</button>
             </div>
-            <div className="modal-body" style={{padding: '20px'}}>
-              <p style={{marginBottom: '12px', color: '#e8a040'}}><i className="fas fa-shield-halved"></i> <strong>{pendingToolConfirm.tool}</strong>: {pendingToolConfirm.description}</p>
-              <p style={{fontSize: '0.9em', color: '#999', marginBottom: '20px'}}>{tr('M\u00f6chtest du die Ausf\u00fchrung dieses Tools erlauben?', 'Do you want to allow executing this tool?')}</p>
-              <div style={{display: 'flex', gap: '10px', justifyContent: 'flex-end'}}>
+            <div className="modal-body" style={{padding:'12px 20px 20px'}}>
+              <div className="tool-confirm-tool">{pendingToolConfirm.tool}</div>
+              <p className="tool-confirm-desc">{pendingToolConfirm.description}</p>
+              <p className="tool-confirm-question">{tr('M\u00f6chtest du die Ausf\u00fchrung dieses Tools erlauben?', 'Do you want to allow executing this tool?')}</p>
+              <div className="tool-confirm-actions">
                 <button className="btn btn-secondary" onClick={async () => {
                   const confirmationId = pendingToolConfirm.confirmationId;
                   setPendingToolConfirm(null);
