@@ -56,13 +56,6 @@ export const metadata = {
     follow: true,
     googleBot: { index: true, follow: true, 'max-video-preview': -1, 'max-image-preview': 'large', 'max-snippet': -1 },
   },
-  alternates: {
-    canonical: siteUrl,
-    languages: {
-      'de': `${siteUrl}/language`,
-      'en': `${siteUrl}/language`,
-    },
-  },
   category: 'technology',
 };
 
