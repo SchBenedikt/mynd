@@ -10,53 +10,71 @@ const SCENARIOS = [
   {
     id: 'server',
     icon: 'fa-house-signal',
-    q_de: 'Läuft der Server noch?',
-    q_en: 'Is the server still up?',
     service_de: 'Home Assistant',
     service_en: 'Home Assistant',
-    detail_de: 'Steckdosen, Temperatur, Energie — MYND zeigt den Live-Zustand aus deinem Smart Home.',
-    detail_en: 'Sockets, temperature, energy — MYND shows the live status from your smart home.',
-    steps: [
-      { icon: 'fa-plug', label_de: 'Steckdose Werkstatt', label_en: 'Workshop socket', state_de: 'aus', state_en: 'off' },
-      { icon: 'fa-temperature-half', label_de: 'Wohnzimmer', label_en: 'Living room', state_de: '21,3 °C', state_en: '21.3 °C' },
-      { icon: 'fa-solar-panel', label_de: 'PV-Heute', label_en: 'Solar today', state_de: '7,2 kWh', state_en: '7.2 kWh' },
+    q_de: 'Läuft der Server noch?',
+    q_en: 'Is the server still up?',
+    answer_de: 'Der Server ist online. Im Wohnzimmer sind 21,3 °C, die Werkstatt-Steckdose ist aus, und die PV hat heute 7,2 kWh eingespeist.',
+    answer_en: 'The server is online. Living room is 21.3 °C, the workshop socket is off, and solar fed in 7.2 kWh today.',
+    tools: [
+      { name: 'homeassistant_get_states', result: '33 entities found', duration: '0.4s' },
+      { name: 'think', thought: 'Der Nutzer fragt nach dem Server-Status. Ich suche nach System-Sensoren + den wichtigsten Räumen.' },
+      { name: 'homeassistant_get_history', result: 'PV-Tagesertrag: 7,2 kWh · Temperatur Wohnzimmer: 21,3 °C', duration: '0.3s' },
     ],
-    answer_de: 'Der Server ist online. Im Wohnzimmer sind 21,3 °C, die Werkstatt-Steckdose ist aus, und die PV hat heute 7,2 kWh geliefert.',
-    answer_en: 'The server is online. Living room is 21.3 °C, the workshop socket is off, and solar produced 7.2 kWh today.',
+    sources: [
+      { service: 'Home Assistant', icon: 'fa-house-signal', entries: [
+        { label_de: 'System', label_en: 'System', state_de: 'online · 3h uptime', state_en: 'online · 3h uptime' },
+        { label_de: 'Wohnzimmer', label_en: 'Living room', state_de: '21,3 °C · 42 %', state_en: '21.3 °C · 42 %' },
+        { label_de: 'Werkstatt', label_en: 'Workshop', state_de: 'Steckdose aus', state_en: 'socket off' },
+        { label_de: 'PV-Heute', label_en: 'Solar today', state_de: '7,2 kWh', state_en: '7.2 kWh' },
+      ]}
+    ]
   },
   {
     id: 'search',
     icon: 'fa-globe',
-    q_de: 'Was ist gerade los in der KI-Welt?',
-    q_en: 'What is happening in AI right now?',
     service_de: 'Browser + Immich',
     service_en: 'Browser + Immich',
-    detail_de: 'MYND sucht im Web, zeigt Bilder und fasst zusammen — alles in einer Antwort.',
-    detail_en: 'MYND searches the web, shows images and summarises — all in one answer.',
-    steps: [
-      { icon: 'fa-newspaper', label_de: 'heise.de', label_en: 'heise.de', state_de: 'Claude 4 erschienen', state_en: 'Claude 4 released' },
-      { icon: 'fa-image', label_de: 'Screenshot', label_en: 'Screenshot', state_de: 'Benchmarks', state_en: 'Benchmarks' },
-      { icon: 'fa-list', label_de: 'Zusammenfassung', label_en: 'Summary', state_de: '3 Kernpunkte', state_en: '3 key points' },
+    q_de: 'Was gibt es Neues bei den KI-Modellen?',
+    q_en: 'Whats new in AI models?',
+    answer_de: 'Claude 4 und GPT-5 wurden verglichen. Claude 4 führt in Reasoning-Benchmarks, GPT-5 bei Multimodalität. Hier die Details mit Screenshot.',
+    answer_en: 'Claude 4 and GPT-5 have been compared. Claude 4 leads in reasoning benchmarks, GPT-5 in multimodality. Here are the details with a screenshot.',
+    tools: [
+      { name: 'browser_search', result: 'heise.de: Claude 4 vs GPT-5 im Vergleich · 3 weitere Quellen', duration: '1.2s' },
+      { name: 'browser_open', result: 'https://heise.de/ki-vergleich', duration: '0.8s' },
+      { name: 'browser_screenshot', result: '📸 Benchmark-Tabelle erfasst', duration: '0.5s' },
+      { name: 'think', thought: 'Die Seite enthält eine Vergleichstabelle. Ich extrahiere die wichtigsten Kennzahlen und habe einen Screenshot gemacht.' },
+      { name: 'browser_extract', result: 'Claude 4: 89,2 % · GPT-5: 91,7 % (MMLU) · Preis: gleich', duration: '0.6s' },
     ],
-    answer_de: 'Claude 4 ist draußen — übertrifft GPT-4 in allen Benchmarks. Hier die Details und ein Vergleichs-Screenshot.',
-    answer_en: 'Claude 4 is out — beats GPT-4 on all benchmarks. Here are the details and a comparison screenshot.',
+    sources: [
+      { service: 'Browser', icon: 'fa-globe', entries: [
+        { label_de: 'heise.de', label_en: 'heise.de', state_de: 'KI-Vergleich 2026', state_en: 'AI comparison 2026' },
+        { label_de: 'Screenshot', label_en: 'Screenshot', state_de: 'Benchmark-Tabelle', state_en: 'benchmark table' },
+      ]}
+    ]
   },
   {
     id: 'files',
     icon: 'fa-cloud',
-    q_de: 'Welche Dateien kamen diese Woche dazu?',
-    q_en: 'Which files were added this week?',
     service_de: 'Nextcloud',
     service_en: 'Nextcloud',
-    detail_de: 'MYND listet neue und geänderte Dateien aus deiner Nextcloud auf.',
-    detail_en: 'MYND lists new and changed files from your Nextcloud.',
-    steps: [
-      { icon: 'fa-file-pdf', label_de: 'Rechnung.pdf', label_en: 'invoice.pdf', state_de: 'heute, 320 KB', state_en: 'today, 320 KB' },
-      { icon: 'fa-file-image', label_de: 'Urlaub_2026/', label_en: 'vacation_2026/', state_de: '12 Fotos', state_en: '12 photos' },
-      { icon: 'fa-file-lines', label_de: 'Notizen.md', label_en: 'notes.md', state_de: 'geändert gestern', state_en: 'modified yesterday' },
+    q_de: 'Was gab es diese Woche Neues in Nextcloud?',
+    q_en: 'Whats new in Nextcloud this week?',
+    answer_de: 'Seit Montag sind 3 Dateien dazugekommen: eine Rechnung (PDF), 12 Urlaubsfotos und aktualisierte Notizen.',
+    answer_en: '3 new files since Monday: an invoice (PDF), 12 vacation photos and updated notes.',
+    tools: [
+      { name: 'nextcloud_list', result: '12 Einträge im Wurzelverzeichnis', duration: '0.3s' },
+      { name: 'nextcloud_search', result: `3 Dateien seit Montag geändert`, duration: '0.5s' },
+      { name: 'think', thought: 'Ich suche nach Dateien, die seit Montag neu sind oder geändert wurden. Sortiere nach Änderungsdatum.' },
+      { name: 'nextcloud_read_file', result: 'Notizen.md · 1.240 Zeichen · Metadaten gelesen', duration: '0.4s' },
     ],
-    answer_de: 'Drei neue Dateien seit Montag: Rechnung eingegangen, Urlaubsfotos synchronisiert, Notizen aktualisiert.',
-    answer_en: 'Three new files since Monday: invoice received, vacation photos synced, notes updated.',
+    sources: [
+      { service: 'Nextcloud', icon: 'fa-cloud', entries: [
+        { label_de: 'Rechnung_März.pdf', label_en: 'invoice_March.pdf', state_de: 'heute · 320 KB', state_en: 'today · 320 KB' },
+        { label_de: 'Urlaub_2026/', label_en: 'vacation_2026/', state_de: '12 Fotos · 8 MB', state_en: '12 photos · 8 MB' },
+        { label_de: 'Notizen.md', label_en: 'notes.md', state_de: 'gestern · 1,2 KB', state_en: 'yesterday · 1.2 KB' },
+      ]}
+    ]
   },
 ];
 
@@ -98,7 +116,7 @@ export default function LandingPage() {
   useEffect(() => {
     const id = setInterval(() => {
       setActive((prev) => (prev + 1) % SCENARIOS.length);
-    }, 5000);
+    }, 6000);
     return () => clearInterval(id);
   }, []);
 
@@ -143,10 +161,10 @@ export default function LandingPage() {
         <div className="lp-shell lp-hero-grid" id="main-content">
           <div className="lp-hero-copy">
             <p className="lp-eyebrow"><span className="lp-live-dot" /> {t('Personal AI · auf deiner Infrastruktur', 'Personal AI · on your infrastructure')}</p>
-            <h1>{t('Frag dein digitales Leben.', 'Ask your digital life.')} <em>{t('Nicht irgendeine Cloud.', 'Not just another cloud.')}</em></h1>
+            <h1>{t('Nutze dein zweites Gehirn.', 'Use your second brain.')} <em>{t('Nicht irgendeine KI.', 'Not just any AI.')}</em></h1>
             <p className="lp-hero-lede">
               {t(
-                'MYND durchsucht genau die Dienste, die du freigibst — und zeigt, woher eine Antwort kommt.',
+                'MYND durchsucht genau die Dienste, die du freigibst — und zeigt dir, woher jede Antwort kommt.',
                 'MYND searches exactly the services you approve — and shows where every answer came from.'
               )}
             </p>
@@ -156,7 +174,7 @@ export default function LandingPage() {
                 <i className="fas fa-arrow-right" aria-hidden="true" />
               </Link>
               <a href="#method" className="lp-secondary-cta">
-                {t('Wie das aussieht', 'See an example')}
+                {t('So läuft eine Abfrage ab', 'See how a query runs')}
                 <i className="fas fa-arrow-down" aria-hidden="true" />
               </a>
             </div>
@@ -182,17 +200,33 @@ export default function LandingPage() {
               <h2>{t(s.q_de, s.q_en)}</h2>
             </div>
 
+            <div className="lp-trace-tools">
+              {s.tools.map((tool, i) => (
+                <div key={i} className={`lp-trace-tool${tool.name === 'think' ? ' think' : ''}`}>
+                  <span className="lp-trace-tool-icon">{tool.name === 'think' ? '⟳' : '✓'}</span>
+                  <span className="lp-trace-tool-name">{tool.name === 'think' ? '' : tool.name}</span>
+                  {tool.thought ? (
+                    <span className="lp-trace-tool-thought">{tool.thought}</span>
+                  ) : (
+                    <span className="lp-trace-tool-result">{tool.result}</span>
+                  )}
+                  {tool.duration && <span className="lp-trace-tool-dur">{tool.duration}</span>}
+                </div>
+              ))}
+            </div>
+
             <div className="lp-trace-map">
-              <div className="lp-trace-line" aria-hidden="true"><span style={{ animationDelay: `${active * 0.3}s` }} /></div>
               <ol>
-                {s.steps.map((step, i) => (
-                  <li key={i} style={{ animationDelay: `${i * 0.12}s` }}>
-                    <span className="lp-source-icon"><i className={`fas ${step.icon}`} aria-hidden="true" /></span>
-                    <div>
-                      <strong>{t(step.label_de, step.label_en)}</strong>
-                      <span>{t(step.state_de, step.state_en)}</span>
-                    </div>
-                  </li>
+                {s.sources.map((group, gi) => (
+                  group.entries.map((entry, ei) => (
+                    <li key={`${gi}-${ei}`}>
+                      <span className="lp-source-icon"><i className={`fas ${group.icon}`} aria-hidden="true" /></span>
+                      <div>
+                        <strong>{t(entry.label_de, entry.label_en)}</strong>
+                        <span>{t(entry.state_de, entry.state_en)}</span>
+                      </div>
+                    </li>
+                  ))
                 ))}
               </ol>
             </div>
@@ -201,8 +235,8 @@ export default function LandingPage() {
               <span className="lp-trace-answer-label">{t('ANTWORT', 'ANSWER')}</span>
               <p>{t(s.answer_de, s.answer_en)}</p>
               <div className="lp-trace-sources">
-                <span>{t(s.service_de, s.service_en)}</span>
-                <span><i className={`fas ${s.icon}`} aria-hidden="true" /> {t('Quelle', 'Source')}</span>
+                <span>{s.sources.length} {t('Quelle(n)', 'source(s)')}</span>
+                <span><i className={`fas ${s.icon}`} aria-hidden="true" /> {t(s.service_de, s.service_en)}</span>
               </div>
             </div>
           </div>

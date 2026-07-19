@@ -276,6 +276,16 @@ html:has(.lp) body {
 .lp-trace-map li > div { min-width: 0; display: flex; justify-content: space-between; gap: 1rem; }
 .lp-trace-map strong { min-width: 0; overflow: hidden; color: var(--lp-body); font-size: .8rem; font-weight: 560; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .lp-trace-map li > div > span { flex: 0 0 auto; color: var(--lp-muted); font: 400 .75rem/1.35 var(--lp-mono); }
+/* Tool trace */
+.lp-trace-tools { padding: .35rem 1.15rem; border-bottom: 1px solid var(--lp-line); }
+.lp-trace-tool { display: flex; align-items: center; gap: .55rem; padding: .35rem 0; font: 400 .75rem/1.4 var(--lp-mono); animation: lp-slidein .35s cubic-bezier(.2,.7,.2,1) both; }
+.lp-trace-tool.think { flex-wrap: wrap; }
+.lp-trace-tool-icon { flex: 0 0 auto; width: 18px; text-align: center; color: var(--lp-accent); }
+.lp-trace-tool-name { flex: 0 0 auto; color: var(--lp-body); font-weight: 550; }
+.lp-trace-tool-result { flex: 1 1 min-content; min-width: 0; color: var(--lp-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-trace-tool-thought { flex: 1 1 100%; padding: .45rem .6rem; margin-top: .15rem; border-left: 2px solid var(--lp-accent); color: var(--lp-body); font-style: italic; background: rgba(145,160,255,.04); }
+.lp-trace-tool-dur { flex: 0 0 auto; color: var(--lp-dim); font-size: .7rem; }
+
 .lp-trace-answer { margin: 0 1.25rem; padding: 1.1rem 1.15rem; border: 1px solid rgba(145,160,255,.28); background: var(--lp-accent-soft); }
 .lp-trace-answer-label { color: var(--lp-accent); font: 500 .75rem/1 var(--lp-mono); letter-spacing: .08em; }
 .lp-trace-answer p { margin: .72rem 0 .9rem; color: #e5e7ef; font-size: .84rem; line-height: 1.6; }
@@ -424,6 +434,9 @@ html:has(.lp) body {
   .lp-trace-topline { flex-wrap: wrap; align-items: flex-start; font-size: .75rem; }
   .lp-trace-topline > span:last-child { display: none; }
   .lp-trace-query { grid-template-columns: 30px 1fr; padding-inline: .9rem; }
+  .lp-trace-tools { padding-inline: .9rem; }
+  .lp-trace-tool { flex-wrap: wrap; }
+  .lp-trace-tool-result { white-space: normal; }
   .lp-trace-map { padding-inline: .8rem; }
   .lp-trace-line { left: 61px; }
   .lp-trace-map li { grid-template-columns: 35px 26px minmax(0, 1fr); gap: .45rem; min-height: 66px; }
