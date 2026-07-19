@@ -108,7 +108,7 @@ export default function AuthGate({ children }) {
 
   useEffect(() => {
     if (!ready) return;
-    if (pathname === '/' || pathname === '/language' || pathname?.startsWith('/setup') || pathname === '/login') return;
+    if (pathname === '/' || pathname === '/language' || pathname?.startsWith('/setup') || pathname === '/login' || pathname === '/developers') return;
     if (user && !forceOpen) return;
     guardedReplace('/login');
   }, [ready, pathname, user, forceOpen, guardedReplace]);
@@ -142,6 +142,7 @@ export default function AuthGate({ children }) {
   if (pathname === '/language') return children;
   if (pathname?.startsWith('/setup')) return children;
   if (pathname === '/login') return children;
+  if (pathname === '/developers') return children;
   if (user && !forceOpen) return children;
   if (pathname === '/') return <LandingPage />;
   return null;

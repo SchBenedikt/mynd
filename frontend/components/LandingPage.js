@@ -223,10 +223,11 @@ export default function LandingPage() {
             <span className="lp-logo-mark" aria-hidden="true"><i /></span>
             <span>MYND</span>
           </a>
-          <div className="lp-nav-links">
+        <div className="lp-nav-links">
             <a href="#method">{t('So funktionierts', 'How it works')}</a>
             <a href="#integrations">{t('Integrationen', 'Integrations')}</a>
             <a href="#modes">{t('Betriebsmodi', 'Modes')}</a>
+            <Link href="/developers">{t('Entwickler', 'Developers')}</Link>
           </div>
           <div className="lp-nav-actions">
             <button className="lp-language" type="button" onClick={toggleLanguage} aria-label={t('Switch to English', 'Auf Deutsch wechseln')}>

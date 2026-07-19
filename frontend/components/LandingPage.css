@@ -466,7 +466,7 @@ html:has(.lp) body {
   .lp-section-header h2,
   .lp-method-header h2,
   .lp-integrations-header h2,
-  .lp-control-header h2,
+  .lp-modes-header h2,
   .lp-final h2 { font-size: clamp(2.3rem, 12vw, 3.35rem); }
   .lp-question { min-height: 0; grid-template-columns: 34px 1fr; gap: 1rem; padding-block: 2rem; }
   .lp-question-number { padding-top: .45rem; }

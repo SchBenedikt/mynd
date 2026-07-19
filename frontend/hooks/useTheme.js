@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 
 function loadTheme() {
-  if (typeof window === 'undefined') return { theme: 'gold', darkMode: 'dark', contrastColor: '' };
+  if (typeof window === 'undefined') return { theme: 'gold', darkMode: 'auto', contrastColor: '' };
   const savedTheme = localStorage.getItem('theme') || 'gold';
-  const savedDarkMode = localStorage.getItem('darkMode') || 'dark';
+  const savedDarkMode = localStorage.getItem('darkMode') || 'auto';
   const savedContrast = localStorage.getItem('contrastColor') || '';
   try {
     document.documentElement.setAttribute('data-theme', savedTheme);
@@ -24,7 +24,7 @@ export function useTheme() {
   const [contrastColor, setContrastColorState] = useState(initial.contrastColor);
 
   useEffect(() => {
-    const savedDarkMode = localStorage.getItem('darkMode') || 'dark';
+  const savedDarkMode = localStorage.getItem('darkMode') || 'auto';
 
     applyDarkMode(savedDarkMode);
 
