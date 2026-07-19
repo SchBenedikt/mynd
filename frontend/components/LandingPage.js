@@ -168,6 +168,8 @@ export default function LandingPage() {
       const stored = localStorage.getItem('mynd_language');
       if (LANGUAGES.includes(stored)) setLang(stored);
     } catch {}
+    const mode = (() => { try { return localStorage.getItem('darkMode') || 'light'; } catch(e) { return 'light'; } })();
+    document.documentElement.setAttribute('data-mode', mode);
   }, []);
 
   useEffect(() => {
@@ -227,6 +229,7 @@ export default function LandingPage() {
             <a href="#method">{t('So funktionierts', 'How it works')}</a>
             <a href="#integrations">{t('Integrationen', 'Integrations')}</a>
             <a href="#modes">{t('Betriebsmodi', 'Modes')}</a>
+            <Link href="/guide">{t('Anleitung', 'Guide')}</Link>
             <Link href="/developers">{t('Entwickler', 'Developers')}</Link>
           </div>
           <div className="lp-nav-actions">

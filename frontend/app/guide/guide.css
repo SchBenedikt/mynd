@@ -1,0 +1,207 @@
+html:has(.guide-page),
+html:has(.guide-page) body {
+  height: auto; min-height: 100%; overflow: visible;
+}
+
+.guide-page {
+  --lp-bg: #f4f6fb;
+  --lp-bg-raised: #eef0f6;
+  --lp-panel: #ffffff;
+  --lp-panel-2: #f8f9fd;
+  --lp-ink: #151820;
+  --lp-body: #464b5a;
+  --lp-muted: #7c8295;
+  --lp-dim: #a5abbe;
+  --lp-line: rgba(0, 0, 0, 0.09);
+  --lp-line-strong: rgba(0, 0, 0, 0.16);
+  --lp-accent: #6b7dff;
+  --lp-accent-strong: #5570f0;
+  --lp-accent-soft: rgba(107, 125, 255, 0.08);
+  --lp-signal: #d97742;
+  --lp-grid: rgba(0,0,0,.035);
+  --lp-mono: var(--font-ibm-plex-mono), monospace;
+  min-height: 100vh;
+  color: var(--lp-ink);
+  background: var(--lp-bg);
+  font-family: var(--font-space-grotesk), sans-serif;
+}
+
+[data-mode="dark"] .guide-page {
+  --lp-bg: #090a0e;
+  --lp-bg-raised: #0e1016;
+  --lp-panel: #12151d;
+  --lp-panel-2: #171a23;
+  --lp-ink: #f2f3f8;
+  --lp-body: #c3c7d2;
+  --lp-muted: #9298a8;
+  --lp-dim: #767d8f;
+  --lp-line: rgba(210, 216, 236, 0.14);
+  --lp-line-strong: rgba(210, 216, 236, 0.24);
+  --lp-accent: #91a0ff;
+  --lp-accent-strong: #7185ff;
+  --lp-accent-soft: rgba(145, 160, 255, 0.12);
+  --lp-signal: #e28b5c;
+  --lp-grid: rgba(255,255,255,.018);
+}
+
+.guide-nav {
+  position: sticky;
+  inset: 0 0 auto;
+  z-index: 50;
+  border-bottom: 1px solid var(--lp-line);
+  background: rgba(244, 246, 251, .91);
+  backdrop-filter: blur(18px) saturate(115%);
+  -webkit-backdrop-filter: blur(18px) saturate(115%);
+}
+
+[data-mode="dark"] .guide-nav {
+  background: rgba(9, 10, 14, .91);
+}
+
+.guide-nav-inner {
+  width: min(1280px, calc(100% - 64px));
+  min-height: 72px;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.guide-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--lp-ink);
+  text-decoration: none;
+}
+
+.guide-logo-mark i {
+  display: block;
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, var(--lp-accent), var(--lp-accent-strong));
+  border-radius: 8px;
+}
+
+.guide-lang-toggle {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--lp-line-strong);
+  background: var(--lp-panel);
+  color: var(--lp-body);
+  font-size: .82rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--lp-mono);
+}
+
+.guide-lang-toggle:hover { background: var(--lp-panel-2); }
+
+.guide-layout {
+  width: min(1280px, calc(100% - 64px));
+  margin-inline: auto;
+  display: flex;
+  gap: 48px;
+  padding: 48px 0;
+}
+
+.guide-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 88px;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.guide-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--lp-muted);
+  font-size: .85rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all .15s ease;
+  font-family: inherit;
+}
+
+.guide-sidebar-link:hover { color: var(--lp-ink); background: var(--lp-accent-soft); }
+.guide-sidebar-link.active { color: var(--lp-accent-strong); background: var(--lp-accent-soft); font-weight: 600; }
+
+.guide-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.guide-title {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--lp-ink);
+}
+
+.guide-intro {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--lp-body);
+  margin: 0 0 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--lp-line);
+}
+
+.guide-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.guide-step {
+  padding: 20px 24px;
+  border-radius: 12px;
+  background: var(--lp-panel);
+  border: 1px solid var(--lp-line);
+}
+
+.guide-step-heading {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--lp-ink);
+  margin: 0 0 8px;
+}
+
+.guide-step p {
+  font-size: .92rem;
+  line-height: 1.7;
+  color: var(--lp-body);
+  margin: 0;
+}
+
+.guide-step code {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--lp-accent-soft);
+  color: var(--lp-accent-strong);
+  font-size: .88em;
+  font-family: var(--lp-mono);
+}
+
+.guide-footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid var(--lp-line);
+  font-size: .85rem;
+  color: var(--lp-muted);
+}
+
+.guide-footer a { color: var(--lp-accent); text-decoration: none; }
+.guide-footer a:hover { text-decoration: underline; }
