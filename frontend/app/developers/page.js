@@ -245,8 +245,8 @@ export default function DevelopersPage() {
           <article className="lp-dev-section" id="modern">
             <h2>{t(SECTIONS[1].title_de, SECTIONS[1].title_en)}</h2>
             <p>{t(
-              'Erstelle eine neue Datei <code>data/plugins/mein_plugin.py</code>. Leite von <code>Plugin</code> ab, setze Klassenattribute und fülle <code>self.tools</code> und <code>self.tool_map</code> im Konstruktor.',
-              'Create a new file <code>data/plugins/my_plugin.py</code>. Subclass <code>Plugin</code>, set class attributes, and populate <code>self.tools</code> and <code>self.tool_map</code> in the constructor.'
+              'Erstelle eine neue Datei <code>data/plugins/example_plugin.py</code>. Leite von <code>Plugin</code> ab (wie im Beispiel unten), setze Klassenattribute und fülle <code>self.tools</code> und <code>self.tool_map</code> im Konstruktor.',
+              'Create a new file <code>data/plugins/example_plugin.py</code>. Subclass <code>Plugin</code> (as in the example below), set class attributes, and populate <code>self.tools</code> and <code>self.tool_map</code> in the constructor.'
             )}</p>
             <pre className="lp-dev-code"><code>{MODERN_EXAMPLE}</code></pre>
             <p>{t(

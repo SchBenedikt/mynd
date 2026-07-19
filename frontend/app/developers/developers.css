@@ -411,6 +411,23 @@ html:has(.lp-dev) body {
   .lp-dev-footer-inner { min-height: 170px; flex-direction: column; justify-content: center; text-align: center; }
 }
 
+@media (max-width: 480px) {
+  .lp-dev-hero .lp-dev-shell { padding-block: 3rem; }
+  .lp-dev-hero h1 { font-size: clamp(1.8rem, 8vw, 2.4rem); }
+  .lp-dev-lede { font-size: .92rem; }
+  .lp-dev-section h2 { font-size: 1.7rem; }
+  .lp-dev-section h3 { font-size: 1rem; margin-top: 1.5rem; }
+  .lp-dev-section p { font-size: .86rem; }
+  .lp-dev-tr { grid-template-columns: 1fr; gap: .2rem; }
+  .lp-dev-tr span:last-child { text-align: left; }
+  .lp-dev-tool-name { font-size: .82rem; }
+  .lp-dev-code code { padding: .85rem; font-size: .74rem; }
+  .lp-dev-rules li { font-size: .8rem; padding: .45rem .65rem .45rem 1.4rem; }
+  .lp-dev-test-note { flex-direction: column; gap: .5rem; padding: .75rem .85rem; }
+  .lp-dev-test-note span { font-size: .8rem; }
+  .lp-dev-article-footer p { font-size: .8rem; }
+}
+
 @media (max-width: 390px) {
   .lp-dev-logo { gap: .5rem; letter-spacing: .12em; }
   .lp-dev-lang { min-width: 62px; gap: .32rem; }

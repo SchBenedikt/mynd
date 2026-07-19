@@ -307,6 +307,13 @@ html:has(.lp-login) body {
   .lp-login-body { padding: 2rem 1rem 3rem; }
 }
 
+@media (max-width: 480px) {
+  .lp-login-card-inner { padding: 1.5rem 1.2rem; }
+  .lp-login-card-header { margin-bottom: 1.5rem; }
+  .lp-login-card-header h1 { font-size: 1.25rem; }
+  .lp-login-body { padding: 1.5rem .75rem 2.5rem; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .lp-login-card,
   .lp-login-error,
