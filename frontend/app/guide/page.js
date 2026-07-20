@@ -16,7 +16,7 @@ const SECTIONS = [
     desc_de: 'Ollama oder OpenAI-kompatibel — welches Modell für deine Hardware und Anforderungen.', desc_en: 'Ollama or OpenAI-compatible — which model for your hardware and needs.' },
   { id: 'security', icon: 'fa-shield-halved',
     title_de: 'Sicherheit & Modi', title_en: 'Security & Modes',
-    desc_de: 'Sicherheitsmodi, Tool-Bestätigung, Berechtigungen und Datenschutz.', desc_en: 'Security modes, tool confirmation, permissions and privacy.' },
+    desc_de: 'Sicherheitsmodi, Berechtigungen und Datenschutz.', desc_en: 'Security modes, permissions and privacy.' },
   { id: 'nextcloud', icon: 'fa-cloud',
     title_de: 'Nextcloud', title_en: 'Nextcloud',
     desc_de: 'Dateien durchsuchen, Kalender und Aufgaben verwalten.', desc_en: 'Browse files, manage calendars and tasks.' },
@@ -197,26 +197,97 @@ npm run dev`}</code></pre>
               'MYND funktioniert mit Ollama (lokal) und allen OpenAI-kompatiblen APIs. Die Wahl des Modells bestimmt Geschwindigkeit, Qualität und ob Tool-Aufrufe möglich sind.',
               'MYND works with Ollama (local) and all OpenAI-compatible APIs. Your model choice determines speed, quality, and whether tool calling is available.'
             )}</p>
+
+            <h3>{t('Tool-Support — worauf es ankommt', 'Tool Support — what matters')}</h3>
+            <p>{t(
+              'Nicht alle Modelle unterstützen Tool-Calling (Funktionsaufrufe). Ohne diese Fähigkeit kann MYND keine Timer stellen, Dateien durchsuchen, Smart-Home-Geräte schalten oder andere Aktionen ausführen — es kann nur Text generieren. Ein Modell muss explizit für Tool-Calling trainiert sein.',
+              'Not all models support tool-calling (function calling). Without it, MYND cannot set timers, search files, toggle smart home devices, or execute any actions — it can only generate text. A model must be explicitly trained for tool-calling.'
+            )}</p>
+            <div className="lp-guide-table">
+              <div className="lp-guide-tr lp-guide-th"><span>{t('Unterstützung', 'Support')}</span><span>{t('Bedeutung', 'Meaning')}</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Ja', 'Yes')}</span><span>{t('MYND kann Tools zuverlässig aufrufen und Ergebnisse verarbeiten.', 'MYND can reliably call tools and process results.')}</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Eingeschränkt', 'Limited')}</span><span>{t('Funktioniert teilweise, aber unzuverlässig — MYND fällt dann auf Text-Antwort zurück.', 'Works partially but unreliably — MYND falls back to text-only.')}</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Nein', 'No')}</span><span>{t('MYND kann keine Aktionen ausführen — nur Chat / Text-Antworten.', 'MYND cannot perform any actions — chat / text only.')}</span></div>
+            </div>
+
             <h3>{t('Ollama installieren', 'Install Ollama')}</h3>
             <pre className="lp-guide-code"><code>{`# Linux
 curl -fsSL https://ollama.com/install.sh | sh
 # macOS/Windows: Download von https://ollama.com`}</code></pre>
-            <h3>{t('Modell-Empfehlungen', 'Model recommendations')}</h3>
-            <div className="lp-guide-table">
-              <div className="lp-guide-tr lp-guide-th"><span>{t('Hardware', 'Hardware')}</span><span>{t('Modell', 'Model')}</span><span>{t('RAM', 'RAM')}</span><span>{t('Tool-Support', 'Tool Support')}</span></div>
-              <div className="lp-guide-tr"><span>8 GB</span><span className="lp-guide-mono">phi</span><span>~4 GB</span><span>{t('Basis', 'Basic')}</span></div>
-              <div className="lp-guide-tr"><span>8 GB</span><span className="lp-guide-mono">tinyllama</span><span>~2 GB</span><span>{t('Nein', 'No')}</span></div>
-              <div className="lp-guide-tr"><span>16 GB</span><span className="lp-guide-mono">llama3.2</span><span>~8 GB</span><span>{t('Ja', 'Yes')}</span></div>
-              <div className="lp-guide-tr"><span>16 GB</span><span className="lp-guide-mono">mistral</span><span>~7 GB</span><span>{t('Ja', 'Yes')}</span></div>
-              <div className="lp-guide-tr"><span>32 GB</span><span className="lp-guide-mono">qwen2.5</span><span>~9 GB</span><span>{t('Hervorragend', 'Excellent')}</span></div>
-              <div className="lp-guide-tr"><span>32 GB</span><span className="lp-guide-mono">llama3.1</span><span>~12 GB</span><span>{t('Ja', 'Yes')}</span></div>
-            </div>
-            <h3>{t('OpenAI-kompatible Anbieter', 'OpenAI-compatible providers')}</h3>
+
+            <h3>{t('Lokale Modell-Empfehlungen (Ollama)', 'Local model recommendations (Ollama)')}</h3>
             <p>{t(
-              'Unterstützt werden OpenAI (gpt-4o, gpt-4o-mini), Groq (llama-3.3-70b), Together, Anthropic (claude-3.5) und Google Gemini. Konfiguriere Base-URL und API-Key in Settings → AI.',
-              'Supported: OpenAI (gpt-4o, gpt-4o-mini), Groq (llama-3.3-70b), Together, Anthropic (claude-3.5), and Google Gemini. Configure Base URL and API key in Settings → AI.'
+              'Lokale Modelle laufen auf deiner Hardware, sind kostenlos und privat. Benötigen Ollama 0.3.0+ für Tool-Support. Je größer das Modell, desto besser die Tool-Kompetenz — aber auch mehr RAM.',
+              'Local models run on your hardware, are free and private. Require Ollama 0.3.0+ for tool support. Larger models mean better tool competence — but also more RAM.'
             )}</p>
-            <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t('Cloud-Modelle sind schneller, lokale Modelle sind kostenlos und privat. Für Tool-Support wird Ollama 0.3.0+ benötigt.', 'Cloud models are faster, local models are free and private. Tool support requires Ollama 0.3.0+.')}</span></div>
+            <div className="lp-guide-table">
+              <div className="lp-guide-tr lp-guide-th"><span>{t('Hardware', 'Hardware')}</span><span>{t('Modell', 'Model')}</span><span>{t('RAM', 'RAM')}</span><span>{t('Tool-Support', 'Tool Support')}</span><span>{t('Bewertung', 'Rating')}</span></div>
+              <div className="lp-guide-tr"><span>8 GB</span><span className="lp-guide-mono">phi</span><span>~4 GB</span><span>{t('Ja', 'Yes')}</span><span>{t('Gut für einfache Tools', 'Good for simple tools')}</span></div>
+              <div className="lp-guide-tr"><span>8 GB</span><span className="lp-guide-mono">tinyllama</span><span>~2 GB</span><span>{t('Nein', 'No')}</span><span>{t('Nur Chat, keine Aktionen', 'Chat only, no actions')}</span></div>
+              <div className="lp-guide-tr"><span>8 GB</span><span className="lp-guide-mono">llama3.2:3b</span><span>~3 GB</span><span>{t('Ja', 'Yes')}</span><span>{t('Tools + schnell', 'Tools + fast')}</span></div>
+              <div className="lp-guide-tr"><span>16 GB</span><span className="lp-guide-mono">llama3.2</span><span>~8 GB</span><span>{t('Ja', 'Yes')}</span><span>{t('Gut für tägliche Nutzung', 'Good for daily use')}</span></div>
+              <div className="lp-guide-tr"><span>16 GB</span><span className="lp-guide-mono">mistral</span><span>~7 GB</span><span>{t('Ja', 'Yes')}</span><span>{t('Sehr guter Tool-Support', 'Very good tool support')}</span></div>
+              <div className="lp-guide-tr"><span>16 GB</span><span className="lp-guide-mono">qwen2.5:7b</span><span>~6 GB</span><span>{t('Ja', 'Yes')}</span><span>{t('Hervorragend + multilingual', 'Excellent + multilingual')}</span></div>
+              <div className="lp-guide-tr"><span>32 GB</span><span className="lp-guide-mono">qwen2.5</span><span>~9 GB</span><span>{t('Ja', 'Yes')}</span><span>{t('Bester Tool-Support (lokal)', 'Best tool support (local)')}</span></div>
+              <div className="lp-guide-tr"><span>32 GB</span><span className="lp-guide-mono">llama3.1</span><span>~12 GB</span><span>{t('Ja', 'Yes')}</span><span>{t('Solide, aber RAM-intensiv', 'Solid but RAM-heavy')}</span></div>
+              <div className="lp-guide-tr"><span>48+ GB</span><span className="lp-guide-mono">qwen2.5:72b</span><span>~45 GB</span><span>{t('Ja', 'Yes')}</span><span>{t('Beste Qualität, viel RAM', 'Best quality, heavy RAM')}</span></div>
+            </div>
+            <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t('Tipp: Starte mit qwen2.5:7b (16 GB RAM) — es bietet den besten Tool-Support bei moderatem RAM-Verbrauch. Für 8 GB ist llama3.2:3b die beste Wahl.', 'Tip: Start with qwen2.5:7b (16 GB RAM) — best tool support at moderate RAM. For 8 GB, llama3.2:3b is the best choice.')}</span></div>
+
+            <h3>{t('Cloud-Anbieter', 'Cloud providers')}</h3>
+            <p>{t(
+              'Cloud-Modelle werden extern gehostet — schneller, leistungsfähiger, aber mit Kosten verbunden. Alle gängigen Anbieter unterstützen Tool-Calling. Konfiguriere Base-URL und API-Key in Settings → AI.',
+              'Cloud models are externally hosted — faster, more capable, but incur costs. All major providers support tool-calling. Configure Base URL and API key in Settings → AI.'
+            )}</p>
+
+            <h3>{t('OpenAI', 'OpenAI')}</h3>
+            <p>{t(
+              'Bester Tool-Support am Markt. GPT-4o und GPT-4o-mini beherrschen parallele Tool-Aufrufe, strukturierte Outputs und komplexe Workflows. Einfach API-Key in Settings → AI eintragen.',
+              'Best tool support on the market. GPT-4o and GPT-4o-mini handle parallel tool calls, structured outputs, and complex workflows. Just add your API key in Settings → AI.'
+            )}</p>
+
+            <h3>{t('Anthropic (Claude)', 'Anthropic (Claude)')}</h3>
+            <p>{t(
+              'Claude 3.5 Sonnet / Haiku haben exzellenten Tool-Support mit hoher Zuverlässigkeit. Claude denkt zuerst nach (Extended Thinking) und ruft dann präzise Tools auf. API-Key + https://api.anthropic.com als Base-URL.',
+              'Claude 3.5 Sonnet / Haiku have excellent tool support with high reliability. Claude thinks first (Extended Thinking) then calls tools precisely. API key + https://api.anthropic.com as Base URL.'
+            )}</p>
+
+            <h3>{t('Google Gemini', 'Google Gemini')}</h3>
+            <p>{t(
+              'Gemini 2.0 Flash / Pro unterstützen nativen Tool-Calling. Sehr schnell, günstig, gut für Echtzeit-Anwendungen. API-Key + https://generativelanguage.googleapis.com/v1beta/openai/ als Base-URL.',
+              'Gemini 2.0 Flash / Pro support native tool-calling. Very fast, cheap, great for real-time applications. API key + https://generativelanguage.googleapis.com/v1beta/openai/ as Base URL.'
+            )}</p>
+
+            <h3>{t('Groq', 'Groq')}</h3>
+            <p>{t(
+              'Groq bietet Llama-3.3-70B und andere Modelle mit extrem niedriger Latenz durch spezielle Hardware (LPU). Exzellenter Tool-Support. Kostenloser Tier verfügbar. Base-URL: https://api.groq.com/openai.',
+              'Groq runs Llama-3.3-70B and other models on specialized LPU hardware for extremely low latency. Excellent tool support. Free tier available. Base URL: https://api.groq.com/openai.'
+            )}</p>
+
+            <h3>{t('Together AI', 'Together AI')}</h3>
+            <p>{t(
+              'Together hostet 100+ Open-Source-Modelle (Llama, Qwen, DeepSeek, Mixtral) mit Tool-Calling. Flexible Auswahl, gute Preise. Base-URL: https://api.together.xyz/v1.',
+              'Together hosts 100+ open-source models (Llama, Qwen, DeepSeek, Mixtral) with tool-calling. Flexible selection, good pricing. Base URL: https://api.together.xyz/v1.'
+            )}</p>
+
+            <h3>{t('Ollama Cloud / OpenRouter', 'Ollama Cloud / OpenRouter')}</h3>
+            <p>{t(
+              'OpenRouter ist ein Aggregator, der über 200 Modelle von 20+ Anbietern bündelt — inklusive aller lokalen Modelle (Qwen, Llama, DeepSeek) als Cloud-API. Du zahlst nur pro Token. Tool-Calling wird von den meisten Modellen unterstützt. Base-URL: https://openrouter.ai/api/v1. Auch andere Anbieter wie DeepSeek, Perplexity oder Azure OpenAI sind kompatibel — solange sie eine OpenAI-kompatible API bereitstellen.',
+              'OpenRouter is an aggregator unifying 200+ models from 20+ providers — including all local models (Qwen, Llama, DeepSeek) as cloud APIs. Pay per token. Most models support tool-calling. Base URL: https://openrouter.ai/api/v1. Other providers like DeepSeek, Perplexity, or Azure OpenAI work too — as long as they offer an OpenAI-compatible API.'
+            )}</p>
+
+            <h3>{t('Cloud-Anbieter Vergleich', 'Cloud provider comparison')}</h3>
+            <div className="lp-guide-table">
+              <div className="lp-guide-tr lp-guide-th"><span>{t('Anbieter', 'Provider')}</span><span>{t('Tool-Support', 'Tool Support')}</span><span>{t('Latenz', 'Latency')}</span><span>{t('Kosten', 'Cost')}</span><span>{t('Modelle', 'Models')}</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">OpenAI</span><span>{t('Hervorragend', 'Excellent')}</span><span>{t('Niedrig', 'Low')}</span><span>{t('Mittel', 'Medium')}</span><span>GPT-4o, GPT-4o-mini, o3</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">Anthropic</span><span>{t('Hervorragend', 'Excellent')}</span><span>{t('Mittel', 'Medium')}</span><span>{t('Mittel', 'Medium')}</span><span>Claude 3.5 Sonnet/Haiku</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">Google</span><span>{t('Sehr gut', 'Very good')}</span><span>{t('Niedrig', 'Low')}</span><span>{t('Niedrig', 'Low')}</span><span>Gemini 2.0 Flash/Pro</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">Groq</span><span>{t('Sehr gut', 'Very good')}</span><span>{t('Sehr niedrig', 'Very low')}</span><span>{t('Kostenlos / Niedrig', 'Free / Low')}</span><span>Llama 3.3-70B, Mixtral</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">Together</span><span>{t('Gut', 'Good')}</span><span>{t('Niedrig', 'Low')}</span><span>{t('Niedrig', 'Low')}</span><span>100+ Open-Source</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">OpenRouter</span><span>{t('Variiert', 'Varies')}</span><span>{t('Variiert', 'Varies')}</span><span>{t('Pro Token', 'Per token')}</span><span>200+ Modelle</span></div>
+            </div>
+
+            <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t('Cloud-Modelle sind schneller und leistungsfähiger, aber Daten verlassen deine Infrastruktur. Lokale Modelle sind kostenlos und privat. Für Tool-Support wird Ollama 0.3.0+ benötigt.', 'Cloud models are faster and more capable, but data leaves your infrastructure. Local models are free and private. Tool support requires Ollama 0.3.0+.')}</span></div>
           </article>
 
           {/* Security & Modes */}
@@ -230,14 +301,9 @@ curl -fsSL https://ollama.com/install.sh | sh
             <div className="lp-guide-table">
               <div className="lp-guide-tr lp-guide-th"><span>{t('Modus', 'Mode')}</span><span>{t('Beschreibung', 'Description')}</span></div>
               <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Restricted', 'Restricted')}</span><span>{t('Nur Dokumentsuche + Gedächtnis. Keine externen Tools.', 'Only document search + memory. No external tools.')}</span></div>
-              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Standard', 'Standard')}</span><span>{t('Vault + Tools, kein SSH/Admin. Bestätigung bei kritischen Aktionen.', 'Vault + tools, no SSH/admin. Confirmation for critical actions.')}</span></div>
-              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Admin', 'Admin')}</span><span>{t('Voller Zugriff inkl. SSH. Keine Bestätigungsdialoge – vollautonom.', 'Full access including SSH. No confirmation dialogs – fully autonomous.')}</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Standard', 'Standard')}</span><span>{t('Vault + Tools, kein SSH/Admin.', 'Vault + tools, no SSH/admin.')}</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Admin', 'Admin')}</span><span>{t('Voller Zugriff inkl. SSH – vollautonom.', 'Full access including SSH – fully autonomous.')}</span></div>
             </div>
-            <h3>{t('Tool-Bestätigung', 'Tool Confirmation')}</h3>
-            <p>{t(
-              'Im Standard-Modus benötigen bestimmte Tools deine Bestätigung: Datei-Operationen, E-Mail-Versand, Home-Assistant-Schaltbefehle, SSH-Kommandos, Browser-Interaktionen. Der Dialog blockiert die Ausführung bis zur Freigabe. Im Admin-Modus entfällt die Bestätigung.',
-              'In Standard mode, certain tools require confirmation: file operations, email sending, Home Assistant state changes, SSH commands, browser interactions. The dialog blocks execution until approved. In Admin mode, no confirmation is needed.'
-            )}</p>
             <h3>{t('Berechtigungsmodus (Bash/SSH)', 'Permission Mode (Bash/SSH)')}</h3>
             <p>{t(
               'MYND_PERMISSION_MODE=auto (alle erlaubt) / semi (nur rm,sudo,dd) / ask (jeder Befehl). Setzbar in .env oder als Umgebungsvariable.',
@@ -296,7 +362,7 @@ curl -fsSL https://ollama.com/install.sh | sh
               'Frage: "Wie ist die Temperatur im Wohnzimmer?", "Schalte alle Lichter aus", "Ist die Haustür verriegelt?", "Starte die Guten-Morgen-Automation".',
               'Ask: "What is the temperature in the living room?", "Turn off all lights", "Is the front door locked?", "Run the good morning automation".'
             )}</p>
-            <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t('Schaltbefehle benötigen Bestätigung im Standard-Modus. Admin-Modus für autonome Steuerung.', 'State changes require confirmation in Standard mode. Use Admin mode for autonomous control.')}</span></div>
+            <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t('MYND kann Sensoren abfragen und Geräte schalten — im Admin-Modus vollautonom.', 'MYND can query sensors and toggle devices — fully autonomous in Admin mode.')}</span></div>
           </article>
 
           {/* Email */}
@@ -370,7 +436,7 @@ curl -fsSL https://ollama.com/install.sh | sh
               'Frage: "Öffne [URL]", "Mach einen Screenshot von [URL]", "Fasse den Inhalt von [URL] zusammen", "Suche auf der Seite nach [Suchbegriff]".',
               'Ask: "Open [URL]", "Take a screenshot of [URL]", "Summarize the content of [URL]", "Search the page for [query]".'
             )}</p>
-            <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t('Browser-Interaktionen (Klicks, Formulare) benötigen Bestätigung im Standard-Modus.', 'Browser interactions (clicks, forms) require confirmation in Standard mode.')}</span></div>
+            <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t('Der integrierte Browser läuft isoliert auf dem Server und teilt keine Cookies mit deinem lokalen Browser.', 'The built-in browser runs isolated on the server and does not share cookies with your local browser.')}</span></div>
           </article>
 
           <footer className="lp-guide-article-footer">
