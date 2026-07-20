@@ -12,7 +12,7 @@ if RICH:
 
 
 def _no_tool_keywords():
-    raw = os.getenv('NO_TOOL_MODEL_KEYWORDS', 'gemma,phi,tinyllama')
+    raw = os.getenv('NO_TOOL_MODEL_KEYWORDS', 'phi,tinyllama')
     return [k.strip().lower() for k in raw.split(',') if k.strip()]
 
 
