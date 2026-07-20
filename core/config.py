@@ -12,7 +12,7 @@ EMBS = BASE / 'data' / 'embeddings.npy'
 VAULT_FILE = BASE / 'data' / 'vault.json'
 MEMORY_FILE = BASE / 'data' / 'memory.json'
 PLUGIN_DIR = BASE / 'data' / 'plugins'
-PLUGIN_STATE = BASE / 'data' / 'plugins_enabled.json'
+PLUGIN_STATE = BASE / 'data' / 'plugins' / 'plugin_state.json'
 
 OLLAMA = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 

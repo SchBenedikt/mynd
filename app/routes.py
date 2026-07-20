@@ -458,7 +458,7 @@ def chat():
     system_prompt = _build_agent_system_prompt(message, language)
     cfg = load_ai_config()
     model_has_tools = check_tool_support(ollama_client.model, cfg.get('base_url'))
-    _ntk = [k.strip().lower() for k in os.getenv('NO_TOOL_MODEL_KEYWORDS', 'gemma,phi,tinyllama').split(',') if k.strip()]
+    _ntk = [k.strip().lower() for k in os.getenv('NO_TOOL_MODEL_KEYWORDS', 'phi,tinyllama').split(',') if k.strip()]
     if any(k in ollama_client.model.lower() for k in _ntk):
         model_has_tools = False
     no_tool_context = ""
@@ -567,7 +567,7 @@ def agent_query_stream():
     if cache_key not in agent_query_stream._tool_cache:
         agent_query_stream._tool_cache[cache_key] = check_tool_support(active_model, cfg.get('base_url'))
     model_has_tools = agent_query_stream._tool_cache[cache_key]
-    _ntk = [k.strip().lower() for k in os.getenv('NO_TOOL_MODEL_KEYWORDS', 'gemma,phi,tinyllama').split(',') if k.strip()]
+    _ntk = [k.strip().lower() for k in os.getenv('NO_TOOL_MODEL_KEYWORDS', 'phi,tinyllama').split(',') if k.strip()]
     if any(k in active_model.lower() for k in _ntk):
         model_has_tools = False
 
