@@ -1894,6 +1894,10 @@ def tool_run():
         return jsonify({'success': True, 'result': '⛔ Cancelled'})
     func = WEB_TOOL_MAP.get(pending['tool'])
     if not func:
+        from app.agent_loop import load_plugins as _reload_plugins
+        _reload_plugins()
+        func = WEB_TOOL_MAP.get(pending['tool'])
+    if not func:
         return jsonify({'success': False, 'error': f'Unknown tool: {pending["tool"]}'}), 400
     try:
         started_at = time.monotonic()

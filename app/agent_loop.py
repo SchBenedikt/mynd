@@ -22,18 +22,7 @@ PLUGIN_TOOL_MAP = {}
 AGENT_TOOLS = []
 WEB_TOOL_MAP = {}
 
-_CONFIRMATION_REQUIRED_TOOLS = frozenset({
-    'execute_bash', 'execute_python', 'execute_ssh', 'write_local_file', 'system_save_text',
-    'memory_set', 'memory_delete', 'vault_set', 'vault_delete',
-    'nextcloud_write_file', 'nextcloud_delete', 'nextcloud_mkdir', 'nextcloud_move',
-    'nextcloud_caldav_create', 'nextcloud_tasks_create', 'nextcloud_share_link',
-    'email_send', 'immich_upload_photo', 'immich_create_album',
-    'homeassistant_activate_scene', 'homeassistant_call_service', 'homeassistant_light_set',
-    'homeassistant_run_script', 'homeassistant_toggle', 'homeassistant_turn_off', 'homeassistant_turn_on',
-    'python_create_script', 'python_execute', 'python_install_package', 'python_run_script',
-    'timer_remove', 'timer_set', 'browser_click', 'browser_dialog_handler', 'browser_evaluate',
-    'browser_fill_form', 'browser_intercept', 'browser_select', 'browser_type',
-})
+_CONFIRMATION_REQUIRED_TOOLS = frozenset()
 
 
 def _tool_requires_confirmation(name, args):

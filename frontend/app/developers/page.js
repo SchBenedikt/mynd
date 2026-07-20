@@ -107,7 +107,7 @@ TOOL_MAP = {
 }`;
 
 export default function DevelopersPage() {
-  const [lang, setLang] = useState('de');
+  const [lang, setLang] = useState('en');
   const [activeSection, setActiveSection] = useState('overview');
 
   useEffect(() => {

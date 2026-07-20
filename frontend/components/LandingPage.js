@@ -159,7 +159,7 @@ const MODES = [
 ];
 
 export default function LandingPage() {
-  const [lang, setLang] = useState('de');
+  const [lang, setLang] = useState('en');
   const [active, setActive] = useState(0);
   const [expandedInt, setExpandedInt] = useState(null);
 
@@ -392,6 +392,37 @@ export default function LandingPage() {
                 )}
               </article>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="lp-questions lp-section" id="questions">
+        <div className="lp-shell">
+          <header className="lp-section-header">
+            <div>
+              <p className="lp-kicker">{t('Beispielfragen', 'Example questions')}</p>
+              <h2>{t('Was du MYND fragen kannst.', 'What you can ask MYND.')}</h2>
+            </div>
+            <p>{t('MYND verbindet all deine Dienste in einer KI — eine Frage, eine Antwort, alles vernetzt.', 'MYND connects all your services into one AI — one question, one answer, everything connected.')}</p>
+          </header>
+          <div className="lp-question-list">
+            {[
+              { icon: 'fa-house-signal', q_de: '"Wie ist die Temperatur im Wohnzimmer?"', q_en: '"What\'s the temperature in the living room?"', a_de: 'Fragt live Home Assistant-Sensoren ab und zeigt Temperatur, Luftfeuchtigkeit und Heizungsstatus an.', a_en: 'Queries Home Assistant sensors live — returns temperature, humidity, and heating status.' },
+              { icon: 'fa-images', q_de: '"Zeige Fotos vom letzten Sommer"', q_en: '"Show me photos from last summer"', a_de: 'Durchsucht deine gesamte Immich-Bibliothek mit natürlicher Sprache und zeigt passende Bilder.', a_en: 'Searches your entire Immich library with natural language and returns matching photos.' },
+              { icon: 'fa-cloud', q_de: '"Wo ist die Rechnung vom Januar?"', q_en: '"Where is the January invoice?"', a_de: 'Durchsucht Nextcloud-Dateien und E-Mails gleichzeitig — findet Dokumente in Sekunden.', a_en: 'Searches Nextcloud files and emails simultaneously — finds documents in seconds.' },
+              { icon: 'fa-discord', q_de: '"Fasse zusammen, was heute im Discord passiert ist"', q_en: '"Summarize what happened on Discord today"', a_de: 'Liest Nachrichten aus allen Kanälen und erstellt eine Zusammenfassung der wichtigsten Diskussionen.', a_en: 'Reads messages across all channels and creates a summary of key discussions.' },
+            ].map((item, i) => (
+              <article key={i} className="lp-question">
+                <div className="lp-question-icon"><i className={`fas ${item.icon}`} /></div>
+                <div className="lp-question-body">
+                  <h3>{item.q_en}</h3>
+                  <p>{t(item.a_de, item.a_en)}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="lp-question-more">
+            <p>{t('MYND kann noch viel mehr: Musik steuern, NAS überwachen, Webseiten analysieren, Aufgaben planen — einfach fragen.', 'MYND can do much more: control music, monitor your NAS, analyze webpages, plan tasks — just ask.')}</p>
           </div>
         </div>
       </section>
