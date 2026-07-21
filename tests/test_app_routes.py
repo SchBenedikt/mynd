@@ -6,7 +6,6 @@ import re
 import pytest
 
 import app as app_module
-import app.auth as app_auth
 import app.routes as app_routes
 import app.state as app_state
 from app import app
