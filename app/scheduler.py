@@ -41,7 +41,9 @@ def _start_indexing_scheduler():
         def auto_briefing():
             try:
                 import requests
-                requests.get("http://127.0.0.1:5001/api/agent/briefing", timeout=30)
+
+                from app.config import SERVER_PORT
+                requests.get(f"http://127.0.0.1:{SERVER_PORT}/api/agent/briefing", timeout=30)
             except Exception:
                 pass
 

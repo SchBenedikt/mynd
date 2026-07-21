@@ -22,6 +22,7 @@ GENERATED_DIR = DATA_DIR / 'generated'
 SETUP_DONE_FILE = DATA_DIR / 'setup_done.json'
 AUTH_CONFIG_FILE = DATA_DIR / 'auth_config.json'
 AUTH_FILE = DATA_DIR / 'auth_users.json'
+SERVER_PORT = int(os.getenv('MYND_PORT', '5001'))
 MEMORY_FILE = DATA_DIR / 'memory.json'
 VAULT_FILE = DATA_DIR / 'vault.json'
 API_REFS_PATH = DATA_DIR / 'api_refs.json'

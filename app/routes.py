@@ -686,6 +686,7 @@ def agent_input():
 
 # ── /api/generated/* ───────────────────────────────────────
 @app.route('/api/generated/<path:filename>')
+@require_auth
 def serve_generated(filename):
     return send_from_directory(GENERATED_DIR, filename)
 
@@ -706,18 +707,25 @@ def upload_file():
     f = request.files['file']
     if f.filename == '':
         return jsonify({'success': False, 'error': 'No file selected'}), 400
+    _max_upload_size = 50 * 1024 * 1024
+    if request.content_length and request.content_length > _max_upload_size:
+        return jsonify({'success': False, 'error': 'File exceeds 50 MB limit'}), 400
     try:
         safe_name = re.sub(r'[^\w\.\-]', '_', f.filename)
         dest = os.path.realpath(os.path.join(UPLOAD_DIR, safe_name))
         if not dest.startswith(os.path.realpath(UPLOAD_DIR)):
             return jsonify({'success': False, 'error': 'Invalid path'}), 400
-        Path(dest).write_bytes(f.read())
+        data = f.read(_max_upload_size + 1)
+        if len(data) > _max_upload_size:
+            return jsonify({'success': False, 'error': 'File exceeds 50 MB limit'}), 400
+        Path(dest).write_bytes(data)
         size = os.path.getsize(dest)
         return jsonify({'success': True, 'filename': safe_name, 'size': size, 'url': f'/api/uploads/{safe_name}'})
     except Exception:
         return jsonify({'success': False, 'error': 'Upload failed'}), 500
 
 @app.route('/api/uploads/<path:filename>')
+@require_auth
 def serve_upload(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
