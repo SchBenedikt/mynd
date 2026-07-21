@@ -66,7 +66,7 @@ from app.helpers import (
 from app.ollama_client import load_ai_config, ollama_client, save_ai_config
 from app.scheduler import automation_engine
 from app.session_store import agent_sessions
-from app.state import _PENDING_TOOL_CONFIRMS as _CONFIRMS
+
 from app.state import INDEXING_STATUS
 from core.model import check_tool_support
 from core.plugin_base import (
@@ -1865,57 +1865,7 @@ def backup_import():
             errors.append(f"{fname}: restore failed")
     return jsonify({'success': True, 'restored': restored, 'errors': errors})
 
-# ── /api/tool/run ──────────────────────────────────────────
-@app.route('/api/tool/run', methods=['POST'])
-@require_auth
-def tool_run():
-    data = request.json or {}
-    confirmation_id = str(data.get('confirmation_id') or '')
-    if not confirmation_id:
-        return jsonify({'success': False, 'error': 'confirmation_id is required'}), 400
-    with _app_lock:
-        pending = _CONFIRMS.get(confirmation_id)
-    if not pending:
-        return jsonify({'success': False, 'error': 'Confirmation not found or already used'}), 404
-    if pending.get('owner') != request.current_user:
-        return jsonify({'success': False, 'error': 'Forbidden'}), 403
-    with _app_lock:
-        pending = _CONFIRMS.pop(confirmation_id, None)
-    if not pending:
-        return jsonify({'success': False, 'error': 'Confirmation not found or already used'}), 404
-    if time.time() - float(pending.get('created_at', 0)) > 300:
-        return jsonify({'success': False, 'error': 'Confirmation expired'}), 410
-    confirmed = data.get('confirmed', False)
-    if not confirmed:
-        audit_tool(
-            pending['tool'], request.current_user, pending['args'], False,
-            duration_ms=0, request_id=confirmation_id, confirmation='denied',
-        )
-        return jsonify({'success': True, 'result': '⛔ Cancelled'})
-    func = WEB_TOOL_MAP.get(pending['tool'])
-    if not func:
-        from app.agent_loop import load_plugins as _reload_plugins
-        _reload_plugins()
-        func = WEB_TOOL_MAP.get(pending['tool'])
-    if not func:
-        return jsonify({'success': False, 'error': f'Unknown tool: {pending["tool"]}'}), 400
-    try:
-        started_at = time.monotonic()
-        _ct.PERMISSION_MODE = 'auto'
-        result = func(**pending['args'])
-        audit_tool(
-            pending['tool'], request.current_user, pending['args'], True,
-            duration_ms=int((time.monotonic() - started_at) * 1000),
-            request_id=confirmation_id, confirmation='confirmed',
-        )
-        return jsonify({'success': True, 'result': str(result)})
-    except Exception as exc:
-        audit_tool(
-            pending['tool'], request.current_user, pending['args'], False,
-            duration_ms=int((time.monotonic() - started_at) * 1000),
-            request_id=confirmation_id, confirmation='confirmed', error_class=type(exc).__name__,
-        )
-        return jsonify({'success': False, 'error': "Request failed"}), 500
+# ── /api/tool/run removed (tool confirmation dialog removed) ──
 
 # ── /api/automations/* ─────────────────────────────────────
 @app.route('/api/automations', methods=['GET'])

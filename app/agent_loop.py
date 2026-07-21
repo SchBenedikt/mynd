@@ -1,16 +1,14 @@
 import json
 import re
-import secrets
 import time
 from urllib.parse import urljoin, urlparse
 
 import core.tools as _ct
 
 # Plugin references
-from app.config import DATA_DIR, GENERATED_DIR, VAULT_FILE, _app_lock, logger
-from app.helpers import load_security_mode
+from app.config import DATA_DIR, GENERATED_DIR, VAULT_FILE, logger
 from app.session_store import agent_sessions
-from app.state import _PENDING_TOOL_CONFIRMS, _PRIVILEGED_TOOL_NAMES, _PRIVILEGED_TOOL_PREFIXES, _audit_log
+from app.state import _PRIVILEGED_TOOL_NAMES, _PRIVILEGED_TOOL_PREFIXES, _audit_log
 from core.llm import chat_with_tools, chat_with_tools_stream
 from core.plugin_base import get_all_tools
 from core.tools import CORE_MAP, CORE_TOOLS, execute_ssh, http_request, safe_http_request, think, vault_set
@@ -21,35 +19,6 @@ PLUGIN_TOOLS = []
 PLUGIN_TOOL_MAP = {}
 AGENT_TOOLS = []
 WEB_TOOL_MAP = {}
-
-_CONFIRMATION_REQUIRED_TOOLS = frozenset()
-
-
-def _tool_requires_confirmation(name, args):
-    mode = load_security_mode().get('mode', 'standard')
-    if mode == 'admin':
-        return False
-    if name in _CONFIRMATION_REQUIRED_TOOLS:
-        return True
-    if name in {'http_request', 'nextcloud_request', 'immich_api_request', 'truenas_api_request'}:
-        return str((args or {}).get('method', 'GET')).upper() not in {'GET', 'HEAD', 'OPTIONS'}
-    return False
-
-
-def _queue_tool_confirmation(name, args, owner):
-    confirmation_id = secrets.token_urlsafe(24)
-    with _app_lock:
-        _PENDING_TOOL_CONFIRMS[confirmation_id] = {
-            'tool': name, 'args': args, 'owner': owner, 'created_at': time.time(),
-        }
-    return confirmation_id
-
-
-def _confirmation_description(name, args):
-    target = next((args.get(key) for key in ('path', 'url', 'host', 'filename', 'summary') if args.get(key)), None)
-    suffix = f' ({str(target)[:120]})' if target else ''
-    return f'{name}{suffix} ausführen?'
-
 
 def load_plugins():
     global plugins_loaded, PLUGIN_TOOLS, PLUGIN_TOOL_MAP, AGENT_TOOLS, WEB_TOOL_MAP
@@ -69,7 +38,7 @@ def web_prompt_user(message, secret=False):
 
 
 _ct.prompt_user = web_prompt_user
-_ct._CONFIRM_TOOL_PENDING = True
+_ct.PERMISSION_MODE = 'auto'
 
 
 _INTERMEDIATE_PATTERNS = [
@@ -402,14 +371,6 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
                     func = WEB_TOOL_MAP.get(name)
                     if func:
                         try:
-                            if _tool_requires_confirmation(name, args):
-                                confirmation_id = _queue_tool_confirmation(name, args, owner)
-                                return None, msgs, {
-                                    'message': _confirmation_description(name, args),
-                                    'confirmation_id': confirmation_id,
-                                    'tool': name,
-                                    'requires_confirmation': True,
-                                }, stats
                             result = func(**args)
                             if isinstance(result, str) and result.startswith("⏳ USER_INPUT_REQUIRED"):
                                 message = args.get('message', result.replace('⏳ USER_INPUT_REQUIRED: ', ''))
@@ -420,9 +381,7 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
                                 })
                                 msgs.append({"role": "tool", "content": "⏳ Warte auf Antwort...", "name": "prompt_user"})
                                 return None, msgs, {'message': message, 'session_id': session_id}, stats
-                            if isinstance(result, str) and result.startswith("⏳ TOOL_CONFIRM_REQUIRED"):
-                                message = result.replace("⏳ TOOL_CONFIRM_REQUIRED: Bist du sicher, dass du ", "").rstrip("?") + "?"
-                                return None, msgs, {'message': message}, stats
+
                         except Exception:
                             logger.exception('Tool execution failed: %s', name)
                             result = "❌ Tool execution failed"
@@ -581,13 +540,6 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                         func = WEB_TOOL_MAP.get(name)
                         if func:
                             try:
-                                if _tool_requires_confirmation(name, args):
-                                    confirmation_id = _queue_tool_confirmation(name, args, owner)
-                                    yield {
-                                        "type": "confirm_tool", "confirmation_id": confirmation_id,
-                                        "tool": name, "description": _confirmation_description(name, args),
-                                    }
-                                    return
                                 result = func(**args)
                                 if isinstance(result, str) and result.startswith("⏳ USER_INPUT_REQUIRED"):
                                     message = args.get('message', result.replace('⏳ USER_INPUT_REQUIRED: ', ''))
@@ -599,15 +551,7 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                                     msgs.append({"role": "tool", "content": "⏳ Warte auf Antwort...", "name": "prompt_user"})
                                     yield {"type": "needs_input", "message": message, "session_id": session_id}
                                     return
-                                if isinstance(result, str) and result.startswith("⏳ TOOL_CONFIRM_REQUIRED"):
-                                    confirmation_id = secrets.token_urlsafe(24)
-                                    with _app_lock:
-                                        _PENDING_TOOL_CONFIRMS[confirmation_id] = {
-                                            'tool': name, 'args': args, 'owner': owner,
-                                            'created_at': time.time(),
-                                        }
-                                    yield {"type": "confirm_tool", "confirmation_id": confirmation_id, "tool": name, "description": result.replace("⏳ TOOL_CONFIRM_REQUIRED: ", "")}
-                                    return
+
                             except Exception:
                                 logger.exception('Tool execution failed: %s', name)
                                 result = "❌ Tool execution failed"
@@ -690,32 +634,7 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                     func = WEB_TOOL_MAP.get(name)
                     if func:
                         try:
-                            if _tool_requires_confirmation(name, args):
-                                confirmation_id = _queue_tool_confirmation(name, args, owner)
-                                yield {
-                                    "type": "confirm_tool", "confirmation_id": confirmation_id,
-                                    "tool": name, "description": _confirmation_description(name, args),
-                                }
-                                return
                             result = func(**args)
-                            if isinstance(result, str) and result.startswith("⏳ USER_INPUT_REQUIRED"):
-                                message = args.get('message', result.replace('⏳ USER_INPUT_REQUIRED: ', ''))
-                                session_id = agent_sessions.create(owner, {
-                                    'msgs': msgs, 'stats': stats, 'model': model,
-                                    'tools': tools, 'max_rounds': max_rounds,
-                                    'prompt': message, 'secret': args.get('secret', False),
-                                })
-                                yield {"type": "needs_input", "message": message, "session_id": session_id}
-                                return
-                            if isinstance(result, str) and result.startswith("⏳ TOOL_CONFIRM_REQUIRED"):
-                                confirmation_id = secrets.token_urlsafe(24)
-                                with _app_lock:
-                                    _PENDING_TOOL_CONFIRMS[confirmation_id] = {
-                                        'tool': name, 'args': args, 'owner': owner,
-                                        'created_at': time.time(),
-                                    }
-                                yield {"type": "confirm_tool", "confirmation_id": confirmation_id, "tool": name, "description": result.replace("⏳ TOOL_CONFIRM_REQUIRED: ", "")}
-                                return
                         except Exception:
                             logger.exception('Tool execution failed: %s', name)
                             result = "❌ Tool execution failed"

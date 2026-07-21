@@ -11,7 +11,6 @@ from app.config import AUTH_FILE as AUTH_FILE
 from app.config import DATA_DIR as DATA_DIR
 from app.config import SETUP_DONE_FILE, logger
 from app.config import _app_lock as _app_lock
-from app.state import _PENDING_TOOL_CONFIRMS as _PENDING_TOOL_CONFIRMS
 from app.state import AUTH_USERS as AUTH_USERS
 
 load_dotenv()

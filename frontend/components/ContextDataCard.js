@@ -366,11 +366,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
                     ? (card?.subtitle || t('Lokales Wetter', 'Local weather'))
                     : `${payload?.count || 0} items`}
           </div>
-          {isEmail && card?.requires_confirmation && (
-            <div className="context-data-note" style={{marginTop: '0.5rem'}}>
-              {card?.confirmation_text || t('Bitte bestätige den Versand manuell, bevor die Nachricht gesendet wird.', 'Please confirm the send manually before the message is sent.')}
-            </div>
-          )}
+
         </div>
 
         {!isPhoto && !isEmail && !isContacts && !isWeather && (

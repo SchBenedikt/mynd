@@ -65,7 +65,6 @@ export default function HomePage() {
   const [pendingQueue, setPendingQueue] = useState([]);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const fileInputRef = useRef(null);
-  const [pendingToolConfirm, setPendingToolConfirm] = useState(null);
   const [pendingUserInput, setPendingUserInput] = useState(null);
   const [pendingUserInputValue, setPendingUserInputValue] = useState('');
 
@@ -374,17 +373,6 @@ export default function HomePage() {
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
             setPendingUserInput({ message: event.message, sessionId: event.session_id, chatId: targetChatId, messageId: assistantMessageId });
-          } else if (event.type === 'confirm_tool') {
-            clearActiveThinkTool();
-            document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
-            setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
-            setPendingToolConfirm({
-              confirmationId: event.confirmation_id,
-              tool: event.tool,
-              description: event.description,
-              chatId: targetChatId,
-              messageId: assistantMessageId,
-            });
           }
         }
       }
@@ -878,44 +866,7 @@ export default function HomePage() {
           </div>
         </div>
       )}
-      {pendingToolConfirm && (
-        <div className="modal-overlay" onClick={() => setPendingToolConfirm(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{maxWidth:'420px'}}>
-            <div className="modal-head">
-              <strong><i className="fas fa-shield-halved" style={{color:'var(--accent)',marginRight:8}}></i>{tr('Tool-Best\u00e4tigung', 'Tool Confirmation')}</strong>
-              <button className="modal-x" onClick={() => setPendingToolConfirm(null)}>&times;</button>
-            </div>
-            <div className="modal-body" style={{padding:'12px 20px 20px'}}>
-              <div className="tool-confirm-tool">{pendingToolConfirm.tool}</div>
-              <p className="tool-confirm-desc">{pendingToolConfirm.description}</p>
-              <p className="tool-confirm-question">{tr('M\u00f6chtest du die Ausf\u00fchrung dieses Tools erlauben?', 'Do you want to allow executing this tool?')}</p>
-              <div className="tool-confirm-actions">
-                <button className="btn btn-secondary" onClick={async () => {
-                  const confirmationId = pendingToolConfirm.confirmationId;
-                  setPendingToolConfirm(null);
-                  try {
-                    await apiFetch('/api/tool/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ confirmation_id: confirmationId, confirmed: false }) });
-                  } catch (e) { console.error('Tool denial error:', e); }
-                }}>{tr('Ablehnen', 'Deny')}</button>
-                <button className="btn btn-primary" onClick={async () => {
-                  const toolInfo = pendingToolConfirm;
-                  setPendingToolConfirm(null);
-                  try {
-                    const res = await apiFetch('/api/tool/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ confirmation_id: toolInfo.confirmationId, confirmed: true }) });
-                    const data = await res.json();
-                    const resultContent = data.success
-                      ? `✅ Tool ausgef\u00fchrt:\n\`\`\`\n${data.result}\n\`\`\``
-                      : `\u274c Fehler: ${data.error}`;
-                    updateMessageInChat(toolInfo.chatId, toolInfo.messageId, (msg) => ({ ...msg, content: resultContent }));
-                  } catch (e) { console.error('Tool confirm error:', e); }
-                }}>
-                  <i className="fas fa-check"></i> {tr('Erlauben', 'Allow')}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+
     </>
   );
 }

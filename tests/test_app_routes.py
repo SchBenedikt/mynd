@@ -207,36 +207,6 @@ class TestSecurityAPI:
         traversal = client.get("/data/browser_downloads/../secret.txt")
         assert traversal.status_code == 404
 
-    def test_tool_confirmation_is_owner_bound_and_single_use(self, client):
-        app_module.AUTH_USERS["other-user"] = {
-            "name": "Other",
-            "role": "user",
-            "token": "other-token",
-        }
-        confirmation_id = "test-confirmation"
-        app_module._PENDING_TOOL_CONFIRMS[confirmation_id] = {
-            "tool": "think",
-            "args": {"thought": "test"},
-            "owner": "test-client",
-            "created_at": time.time(),
-        }
-        payload = {"confirmation_id": confirmation_id, "confirmed": False}
-
-        forbidden = client.post(
-            "/api/tool/run",
-            json=payload,
-            headers={"Authorization": "Bearer other-token"},
-        )
-        assert forbidden.status_code == 403
-        assert confirmation_id in app_module._PENDING_TOOL_CONFIRMS
-
-        accepted = client.post("/api/tool/run", json=payload)
-        assert accepted.status_code == 200
-        assert confirmation_id not in app_module._PENDING_TOOL_CONFIRMS
-        assert client.post("/api/tool/run", json=payload).status_code == 404
-        app_module.AUTH_USERS.pop("other-user", None)
-
-
 class TestVaultAPI:
     def test_vault_list(self, client):
         resp = client.get("/api/vault/entries")

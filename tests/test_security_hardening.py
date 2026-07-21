@@ -4,7 +4,6 @@ import sys
 import pytest
 
 import app.audit as audit
-from app.agent_loop import _tool_requires_confirmation
 from core.sandbox import _linux_command, run_sandboxed
 from core.tools import _validate_http_url
 
@@ -55,8 +54,4 @@ def test_audit_redacts_nested_secrets_and_omits_results(monkeypatch, tmp_path):
     assert 'result_preview' not in event
 
 
-def test_tool_confirmation_behavior():
-    assert not _tool_requires_confirmation('email_send', {})
-    assert _tool_requires_confirmation('http_request', {'method': 'POST'})
-    assert not _tool_requires_confirmation('http_request', {'method': 'GET'})
-    assert not _tool_requires_confirmation('search_documents', {})
+
