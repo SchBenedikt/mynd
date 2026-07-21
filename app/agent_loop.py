@@ -1,5 +1,6 @@
 import json
 import re
+import threading
 import time
 from urllib.parse import urljoin, urlparse
 
@@ -19,6 +20,7 @@ PLUGIN_TOOLS = []
 PLUGIN_TOOL_MAP = {}
 AGENT_TOOLS = []
 WEB_TOOL_MAP = {}
+_web_tool_lock = threading.Lock()
 
 def load_plugins():
     global plugins_loaded, PLUGIN_TOOLS, PLUGIN_TOOL_MAP, AGENT_TOOLS, WEB_TOOL_MAP
@@ -28,8 +30,9 @@ def load_plugins():
     PLUGIN_TOOLS, PLUGIN_TOOL_MAP = _get_all_tools()
     AGENT_TOOLS = [*CORE_TOOLS, *PLUGIN_TOOLS]
     new_map = {**CORE_MAP, **PLUGIN_TOOL_MAP, 'prompt_user': web_prompt_user}
-    WEB_TOOL_MAP.clear()
-    WEB_TOOL_MAP.update(new_map)
+    with _web_tool_lock:
+        WEB_TOOL_MAP.clear()
+        WEB_TOOL_MAP.update(new_map)
     plugins_loaded = True
 
 

@@ -38,8 +38,12 @@ def _load_json(path, default=None):
     return default if default is not None else []
 
 
+_scheduler_lock = threading.Lock()
+
+
 def _save_json(path, data):
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+    with _scheduler_lock:
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
 
 
 def _validate_condition(condition: dict, context: dict) -> bool:

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import warnings
 from pathlib import Path
 
@@ -325,8 +326,9 @@ def search_documents(query, top_k=10):
                     f"[{chunks[i]['source']}] (Score: {scores[i]:.2f})\n{chunks[i]['text'][:300]}"
                 )
         return '\n\n---\n\n'.join(parts[:top_k]) if parts else "Keine Treffer."
-    except Exception as e:
-        return f"❌ {e}"
+    except Exception:
+        logger.exception("search_documents failed")
+        return "❌ Suche fehlgeschlagen"
 
 
 def _workspace_path(path):
@@ -478,7 +480,11 @@ def safe_http_request(method, url, *, headers=None, data=None, timeout=60, max_b
             raise ValueError(f'Response exceeds the {max_bytes}-byte limit')
         chunks = []
         total = 0
+        read_deadline = time.monotonic() + timeout
         for chunk in response.iter_content(chunk_size=16_384):
+            if time.monotonic() > read_deadline:
+                response.close()
+                raise ValueError('Response read timed out')
             total += len(chunk)
             if total > max_bytes:
                 response.close()
