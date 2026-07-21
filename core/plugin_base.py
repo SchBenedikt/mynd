@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sys
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ def validate_plugin_tools(plugin):
 
 _registry = {}
 _config_cache = {}
+_plugin_lock = threading.Lock()
 
 
 def _plugin_sha256(filepath):
@@ -119,27 +121,27 @@ def get_plugin_config():
 
 
 def save_plugin_config(cfg):
-    cf = PLUGIN_DIR / 'plugin_config.json'
-    cf.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
-    _config_cache.clear()
+    with _plugin_lock:
+        cf = PLUGIN_DIR / 'plugin_config.json'
+        cf.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+        _config_cache.clear()
     return cfg
 
 
 def load_plugins():
     global _registry, _config_cache
-    _registry = {}
-    _config_cache = get_plugin_config()
+    config_cache = get_plugin_config()
     state = get_plugin_state()
     plugins_file = PLUGIN_DIR / '__init__.py'
     plugins_file.write_text('')
     sys.path.insert(0, str(PLUGIN_DIR.parent))
+    registry = {}
     for f in sorted(PLUGIN_DIR.glob('*.py')):
         if f.name in ('__init__.py', 'plugin_config.json', 'plugin_state.json'):
             continue
         mod_name = f'data.plugins.{f.stem}'
         try:
             mod = importlib.import_module(mod_name)
-            # Find Plugin subclasses defined in THIS module (not the imported base class)
             plugin_cls = None
             for attr_name in dir(mod):
                 obj = getattr(mod, attr_name, None)
@@ -156,7 +158,7 @@ def load_plugins():
                 name = getattr(mod, 'PLUGIN_NAME', f.stem)
                 if not _is_enabled(name, state):
                     logger.info(f"Plugin deaktiviert: {name}")
-                    _registry[name] = None
+                    registry[name] = None
                     continue
                 desc = getattr(mod, 'PLUGIN_DESC', '')
                 legacy_config_schema = getattr(mod, 'PLUGIN_CONFIG_SCHEMA', {})
@@ -167,43 +169,49 @@ def load_plugins():
                     'tool_map': legacy_map,
                     'config_schema': legacy_config_schema,
                 })
-                instance = plugin(config=_config_cache.get(name, {}))
+                instance = plugin(config=config_cache.get(name, {}))
                 validate_plugin_tools(instance)
-                _registry[name] = instance
+                registry[name] = instance
                 logger.info(f"Plugin geladen (Legacy): {name}")
             else:
                 name = plugin_cls.name
                 if not _is_enabled(name, state):
                     logger.info(f"Plugin deaktiviert: {name}")
-                    _registry[name] = None
+                    registry[name] = None
                     continue
-                instance = plugin_cls(config=_config_cache.get(name, {}))
+                instance = plugin_cls(config=config_cache.get(name, {}))
                 validate_plugin_tools(instance)
                 instance.on_load()
-                _registry[name] = instance
+                registry[name] = instance
                 logger.info(f"Plugin geladen: {instance.name} v{instance.version}")
         except Exception as e:
             logger.warning(f"Plugin {f.stem} nicht geladen: {e}")
+    with _plugin_lock:
+        _registry = registry
+        _config_cache = config_cache
     return _registry
 
 
 def get_registry():
-    return _registry
+    with _plugin_lock:
+        return dict(_registry)
 
 
 def get_plugin(name):
-    return _registry.get(name)
+    with _plugin_lock:
+        return _registry.get(name)
 
 
 def get_all_tools():
-    tools = []
-    tool_map = {}
-    for name, plugin in _registry.items():
-        if plugin is None:
-            continue
-        tools.extend(plugin.tools)
-        tool_map.update(plugin.tool_map)
-    return tools, tool_map
+    with _plugin_lock:
+        tools = []
+        tool_map = {}
+        for name, plugin in _registry.items():
+            if plugin is None:
+                continue
+            tools.extend(plugin.tools)
+            tool_map.update(plugin.tool_map)
+        return tools, tool_map
 
 
 def get_plugin_state():
@@ -216,46 +224,50 @@ def get_plugin_state():
     return {}
 
 def save_plugin_state(state):
-    (PLUGIN_DIR / 'plugin_state.json').write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    with _plugin_lock:
+        (PLUGIN_DIR / 'plugin_state.json').write_text(json.dumps(state, indent=2, ensure_ascii=False))
 
 def _is_enabled(name, state):
     return state.get(name, {}).get('enabled', True)
 
 def get_all_plugins():
     state = get_plugin_state()
-    result = []
-    for name, plugin in _registry.items():
-        s = state.get(name, {})
-        sha = _plugin_sha256(PLUGIN_DIR / f'{name}.py') if (PLUGIN_DIR / f'{name}.py').exists() else None
-        if plugin is None:
-            result.append({'name': name, 'description': '', 'version': '', 'tools': [], 'tool_count': 0, 'enabled': False, 'sha256': sha})
-        else:
-            result.append({
-                'name': name,
-                'description': getattr(plugin, 'description', ''),
-                'version': getattr(plugin, 'version', ''),
-                'tools': [t.get('function', {}).get('name', '') for t in getattr(plugin, 'tools', [])],
-                'tool_count': len(getattr(plugin, 'tools', [])),
-                'enabled': s.get('enabled', True),
-                'sha256': sha,
-            })
-    return result
+    with _plugin_lock:
+        result = []
+        for name, plugin in list(_registry.items()):
+            s = state.get(name, {})
+            sha = _plugin_sha256(PLUGIN_DIR / f'{name}.py') if (PLUGIN_DIR / f'{name}.py').exists() else None
+            if plugin is None:
+                result.append({'name': name, 'description': '', 'version': '', 'tools': [], 'tool_count': 0, 'enabled': False, 'sha256': sha})
+            else:
+                result.append({
+                    'name': name,
+                    'description': getattr(plugin, 'description', ''),
+                    'version': getattr(plugin, 'version', ''),
+                    'tools': [t.get('function', {}).get('name', '') for t in getattr(plugin, 'tools', [])],
+                    'tool_count': len(getattr(plugin, 'tools', [])),
+                    'enabled': s.get('enabled', True),
+                    'sha256': sha,
+                })
+        return result
 
 def set_plugin_enabled(name, enabled):
-    state = get_plugin_state()
-    entry = state.get(name, {})
-    entry['enabled'] = enabled
-    sha = _plugin_sha256(PLUGIN_DIR / f'{name}.py')
-    if sha:
-        entry['sha256'] = sha
-    state[name] = entry
-    save_plugin_state(state)
+    with _plugin_lock:
+        state = get_plugin_state()
+        entry = state.get(name, {})
+        entry['enabled'] = enabled
+        sha = _plugin_sha256(PLUGIN_DIR / f'{name}.py')
+        if sha:
+            entry['sha256'] = sha
+        state[name] = entry
+        (PLUGIN_DIR / 'plugin_state.json').write_text(json.dumps(state, indent=2, ensure_ascii=False))
     reload_plugins()
 
 def uninstall_plugin(name):
-    state = get_plugin_state()
-    state.pop(name, None)
-    save_plugin_state(state)
+    with _plugin_lock:
+        state = get_plugin_state()
+        state.pop(name, None)
+        save_plugin_state(state)
     f = PLUGIN_DIR / f'{name}.py'
     if f.exists():
         f.unlink()
@@ -269,11 +281,12 @@ def install_from_github(url):
     )
 
 def reload_plugins():
-    for name, plugin in list(_registry.items()):
-        try:
-            plugin.on_unload()
-        except Exception:
-            pass
+    with _plugin_lock:
+        for name, plugin in list(_registry.items()):
+            try:
+                plugin.on_unload()
+            except Exception:
+                pass
     for mod_name in list(sys.modules.keys()):
         if mod_name.startswith('data.plugins.') and mod_name != 'data.plugins':
             del sys.modules[mod_name]

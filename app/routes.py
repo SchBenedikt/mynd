@@ -36,7 +36,6 @@ from app.auth import (
 from app.config import (
     AI_CONFIG_FILE,
     AUTH_CONFIG_FILE,
-    AUTH_FILE,
     BROWSER_DOWNLOADS_DIR,
     BROWSER_SCREENSHOTS_DIR,
     CHUNKS,
@@ -62,9 +61,9 @@ from app.helpers import (
     save_security_mode,
 )
 from app.ollama_client import load_ai_config, ollama_client, save_ai_config
-from app.scheduler import automation_engine
+from app.scheduler import _init_automation_engine, automation_engine
 from app.session_store import agent_sessions
-from app.state import INDEXING_STATUS
+from app.state import INDEXING_STATUS, save_auth_users
 from core.model import check_tool_support
 from core.plugin_base import (
     get_all_plugins,
@@ -74,7 +73,7 @@ from core.plugin_base import (
     uninstall_plugin,
 )
 from core.scheduler import CRON_HELP, TRIGGER_EXAMPLES
-from core.tools import CORE_TOOLS, PERMISSION_HELP, PERMISSION_MODE, vault_delete, vault_set, web_search
+from core.tools import CORE_TOOLS, PERMISSION_HELP, vault_delete, vault_set, web_search
 from core.utils import call_with_timeout
 from core.vault import load_vault
 from core.vault import vault_get as _vg
@@ -82,9 +81,9 @@ from core.vault import vault_set as _vs
 
 # ── Init ───────────────────────────────────────────────────
 load_plugins()
+_init_automation_engine()
 
-# Patch prompt_user + PERMISSION_MODE
-_ct.permission_mode = PERMISSION_MODE
+# Patch prompt_user — agent_loop.py handles PERMISSION_MODE
 
 # ── /api/auth/* ────────────────────────────────────────────
 @app.route('/api/auth/me', methods=['GET'])
@@ -112,7 +111,7 @@ def auth_login():
     if username in AUTH_USERS and _verify_password(AUTH_USERS[username], password):
         token = os.urandom(32).hex()
         AUTH_USERS[username]['token'] = token
-        AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+        save_auth_users()
         return jsonify({
             'authenticated': True,
             'user': {
@@ -131,7 +130,7 @@ def auth_refresh():
     username = request.current_user
     token = secrets.token_hex(32)
     AUTH_USERS[username]['token'] = token
-    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    save_auth_users()
     return jsonify({'success': True, 'token': token})
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -162,7 +161,7 @@ def auth_register():
         'password_hash': generate_password_hash(password),
         'name': name, 'role': 'user', 'token': token,
     }
-    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    save_auth_users()
     return jsonify({
         'success': True, 'authenticated': True,
         'user': {'name': name, 'username': username, 'role': 'user'}, 'token': token
@@ -177,7 +176,7 @@ def auth_logout():
         for user in AUTH_USERS.values():
             if secrets.compare_digest(str(user.get('token', '')), token):
                 user.pop('token', None)
-                AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+                save_auth_users()
                 break
     return jsonify({'success': True})
 
@@ -195,7 +194,7 @@ def auth_factory_reset():
         'password_hash': generate_password_hash(password),
         'name': admin_name, 'role': 'admin',
     }
-    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    save_auth_users()
     SETUP_DONE_FILE.unlink(missing_ok=True)
     return jsonify({'success': True})
 
@@ -246,7 +245,7 @@ def auth_profile():
             AUTH_USERS[username]['name'] = name
         if password:
             _set_password(AUTH_USERS[username], password)
-        AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+        save_auth_users()
     current = AUTH_USERS.get(username, {})
     return jsonify({'success': True, 'user': {
         'username': username,
@@ -282,7 +281,7 @@ def admin_users_create():
         'password_hash': generate_password_hash(password),
         'name': name or username, 'role': role,
     }
-    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    save_auth_users()
     return jsonify({'success': True, 'user': {'username': username, 'name': name or username, 'role': role}})
 
 @app.route('/api/admin/users/delete', methods=['POST'])
@@ -296,7 +295,7 @@ def admin_users_delete():
     if username == 'admin':
         return jsonify({'success': False, 'error': 'Cannot delete admin user'}), 400
     del AUTH_USERS[username]
-    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    save_auth_users()
     return jsonify({'success': True})
 
 @app.route('/api/admin/users/reset', methods=['POST'])
@@ -311,7 +310,7 @@ def admin_users_reset():
     if not password:
         return jsonify({'success': False, 'error': 'Password required'}), 400
     _set_password(AUTH_USERS[username], password)
-    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    save_auth_users()
     return jsonify({'success': True})
 
 @app.route('/api/admin/reset', methods=['POST'])
@@ -391,7 +390,7 @@ def setup_bootstrap():
             'password_hash': generate_password_hash(pw),
             'name': name, 'role': 'admin',
         }
-        AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+        save_auth_users()
         return jsonify({'success': True, 'mode': 'admin'})
     elif mode == 'ai':
         cfg = {
@@ -805,7 +804,7 @@ def ai_test():
 @app.route('/api/permission/mode', methods=['GET', 'POST'])
 def permission_mode():
     if request.method == 'GET':
-        return jsonify({'success': True, 'mode': PERMISSION_MODE, 'help': PERMISSION_HELP})
+        return jsonify({'success': True, 'mode': _ct.PERMISSION_MODE, 'help': PERMISSION_HELP})
     data = request.json or {}
     mode = data.get('mode', 'auto')
     if mode not in PERMISSION_HELP:
@@ -1807,17 +1806,21 @@ def ai_greeting():
 @require_admin
 def backup_export():
     import base64
+    _sensitive = frozenset({'auth_users.json', 'vault.json', 'ai_config.json'})
     files = {}
     data_dir = DATA_DIR
     for fname in os.listdir(data_dir):
         fpath = data_dir / fname
         if fpath.is_file() and fname != 'setup_done.json':
             try:
-                raw = fpath.read_bytes()
-                if fname.endswith('.npy'):
-                    files[fname] = {'content': base64.b64encode(raw).decode('ascii'), 'encoding': 'base64'}
+                if fname in _sensitive:
+                    files[fname] = {'content': '***', 'encoding': 'utf-8', 'redacted': True}
                 else:
-                    files[fname] = {'content': raw.decode('utf-8'), 'encoding': 'utf-8'}
+                    raw = fpath.read_bytes()
+                    if fname.endswith('.npy'):
+                        files[fname] = {'content': base64.b64encode(raw).decode('ascii'), 'encoding': 'base64'}
+                    else:
+                        files[fname] = {'content': raw.decode('utf-8'), 'encoding': 'utf-8'}
             except Exception:
                 files[fname] = {'error': 'read failed'}
     return jsonify({'success': True, 'files': files, 'exported_at': datetime.now(UTC).isoformat()})
@@ -1830,9 +1833,13 @@ def backup_import():
     files = data.get('files', {})
     if not isinstance(files, dict):
         return jsonify({'success': False, 'error': 'files must be an object'}), 400
+    _sensitive = frozenset({'auth_users.json', 'vault.json', 'ai_config.json'})
     errors = []
     restored = 0
     for fname, meta in files.items():
+        if fname in _sensitive:
+            errors.append(f"Skipped {fname}: restoring sensitive files is blocked for security")
+            continue
         if not isinstance(fname, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', fname) or '/' in fname or '\\' in fname:
             errors.append(f"Rejected unsafe filename: {fname}")
             continue

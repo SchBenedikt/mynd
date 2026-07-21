@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import warnings
 from pathlib import Path
 
@@ -56,6 +57,8 @@ CRITICAL_PATTERNS = [
 
 # Web confirmation hook – replaced in web mode
 _CONFIRM_TOOL_PENDING = None
+
+_memory_lock = threading.Lock()
 
 _TOOL_CODE_TAGS = (
     ('<tool_code>', '</tool_code>'),
@@ -205,7 +208,6 @@ def _confirm_cmd(cmd):
 
 
 def execute_bash(command):
-    global PERMISSION_MODE
     if PERMISSION_MODE == "ask":
         ok = _request_tool_confirmation("execute_bash", command)
         if ok is not True:
@@ -231,7 +233,6 @@ def execute_bash(command):
 
 
 def execute_ssh(host="", command="", user="", port=22, key="", password="", profile=""):
-    global PERMISSION_MODE
     if PERMISSION_MODE == "ask":
         ok = _request_tool_confirmation("execute_ssh", command)
         if ok is not True:
@@ -240,6 +241,7 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
         ok = _request_tool_confirmation("execute_ssh", command)
         if ok is not True:
             return ok if isinstance(ok, str) else "⛔ Cancelled (not confirmed)"
+    keyfile = None
     try:
         if profile:
             base = f"vm/{profile}"
@@ -260,7 +262,6 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
         if not host:
             return "❌ Keine Host/IP. `vault_set vm/<profil>/ip <ip>` oder host-Parameter angeben."
 
-        keyfile = None
         validated = command.strip()
         if not validated or len(validated) > 10000:
             return "❌ Ungültiger Befehl"
@@ -271,37 +272,41 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
                 f.write(key)
                 keyfile = f.name
             os.chmod(keyfile, 0o600)
-            ssh_cmd = ['ssh', '-i', keyfile, '-o', 'StrictHostKeyChecking=yes',
+            ssh_cmd = ['ssh', '-i', keyfile, '-o', 'StrictHostKeyChecking=accept-new',
+                       '-o', 'UserKnownHostsFile=/dev/null',
                        '-p', str(port), f'{user}@{host}'] + cmd_parts
         elif password:
-            ssh_cmd = ['sshpass', '-e', 'ssh', '-o', 'StrictHostKeyChecking=yes',
+            ssh_cmd = ['sshpass', '-e', 'ssh', '-o', 'StrictHostKeyChecking=accept-new',
+                       '-o', 'UserKnownHostsFile=/dev/null',
                        '-p', str(port), f'{user}@{host}'] + cmd_parts
         else:
-            ssh_cmd = ['ssh', '-o', 'StrictHostKeyChecking=yes',
+            ssh_cmd = ['ssh', '-o', 'StrictHostKeyChecking=accept-new',
+                       '-o', 'UserKnownHostsFile=/dev/null',
                        '-p', str(port), f'{user}@{host}'] + cmd_parts
 
         ssh_env = {**os.environ, 'SSHPASS': password} if password else None
         r = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=60, env=ssh_env)
         if key and password and r.returncode != 0:
             first_err = (r.stderr or r.stdout or "").strip()
-            password_cmd = ['sshpass', '-e', 'ssh', '-o', 'StrictHostKeyChecking=yes',
+            password_cmd = ['sshpass', '-e', 'ssh', '-o', 'StrictHostKeyChecking=accept-new',
+                            '-o', 'UserKnownHostsFile=/dev/null',
                             '-p', str(port), f'{user}@{host}'] + cmd_parts
             r = subprocess.run(password_cmd, capture_output=True, text=True, timeout=60, env=ssh_env)
             if not (r.stdout or r.stderr).strip() and first_err:
                 r.stderr = first_err
         out = r.stdout.strip()[:5000] if r.stdout.strip() else r.stderr.strip()[:2000]
-        if keyfile: os.unlink(keyfile)
         return out if out else "(leer)"
     except subprocess.TimeoutExpired:
-        if 'keyfile' in locals() and keyfile: os.unlink(keyfile)
         return "⏱ Timeout (60s)"
     except FileNotFoundError:
-        if 'keyfile' in locals() and keyfile: os.unlink(keyfile)
         return "❌ sshpass nicht installiert. `brew install sshpass` oder SSH-Key verwenden."
     except Exception:
-        if 'keyfile' in locals() and keyfile: os.unlink(keyfile)
         logger.exception("execute_ssh failed")
         return "❌ SSH-Ausführung fehlgeschlagen."
+    finally:
+        if keyfile:
+            try: os.unlink(keyfile)
+            except OSError: pass
 
 
 def search_documents(query, top_k=10):
@@ -356,7 +361,6 @@ def write_local_file(path, content):
 
 
 def execute_python(code):
-    global PERMISSION_MODE
     if PERMISSION_MODE == "ask":
         ok = _request_tool_confirmation("execute_python", code[:120])
         if ok is not True:
@@ -696,26 +700,28 @@ def memory_get(key=""):
         return '\n'.join(f"{k}: {v}" for k, v in sorted(m.items())) if m else "(leer)"
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return "❌ Fehler"
-
 def memory_set(key, value):
-    try:
-        m = json.loads(MEMORY_FILE.read_text()) if MEMORY_FILE.exists() else {}
-        m[key] = value
-        MEMORY_FILE.write_text(json.dumps(m, indent=2, ensure_ascii=False))
-        return f"✅ `{key}` gespeichert"
-    except Exception as e:
-        return f"❌ {e}"
+    with _memory_lock:
+        try:
+            m = json.loads(MEMORY_FILE.read_text()) if MEMORY_FILE.exists() else {}
+            m[key] = value
+            MEMORY_FILE.write_text(json.dumps(m, indent=2, ensure_ascii=False))
+            return f"✅ `{key}` gespeichert"
+        except Exception as e:
+            return f"❌ {e}"
+
 
 def memory_delete(key):
-    try:
-        m = json.loads(MEMORY_FILE.read_text()) if MEMORY_FILE.exists() else {}
-        if key in m:
-            del m[key]
-            MEMORY_FILE.write_text(json.dumps(m, indent=2, ensure_ascii=False))
-            return f"🗑 `{key}` gelöscht"
-        return f"❌ `{key}` nicht gefunden"
-    except Exception as e:
-        return f"❌ {e}"
+    with _memory_lock:
+        try:
+            m = json.loads(MEMORY_FILE.read_text()) if MEMORY_FILE.exists() else {}
+            if key in m:
+                del m[key]
+                MEMORY_FILE.write_text(json.dumps(m, indent=2, ensure_ascii=False))
+                return f"🗑 `{key}` gelöscht"
+            return f"❌ `{key}` nicht gefunden"
+        except Exception as e:
+            return f"❌ {e}"
 
 
 # ── Sub-Agent Delegation ───────────────────────────────────────
@@ -808,12 +814,15 @@ def agent_browser(action, selector="", text="", url=""):
             tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
             tmp.close()
             cmd += ["screenshot", tmp.name]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if r.returncode != 0:
-                return f"❌ Screenshot-Fehler: {r.stderr[:500]}"
-            data = base64.b64encode(open(tmp.name, 'rb').read()).decode()
-            os.unlink(tmp.name)
-            return json.dumps({"screenshot": data[:500000], "screenshot_available": True, "action": "screenshot"})
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if r.returncode != 0:
+                    return f"❌ Screenshot-Fehler: {r.stderr[:500]}"
+                data = base64.b64encode(open(tmp.name, 'rb').read()).decode()
+                return json.dumps({"screenshot": data[:500000], "screenshot_available": True, "action": "screenshot"})
+            finally:
+                if os.path.exists(tmp.name):
+                    os.unlink(tmp.name)
         elif action == "extract" and selector:
             cmd += ["extract", selector]
         elif action == "back":

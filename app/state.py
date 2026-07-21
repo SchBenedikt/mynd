@@ -12,6 +12,14 @@ _app_lock = threading.Lock()
 _PRIVILEGED_TOOL_PREFIXES = ('execute_', 'browser_', 'nextcloud_', 'vault_', 'memory_')
 _PRIVILEGED_TOOL_NAMES = frozenset({'write_local_file', 'http_request', 'agent_browser', 'think'})
 
+_auth_lock = threading.Lock()
+
+
+def save_auth_users():
+    with _auth_lock:
+        AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+
+
 # ── Auth state ─────────────────────────────────────────────
 AUTH_USERS = {}
 if AUTH_FILE.exists():
@@ -28,7 +36,7 @@ if not AUTH_USERS:
         'name': 'Admin',
         'role': 'admin',
     }
-    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    save_auth_users()
     logger.warning('Created initial admin account with temporary password')
 
 INDEXING_STATUS = {

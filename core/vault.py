@@ -30,9 +30,12 @@ def _vault_key() -> bytes:
         os.chmod(key_file.parent, 0o700)
     except OSError:
         pass
-    if not key_file.exists():
-        key = Fernet.generate_key()
+    try:
         fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        key = Fernet.generate_key()
         with os.fdopen(fd, 'wb') as handle:
             handle.write(key + b'\n')
     key = key_file.read_bytes().strip()
