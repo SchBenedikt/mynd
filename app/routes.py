@@ -18,7 +18,6 @@ import data.plugins.immich as _immich_module
 import data.plugins.nextcloud as _nc_module
 from app import flask_app as app
 from app.agent_loop import (
-    WEB_TOOL_MAP,
     _get_tool_names_for_prompt,
     _get_vault_keys_for_prompt,
     _store_credentials_from_message,
@@ -26,7 +25,6 @@ from app.agent_loop import (
     web_agent_loop,
     web_agent_loop_stream,
 )
-from app.audit import audit_tool
 from app.auth import (
     _authenticated_username,
     _request_has_admin_token,
@@ -66,7 +64,6 @@ from app.helpers import (
 from app.ollama_client import load_ai_config, ollama_client, save_ai_config
 from app.scheduler import automation_engine
 from app.session_store import agent_sessions
-
 from app.state import INDEXING_STATUS
 from core.model import check_tool_support
 from core.plugin_base import (
