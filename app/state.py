@@ -7,7 +7,6 @@ from app.audit import _audit_log as _audit_log
 from app.config import AUTH_FILE, logger
 
 _PROMPT_QUEUE = []
-_PENDING_TOOL_CONFIRMS = {}
 _app_lock = threading.Lock()
 
 _PRIVILEGED_TOOL_PREFIXES = ('execute_', 'browser_', 'nextcloud_', 'vault_', 'memory_')

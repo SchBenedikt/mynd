@@ -1199,31 +1199,6 @@ body {
   overflow-y: auto;
   padding: 0.4rem 0.4rem 0.6rem;
 }
-.tool-confirm-tool {
-  display: inline-block;
-  padding: 0.2rem 0.7rem;
-  margin-bottom: 8px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
-  font: 600 0.85rem/1.6 var(--font-ibm-plex-mono, monospace);
-}
-.tool-confirm-desc {
-  margin: 0 0 12px;
-  color: var(--body);
-  font-size: 0.92rem;
-  line-height: 1.55;
-}
-.tool-confirm-question {
-  margin: 0 0 16px;
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-.tool-confirm-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-}
 .modal-empty {
   display: flex;
   flex-direction: column;
