@@ -3,13 +3,12 @@ import locale
 from datetime import date, datetime, timedelta
 
 import numpy as np
-from flask import jsonify
 
 import data.plugins.email as _email_module
 import data.plugins.immich as _immich_module
 import data.plugins.nextcloud as _nc_module
-from app.config import AI_CONFIG_FILE, AUTH_FILE, CHUNKS, DATA_DIR, EMBS, logger
-from app.state import AUTH_USERS
+from app.config import AI_CONFIG_FILE, CHUNKS, DATA_DIR, EMBS, logger
+from app.state import AUTH_USERS, save_auth_users
 from core.embed import embed as _embed_fn
 from core.vault import load_vault
 
@@ -291,13 +290,7 @@ def _calendar_query_response(start, end):
     }, 200
 
 
-def _safe_error(message, exception=None, status=500):
-    if exception:
-        logger.error('%s: %s', message, exception)
-    return jsonify({'success': False, 'error': message}), status
 
-
-_SAFE_ERROR = _safe_error
 
 
 def _reset_app_data():
@@ -317,7 +310,7 @@ def _reset_app_data():
         'password_hash': generate_password_hash(temporary_password),
         'name': 'Admin', 'role': 'admin',
     }
-    AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+    save_auth_users()
     AI_CONFIG_FILE.write_text(json.dumps({'base_url': 'http://127.0.0.1:11434', 'model': '', 'embedding_model': ''}, indent=2))
     auth_cfg = DATA_DIR / 'auth_config.json'
     auth_cfg.write_text(json.dumps({'allowRegistration': False, 'requireLogin': True}, indent=2))

@@ -1,12 +1,10 @@
-import json
 import secrets
 from functools import wraps
 
 from flask import jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.config import AUTH_FILE
-from app.state import AUTH_USERS
+from app.state import AUTH_USERS, save_auth_users
 
 
 def _verify_password(user, password):
@@ -16,7 +14,7 @@ def _verify_password(user, password):
     if secrets.compare_digest(str(user.get('password', '')), str(password)):
         user['password_hash'] = generate_password_hash(password)
         user.pop('password', None)
-        AUTH_FILE.write_text(json.dumps(AUTH_USERS, indent=2))
+        save_auth_users()
         return True
     return False
 

@@ -4,14 +4,10 @@ from core.scheduler import AutomationEngine
 
 automation_engine = AutomationEngine({})
 
-# Patch automation engine with WEB_TOOL_MAP after routes load
 def _init_automation_engine():
     from app.agent_loop import WEB_TOOL_MAP
     global automation_engine
     automation_engine = AutomationEngine(WEB_TOOL_MAP)
-
-# Load automation engine after routes
-_init_automation_engine()
 
 
 def _start_indexing_scheduler():
