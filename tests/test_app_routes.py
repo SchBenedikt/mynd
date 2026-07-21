@@ -8,6 +8,7 @@ import pytest
 import app as app_module
 import app.auth as app_auth
 import app.routes as app_routes
+import app.state as app_state
 from app import app
 from core.tools import _parse_tool_code_fallback
 
@@ -63,8 +64,7 @@ class TestAuthAPI:
     def test_refresh_rotates_token(self, client, monkeypatch, tmp_path):
         auth_file = tmp_path / "auth_users.json"
         monkeypatch.setattr(app_module, "AUTH_FILE", auth_file)
-        monkeypatch.setattr(app_auth, "AUTH_FILE", auth_file)
-        monkeypatch.setattr(app_routes, "AUTH_FILE", auth_file)
+        monkeypatch.setattr(app_state, "AUTH_FILE", auth_file)
         monkeypatch.setitem(
             app_module.AUTH_USERS,
             "refresh-user",
@@ -288,7 +288,7 @@ class TestBackupSecurity:
         data_dir.mkdir()
         auth_file = data_dir / "auth_users.json"
         monkeypatch.setattr(app_module, "DATA_DIR", data_dir)
-        monkeypatch.setattr(app_module, "AUTH_FILE", auth_file)
+        monkeypatch.setattr(app_state, "AUTH_FILE", auth_file)
         monkeypatch.setitem(
             app_module.AUTH_USERS,
             "admin",
