@@ -77,7 +77,9 @@ const TRANSLATIONS = {
     userDeleted: 'Benutzer gelöscht',
     userCreated: 'Benutzer angelegt',
     passwordReset: 'Passwort zurückgesetzt',
-    adminTab: 'Admin'
+    adminTab: 'Admin',
+    search: 'Suchen',
+    send: 'Senden'
   },
   en: {
     newChat: 'New Chat',
@@ -135,7 +137,9 @@ const TRANSLATIONS = {
     userDeleted: 'User deleted',
     userCreated: 'User created',
     passwordReset: 'Password reset',
-    adminTab: 'Admin'
+    adminTab: 'Admin',
+    search: 'Search',
+    send: 'Send'
   },
   fr: {
     newChat: 'Nouveau Chat',

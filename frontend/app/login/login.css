@@ -142,6 +142,15 @@ html:has(.lp-login) body {
   text-align: center;
   margin-bottom: 2.25rem;
 }
+.lp-login-card-brand {
+  margin-bottom: 1.25rem;
+}
+.lp-login-card-brand-mark {
+  display: inline-block;
+  font-size: 1.6rem;
+  color: var(--lp-accent);
+  line-height: 1;
+}
 .lp-login-card-header h1 {
   font-size: 1.5rem;
   font-weight: 700;
@@ -198,6 +207,10 @@ html:has(.lp-login) body {
   letter-spacing: .04em;
   text-transform: uppercase;
 }
+.lp-login-field input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .lp-login-field input {
   padding: .7rem .85rem;
   border: 1px solid var(--lp-line);
@@ -212,6 +225,33 @@ html:has(.lp-login) body {
 .lp-login-field input:focus {
   border-color: var(--lp-accent);
   box-shadow: 0 0 0 3px rgba(145,160,255,.1);
+}
+.lp-login-pass-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.lp-login-pass-wrapper input {
+  flex: 1;
+  padding-right: 2.5rem;
+}
+.lp-login-pass-toggle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 2.5rem;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
+  color: var(--lp-dim);
+  cursor: pointer;
+  transition: color 0.2s;
+  font-size: 0.85rem;
+}
+.lp-login-pass-toggle:hover {
+  color: var(--lp-ink);
 }
 .lp-login-hint {
   margin: -.15rem 0 0;

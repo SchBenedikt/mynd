@@ -1,12 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import './LandingScreen.css';
 
 const SOURCE_OPTIONS = [
-  { value: 'auto', icon: 'fa-globe', label: 'Auto' },
-  { value: 'web', icon: 'fa-globe', label: 'Web' },
-  { value: 'deep', icon: 'fa-magnifying-glass', label: 'Deep' },
-  { value: 'local', icon: 'fa-database', label: 'Lokal' }
+  { value: 'auto', icon: 'fa-globe', label: { en: 'Auto', de: 'Auto' } },
+  { value: 'web', icon: 'fa-globe', label: { en: 'Web', de: 'Web' } },
+  { value: 'deep', icon: 'fa-magnifying-glass', label: { en: 'Deep', de: 'Tief' } },
+  { value: 'local', icon: 'fa-database', label: { en: 'Local', de: 'Lokal' } }
 ];
 
 export default function LandingScreen({
@@ -16,20 +17,36 @@ export default function LandingScreen({
   onSend, onStartVoiceInput,
   indexingStatus, indexingProgress, indexingDetails, indexingStats,
   source, setSource,
-  model, setModel, aiModels
+  model, setModel, aiModels,
+  suggestions, onSuggestionClick
 }) {
+  const [showSuggestions, setShowSuggestions] = useState(true);
+
+  const l = (obj) => obj[language] || obj.en;
+
   return (
     <div className="landing">
-      <div className="landing-brand">◆ MYND</div>
+      <div className="landing-glow" />
+      <div className="landing-brand">
+        <span className="landing-brand-icon">◆</span>
+        <span className="landing-brand-text">MYND</span>
+      </div>
+
+      {personalGreeting && (
+        <div className="landing-greeting">
+          <div className="landing-greeting-text">{personalGreeting}</div>
+        </div>
+      )}
+
       <div className="landing-input-section">
         <div className="source-toggle-row">
           {SOURCE_OPTIONS.map(opt => (
             <button key={opt.value}
               className={`source-btn ${source === opt.value ? 'active' : ''}`}
               onClick={() => setSource(opt.value)}
-              title={opt.label}>
+              title={l(opt.label)}>
               <i className={`fas ${opt.icon}`}></i>
-              {opt.label}
+              {l(opt.label)}
             </button>
           ))}
           <div className="composer-model-wrapper">
@@ -63,6 +80,31 @@ export default function LandingScreen({
             <i className="fas fa-arrow-right"></i>
           </button>
         </div>
+      </div>
+
+      {showSuggestions && suggestions && suggestions.length > 0 && (
+        <div className="landing-suggestions">
+          <div className="landing-suggestions-header">
+            <span>{t('suggestions')}</span>
+            <button className="landing-suggestions-hide" onClick={() => setShowSuggestions(false)} title={language === 'de' ? 'Ausblenden' : 'Hide'}>
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+          <div className="landing-suggestions-grid">
+            {suggestions.map((s, i) => (
+              <button key={i} className="landing-suggestion-card" onClick={() => onSuggestionClick(s.text)}>
+                <i className={`fas ${s.icon}`}></i>
+                <span>{s.text}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="landing-shortcuts">
+        <span><kbd>⌘K</kbd> {t('search')}</span>
+        <span><kbd>⌘⏎</kbd> {t('send')}</span>
+        <span><kbd>⌘⇧F</kbd> {t('files')}</span>
       </div>
 
       {(indexingStatus !== 'idle' || indexingDetails.processedFiles > 0) && (

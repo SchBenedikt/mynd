@@ -12,7 +12,7 @@
     "@google/genai": "^1.48.0",
     "d3": "^7.8.5",
     "dompurify": "^3.4.12",
-    "next": "^16.2.1",
+    "next": "^16.2.11",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
@@ -31,6 +31,7 @@
     "eslint-config-next": "^16.2.10"
   },
   "overrides": {
-    "postcss": "^8.5.10"
+    "postcss": "^8.5.10",
+    "sharp": "0.35.3"
   }
 }
