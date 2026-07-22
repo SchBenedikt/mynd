@@ -1,12 +1,22 @@
 'use client';
 
+import { useState } from 'react';
 import './LandingScreen.css';
 
 const SOURCE_OPTIONS = [
-  { value: 'auto', icon: 'fa-globe', label: 'Auto' },
-  { value: 'web', icon: 'fa-globe', label: 'Web' },
-  { value: 'deep', icon: 'fa-magnifying-glass', label: 'Deep' },
-  { value: 'local', icon: 'fa-database', label: 'Lokal' }
+  { value: 'auto', icon: 'fa-globe', label: { en: 'Auto', de: 'Auto' } },
+  { value: 'web', icon: 'fa-globe', label: { en: 'Web', de: 'Web' } },
+  { value: 'deep', icon: 'fa-magnifying-glass', label: { en: 'Deep', de: 'Tief' } },
+  { value: 'local', icon: 'fa-database', label: { en: 'Local', de: 'Lokal' } }
+];
+
+const SUGGESTIONS = [
+  { icon: 'fa-cloud-sun', en: 'What\'s the weather today?', de: 'Wie wird das Wetter heute?' },
+  { icon: 'fa-calendar-day', en: 'Schedule a meeting for tomorrow', de: 'Erstelle einen Termin für morgen' },
+  { icon: 'fa-envelope', en: 'Check my emails', de: 'Prüfe meine E-Mails' },
+  { icon: 'fa-brain', en: 'Summarize the latest news', de: 'Fasse die aktuellen News zusammen' },
+  { icon: 'fa-image', en: 'Show photos from last week', de: 'Zeige Fotos von letzter Woche' },
+  { icon: 'fa-file-lines', en: 'Help me write a draft', de: 'Hilf mir einen Entwurf zu schreiben' },
 ];
 
 export default function LandingScreen({
@@ -18,18 +28,40 @@ export default function LandingScreen({
   source, setSource,
   model, setModel, aiModels
 }) {
+  const [showSuggestions, setShowSuggestions] = useState(true);
+
+  const handleSuggestion = (text) => {
+    setInputValue(text);
+    if (inputRef.current) inputRef.current.value = text;
+    setTimeout(() => onSend(text), 50);
+  };
+
+  const l = (obj) => obj[language] || obj.en;
+
   return (
     <div className="landing">
-      <div className="landing-brand">◆ MYND</div>
+      <div className="landing-glow" />
+      <div className="landing-brand">
+        <span className="landing-brand-icon">◆</span>
+        <span className="landing-brand-text">MYND</span>
+      </div>
+
+      <div className="landing-greeting">
+        {personalGreeting && (
+          <div className="landing-greeting-text">{personalGreeting}</div>
+        )}
+        <div className="landing-tagline">{t('tagline')}</div>
+      </div>
+
       <div className="landing-input-section">
         <div className="source-toggle-row">
           {SOURCE_OPTIONS.map(opt => (
             <button key={opt.value}
               className={`source-btn ${source === opt.value ? 'active' : ''}`}
               onClick={() => setSource(opt.value)}
-              title={opt.label}>
+              title={l(opt.label)}>
               <i className={`fas ${opt.icon}`}></i>
-              {opt.label}
+              {l(opt.label)}
             </button>
           ))}
           <div className="composer-model-wrapper">
@@ -63,6 +95,55 @@ export default function LandingScreen({
             <i className="fas fa-arrow-right"></i>
           </button>
         </div>
+      </div>
+
+      {showSuggestions && (
+        <div className="landing-suggestions">
+          <div className="landing-suggestions-header">
+            <span>{t('suggestions')}</span>
+            <button className="landing-suggestions-hide" onClick={() => setShowSuggestions(false)} title={language === 'de' ? 'Ausblenden' : 'Hide'}>
+              <i className="fas fa-times"></i>
+            </button>
+          </div>
+          <div className="landing-suggestions-grid">
+            {SUGGESTIONS.map((s, i) => (
+              <button key={i} className="landing-suggestion-card" onClick={() => handleSuggestion(l({ en: s.en, de: s.de }))}>
+                <i className={`fas ${s.icon}`}></i>
+                <span>{l({ en: s.en, de: s.de })}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="landing-features">
+        <div className="landing-feature">
+          <i className="fas fa-robot"></i>
+          <div className="landing-feature-text">
+            <strong>{t('multiModel')}</strong>
+            <span>{t('multiModelDesc')}</span>
+          </div>
+        </div>
+        <div className="landing-feature">
+          <i className="fas fa-plug"></i>
+          <div className="landing-feature-text">
+            <strong>{t('integrations')}</strong>
+            <span>{t('integrationsDesc')}</span>
+          </div>
+        </div>
+        <div className="landing-feature">
+          <i className="fas fa-lock"></i>
+          <div className="landing-feature-text">
+            <strong>{t('privacy')}</strong>
+            <span>{t('privacyDesc')}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="landing-shortcuts">
+        <span><kbd>⌘K</kbd> {t('search')}</span>
+        <span><kbd>⌘⏎</kbd> {t('send')}</span>
+        <span><kbd>⌘⇧F</kbd> {t('files')}</span>
       </div>
 
       {(indexingStatus !== 'idle' || indexingDetails.processedFiles > 0) && (

@@ -35,6 +35,7 @@ export default function LoginPage() {
   const [registrationAllowed, setRegistrationAllowed] = useState(false);
   const [backendUrl, setBackendUrl] = useState('http://127.0.0.1:5001');
   const [showDetails, setShowDetails] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     try {
@@ -131,6 +132,9 @@ export default function LoginPage() {
         <div className="lp-login-card">
           <div className="lp-login-card-inner">
             <header className="lp-login-card-header">
+              <div className="lp-login-card-brand">
+                <span className="lp-login-card-brand-mark">◆</span>
+              </div>
               <h1>{isRegister ? c.newAccount : c.subtitle}</h1>
               <p>{language === 'de' ? 'Lokale Personal AI' : 'Local personal AI'}</p>
             </header>
@@ -149,22 +153,32 @@ export default function LoginPage() {
                 <label htmlFor="login-user">{c.username}</label>
                 <input id="login-user" value={loginUser}
                   onChange={(e) => setLoginUser(e.target.value)}
-                  placeholder={c.username} autoFocus autoComplete="username" />
+                  placeholder={c.username} autoFocus autoComplete="username"
+                  disabled={loading} />
               </div>
               {isRegister && (
                 <div className="lp-login-field">
                   <label htmlFor="login-name">{c.displayName}</label>
                   <input id="login-name" value={loginName}
                     onChange={(e) => setLoginName(e.target.value)}
-                    placeholder={c.displayNamePlaceholder} />
+                    placeholder={c.displayNamePlaceholder} disabled={loading} />
                 </div>
               )}
               <div className="lp-login-field">
                 <label htmlFor="login-pass">{c.password}</label>
-                <input id="login-pass" value={loginPass}
-                  onChange={(e) => setLoginPass(e.target.value)}
-                  placeholder={c.password} type="password"
-                  autoComplete={isRegister ? 'new-password' : 'current-password'} />
+                <div className="lp-login-pass-wrapper">
+                  <input id="login-pass" value={loginPass}
+                    onChange={(e) => setLoginPass(e.target.value)}
+                    placeholder={c.password} type={showPassword ? 'text' : 'password'}
+                    autoComplete={isRegister ? 'new-password' : 'current-password'}
+                    disabled={loading} />
+                  <button type="button" className="lp-login-pass-toggle"
+                    onClick={() => setShowPassword(!showPassword)}
+                    tabIndex={-1}
+                    aria-label={showPassword ? (language === 'de' ? 'Passwort verstecken' : 'Hide password') : (language === 'de' ? 'Passwort anzeigen' : 'Show password')}>
+                    <i className={`fas ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`} />
+                  </button>
+                </div>
                 {isRegister && loginPass.length > 0 && loginPass.length < 4 && (
                   <p className="lp-login-hint">{c.min}</p>
                 )}
@@ -174,7 +188,8 @@ export default function LoginPage() {
                   <label htmlFor="login-pass-confirm">{c.confirm}</label>
                   <input id="login-pass-confirm" value={loginPassConfirm}
                     onChange={(e) => setLoginPassConfirm(e.target.value)}
-                    placeholder={c.repeat} type="password" autoComplete="new-password" />
+                    placeholder={c.repeat} type={showPassword ? 'text' : 'password'}
+                    autoComplete="new-password" disabled={loading} />
                 </div>
               )}
               <button type="submit" className="lp-login-btn" disabled={!canSubmit}>

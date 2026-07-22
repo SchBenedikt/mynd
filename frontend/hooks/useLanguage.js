@@ -77,7 +77,16 @@ const TRANSLATIONS = {
     userDeleted: 'Benutzer gelöscht',
     userCreated: 'Benutzer angelegt',
     passwordReset: 'Passwort zurückgesetzt',
-    adminTab: 'Admin'
+    adminTab: 'Admin',
+    tagline: 'Frag deine Wissensbasis.',
+    multiModel: 'Multi-Model',
+    multiModelDesc: 'Wechsle zwischen verschiedenen KI-Modellen',
+    integrations: 'Integrationen',
+    integrationsDesc: 'Verbunden mit deinen Tools',
+    privacy: 'Datenschutz',
+    privacyDesc: 'Deine Daten bleiben bei dir',
+    search: 'Suchen',
+    send: 'Senden'
   },
   en: {
     newChat: 'New Chat',
@@ -135,7 +144,16 @@ const TRANSLATIONS = {
     userDeleted: 'User deleted',
     userCreated: 'User created',
     passwordReset: 'Password reset',
-    adminTab: 'Admin'
+    adminTab: 'Admin',
+    tagline: 'Ask your knowledge base anything.',
+    multiModel: 'Multi-Model',
+    multiModelDesc: 'Switch between different AI models',
+    integrations: 'Integrations',
+    integrationsDesc: 'Connected to your tools',
+    privacy: 'Privacy',
+    privacyDesc: 'Your data stays with you',
+    search: 'Search',
+    send: 'Send'
   },
   fr: {
     newChat: 'Nouveau Chat',
