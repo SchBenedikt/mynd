@@ -64,12 +64,6 @@
   margin-bottom: 0.3rem;
 }
 
-.landing-tagline {
-  font-size: 0.95rem;
-  color: var(--text-secondary);
-  opacity: 0.8;
-}
-
 .landing-input-section {
   width: 100%;
   max-width: 900px;
@@ -160,50 +154,6 @@
   flex-shrink: 0;
 }
 
-.landing-features {
-  display: flex;
-  gap: 1rem;
-  margin-top: 1.5rem;
-  animation: landingFadeIn 0.35s ease-out 0.15s both;
-}
-
-.landing-feature {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-  padding: 0.75rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  flex: 1;
-  min-width: 0;
-}
-
-.landing-feature i {
-  font-size: 1.1rem;
-  color: var(--brand);
-  margin-top: 0.1rem;
-  flex-shrink: 0;
-}
-
-.landing-feature-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.landing-feature-text strong {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.landing-feature-text span {
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  line-height: 1.3;
-}
-
 .landing-shortcuts {
   display: flex;
   gap: 1rem;
@@ -232,10 +182,6 @@
 }
 
 @media (max-width: 768px) {
-  .landing-features {
-    flex-direction: column;
-  }
-
   .landing-suggestions-grid {
     grid-template-columns: 1fr 1fr;
   }

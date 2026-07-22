@@ -615,7 +615,7 @@ export default function HomePage() {
     loadProactiveBriefings();
     autoResolveLocationOnOpen();
     fetchGreeting();
-    if (!personalGreeting) setPersonalGreeting('Hallo');
+    if (!personalGreeting) setPersonalGreeting(language === 'de' ? 'Hallo' : 'Hello');
     const onPop = () => { const urlChat = new URL(window.location.href).searchParams.get('chat'); if (urlChat) setActiveChatId(urlChat); };
     window.addEventListener('popstate', onPop);
     const statusInterval = setInterval(updateStatus, 8000);
@@ -675,13 +675,30 @@ export default function HomePage() {
   }, [chatSummaryPanel.open]);
 
   useEffect(() => {
-    const handleCancelKey = (event) => {
+    const handleGlobalKey = (event) => {
+      const isCmd = event.metaKey || event.ctrlKey;
+      if (isCmd && event.key === 'k') {
+        event.preventDefault();
+        inputRef.current?.focus();
+        return;
+      }
+      if (isCmd && event.key === 'Enter') {
+        event.preventDefault();
+        const text = inputRef.current?.value || '';
+        if (text.trim()) sendMessage(text);
+        return;
+      }
+      if (isCmd && event.shiftKey && event.key === 'F') {
+        event.preventDefault();
+        inputRef.current?.focus();
+        return;
+      }
       if (!isThinking) return;
-      if (event.key === 'c' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); cancelPendingRequest(); }
+      if (event.key === 'c' && isCmd) { event.preventDefault(); cancelPendingRequest(); }
     };
-    window.addEventListener('keydown', handleCancelKey);
-    return () => window.removeEventListener('keydown', handleCancelKey);
-  }, [isThinking, cancelPendingRequest]);
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, [isThinking, cancelPendingRequest, sendMessage]);
 
   const canSend = inputValue.trim().length > 0;
   const queueReady = isThinking && canSend;

@@ -46,12 +46,11 @@ export default function LandingScreen({
         <span className="landing-brand-text">MYND</span>
       </div>
 
-      <div className="landing-greeting">
-        {personalGreeting && (
+      {personalGreeting && (
+        <div className="landing-greeting">
           <div className="landing-greeting-text">{personalGreeting}</div>
-        )}
-        <div className="landing-tagline">{t('tagline')}</div>
-      </div>
+        </div>
+      )}
 
       <div className="landing-input-section">
         <div className="source-toggle-row">
@@ -115,30 +114,6 @@ export default function LandingScreen({
           </div>
         </div>
       )}
-
-      <div className="landing-features">
-        <div className="landing-feature">
-          <i className="fas fa-robot"></i>
-          <div className="landing-feature-text">
-            <strong>{t('multiModel')}</strong>
-            <span>{t('multiModelDesc')}</span>
-          </div>
-        </div>
-        <div className="landing-feature">
-          <i className="fas fa-plug"></i>
-          <div className="landing-feature-text">
-            <strong>{t('integrations')}</strong>
-            <span>{t('integrationsDesc')}</span>
-          </div>
-        </div>
-        <div className="landing-feature">
-          <i className="fas fa-lock"></i>
-          <div className="landing-feature-text">
-            <strong>{t('privacy')}</strong>
-            <span>{t('privacyDesc')}</span>
-          </div>
-        </div>
-      </div>
 
       <div className="landing-shortcuts">
         <span><kbd>⌘K</kbd> {t('search')}</span>
