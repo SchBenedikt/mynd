@@ -700,6 +700,19 @@ export default function HomePage() {
     return () => window.removeEventListener('keydown', handleGlobalKey);
   }, [isThinking, cancelPendingRequest, sendMessage]);
 
+  const landingSuggestions = useMemo(() => [
+    { icon: 'fa-cloud-sun', text: language === 'de' ? 'Wie wird das Wetter heute?' : 'What\'s the weather today?' },
+    { icon: 'fa-calendar-day', text: language === 'de' ? 'Erstelle einen Termin für morgen' : 'Schedule a meeting for tomorrow' },
+    { icon: 'fa-envelope', text: language === 'de' ? 'Prüfe meine E-Mails' : 'Check my emails' },
+    { icon: 'fa-brain', text: language === 'de' ? 'Fasse die aktuellen News zusammen' : 'Summarize the latest news' },
+    { icon: 'fa-image', text: language === 'de' ? 'Zeige Fotos von letzter Woche' : 'Show photos from last week' },
+    { icon: 'fa-file-lines', text: language === 'de' ? 'Hilf mir einen Entwurf zu schreiben' : 'Help me write a draft' },
+  ], [language]);
+
+  const handleSuggestion = useCallback((text) => {
+    sendMessage(text);
+  }, [sendMessage]);
+
   const canSend = inputValue.trim().length > 0;
   const queueReady = isThinking && canSend;
   const voiceStatusText = (() => {
@@ -760,6 +773,7 @@ export default function HomePage() {
             indexingDetails={indexingDetails} indexingStats={indexingStats}
             source={source} setSource={setSource}
             model={model} setModel={setModel} aiModels={aiModels}
+            suggestions={landingSuggestions} onSuggestionClick={handleSuggestion}
           />
         ) : (
           <>

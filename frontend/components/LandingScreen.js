@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import './LandingScreen.css';
 
 const SOURCE_OPTIONS = [
@@ -10,15 +10,6 @@ const SOURCE_OPTIONS = [
   { value: 'local', icon: 'fa-database', label: { en: 'Local', de: 'Lokal' } }
 ];
 
-const SUGGESTIONS = [
-  { icon: 'fa-cloud-sun', en: 'What\'s the weather today?', de: 'Wie wird das Wetter heute?' },
-  { icon: 'fa-calendar-day', en: 'Schedule a meeting for tomorrow', de: 'Erstelle einen Termin für morgen' },
-  { icon: 'fa-envelope', en: 'Check my emails', de: 'Prüfe meine E-Mails' },
-  { icon: 'fa-brain', en: 'Summarize the latest news', de: 'Fasse die aktuellen News zusammen' },
-  { icon: 'fa-image', en: 'Show photos from last week', de: 'Zeige Fotos von letzter Woche' },
-  { icon: 'fa-file-lines', en: 'Help me write a draft', de: 'Hilf mir einen Entwurf zu schreiben' },
-];
-
 export default function LandingScreen({
   personalGreeting, t, language, chats,
   inputValue, setInputValue, inputRef,
@@ -26,15 +17,10 @@ export default function LandingScreen({
   onSend, onStartVoiceInput,
   indexingStatus, indexingProgress, indexingDetails, indexingStats,
   source, setSource,
-  model, setModel, aiModels
+  model, setModel, aiModels,
+  suggestions, onSuggestionClick
 }) {
   const [showSuggestions, setShowSuggestions] = useState(true);
-  const onSendRef = useRef(onSend);
-  useEffect(() => { onSendRef.current = onSend; }, [onSend]);
-
-  const handleSuggestion = (text) => {
-    onSendRef.current(text);
-  };
 
   const l = (obj) => obj[language] || obj.en;
 
@@ -96,7 +82,7 @@ export default function LandingScreen({
         </div>
       </div>
 
-      {showSuggestions && (
+      {showSuggestions && suggestions && suggestions.length > 0 && (
         <div className="landing-suggestions">
           <div className="landing-suggestions-header">
             <span>{t('suggestions')}</span>
@@ -105,10 +91,10 @@ export default function LandingScreen({
             </button>
           </div>
           <div className="landing-suggestions-grid">
-            {SUGGESTIONS.map((s, i) => (
-              <button key={i} className="landing-suggestion-card" onClick={() => handleSuggestion(l({ en: s.en, de: s.de }))}>
+            {suggestions.map((s, i) => (
+              <button key={i} className="landing-suggestion-card" onClick={() => onSuggestionClick(s.text)}>
                 <i className={`fas ${s.icon}`}></i>
-                <span>{l({ en: s.en, de: s.de })}</span>
+                <span>{s.text}</span>
               </button>
             ))}
           </div>
