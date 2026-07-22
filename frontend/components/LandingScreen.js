@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import './LandingScreen.css';
 
 const SOURCE_OPTIONS = [
@@ -29,11 +29,11 @@ export default function LandingScreen({
   model, setModel, aiModels
 }) {
   const [showSuggestions, setShowSuggestions] = useState(true);
+  const onSendRef = useRef(onSend);
+  useEffect(() => { onSendRef.current = onSend; }, [onSend]);
 
   const handleSuggestion = (text) => {
-    setInputValue(text);
-    if (inputRef.current) inputRef.current.value = text;
-    setTimeout(() => onSend(text), 50);
+    onSendRef.current(text);
   };
 
   const l = (obj) => obj[language] || obj.en;
