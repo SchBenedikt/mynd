@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useLanguage } from '../../../hooks/useLanguage';
+import { usePageTitle } from '../../../hooks/usePageTitle';
 import { useApp } from '../../../lib/AppContext';
 import IntegrationsTab from '../../../components/settings/IntegrationsTab';
 import ConfigTab from '../../../components/settings/ConfigTab';
@@ -27,6 +28,7 @@ const NAV_GROUPS = [
 const tr = (de, en, lang) => lang === 'de' ? de : en;
 
 export default function SettingsPage() {
+  usePageTitle('Einstellungen');
   const { language, t } = useLanguage();
   const { user } = useApp();
   const [activeTab, setActiveTab] = useState('profile');

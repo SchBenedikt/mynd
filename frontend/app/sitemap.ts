@@ -18,25 +18,25 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.3,
     },
     {
-      url: `${siteUrl}/language`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.2,
-    },
-    {
       url: `${siteUrl}/setup`,
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.5,
     },
     {
-      url: `${siteUrl}/projects`,
+      url: `${siteUrl}/guide`,
+      lastModified: new Date(),
+      changeFrequency: 'weekly',
+      priority: 0.7,
+    },
+    {
+      url: `${siteUrl}/developers`,
       lastModified: new Date(),
       changeFrequency: 'weekly',
       priority: 0.6,
     },
     {
-      url: `${siteUrl}/knowledge-graph`,
+      url: `${siteUrl}/projects`,
       lastModified: new Date(),
       changeFrequency: 'weekly',
       priority: 0.6,

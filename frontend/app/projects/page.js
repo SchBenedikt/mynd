@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from '../../hooks/useLanguage';
+import { usePageTitle } from '../../hooks/usePageTitle';
 import { useSidebar } from '../../hooks/useSidebar';
 
 const PROJECTS_STORAGE_KEY = 'mynd_projects_v1';
@@ -18,6 +19,7 @@ function loadChats() {
 }
 
 export default function ProjectsPage() {
+  usePageTitle('Projekte');
   const router = useRouter();
   const { language, t } = useLanguage();
   const tr = (deText, enText) => (language === 'de' ? deText : enText);

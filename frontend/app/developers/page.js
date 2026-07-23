@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import './developers.css';
+import { usePageTitle } from '../../hooks/usePageTitle';
 
 const LANG = ['de', 'en'];
 
@@ -107,6 +108,7 @@ TOOL_MAP = {
 }`;
 
 export default function DevelopersPage() {
+  usePageTitle('Developer Guide');
   const [lang, setLang] = useState('en');
   const [activeSection, setActiveSection] = useState('overview');
 

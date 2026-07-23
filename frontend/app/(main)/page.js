@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { usePageTitle } from '../../hooks/usePageTitle';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { useTheme } from '../../hooks/useTheme';
@@ -26,6 +27,7 @@ import {
 } from '../../lib/pageUtils';
 
 export default function HomePage() {
+  usePageTitle('Chat');
   const { theme, darkMode, contrastColor, setTheme, setDarkMode, setContrastColor } = useTheme();
   const { language, setLanguage, t } = useLanguage();
   const tr = useCallback((deText, enText) => (language === 'de' ? deText : enText), [language]);
