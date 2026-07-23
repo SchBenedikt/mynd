@@ -37,7 +37,7 @@ def test_application_entry_loads_without_browser_errors():
         if page.title().strip() == 'MYND Setup | MYND':
             expect(page.get_by_role('heading', name='Start wählen')).to_be_visible()
         else:
-            expect(page).to_have_title('MYND - Local-first AI Workspace')
+            expect(page).to_have_title('Login | MYND')
             expect(page.get_by_role('heading', name='Sign in to continue')).to_be_visible()
             expect(page.locator('#login-user')).to_be_visible()
             expect(page.locator('#login-pass')).to_be_visible()
