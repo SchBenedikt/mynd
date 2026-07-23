@@ -324,6 +324,44 @@
   }
 }
 
+@media (max-width: 480px) {
+  .auth-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .auth-card {
+    border-radius: 20px 20px 0 0;
+    max-height: 92vh;
+    overflow-y: auto;
+  }
+  .auth-intro {
+    padding: 20px 18px;
+    gap: 14px;
+  }
+  .auth-intro h1 {
+    font-size: 22px;
+  }
+  .auth-intro .auth-sub {
+    font-size: 13px;
+  }
+  .auth-panel-wrap {
+    padding: 0 18px 20px;
+  }
+  .auth-panel {
+    padding: 20px 16px;
+  }
+  .auth-feature {
+    padding: 10px 12px;
+  }
+  .auth-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+  .auth-footer {
+    padding: 12px 18px 16px;
+  }
+}
+
 .authgate-skeleton {
   display: flex;
   width: 100vw;
