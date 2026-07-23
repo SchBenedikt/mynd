@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '../../lib/api';
 import { useLanguage } from '../../hooks/useLanguage';
+import { usePageTitle } from '../../hooks/usePageTitle';
 import './login.css';
 
 const TOKEN_KEY = 'mynd_token_v1';
@@ -22,6 +23,7 @@ function Spinner() {
 }
 
 export default function LoginPage() {
+  usePageTitle('Login');
   const { language } = useLanguage();
   const c = { ...COPY.en, ...(COPY[language] || {}) };
   const [loginUser, setLoginUser] = useState('');

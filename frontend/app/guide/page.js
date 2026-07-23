@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import './guide.css';
+import { usePageTitle } from '../../hooks/usePageTitle';
 
 const SECTIONS = [
   { id: 'getting-started', icon: 'fa-rocket',
@@ -44,6 +45,7 @@ const SECTIONS = [
 ];
 
 export default function GuidePage() {
+  usePageTitle('Guide');
   const [lang, setLang] = useState('en');
   const [activeId, setActiveId] = useState('getting-started');
 

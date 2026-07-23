@@ -5369,3 +5369,362 @@ body {
 .browser-preview__close:hover {
   background: rgba(255, 255, 255, 0.3);
 }
+
+/* ── Projects Page ── */
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.project-create-card {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.project-create-card input {
+  flex: 1;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-family: inherit;
+  outline: none;
+}
+
+.project-create-card input:focus {
+  border-color: var(--brand);
+}
+
+.project-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.project-card:hover {
+  border-color: var(--brand);
+}
+
+.project-card.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+}
+
+.project-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.project-card-head i {
+  color: var(--brand);
+  font-size: 0.95rem;
+}
+
+.project-card-name {
+  font-weight: 500;
+  font-size: 0.88rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-card-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--chip-bg);
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+
+.project-card-acts {
+  display: flex;
+  gap: 0.2rem;
+  margin-left: 0.5rem;
+}
+
+.project-card-btn {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: background 0.15s;
+}
+
+.project-card-btn:hover {
+  background: var(--chip-bg);
+  color: var(--text);
+}
+
+.project-card-btn.del:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.project-chats-section {
+  margin-top: 2rem;
+}
+
+.project-chats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.project-chats-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.project-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.project-chat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.project-chat-row:hover {
+  background: var(--chip-bg);
+}
+
+.project-chat-row i {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.project-chat-title {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-chat-date {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.projects-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.projects-empty i {
+  font-size: 2rem;
+  opacity: 0.4;
+}
+
+/* ── Responsive 480px ── */
+@media (max-width: 480px) {
+  .projects-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-create-card {
+    flex-direction: column;
+  }
+
+  .project-chats-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .messages {
+    padding: 0.75rem 0.6rem 1rem;
+  }
+
+  .bubble {
+    max-width: 100%;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.88rem;
+  }
+
+  .sources-container {
+    max-width: 100%;
+  }
+
+  .composer-shell {
+    width: calc(100% - 0.75rem);
+    margin: 0.5rem auto;
+  }
+
+  .composer {
+    padding: 0.3rem;
+  }
+
+  .composer input {
+    padding: 0.3rem 0.35rem;
+    font-size: 0.85rem;
+  }
+
+  .composer button {
+    width: 28px;
+    height: 28px;
+    font-size: 0.8rem;
+  }
+
+  .source-btn span {
+    display: none;
+  }
+
+  .source-btn {
+    padding: 0.25rem 0.4rem;
+    justify-content: center;
+  }
+
+  .source-btn i {
+    margin: 0;
+    font-size: 0.7rem;
+  }
+
+  .source-toggle-row {
+    gap: 0.15rem;
+  }
+
+  .left-sidebar {
+    width: 260px;
+  }
+
+  .topbar {
+    padding: 0 0.5rem;
+    min-height: 48px;
+  }
+
+  .center-area {
+    padding: 1rem !important;
+  }
+
+  .page-header h1 {
+    font-size: 1.2rem;
+  }
+
+  .page-sub {
+    font-size: 0.82rem;
+  }
+
+  .settings-full {
+    padding: 0.75rem;
+  }
+
+  .settings-full .settings-tabs .tab-btn {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.78rem;
+  }
+
+  .user-row .user-info {
+    display: none;
+  }
+
+  .history-item {
+    padding: 0.4rem 0.6rem;
+  }
+
+  .history-title {
+    font-size: 0.82rem;
+  }
+
+  .nav-item {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.82rem;
+  }
+
+  .conversation {
+    padding: 0;
+  }
+
+  .security-banner {
+    margin: 0.5rem 0.5rem 0.25rem 0.5rem;
+  }
+
+  .photo-context-gallery {
+    grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+    gap: 0.25rem;
+  }
+
+  .context-cards-wrap {
+    max-width: 100%;
+  }
+
+  .landing-brand-text {
+    font-size: 1.8rem;
+  }
+
+  .landing-greeting-text {
+    font-size: 1rem;
+  }
+
+  .landing-suggestions-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-suggestion-card {
+    padding: 0.5rem 0.65rem;
+    font-size: 0.82rem;
+  }
+
+  .landing-shortcuts {
+    display: none;
+  }
+
+  .landing .composer-model-select {
+    font-size: 0.65rem;
+  }
+
+  .modal-card {
+    width: 95vw;
+    margin: 0.5rem;
+  }
+
+  .image-modal,
+  .chat-summary-modal {
+    width: 98vw;
+  }
+
+  .api-overview-bar {
+    grid-template-columns: 1fr;
+  }
+}

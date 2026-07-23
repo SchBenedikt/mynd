@@ -42,13 +42,13 @@ export const metadata = {
     title: 'MYND - Local-first AI Workspace',
     description: 'A local-first AI workspace for chat, knowledge, automation, and integrations. Your private AI assistant.',
     url: siteUrl,
-    images: [{ url: '/og-image.png', width: 1200, height: 630, alt: 'MYND Workspace' }],
+    images: [{ url: '/og-image.svg', width: 1200, height: 630, alt: 'MYND Workspace' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'MYND - Local-first AI Workspace',
     description: 'A local-first AI workspace for chat, knowledge, automation, and integrations.',
-    images: ['/og-image.png'],
+    images: ['/og-image.svg'],
     creator: '@mynd_ai',
   },
   robots: {

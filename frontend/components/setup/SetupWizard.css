@@ -548,3 +548,123 @@
   font-size: 18px;
   color: #94a3b8;
 }
+
+@media (max-width: 768px) {
+  .setup-page {
+    padding: 24px 16px;
+  }
+  .setup-card-body {
+    padding: 24px 20px;
+  }
+  .setup-choice-grid {
+    flex-direction: column;
+  }
+  .setup-choice-card {
+    padding: 18px;
+  }
+  .setup-grid {
+    grid-template-columns: 1fr;
+  }
+  .setup-stepline {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .setup-footer {
+    flex-direction: column-reverse;
+  }
+  .setup-footer .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .setup-complete-actions {
+    flex-direction: column;
+  }
+  .setup-complete-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .setup-post-card {
+    flex-direction: column;
+    text-align: center;
+    padding: 16px;
+  }
+  .setup-review-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .setup-page {
+    padding: 16px 8px;
+  }
+  .setup-card {
+    border-radius: 16px;
+  }
+  .setup-card-body {
+    padding: 20px 14px;
+  }
+  .setup-title {
+    font-size: 18px;
+  }
+  .setup-subtitle {
+    font-size: 13px;
+  }
+  .setup-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+  .setup-step-label {
+    font-size: 8px;
+  }
+  .setup-stepchip {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+  }
+  .setup-step-arrow {
+    margin: 0 4px;
+    font-size: 9px;
+  }
+  .setup-choice-card {
+    padding: 14px;
+  }
+  .setup-choice-title {
+    font-size: 14px;
+  }
+  .setup-choice-card p {
+    font-size: 12px;
+  }
+  .setup-field input,
+  .setup-field select {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+  .setup-field span {
+    font-size: 13px;
+  }
+  .setup-footer .btn {
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+  .setup-card-toggle {
+    padding: 12px;
+  }
+  .setup-card-body-inner {
+    padding: 0 12px 12px;
+    padding-top: 12px;
+  }
+  .setup-config-card {
+    border-radius: 10px;
+  }
+  .setup-post-card {
+    padding: 14px;
+  }
+  .setup-post-info strong {
+    font-size: 14px;
+  }
+  .setup-post-info small {
+    font-size: 12px;
+  }
+}

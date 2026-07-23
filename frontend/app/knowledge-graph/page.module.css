@@ -27,3 +27,21 @@
   background: rgba(255, 255, 255, 0.2);
   transform: translateX(-2px);
 }
+
+@media (max-width: 768px) {
+  .backLink {
+    top: 20px;
+    left: 20px;
+    font-size: 13px;
+    padding: 6px 14px;
+  }
+}
+
+@media (max-width: 480px) {
+  .backLink {
+    top: 12px;
+    left: 12px;
+    font-size: 12px;
+    padding: 5px 12px;
+  }
+}
