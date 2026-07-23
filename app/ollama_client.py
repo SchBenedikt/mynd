@@ -85,6 +85,9 @@ class OllamaClient:
 ollama_client = OllamaClient()
 
 
+OAUTH_PROXY_URL = 'http://127.0.0.1:10531'
+
+
 def load_ai_config():
     cfg = {
         'provider': 'ollama',
@@ -109,10 +112,14 @@ def load_ai_config():
             pass
     if cfg['provider'] == 'ollama':
         ollama_client.update_config(cfg['base_url'], cfg['model'])
+    elif cfg['provider'] == 'openai-oauth':
+        cfg['base_url'] = OAUTH_PROXY_URL
     return cfg
 
 
 def save_ai_config(provider, base_url, model, api_key='', embedding_model=None):
+    if provider == 'openai-oauth':
+        base_url = OAUTH_PROXY_URL
     cfg = {
         'provider': provider or 'ollama',
         'base_url': base_url.rstrip('/'),
@@ -128,6 +135,49 @@ def save_ai_config(provider, base_url, model, api_key='', embedding_model=None):
     AI_CONFIG_FILE.write_text(json.dumps(display_cfg, indent=2, ensure_ascii=False))
     if cfg['provider'] == 'ollama':
         ollama_client.update_config(cfg['base_url'], cfg['model'])
+
+
+def check_oauth_proxy():
+    try:
+        r = requests.get(f'{OAUTH_PROXY_URL}/v1/models', timeout=3)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def fetch_oauth_models():
+    try:
+        r = requests.get(f'{OAUTH_PROXY_URL}/v1/models', timeout=5)
+        r.raise_for_status()
+        return [m['id'] for m in r.json().get('data', [])]
+    except Exception:
+        return []
+
+
+def check_oauth_auth():
+    auth_file = Path(os.path.expanduser('~/.codex/auth.json'))
+    return auth_file.exists()
+
+
+def start_oauth_proxy():
+    import subprocess
+    try:
+        subprocess.Popen(
+            ['npx', 'openai-oauth', '--detach', '-p', '10531'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return True
+    except Exception as e:
+        return str(e)
+
+
+def stop_oauth_proxy():
+    import subprocess
+    try:
+        subprocess.run(['pkill', '-f', 'openai-oauth'], capture_output=True)
+        return True
+    except Exception as e:
+        return str(e)
 
 
 load_ai_config()

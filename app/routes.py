@@ -784,6 +784,8 @@ def ai_config():
             base_url = 'https://api.openai.com/v1'
         if not api_key:
             api_key = load_ai_config().get('api_key', '')
+    elif provider == 'openai-oauth':
+        pass
     else:
         return jsonify({'error': 'Unknown provider'}), 400
     save_ai_config(provider, base_url, model, api_key, embedding_model)
@@ -837,6 +839,39 @@ def api_ai_check_models():
         supported = check_tool_support(model, base_url)
         results.append({'model': model, 'tool_support': supported})
     return jsonify({'base_url': base_url, 'results': results})
+
+# ── /api/ai/oauth/* ────────────────────────────────────────
+@app.route('/api/ai/oauth/status', methods=['GET'])
+def api_oauth_status():
+    from ollama_client import check_oauth_proxy, check_oauth_auth
+    return jsonify({
+        'signed_in': check_oauth_auth(),
+        'proxy_running': check_oauth_proxy(),
+    })
+
+@app.route('/api/ai/oauth/models', methods=['GET'])
+def api_oauth_models():
+    from ollama_client import fetch_oauth_models, check_oauth_proxy
+    if not check_oauth_proxy():
+        return jsonify({'error': 'Proxy nicht erreichbar'}), 502
+    models = fetch_oauth_models()
+    return jsonify({'models': models})
+
+@app.route('/api/ai/oauth/proxy/start', methods=['POST'])
+def api_oauth_proxy_start():
+    from ollama_client import start_oauth_proxy
+    result = start_oauth_proxy()
+    if result is True:
+        return jsonify({'status': 'started'})
+    return jsonify({'error': str(result)}), 500
+
+@app.route('/api/ai/oauth/proxy/stop', methods=['POST'])
+def api_oauth_proxy_stop():
+    from ollama_client import stop_oauth_proxy
+    result = stop_oauth_proxy()
+    if result is True:
+        return jsonify({'status': 'stopped'})
+    return jsonify({'error': str(result)}), 500
 
 # ── /api/vault/* ───────────────────────────────────────────
 @app.route('/api/vault/entries', methods=['GET'])

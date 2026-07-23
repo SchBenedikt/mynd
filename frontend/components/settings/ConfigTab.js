@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { SignInWithChatGPT } from '@openai-oauth/react';
 import { apiFetch } from '../../lib/api';
 import {
   getModelBaseName,
@@ -408,6 +409,7 @@ export default function ConfigTab({ tr, language }) {
           <select value={aiProvider} onChange={(e) => setAiProvider(e.target.value)}>
             <option value="ollama">Ollama (Lokal)</option>
             <option value="openai">OpenAI-kompatibel</option>
+            <option value="openai-oauth">ChatGPT (kostenlos)</option>
           </select>
         </div>
         {aiProvider === 'openai' ? (
@@ -423,6 +425,16 @@ export default function ConfigTab({ tr, language }) {
                 placeholder={openaiApiKeySet ? tr('API-Key ist gesetzt (neu eingeben zum Ändern)', 'API key is set (enter new to change)') : tr('API-Key eingeben', 'Enter API key')} />
             </div>
           </>
+        ) : aiProvider === 'openai-oauth' ? (
+          <div style={{marginTop: '0.5rem'}}>
+            <p style={{fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '0.75rem', lineHeight: '1.5'}}>
+              {tr(
+                'Nutze deinen ChatGPT-Account kostenlos. Der openai-oauth-Proxy läuft lokal auf Port 10531.',
+                'Use your ChatGPT account for free. The openai-oauth proxy runs locally on port 10531.'
+              )}
+            </p>
+            <SignInWithChatGPT />
+          </div>
         ) : (
           <>
             <div className="input-group">
