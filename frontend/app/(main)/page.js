@@ -260,7 +260,7 @@ export default function HomePage() {
     text = text.trim();
     let targetChatId = options.chatId || activeChatId;
     const userMessageId = options.messageId || createMessageId();
-    if (!targetChatId) {
+    if (!targetChatId || (chats.length > 0 && !chats.some(c => c.id === targetChatId))) {
       const now = Date.now();
       const newChat = { id: createMessageId(), title: buildChatTitleFromText(text), messages: [{ role: 'user', content: text, id: userMessageId }], createdAt: now, updatedAt: now, project: null };
       setChats(prev => [newChat, ...prev]);
@@ -645,7 +645,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (chats.length === 0) { const initialChat = createEmptyChat(); setChats([initialChat]); setActiveChatId(initialChat.id); return; }
-    if (!activeChatId) { setActiveChatId(chats[0].id); return; }
+    if (!activeChatId || !chats.some(c => c.id === activeChatId)) { setActiveChatId(chats[0].id); return; }
     const urlChat = typeof window !== 'undefined' ? new URL(window.location.href).searchParams.get('chat') : null;
     if (urlChat && chats.some(c => c.id === urlChat) && urlChat !== activeChatId) setActiveChatId(urlChat);
   }, [chats.length, chats, activeChatId, setChats, setActiveChatId]);

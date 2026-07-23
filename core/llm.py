@@ -26,6 +26,8 @@ def _load_openai_config():
                 base = str(fc.get('base_url', '')).rstrip('/')
                 key = str(fc.get('api_key', ''))
                 return base or 'https://api.openai.com/v1', key
+            if fc.get('provider') == 'openai-oauth':
+                return 'http://127.0.0.1:10531/v1', ''
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             pass
     return _openai_cfg()

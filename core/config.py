@@ -41,6 +41,20 @@ def _openai_prefixes():
     raw = os.environ.get("OPENAI_MODEL_PREFIXES", "gpt-,o1-,o3-,claude-,gemini-,minimax-")
     return [p.strip() for p in raw.split(",") if p.strip()]
 
+def _is_chatgpt_oauth():
+    import json
+    from pathlib import Path
+    cfg_file = Path(__file__).parent.parent / 'data' / 'ai_config.json'
+    if cfg_file.exists():
+        try:
+            fc = json.loads(cfg_file.read_text())
+            return fc.get('provider') == 'openai-oauth'
+        except Exception:
+            pass
+    return False
+
 def _is_openai(model):
+    if _is_chatgpt_oauth():
+        return True
     ob, ok, oms = _openai_cfg()
     return ob and (model in oms or any(model.startswith(p) for p in _openai_prefixes()))
