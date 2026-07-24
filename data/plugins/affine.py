@@ -106,7 +106,7 @@ def _graphql(query, variables=None):
 
 
 def _list_workspaces():
-    data = _graphql("{ workspaces { id } }")
+    data = _graphql("{ workspaces { id role memberCount team owner { id name email } } }")
     if "error" in data:
         return [], data["error"]
     return data.get("workspaces", []), None
@@ -462,6 +462,47 @@ def _get_workspace_ids():
     return [w["id"] for w in ws_list]
 
 
+def _fetch_ws_docs(ws_id, limit=500):
+    """Fetch documents from a workspace using recentlyUpdatedDocs with pagination.
+    Works for both owned and shared (Collaborator) workspaces."""
+    all_edges = []
+    cursor = None
+    has_more = True
+    while has_more and len(all_edges) < limit:
+        pag = {"first": min(100, limit - len(all_edges))}
+        if cursor:
+            pag["after"] = cursor
+        data = _graphql(
+            "query ($wsId: String!, $first: Int!, $after: String) { workspace(id: $wsId) { recentlyUpdatedDocs(pagination: {first: $first, after: $after}) { totalCount pageInfo { hasNextPage endCursor } edges { node { id title } } } } }",
+            {"wsId": ws_id, "first": pag["first"], "after": cursor},
+        )
+        if "error" in data:
+            return [], data["error"]
+        docs = data.get("workspace", {}).get("recentlyUpdatedDocs", {})
+        edges = docs.get("edges", [])
+        all_edges.extend(edges)
+        page_info = docs.get("pageInfo", {})
+        has_more = page_info.get("hasNextPage", False)
+        if has_more:
+            cursor = page_info.get("endCursor")
+    return all_edges, None
+
+
+def _fetch_ws_doc_count(ws_id):
+    """Get doc count, trying recentlyUpdatedDocs first, falling back to docs."""
+    data = _graphql(
+        "query ($wsId: String!) { workspace(id: $wsId) { recentlyUpdatedDocs(pagination: {first: 1}) { totalCount } docs(pagination: {first: 1}) { totalCount } } }",
+        {"wsId": ws_id},
+    )
+    if "error" in data:
+        return 0
+    ws = data.get("workspace", {})
+    count = ws.get("recentlyUpdatedDocs", {}).get("totalCount")
+    if count is not None:
+        return count
+    return ws.get("docs", {}).get("totalCount", 0)
+
+
 # ── Title Cache (existing) ─────────────────────────────────────
 
 def _fetch_all_titles():
@@ -469,40 +510,40 @@ def _fetch_all_titles():
     ws_ids = _get_workspace_ids()
     if not ws_ids:
         return cache
-    s, err = _login()
-    if err:
-        return cache
-    domain = _vget("affine/domain")
     changed = False
     for ws_id in ws_ids:
-        pages = _graphql(
-            "query ($wsId: String!, $first: Int!) { workspace(id: $wsId) { docs(pagination: {first: $first}) { edges { node { id } } } } }",
-            {"wsId": ws_id, "first": 100},
-        )
-        if "error" in pages:
+        edges, err = _fetch_ws_docs(ws_id)
+        if err or not edges:
             continue
-        for e in pages.get("workspace", {}).get("docs", {}).get("edges", []):
+        for e in edges:
             doc_id = e["node"]["id"]
-            if doc_id in cache["titles"] and cache["titles"][doc_id] is not None:
-                continue
-            try:
-                r = s.get(
-                    f"{domain.rstrip('/')}/api/workspaces/{ws_id}/docs/{doc_id}",
-                    headers={"x-affine-client-version": "0.25.0", "x-csrf-token": _AFFINE_CSRF or ""},
-                    timeout=30,
-                )
-                if r.status_code != 200:
-                    continue
-                ydoc, blocks, decode_err = _decode_ydoc(r.content)
-                if decode_err or blocks is None:
-                    cache["titles"][doc_id] = None
-                    changed = True
-                    continue
-                title = _extract_title(blocks)
+            title = e["node"].get("title", "")
+            if title:
                 cache["titles"][doc_id] = title
                 changed = True
-            except requests.RequestException:
-                continue
+            elif doc_id not in cache["titles"] or cache["titles"][doc_id] is None:
+                # Title not available via GraphQL, fetch raw
+                s, lerr = _login()
+                if lerr:
+                    continue
+                domain = _vget("affine/domain")
+                try:
+                    r = s.get(
+                        f"{domain.rstrip('/')}/api/workspaces/{ws_id}/docs/{doc_id}",
+                        headers={"x-affine-client-version": "0.25.0", "x-csrf-token": _AFFINE_CSRF or ""},
+                        timeout=30,
+                    )
+                    if r.status_code == 200:
+                        ydoc, blocks, decode_err = _decode_ydoc(r.content)
+                        if not decode_err and blocks:
+                            t = _extract_title(blocks)
+                            cache["titles"][doc_id] = t
+                            changed = True
+                        else:
+                            cache["titles"][doc_id] = None
+                            changed = True
+                except requests.RequestException:
+                    continue
     if changed:
         _save_title_cache(cache)
     return cache
@@ -571,7 +612,12 @@ def affine_list_workspaces():
         return "ℹ️ Keine Workspaces gefunden."
     lines = ["📚 **AFFiNE Workspaces:**"]
     for w in ws_list:
-        lines.append(f"  `{w['id']}`")
+        role = w.get("role", "?")
+        team = " (Team)" if w.get("team") else ""
+        owner = w.get("owner", {})
+        owner_name = owner.get("name", "?")
+        member_count = w.get("memberCount", "?")
+        lines.append(f"  `{w['id']}` — Rolle: {role}{team}, Besitzer: {owner_name}, Mitglieder: {member_count}")
     return "\n".join(lines)
 
 
@@ -585,8 +631,9 @@ def affine_workspace_info():
             """query ($id: String!) {
                 workspace(id: $id) {
                     id createdAt memberCount role
+                    owner { id name email }
                     quota { memberLimit memberCount storageQuota usedStorageQuota }
-                    docs(pagination: {first: 100}) { totalCount }
+                    recentlyUpdatedDocs(pagination: {first: 1}) { totalCount }
                 }
             }""",
             {"id": ws_id},
@@ -598,10 +645,13 @@ def affine_workspace_info():
         q = ws.get("quota") or {}
         storage_gb = q.get("storageQuota", 0) / (1024**3) if q.get("storageQuota") else 0
         used_gb = q.get("usedStorageQuota", 0) / (1024**3) if q.get("usedStorageQuota") else 0
-        doc_count = ws.get("docs", {}).get("totalCount", 0)
+        doc_count = ws.get("recentlyUpdatedDocs", {}).get("totalCount", 0)
+        owner = ws.get("owner", {})
+        owner_str = f"{owner.get('name', '?')} ({owner.get('email', '?')})" if owner else "?"
         result_parts.append(
             f"📚 **Workspace** `{ws_id}`\n"
             f"  Rolle: {ws.get('role', '?')}\n"
+            f"  Besitzer: {owner_str}\n"
             f"  Mitglieder: {ws.get('memberCount', '?')}\n"
             f"  Docs: {doc_count}\n"
             f"  Speicher: {used_gb:.1f}GB / {storage_gb:.1f}GB\n"
@@ -618,19 +668,15 @@ def affine_list_pages():
     content_cache = _load_content_cache()
     result_parts = []
     for ws_id in ws_ids:
-        pages = _graphql(
-            "query ($wsId: String!, $first: Int!) { workspace(id: $wsId) { docs(pagination: {first: $first}) { edges { node { id } } } } }",
-            {"wsId": ws_id, "first": 100},
-        )
-        if "error" in pages:
-            result_parts.append(f"  ⚠️ Fehler: {pages['error']}")
+        edges, err = _fetch_ws_docs(ws_id)
+        if err:
+            result_parts.append(f"  ⚠️ Fehler: {err}")
             continue
-        edges = pages.get("workspace", {}).get("docs", {}).get("edges", [])
         if not edges:
             continue
         for e in edges:
             doc_id = e["node"]["id"]
-            title = cache["titles"].get(doc_id)
+            title = e["node"].get("title") or cache["titles"].get(doc_id)
             cached = "📦" if doc_id in content_cache.get("contents", {}) else ""
             display = f"**{title}**" if title else "(kein Titel)"
             result_parts.append(f"  📄 {cached} {display} (`{doc_id}`)")
@@ -684,13 +730,10 @@ def affine_search_content(query_text, max_results=10):
         for ws_id in ws_ids:
             if result_count >= max_results:
                 break
-            pages = _graphql(
-                "query ($wsId: String!, $first: Int!) { workspace(id: $wsId) { docs(pagination: {first: $first}) { edges { node { id } } } } }",
-                {"wsId": ws_id, "first": 100},
-            )
-            if "error" in pages:
+            edges, ferr = _fetch_ws_docs(ws_id, limit=100)
+            if ferr or not edges:
                 continue
-            for e in pages.get("workspace", {}).get("docs", {}).get("edges", []):
+            for e in edges:
                 doc_id = e["node"]["id"]
                 if doc_id in found_ids or result_count >= max_results:
                     continue
@@ -876,7 +919,8 @@ def affine_index_all():
 
     try:
         import numpy as np  # noqa: I001
-        from core.config import BASE, _app_lock  # noqa: I001
+        from app.config import _app_lock  # noqa: I001
+        from core.config import BASE  # noqa: I001
         from core.embed import embed  # noqa: I001
     except ImportError as e:
         _INDEXING_STATUS["status"] = "error"
@@ -906,26 +950,25 @@ def affine_index_all():
             except (OSError, ValueError):
                 existing_embs = np.array([], dtype=np.float32).reshape(0, 0)
 
-    existing_titles = {Path(c["source"]).stem for c in existing_chunks if "source" in c}
+    existing_ids = {c["source"] for c in existing_chunks if "source" in c}
     all_new_chunks = []
     doc_count = 0
+    total_docs = 0
 
     for ws_id in ws_ids:
-        pages = _graphql(
-            "query ($wsId: String!, $first: Int!) { workspace(id: $wsId) { docs(pagination: {first: $first}) { edges { node { id } } } } }",
-            {"wsId": ws_id, "first": 100},
-        )
-        if "error" in pages:
+        edges, ferr = _fetch_ws_docs(ws_id, limit=500)
+        if ferr or not edges:
             continue
-        edges = pages.get("workspace", {}).get("docs", {}).get("edges", [])
-        _INDEXING_STATUS["total"] = len(edges)
+        total_docs += len(edges)
+        _INDEXING_STATUS["total"] = total_docs
 
         for e in edges:
             doc_id = e["node"]["id"]
             _INDEXING_STATUS["progress"] += 1
             _INDEXING_STATUS["current"] = doc_id
 
-            if doc_id in existing_titles:
+            source_key = f"affine://{ws_id}/{doc_id}"
+            if source_key in existing_ids:
                 continue
 
             entry = _ensure_page_cached(ws_id, doc_id)
@@ -938,7 +981,7 @@ def affine_index_all():
 
             chunks = _chunk_text(text, title)
             for ch in chunks:
-                ch["source"] = f"affine://{ws_id}/{doc_id}"
+                ch["source"] = source_key
                 ch["title"] = title
             all_new_chunks.extend(chunks)
             doc_count += 1
@@ -1008,17 +1051,276 @@ def _chunk_text(text, title="", size=600):
     return chunks
 
 
+# ── Doc CRUD (Create, Update, Delete) ──────────────────────────
+
+def _make_page_yjs_binary(title, markdown):
+    """Generate a Yjs binary for a new AFFiNE page with title + markdown content.
+    Returns (doc_id, binary, error)."""
+    if not Y:
+        return None, None, "y-py nicht installiert"
+    import re as _re
+
+    from y_py import YArray, YDoc, YMap, encode_state_as_update  # noqa: I001
+
+    doc_id = "mynd-" + str(int(time.time() * 1000))
+    ydoc = YDoc()
+    blocks = ydoc.get_map("blocks")
+    txn = ydoc.begin_transaction()
+
+    page_block = YMap({})
+    page_block.set(txn, "sys:flavour", "affine:page")
+    page_block.set(txn, "prop:title", title)
+    page_block.set(txn, "sys:id", doc_id)
+    page_block.set(txn, "sys:version", 1)
+
+    children = YArray({})
+
+    lines = markdown.split('\n')
+    i = 0
+    block_idx = 0
+    while i < len(lines):
+        line = lines[i].rstrip()
+        i += 1
+        if not line:
+            continue
+        block_id = f"{doc_id}-b{block_idx}"
+        block = YMap({})
+        block.set(txn, "sys:id", block_id)
+        block.set(txn, "prop:text", line)
+
+        h = _re.match(r'^(#{1,6})\s+(.+)$', line)
+        if h:
+            block.set(txn, "sys:flavour", "affine:heading")
+            block.set(txn, "prop:text", h.group(2))
+            block.set(txn, "prop:level", len(h.group(1)))
+        elif line.startswith('- [x] '):
+            block.set(txn, "sys:flavour", "affine:list")
+            block.set(txn, "prop:text", line[6:])
+            block.set(txn, "prop:type", "todo")
+            block.set(txn, "prop:checked", True)
+        elif line.startswith('- [ ] '):
+            block.set(txn, "sys:flavour", "affine:list")
+            block.set(txn, "prop:text", line[6:])
+            block.set(txn, "prop:type", "todo")
+            block.set(txn, "prop:checked", False)
+        elif line.startswith('- ') or line.startswith('* '):
+            block.set(txn, "sys:flavour", "affine:list")
+            block.set(txn, "prop:text", line[2:])
+            block.set(txn, "prop:type", "bulleted")
+        elif line.startswith('> '):
+            block.set(txn, "sys:flavour", "affine:callout")
+            block.set(txn, "prop:text", line[2:])
+        elif line.startswith('```'):
+            lang = line[3:].strip()
+            code_lines = []
+            while i < len(lines):
+                next_line = lines[i].rstrip()
+                i += 1
+                if next_line.rstrip() == '```':
+                    break
+                code_lines.append(next_line)
+            block.set(txn, "sys:flavour", "affine:code")
+            block.set(txn, "prop:language", lang or "text")
+            block.set(txn, "prop:text", '\n'.join(code_lines))
+        elif line.strip() == '---':
+            block.set(txn, "sys:flavour", "affine:divider")
+        else:
+            block.set(txn, "sys:flavour", "affine:paragraph")
+
+        blocks.set(txn, block_id, block)
+        children.append(txn, block_id)
+        block_idx += 1
+
+    page_block.set(txn, "sys:children", children)
+    blocks.set(txn, doc_id, page_block)
+    txn.commit()
+
+    binary = bytes(encode_state_as_update(ydoc))
+    return doc_id, binary, None
+
+
+def affine_create_page(title, content, workspace_id=""):
+    """Create a new page in AFFiNE from plain text/Markdown content.
+
+    Note: AFFiNE v0.27 supports doc creation only via WebSocket sync,
+    which is unavailable on this instance. The page binary is generated
+    and exported to a local file for manual import via AFFiNE UI.
+    """
+    ws_ids = _get_workspace_ids()
+    if not ws_ids:
+        return "❌ Keine Workspaces verfügbar."
+
+    ws_id = workspace_id if workspace_id and workspace_id in [w["id"] for w in (_list_workspaces()[0] or [])] else ws_ids[0]
+
+    doc_id, binary, err = _make_page_yjs_binary(title, content)
+    if err:
+        return f"❌ {err}"
+
+    export_file = Path(__file__).parent / f"affine_export_{doc_id}.bin"
+
+    export_file.write_bytes(binary)
+
+    from data.plugins.affine import _AFFINE_CSRF, _login, _vget
+    s, lerr = _login()
+    if not lerr:
+        try:
+            r = s.put(
+                f"{_vget('affine/domain').rstrip('/')}/api/workspaces/{ws_id}/docs/{doc_id}",
+                data=binary,
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "x-affine-client-version": "0.27.2",
+                    "x-csrf-token": _AFFINE_CSRF or "",
+                },
+                timeout=30,
+            )
+            if r.status_code in (200, 201):
+                content_cache = _load_content_cache()
+                content_cache["contents"][doc_id] = {
+                    "title": title,
+                    "text": content,
+                    "yjs_size": len(binary),
+                    "updated_at": time.time(),
+                    "block_count": content.count('\n') + 1,
+                }
+                _save_content_cache(content_cache)
+                return f"✅ Seite **{title}** erstellt (`{doc_id}`) in Workspace `{ws_id}`"
+        except Exception:
+            pass
+
+    return (
+        f"📄 **Seite generiert** – `{doc_id}`\n"
+        f"  Titel: {title}\n"
+        f"  Export: `{export_file}` ({len(binary)} Bytes)\n\n"
+        f"  ⚠️ AFFiNE v0.27 unterstützt keine Doc-Erstellung via REST API.\n"
+        f"  Die Yjs-Binärdatei liegt bereit – importiere sie über die AFFiNE-UI:\n"
+        f"  1. Öffne AFFiNE → Einstellungen → Import\n"
+        f"  2. Wähle `{export_file}`\n"
+        f"  3. Oder kopiere den Text manuell in eine neue Seite\n"
+        f"  Alternativ: AFFiNE auf v0.28+ aktualisieren für API-Support.\n"
+        f"  Nach der Erstellung wird die Seite beim nächsten affine_index_all() erkannt."
+    )
+
+
+def affine_edit_page(page_id, content):
+    """Edit/update the content of an existing AFFiNE page.
+
+    Reads the current page, applies changes, and attempts to sync back.
+    Falls back to exporting the modified binary for manual import.
+    """
+    ws_ids = _get_workspace_ids()
+    if not ws_ids:
+        return "❌ Keine Workspaces verfügbar."
+
+    title_cache = _fetch_all_titles()
+    old_title = title_cache["titles"].get(page_id, "") or "(unbenannt)"
+
+    # Read current doc
+    ws_id = None
+    for wid in ws_ids:
+        yjs_binary, ferr = _fetch_page_raw(wid, page_id)
+        if yjs_binary:
+            ws_id = wid
+            break
+
+    if not ws_id:
+        return f"❌ Seite `{page_id}` nicht gefunden."
+
+    # Generate updated binary
+    new_doc_id, binary, err = _make_page_yjs_binary(old_title, content)
+    if err:
+        return f"❌ {err}"
+
+    export_file = Path(__file__).parent / f"affine_export_{page_id}.bin"
+    export_file.write_bytes(binary)
+
+    s, lerr = _login()
+    if not lerr:
+        try:
+            r = s.put(
+                f"{_vget('affine/domain').rstrip('/')}/api/workspaces/{ws_id}/docs/{page_id}",
+                data=binary,
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "x-affine-client-version": "0.27.2",
+                    "x-csrf-token": _AFFINE_CSRF or "",
+                },
+                timeout=30,
+            )
+            if r.status_code in (200, 201):
+                content_cache = _load_content_cache()
+                content_cache["contents"][page_id] = {
+                    "title": old_title,
+                    "text": content,
+                    "yjs_size": len(binary),
+                    "updated_at": time.time(),
+                    "block_count": content.count('\n') + 1,
+                }
+                _save_content_cache(content_cache)
+                return f"✅ Seite **{old_title}** (`{page_id}`) aktualisiert"
+        except Exception:
+            pass
+
+    return (
+        f"📄 **Bearbeitete Seite exportiert** – `{page_id}`\n"
+        f"  Titel: {old_title}\n"
+        f"  Export: `{export_file}` ({len(binary)} Bytes)\n\n"
+        f"  ⚠️ AFFiNE v0.27 unterstützt keine Doc-Änderungen via REST API.\n"
+        f"  Die aktualisierte Yjs-Binärdatei liegt bereit:\n"
+        f"  Importiere sie über AFFiNE → Einstellungen → Import\n"
+        f"  Oder bearbeite den Inhalt direkt in der AFFiNE-UI."
+    )
+
+
+def affine_delete_page(page_id):
+    """Delete an AFFiNE page by its ID.
+
+    Note: AFFiNE REST API doesn't support doc deletion. The page
+    will be removed from MYND's local cache only.
+    """
+    ws_ids = _get_workspace_ids()
+    if not ws_ids:
+        return "❌ Keine Workspaces verfügbar."
+
+    title_cache = _fetch_all_titles()
+    title = title_cache["titles"].get(page_id, "") or "(unbenannt)"
+
+    # Remove from local cache
+    content_cache = _load_content_cache()
+    if page_id in content_cache.get("contents", {}):
+        del content_cache["contents"][page_id]
+        _save_content_cache(content_cache)
+
+    if page_id in title_cache.get("titles", {}):
+        del title_cache["titles"][page_id]
+        _save_title_cache(title_cache)
+
+    return (
+        f"🗑️ **Seite aus Cache entfernt**: {title} (`{page_id}`)\n\n"
+        f"  ⚠️ AFFiNE v0.27 REST API unterstützt keine Löschung.\n"
+        f"  Lösche die Seite in AFFiNE über die Web-UI:\n"
+        f"  1. Öffne workspace → finde die Seite\n"
+        f"  2. Rechtsklick → In Papierkorb verschieben\n"
+        f"  3. Oder Permanently delete aus dem Papierkorb\n"
+        f"  Nach dem Löschen in AFFiNE wird sie beim nächsten affine_index_all()"
+        f" nicht mehr indexiert."
+    )
+
+
 # ── Tool Registration ──────────────────────────────────────────
 
 TOOLS = [
-    {"type": "function", "function": {"name": "affine_list_workspaces", "description": "List all AFFiNE workspace IDs.", "parameters": {"type": "object", "properties": {}, "required": []}}},
-    {"type": "function", "function": {"name": "affine_workspace_info", "description": "Show detailed info about each workspace: member count, role, doc count, storage quota.", "parameters": {"type": "object", "properties": {}, "required": []}}},
-    {"type": "function", "function": {"name": "affine_list_pages", "description": "List all pages across all workspaces with their titles. Shows 📦 icons for pages that have cached content available for fast reading.", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "affine_list_workspaces", "description": "List all AFFiNE workspace IDs with role (Owner/Collaborator) and member count.", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "affine_workspace_info", "description": "Show detailed info about each workspace: member count, role, doc count, storage quota, owner.", "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "affine_list_pages", "description": "List all pages across all workspaces (including shared) with their titles.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "affine_search", "description": "Search AFFiNE pages by title. Fast – searches cached titles only.", "parameters": {"type": "object", "properties": {"query_text": {"type": "string", "description": "Search term"}, "max_results": {"type": "integer", "description": "Max results (default 20)"}}, "required": ["query_text"]}}},
     {"type": "function", "function": {"name": "affine_search_content", "description": "Full-text search across all AFFiNE page contents (titles + body text). Returns text snippets with context.", "parameters": {"type": "object", "properties": {"query_text": {"type": "string", "description": "Search term"}, "max_results": {"type": "integer", "description": "Max results (default 10)"}}, "required": ["query_text"]}}},
     {"type": "function", "function": {"name": "affine_read_page", "description": "Read full page content from AFFiNE by page ID. Returns formatted text with headings (#), lists (-), code blocks, and hierarchy preserved.", "parameters": {"type": "object", "properties": {"page_id": {"type": "string", "description": "Page ID"}}, "required": ["page_id"]}}},
     {"type": "function", "function": {"name": "affine_get_page_metadata", "description": "Get detailed metadata for an AFFiNE page: created/updated dates, authors, page mode, block type breakdown, cache status.", "parameters": {"type": "object", "properties": {"page_id": {"type": "string", "description": "Page ID"}}, "required": ["page_id"]}}},
     {"type": "function", "function": {"name": "affine_page_hierarchy", "description": "Show the hierarchical block tree structure of an AFFiNE page. Displays all block types as a tree.", "parameters": {"type": "object", "properties": {"page_id": {"type": "string", "description": "Page ID"}}, "required": ["page_id"]}}},
+    {"type": "function", "function": {"name": "affine_create_page", "description": "Create a new AFFiNE page with title and Markdown content. Note: requires AFFiNE WebSocket sync (v0.28+ recommend). Falls back to binary export.", "parameters": {"type": "object", "properties": {"title": {"type": "string", "description": "Page title"}, "content": {"type": "string", "description": "Markdown content for the page body"}, "workspace_id": {"type": "string", "description": "Optional workspace ID (uses first if empty)"}}, "required": ["title", "content"]}}},
+    {"type": "function", "function": {"name": "affine_edit_page", "description": "Edit an existing AFFiNE page by replacing its content. Note: requires AFFiNE v0.28+ for direct API write; falls back to binary export.", "parameters": {"type": "object", "properties": {"page_id": {"type": "string", "description": "Page ID to edit"}, "content": {"type": "string", "description": "New Markdown content"}}, "required": ["page_id", "content"]}}},
+    {"type": "function", "function": {"name": "affine_delete_page", "description": "Remove an AFFiNE page from MYND's cache. Note: actual AFFiNE deletion requires AFFiNE Web UI.", "parameters": {"type": "object", "properties": {"page_id": {"type": "string", "description": "Page ID to delete"}}, "required": ["page_id"]}}},
     {"type": "function", "function": {"name": "affine_index_all", "description": "Index ALL AFFiNE documents into the AI knowledge base (embeddings). After running this, search_documents() will find AFFiNE content alongside Nextcloud docs. Must be called once to enable semantic AFFiNE search.", "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {"name": "affine_index_status", "description": "Show current AFFiNE indexing status.", "parameters": {"type": "object", "properties": {}, "required": []}}},
 ]
@@ -1034,6 +1336,9 @@ TOOL_MAP = {
     "affine_page_hierarchy": affine_page_hierarchy,
     "affine_index_all": affine_index_all,
     "affine_index_status": affine_index_status,
+    "affine_create_page": affine_create_page,
+    "affine_edit_page": affine_edit_page,
+    "affine_delete_page": affine_delete_page,
 }
 
 PROMPT_EXTRA = (
@@ -1042,7 +1347,7 @@ PROMPT_EXTRA = (
     "  Aufzeichnungen. Wenn der User eine Frage stellt, solltest du AFFiNE IMMER durchsuchen,\n"
     "  bevor du antwortest oder das Internet verwendest!\n"
     "  Tools:\n"
-    "  1. **affine_list_workspaces()**: Workspace-IDs auflisten\n"
+    "  1. **affine_list_workspaces()**: Workspace-IDs auflisten (mit Rolle)\n"
     "  2. **affine_workspace_info()**: Details zum Workspace\n"
     "  3. **affine_list_pages()**: Alle Seiten mit Titel auflisten\n"
     "  4. **affine_search(query)**: Schnelle Titel-Suche\n"
@@ -1050,9 +1355,12 @@ PROMPT_EXTRA = (
     "  6. **affine_read_page(page_id)**: Seiteninhalt abrufen\n"
     "  7. **affine_get_page_metadata(page_id)**: Metadaten einer Seite\n"
     "  8. **affine_page_hierarchy(page_id)**: Baumstruktur anzeigen\n"
-    "  9. **affine_index_all()**: AFFiNE in den Knowledge Base einlesen (einmalig ausführen!)\n"
-    "     Danach findet **search_documents()** automatisch AFFiNE-Inhalte!\n"
-    "  10. **affine_index_status()**: Indexierungs-Status prüfen\n"
+    "  9. **affine_create_page(title, content)**: Neue Seite anlegen\n"
+    "  10. **affine_edit_page(page_id, content)**: Seite bearbeiten\n"
+    "  11. **affine_delete_page(page_id)**: Seite aus Cache entfernen\n"
+    "  12. **affine_index_all()**: AFFiNE in den Knowledge Base einlesen (einmalig ausführen!)\n"
+    "      Danach findet **search_documents()** automatisch AFFiNE-Inhalte!\n"
+    "  13. **affine_index_status()**: Indexierungs-Status prüfen\n"
     "\n"
     "  ⚠️ WICHTIG: Wenn der User nach Informationen fragt, rufe NICHT sofort das Internet auf!\n"
     "  Gehe stattdessen so vor:\n"

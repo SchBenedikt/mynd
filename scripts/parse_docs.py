@@ -5,19 +5,17 @@ Converts PDF, DOCX, and Markdown files to clean Markdown for LightRAG ingestion.
 Uses Docling for PDFs (best quality), python-docx for Word, preserves MD structure.
 """
 
-import os
-import sys
-import logging
 import argparse
-from pathlib import Path
-from typing import Optional, List
+import logging
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 # PDF parsing
 try:
-    from docling.document_converter import DocumentConverter
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions
+    from docling.document_converter import DocumentConverter
     DOCLING_AVAILABLE = True
 except ImportError:
     DOCLING_AVAILABLE = False
@@ -25,16 +23,15 @@ except ImportError:
 # DOCX parsing
 try:
     from docx import Document as DocxDocument
-    from docx.oxml.ns import qn
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
 
 # Markdown parsing
 import markdown
-from markdown.extensions.toc import TocExtension
-from markdown.extensions.tables import TableExtension
 from markdown.extensions.fenced_code import FencedCodeExtension
+from markdown.extensions.tables import TableExtension
+from markdown.extensions.toc import TocExtension
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,41 +45,41 @@ class ParsedDocument:
     """Result of document parsing."""
     content: str
     metadata: dict
-    headings: List[dict]  # [{level, text, position}]
-    tables: List[str]
+    headings: list[dict]  # [{level, text, position}]
+    tables: list[str]
 
 
 def parse_pdf_docling(filepath: Path) -> ParsedDocument:
     """Parse PDF using Docling (IBM) - best quality for structured PDFs."""
     if not DOCLING_AVAILABLE:
         raise RuntimeError("Docling not installed. Run: pip install docling")
-    
+
     logger.info(f"Parsing PDF with Docling: {filepath}")
-    
+
     pipeline_options = PdfPipelineOptions()
     pipeline_options.do_ocr = True  # Enable OCR for scanned PDFs
     pipeline_options.do_table_structure = True
     pipeline_options.generate_page_images = False
     pipeline_options.generate_picture_images = False
-    
+
     converter = DocumentConverter(
         format_options={
             InputFormat.PDF: pipeline_options
         }
     )
-    
+
     result = converter.convert(str(filepath))
-    
+
     # Export to Markdown
     md_content = result.document.export_to_markdown()
-    
+
     # Extract metadata
     metadata = {
         'source': str(filepath),
         'parser': 'docling',
         'pages': len(result.document.pages) if hasattr(result.document, 'pages') else 0,
     }
-    
+
     # Extract headings from the document structure
     headings = []
     if hasattr(result.document, 'body') and hasattr(result.document.body, 'children'):
@@ -91,13 +88,13 @@ def parse_pdf_docling(filepath: Path) -> ParsedDocument:
                 level = getattr(child, 'level', 1)
                 text = child.text if hasattr(child, 'text') else ''
                 headings.append({'level': level, 'text': text, 'position': i})
-    
+
     # Extract tables
     tables = []
     if hasattr(result.document, 'tables'):
         for table in result.document.tables:
             tables.append(table.export_to_markdown())
-    
+
     return ParsedDocument(
         content=md_content,
         metadata=metadata,
@@ -110,18 +107,18 @@ def parse_docx(filepath: Path) -> ParsedDocument:
     """Parse DOCX using python-docx, convert to Markdown."""
     if not DOCX_AVAILABLE:
         raise RuntimeError("python-docx not installed. Run: pip install python-docx")
-    
+
     logger.info(f"Parsing DOCX: {filepath}")
-    
+
     doc = DocxDocument(filepath)
-    
+
     md_lines = []
     headings = []
     tables = []
-    
+
     for i, para in enumerate(doc.paragraphs):
         style = para.style.name.lower() if para.style else ''
-        
+
         # Handle headings
         if style.startswith('heading'):
             level = int(style.replace('heading', '')) if style.replace('heading', '').isdigit() else 1
@@ -144,7 +141,7 @@ def parse_docx(filepath: Path) -> ParsedDocument:
                         t = f"*{t}*"
                     runs_text.append(t)
                 md_lines.append(''.join(runs_text))
-    
+
     # Extract tables
     for table in doc.tables:
         md_table = []
@@ -155,14 +152,14 @@ def parse_docx(filepath: Path) -> ParsedDocument:
                 md_table.append('| ' + ' | '.join(['---'] * len(cells)) + ' |')
         tables.append('\n'.join(md_table))
         md_lines.append('\n' + tables[-1] + '\n')
-    
+
     metadata = {
         'source': str(filepath),
         'parser': 'python-docx',
         'paragraphs': len(doc.paragraphs),
         'tables': len(doc.tables),
     }
-    
+
     return ParsedDocument(
         content='\n\n'.join(md_lines),
         metadata=metadata,
@@ -174,9 +171,9 @@ def parse_docx(filepath: Path) -> ParsedDocument:
 def parse_markdown(filepath: Path) -> ParsedDocument:
     """Parse Markdown - preserve structure, extract headings."""
     logger.info(f"Parsing Markdown: {filepath}")
-    
+
     content = filepath.read_text(encoding='utf-8')
-    
+
     # Parse with extensions to extract TOC
     md = markdown.Markdown(extensions=[
         TocExtension(),
@@ -184,7 +181,7 @@ def parse_markdown(filepath: Path) -> ParsedDocument:
         FencedCodeExtension(),
     ])
     md.convert(content)
-    
+
     headings = []
     if hasattr(md, 'toc_tokens'):
         for token in md.toc_tokens:
@@ -193,13 +190,13 @@ def parse_markdown(filepath: Path) -> ParsedDocument:
                 'text': token['name'],
                 'position': token.get('id', ''),
             })
-    
+
     metadata = {
         'source': str(filepath),
         'parser': 'markdown',
         'size': len(content),
     }
-    
+
     return ParsedDocument(
         content=content,
         metadata=metadata,
@@ -211,15 +208,15 @@ def parse_markdown(filepath: Path) -> ParsedDocument:
 def parse_text(filepath: Path) -> ParsedDocument:
     """Parse plain text files."""
     logger.info(f"Parsing text file: {filepath}")
-    
+
     content = filepath.read_text(encoding='utf-8')
-    
+
     metadata = {
         'source': str(filepath),
         'parser': 'text',
         'size': len(content),
     }
-    
+
     return ParsedDocument(
         content=content,
         metadata=metadata,
@@ -228,13 +225,13 @@ def parse_text(filepath: Path) -> ParsedDocument:
     )
 
 
-def parse_document(filepath: Path, output_dir: Optional[Path] = None) -> Path:
+def parse_document(filepath: Path, output_dir: Path | None = None) -> Path:
     """
     Parse a document and save as Markdown.
     Returns path to the parsed Markdown file.
     """
     suffix = filepath.suffix.lower()
-    
+
     if suffix == '.pdf':
         parsed = parse_pdf_docling(filepath)
     elif suffix == '.docx':
@@ -245,16 +242,16 @@ def parse_document(filepath: Path, output_dir: Optional[Path] = None) -> Path:
         parsed = parse_text(filepath)
     else:
         raise ValueError(f"Unsupported file type: {suffix}")
-    
+
     # Determine output path
     if output_dir:
         rel_path = filepath.relative_to(filepath.anchor) if filepath.is_absolute() else filepath
         output_path = output_dir / rel_path.with_suffix('.md')
     else:
         output_path = filepath.with_suffix('.md')
-    
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Add metadata header
     meta_lines = [
         '---',
@@ -264,22 +261,22 @@ def parse_document(filepath: Path, output_dir: Optional[Path] = None) -> Path:
         '---',
         '',
     ]
-    
+
     full_content = '\n'.join(meta_lines) + parsed.content
-    
+
     output_path.write_text(full_content, encoding='utf-8')
     logger.info(f"Saved parsed document: {output_path}")
-    
+
     return output_path
 
 
-def batch_parse(input_dir: Path, output_dir: Path, extensions: List[str] = None) -> List[Path]:
+def batch_parse(input_dir: Path, output_dir: Path, extensions: list[str] = None) -> list[Path]:
     """Parse all documents in a directory."""
     if extensions is None:
         extensions = ['.pdf', '.docx', '.md', '.markdown', '.txt', '.text']
-    
+
     parsed_files = []
-    
+
     for ext in extensions:
         for filepath in input_dir.rglob(f'*{ext}'):
             try:
@@ -287,7 +284,7 @@ def batch_parse(input_dir: Path, output_dir: Path, extensions: List[str] = None)
                 parsed_files.append(output_path)
             except Exception as e:
                 logger.error(f"Failed to parse {filepath}: {e}")
-    
+
     return parsed_files
 
 
@@ -298,13 +295,13 @@ def main():
     parser.add_argument('--batch', action='store_true', help='Batch process directory')
     parser.add_argument('--extensions', type=str, default='.pdf,.docx,.md,.txt',
                         help='Comma-separated file extensions')
-    
+
     args = parser.parse_args()
-    
+
     input_path = Path(args.input)
     output_dir = Path(args.output) if args.output else None
     extensions = [e.strip() for e in args.extensions.split(',')]
-    
+
     if args.batch or input_path.is_dir():
         if not output_dir:
             logger.error("Output directory required for batch mode")

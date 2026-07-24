@@ -1,7 +1,9 @@
-import json, statistics
-import numpy as np
-from pathlib import Path
+import json
+import statistics
 from collections import Counter
+from pathlib import Path
+
+import numpy as np
 
 chunks = json.loads(Path("data/chunks.json").read_text())
 total_before = len(chunks)
@@ -80,6 +82,6 @@ for folder, count in folders.most_common(20):
 
 # ── Übersicht größte Quelldateien nach Chunk-Count ──
 source_counts = Counter(c["source"] for c in keep)
-print(f"\n  Top 10 Dateien (meiste Chunks):\n")
+print("\n  Top 10 Dateien (meiste Chunks):\n")
 for src, cnt in source_counts.most_common(10):
     print(f"    {cnt:>5} Chunks  {src[:70]}")
