@@ -89,9 +89,9 @@ class TestOpenAIProviderCfg:
         assert "custom.ai" in base
         assert key == "sk-env"
 
+    @patch("pathlib.Path.exists")
     @patch("pathlib.Path.read_text")
-    @patch("core.model.os.path.exists")
-    def test_reads_ai_config(self, mock_exists, mock_read_text):
+    def test_reads_ai_config(self, mock_read_text, mock_exists):
         mock_exists.return_value = True
         mock_read_text.return_value = '{"provider": "openai", "base_url": "https://cfg.ai/v1", "api_key": "sk-cfg"}'
         from core.model import _openai_provider_cfg
