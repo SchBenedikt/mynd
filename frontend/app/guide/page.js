@@ -42,6 +42,9 @@ const SECTIONS = [
   { id: 'browser', icon: 'fa-globe',
     title_de: 'Browser', title_en: 'Browser',
     desc_de: 'Web-Recherche, Screenshots, Formulare.', desc_en: 'Web research, screenshots, forms.' },
+  { id: 'composio', icon: 'fa-puzzle-piece',
+    title_de: 'Composio (200+ Apps)', title_en: 'Composio (200+ Apps)',
+    desc_de: 'GitHub, Gmail, Slack, Notion, Linear, Jira uvm.', desc_en: 'GitHub, Gmail, Slack, Notion, Linear, Jira and more.' },
 ];
 
 export default function GuidePage() {
@@ -290,6 +293,19 @@ curl -fsSL https://ollama.com/install.sh | sh
             </div>
 
             <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t('Cloud-Modelle sind schneller und leistungsfähiger, aber Daten verlassen deine Infrastruktur. Lokale Modelle sind kostenlos und privat. Für Tool-Support wird Ollama 0.3.0+ benötigt.', 'Cloud models are faster and more capable, but data leaves your infrastructure. Local models are free and private. Tool support requires Ollama 0.3.0+.')}</span></div>
+
+            <h3>{t('Kostenlose / OpenAI-kompatible Endpoints', 'Free / OpenAI-compatible endpoints')}</h3>
+            <p>{t(
+              'Neben den kommerziellen Anbietern gibt es auch eine Reihe kostenloser oder kostengünstiger OpenAI-kompatibler APIs, die du als Base-URL in MYND eintragen kannst. Sobald du die Base-URL und den API-Key in Settings → AI hinterlegt hast, fragt MYND automatisch die verfügbaren Modelle ab — du musst den Modellnamen also nicht kennen.',
+              'Besides commercial providers, there are also several free or low-cost OpenAI-compatible APIs you can use as a Base URL in MYND. Once you enter the Base URL and API key in Settings → AI, MYND automatically fetches the available models — you do not need to know the model name in advance.'
+            )}</p>
+            <ul>
+              <li><strong>OpenRouter (kostenloser Tier):</strong> <code>https://openrouter.ai/api/v1</code> — {t('Zahlreiche Modelle auch kostenlos nutzbar (Ratenlimits).', 'Many models available for free (rate limited).')}</li>
+              <li><strong>Groq (kostenlos):</strong> <code>https://api.groq.com/openai</code> — {t('Llama-3.3-70B, Mixtral, Gemma-2. Kostenloser Tier mit Ratenlimit.', 'Llama-3.3-70B, Mixtral, Gemma-2. Free tier with rate limits.')}</li>
+              <li><strong>Google Gemini (kostenlos):</strong> <code>https://generativelanguage.googleapis.com/v1beta/openai/</code> — {t('Gemini 2.0 Flash kostenlos, API-Key von Google AI Studio.', 'Gemini 2.0 Flash free, API key from Google AI Studio.')}</li>
+              <li><strong>GitHub Models (kostenlos):</strong> <code>https://models.inference.ai.azure.com</code> — {t('GPT-4o-mini, Llama, Qwen, Mistral kostenlos mit GitHub-Token.', 'GPT-4o-mini, Llama, Qwen, Mistral free with GitHub token.')}</li>
+              <li><strong>Cloudflare Workers AI:</strong> <code>https://api.cloudflare.com/client/v4</code> — {t('Llama, Qwen, DeepSeek über Cloudflare Workers AI.', 'Llama, Qwen, DeepSeek via Cloudflare Workers AI.')}</li>
+            </ul>
           </article>
 
           {/* Security & Modes */}
@@ -439,6 +455,52 @@ curl -fsSL https://ollama.com/install.sh | sh
               'Ask: "Open [URL]", "Take a screenshot of [URL]", "Summarize the content of [URL]", "Search the page for [query]".'
             )}</p>
             <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t('Der integrierte Browser läuft isoliert auf dem Server und teilt keine Cookies mit deinem lokalen Browser.', 'The built-in browser runs isolated on the server and does not share cookies with your local browser.')}</span></div>
+          </article>
+
+          {/* Composio */}
+          <article className="lp-guide-section" id="composio">
+            <h2><i className="fas fa-puzzle-piece" /> {t('Composio (200+ Apps)', 'Composio (200+ Apps)')}</h2>
+            <p>{t(
+              'Composio ist eine Cloud-Plattform, die 200+ App-Integrationen für KI-Agenten bereitstellt – darunter GitHub, Gmail, Slack, Notion, Linear, Jira, Google Drive, Asana, und viele mehr. MYND nutzt Composio als Gateway: Du verbindest deine Dienste einmalig per OAuth, und die KI kann dann Tasks ausführen wie Issues erstellen, E-Mails senden oder Slack-Nachrichten schreiben.',
+              'Composio is a cloud platform providing 200+ app integrations for AI agents — including GitHub, Gmail, Slack, Notion, Linear, Jira, Google Drive, Asana, and many more. MYND uses Composio as a gateway: you connect your services once via OAuth, and the AI can perform tasks like creating issues, sending emails, or posting Slack messages.'
+            )}</p>
+            <h3>{t('1. Composio-Konto erstellen', '1. Create Composio account')}</h3>
+            <p>{t(
+              'Gehe auf https://composio.dev und registriere dich. Nach dem Login findest du unter "Settings" deinen API-Key. Kopiere diesen.',
+              'Go to https://composio.dev and sign up. After logging in, find your API key under "Settings". Copy it.'
+            )}</p>
+            <h3>{t('2. API-Key in MYND hinterlegen', '2. Store API key in MYND')}</h3>
+            <p>{t(
+              'Settings → Integrationen → "Composio (200+ Apps)". API-Key eingeben und im Tresor speichern. Optional: User-ID auf "default" lassen oder eine eigene ID vergeben.',
+              'Settings → Integrations → "Composio (200+ Apps)". Enter the API key and save to vault. Optional: leave User-ID as "default" or set your own.'
+            )}</p>
+            <h3>{t('3. App verbinden (OAuth)', '3. Connect an app (OAuth)')}</h3>
+            <p>{t(
+              'Sage der KI: "Verbinde mein GitHub-Konto" oder "Connect my Gmail". Die KI wird dir einen OAuth-Link geben. Öffne den Link in deinem Browser und autorisiere die App. Nach erfolgreicher Verbindung kannst du die App sofort nutzen.',
+              'Tell the AI: "Verbinde mein GitHub-Konto" or "Connect my Gmail". The AI will provide an OAuth link. Open the link in your browser and authorize the app. Once connected, you can use it immediately.'
+            )}</p>
+            <h3>{t('4. Nutzung', '4. Usage')}</h3>
+            <p>{t(
+              'Nach der Verbindung kann die KI Aufträge ausführen wie:',
+              'Once connected, the AI can carry out tasks such as:'
+            )}</p>
+            <ul>
+              <li>{t('"Liste die offenen Issues in meinem Repository"', '"List open issues in my repository"')}</li>
+              <li>{t('"Erstelle ein neues GitHub Issue"', '"Create a new GitHub issue"')}</li>
+              <li>{t('"Such in meinem Gmail-Postfach nach Rechnungen"', '"Search my Gmail inbox for invoices"')}</li>
+              <li>{t('"Schreib eine Slack-Nachricht in #allgemein"', '"Send a Slack message to #general"')}</li>
+              <li>{t('"Erstelle eine neue Notion-Seite mit Meeting-Notes"', '"Create a new Notion page with meeting notes"')}</li>
+              <li>{t('"Zeig mir meine Linear-Tickets"', '"Show me my Linear tickets"')}</li>
+            </ul>
+            <div className="lp-guide-tip"><i className="fas fa-lightbulb" /><span>{t(
+              'Composio erfordert einen API-Key von composio.dev (kostenlose Stufe verfügbar). Die OAuth-Verbindungen werden in der Composio-Cloud gespeichert, nicht lokal. Für die erstmalige Einrichtung ist ein Internetzugang erforderlich.',
+              'Composio requires an API key from composio.dev (free tier available). OAuth connections are stored in the Composio cloud, not locally. Internet access is required for initial setup.'
+            )}</span></div>
+            <h3>{t('Verfügbare Tools im Überblick', 'Available tools overview')}</h3>
+            <p>{t(
+              'Die KI kann jederzeit mit composio_list_apps() alle verfügbaren Apps abfragen. Mit composio_list_tools(app="GITHUB") siehst du die konkreten Aktionen einer App. Die Tool-Slugs folgen dem Muster APP_ACTION (z.B. GITHUB_CREATE_ISSUE, GMAIL_SEND_EMAIL, SLACK_POST_MESSAGE).',
+              'The AI can query all available apps at any time with composio_list_apps(). Use composio_list_tools(app="GITHUB") to see specific actions for an app. Tool slugs follow the pattern APP_ACTION (e.g. GITHUB_CREATE_ISSUE, GMAIL_SEND_EMAIL, SLACK_POST_MESSAGE).'
+            )}</p>
           </article>
 
           <footer className="lp-guide-article-footer">

@@ -76,6 +76,7 @@ def _connect_smtp(account="default"):
     return s, None
 
 def email_search(query="ALL", mailbox="INBOX", max_results=20, account="default"):
+    c = None
     try:
         c, err = _connect_imap(account)
         if err:
@@ -90,10 +91,15 @@ def email_search(query="ALL", mailbox="INBOX", max_results=20, account="default"
             if d[0][1]:
                 msg = eml.message_from_bytes(d[0][1])
                 results.append(f"ID:{mid.decode()} | {account} | {msg['Date']} | {msg['From']} | {msg['Subject']}")
-        c.logout()
         return '\n'.join(results) if results else "(keine)"
     except Exception as e:
         return f"❌ {e}"
+    finally:
+        if c:
+            try:
+                c.logout()
+            except Exception:
+                pass
 
 def email_read(mail_id, mailbox="INBOX", account="default"):
     c = None
@@ -144,7 +150,7 @@ def email_send(to, subject, body, cc="", bcc="", account="default"):
         if cc:
             msg['Cc'] = cc
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
-        all_recip = [to] + ([cc] if cc else [])
+        all_recip = [to] + ([cc] if cc else []) + ([bcc] if bcc else [])
         s.sendmail(user, all_recip, msg.as_string())
         return f"✅ Email an {to} gesendet (Konto: {account}): {subject}"
     except Exception as e:
@@ -170,7 +176,6 @@ def email_get_unread_count(mailbox="INBOX", account="default"):
         ids = data[0].split() if data[0] else []
         _, total_data = c.search(None, "ALL")
         total = total_data[0].split() if total_data[0] else []
-        c.logout()
         return f" {account}/{mailbox}: {len(ids)} ungelesen von {len(total)} gesamt"
     except Exception as e:
         return f"❌ {e}"
@@ -224,9 +229,7 @@ def email_move_message(mail_id, from_mailbox="INBOX", to_mailbox="", account="de
         if r[0] == "OK":
             c.store(mail_id.encode(), "+FLAGS", "\\Deleted")
             c.expunge()
-            c.logout()
             return f"✅ {mail_id} von {from_mailbox} nach {to_mailbox} verschoben"
-        c.logout()
         return f"❌ Kopieren fehlgeschlagen: {r}"
     except Exception as e:
         return f"❌ {e}"

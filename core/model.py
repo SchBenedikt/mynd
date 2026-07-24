@@ -1,9 +1,10 @@
+import json
 import os
 import sys
 
 import requests
 
-from .config import LLM_BLACKLIST, OLLAMA, RICH, C, _is_openai, _openai_cfg
+from .config import BASE, LLM_BLACKLIST, OLLAMA, RICH, C, _is_openai, _openai_cfg
 
 _PROMPT = None
 if RICH:
@@ -16,6 +17,23 @@ def _no_tool_keywords():
     return [k.strip().lower() for k in raw.split(',') if k.strip()]
 
 
+def _openai_provider_cfg():
+    """Read OpenAI provider config from ai_config.json, fall back to env vars."""
+    ai_cfg_file = BASE / 'data' / 'ai_config.json'
+    if ai_cfg_file.exists():
+        try:
+            fc = json.loads(ai_cfg_file.read_text())
+            if fc.get('provider') == 'openai':
+                key = str(fc.get('api_key', ''))
+                if key == '***':
+                    from core.vault import vault_get as _vg
+                    key = _vg('ai/api_key') or ''
+                return str(fc.get('base_url', '')).rstrip('/').removesuffix('/v1'), key
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+    ob, ok, _ = _openai_cfg()
+    return ob.removesuffix('/v1'), ok
+
 def check_tool_support(model, base_url=None):
     model_lower = model.lower()
     if any(k in model_lower for k in _no_tool_keywords()):
@@ -23,11 +41,10 @@ def check_tool_support(model, base_url=None):
     try:
         url = (base_url or OLLAMA).rstrip('/')
         if _is_openai(model):
-            ob, ok, _ = _openai_cfg()
+            ob, ok = _openai_provider_cfg()
             body = {
                 "model": model,
                 "messages": [{"role": "user", "content": "hi"}],
-                "tools": [{"type": "function", "function": {"name": "t", "description": "t", "parameters": {"type": "object", "properties": {}}}}],
                 "stream": False,
             }
             r = requests.post(
@@ -38,21 +55,17 @@ def check_tool_support(model, base_url=None):
             data = r.json()
             if "error" in data:
                 return False
-            # Prüfe ob das Modell tatsächlich tool_calls zurückgibt
-            msg = data.get("choices", [{}])[0].get("message", {})
-            return bool(msg.get("tool_calls"))
+            # OpenAI-kompatible Endpunkte unterstützen Tools immer
+            return True
         r = requests.post(f"{url}/api/chat", json={
             "model": model,
             "messages": [{"role": "user", "content": "hi"}],
-            "tools": [{"type": "function", "function": {"name": "t", "description": "t", "parameters": {"type": "object", "properties": {}}}}],
             "stream": False,
         }, timeout=15)
         data = r.json()
         if "error" in data:
             return False
-        # Prüfe ob das Modell tatsächlich tool_calls zurückgibt
-        msg = data.get("message", {})
-        return bool(msg.get("tool_calls"))
+        return True
     except (requests.RequestException, KeyError, TypeError, ValueError):
         return False
 

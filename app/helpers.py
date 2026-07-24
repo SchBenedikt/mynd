@@ -130,6 +130,8 @@ def _build_agent_system_prompt(message, language='en'):
     email_extra = getattr(_email_module, 'PROMPT_EXTRA', '') if _email_module else ''
     immich_extra = getattr(_immich_module, 'PROMPT_EXTRA', '') if _immich_module else ''
     ha_extra = getattr(__import__('data.plugins.homeassistant', fromlist=['PROMPT_EXTRA']), 'PROMPT_EXTRA', '')
+    affine_extra = getattr(__import__('data.plugins.affine', fromlist=['PROMPT_EXTRA']), 'PROMPT_EXTRA', '')
+    composio_extra = getattr(__import__('data.plugins.composio', fromlist=['PROMPT_EXTRA']), 'PROMPT_EXTRA', '')
 
     system = (
         f"Today is {date_str}, {time_str}. Your language is {language}. You MUST respond in {language}.\n\n"
@@ -181,6 +183,8 @@ def _build_agent_system_prompt(message, language='en'):
         f"{email_extra}"
         f"{immich_extra}"
         f"{ha_extra}"
+        f"{affine_extra}"
+        f"{composio_extra}"
         "⚠️ WICHTIG: Wenn der User dir eine persönliche Information nennt (Name, Wohnort, Geburtstag, Vorlieben etc.), "
         "rufe SOFORT memory_set() auf – nicht nur sagen dass du es merkst. Das Tool MUSS ausgeführt werden.\n\n"
         "WICHTIGE REGELN:\n"
