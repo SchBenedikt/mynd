@@ -39,3 +39,4 @@ APScheduler>=3.10.0
 
 # OAuth / Auth
 requests-oauthlib>=2.0.0
+composio-core>=0.7.0

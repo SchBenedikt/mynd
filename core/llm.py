@@ -23,12 +23,16 @@ def _load_openai_config():
         try:
             fc = json.loads(open(ai_cfg_file).read())
             if fc.get('provider') == 'openai':
-                base = str(fc.get('base_url', '')).rstrip('/')
+                base = str(fc.get('base_url', '')).rstrip('/').removesuffix('/v1')
                 key = str(fc.get('api_key', ''))
+                if key == '***':
+                    from core.vault import vault_get as _vg
+                    key = _vg('ai/api_key') or ''
                 return base or 'https://api.openai.com/v1', key
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             pass
-    return _openai_cfg()
+    ob, ok, _ = _openai_cfg()
+    return ob.removesuffix('/v1'), ok
 
 
 def chat_with_tools(model, msgs, tools):

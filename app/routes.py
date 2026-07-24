@@ -740,6 +740,32 @@ def ollama_status():
 
 @app.route('/api/ollama/models', methods=['GET'])
 def ollama_models():
+    cfg = load_ai_config()
+    if cfg['provider'] == 'openai':
+        try:
+            base_url = cfg['base_url'].rstrip('/')
+            api_key = cfg.get('api_key', '')
+            models_url = base_url.removesuffix('/v1') + '/v1/models'
+            headers = {'Authorization': f'Bearer {api_key}'} if api_key else {}
+            r = requests.get(models_url, headers=headers, timeout=10)
+            r.raise_for_status()
+            raw = r.json().get('data', [])
+            models = sorted(set(m['id'] for m in raw if 'id' in m))
+            current = cfg.get('model', '')
+            if current and current not in models:
+                models.insert(0, current)
+            return jsonify({
+                'connected': True, 'base_url': base_url,
+                'current_model': current, 'models': models
+            })
+        except Exception as e:
+            current = cfg.get('model', '')
+            return jsonify({
+                'connected': False, 'base_url': cfg['base_url'],
+                'current_model': current,
+                'models': [current] if current else [],
+                'error': f'Could not fetch models: {e}'
+            })
     try:
         models = ollama_client.list_models()
         if ollama_client.model and ollama_client.model not in models:
@@ -1395,6 +1421,42 @@ def registry_api_config(api_name):
 
 @app.route('/api/registry/<api_name>/test', methods=['POST'])
 def registry_api_test(api_name):
+    if api_name == 'composio':
+        try:
+            from composio import Composio
+        except ImportError:
+            return jsonify({'success': False, 'error': 'composio ist nicht installiert. pip install composio'})
+        api_key = _vg('composio/api_key')
+        if not api_key:
+            return jsonify({'success': False, 'error': 'API-Key fehlt. Trage ihn unter Integrationen > Composio ein.'})
+        try:
+            client = Composio(api_key=api_key)
+            client.toolkits.list(limit=1)
+            return jsonify({'success': True, 'message': 'Verbindung zu Composio erfolgreich!'})
+        except Exception as e:
+            msg = str(e)
+            if '401' in msg or 'Invalid API key' in msg or 'ApiKeyError' in type(e).__name__:
+                return jsonify({'success': False, 'error': 'Composio API-Key ungültig. Bitte neuen API-Key von composio.dev holen.'})
+            return jsonify({'success': False, 'error': f'Composio-Fehler: {msg[:200]}'})
+    if api_name == 'affine':
+        domain = _vg('affine/domain')
+        email = _vg('affine/email')
+        pw = _vg('affine/password')
+        if not domain or not email or not pw:
+            return jsonify({'success': False, 'error': 'Domain, E-Mail und Passwort eintragen.'})
+        try:
+            import requests
+            s = requests.Session()
+            r = s.post(f"{domain.rstrip('/')}/api/auth/sign-in", json={
+                "email": email, "password": pw,
+            }, headers={"Content-Type": "application/json"}, timeout=15)
+            if r.status_code == 200:
+                return jsonify({'success': True, 'message': 'AFFiNE-Verbindung erfolgreich!'})
+            return jsonify({'success': False, 'error': f"AFFiNE-Login fehlgeschlagen ({r.status_code}): {r.json().get('message', r.text[:200])}"})
+        except ImportError:
+            return jsonify({'success': False, 'error': 'requests nicht installiert.'})
+        except Exception as e:
+            return jsonify({'success': False, 'error': f"AFFiNE nicht erreichbar: {e}"})
     return jsonify({'success': False, 'error': 'Not implemented'}), 501
 
 @app.route('/api/email-indexing/start', methods=['POST'])

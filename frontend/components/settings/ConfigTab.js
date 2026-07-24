@@ -267,6 +267,7 @@ export default function ConfigTab({ tr, language }) {
         if (typeof window !== 'undefined') window.localStorage.setItem(TTS_PROVIDER_STORAGE_KEY, pTts);
         setGeminiTtsApiKey('');
         setGeminiTtsApiKeySet(Boolean(data?.gemini_tts_api_key_set || geminiTtsApiKeySet || geminiTtsApiKey.trim()));
+        loadOllamaModels();
         loadEmbeddingStatus();
       } else {
         setAiStatus(`Error: ${data?.error || tr('Fehler beim Speichern', 'Error saving')}`);
@@ -444,10 +445,16 @@ export default function ConfigTab({ tr, language }) {
         )}
         <div className="input-group">
           <label>{tr('Chat-/KI-Modell', 'Chat / AI model')}</label>
-          <select value={aiModel} onChange={(e) => setAiModel(e.target.value)}>
-            <option value="">{tr('Modell auswählen...', 'Select model...')}</option>
-            {aiModelOptions.map(model => <option key={model} value={model}>{model}</option>)}
-          </select>
+          <div style={{display: 'flex', gap: 6}}>
+            <select value={aiModel} onChange={(e) => setAiModel(e.target.value)} style={{flex: 1}}>
+              <option value="">{tr('Modell auswählen...', 'Select model...')}</option>
+              {aiModelOptions.map(model => <option key={model} value={model}>{model}</option>)}
+            </select>
+            <button className="btn secondary" onClick={loadOllamaModels} title={tr('Modelle neu abrufen', 'Refresh models')}
+              style={{padding: '0 12px', whiteSpace: 'nowrap', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 4}}>
+              <i className="fas fa-rotate" /> {tr('Neu laden', 'Refresh')}
+            </button>
+          </div>
         </div>
         <div className="input-group">
           <label>{tr('Embedding-Modell', 'Embedding model')}</label>

@@ -10,6 +10,8 @@ const INTEGRATIONS = [
   { id: 'homeassistant', icon: 'fas fa-home',           labelDe: 'Home Assistant',      labelEn: 'Home Assistant' },
   { id: 'truenas',       icon: 'fas fa-server',         labelDe: 'TrueNAS',             labelEn: 'TrueNAS' },
   { id: 'server',        icon: 'fas fa-terminal',       labelDe: 'Server (SSH)',        labelEn: 'Server (SSH)' },
+  { id: 'affine',        icon: 'fas fa-layer-group',    labelDe: 'AFFiNE (Wissensdatenbank)', labelEn: 'AFFiNE (Knowledge Base)' },
+  { id: 'composio',      icon: 'fas fa-puzzle-piece',   labelDe: 'Composio (200+ Apps)',labelEn: 'Composio (200+ Apps)' },
   { id: 'spotify',       icon: 'fab fa-spotify',        labelDe: 'Spotify',             labelEn: 'Spotify' },
   { id: 'discord',       icon: 'fab fa-discord',        labelDe: 'Discord',             labelEn: 'Discord' },
   { id: 'plugins',       icon: 'fas fa-puzzle-piece',   labelDe: 'Plugin Manager',      labelEn: 'Plugin Manager' },
@@ -49,6 +51,15 @@ const FIELD_DEFS = {
     { key: 'server/user', labelDe: 'Server Benutzer', labelEn: 'Server User', type: 'text', placeholder: 'root' },
     { key: 'server/password', labelDe: 'Server Passwort', labelEn: 'Server Password', type: 'password' },
     { key: 'server/port', labelDe: 'Server Port', labelEn: 'Server Port', type: 'text', default: '22' },
+  ],
+  affine: [
+    { key: 'affine/domain', labelDe: 'AFFiNE Domain', labelEn: 'AFFiNE Domain', type: 'text', placeholder: 'https://affine.example.com' },
+    { key: 'affine/email',  labelDe: 'AFFiNE E-Mail',  labelEn: 'AFFiNE Email',  type: 'text' },
+    { key: 'affine/password', labelDe: 'AFFiNE Passwort', labelEn: 'AFFiNE Password', type: 'password' },
+  ],
+  composio: [
+    { key: 'composio/api_key', labelDe: 'Composio API-Key', labelEn: 'Composio API Key', type: 'password' },
+    { key: 'composio/user_id', labelDe: 'User-ID (optional)', labelEn: 'User ID (optional)', type: 'text', placeholder: 'default' },
   ],
   spotify: [
     { key: 'spotify/client_id',     labelDe: 'Client-ID',          labelEn: 'Client ID',          type: 'text' },
@@ -252,7 +263,7 @@ export default function IntegrationsTab({ tr, language }) {
     );
   }
 
-  const hasTest = ['immich', 'nextcloud', 'homeassistant', 'truenas', 'spotify', 'discord'].includes(activeInt);
+  const hasTest = ['immich', 'nextcloud', 'homeassistant', 'truenas', 'spotify', 'discord', 'composio', 'affine'].includes(activeInt);
 
   return (
     <div className="settings-panel" style={{ padding: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -276,7 +287,13 @@ export default function IntegrationsTab({ tr, language }) {
             {t(intLabel?.labelDe, intLabel?.labelEn)}
           </div>
           <p style={{ fontSize: '0.85rem', color: 'var(--muted)', marginBottom: '1.25rem' }}>
-            {activeInt === 'spotify'
+            {activeInt === 'affine'
+              ? t('Verbinde deine AFFiNE-Instanz (self-hosted). Die KI kann dann deine Dokumente durchsuchen und darauf basierend antworten.',
+                 'Connect your AFFiNE instance (self-hosted). The AI can search your documents and answer based on them.')
+              : activeInt === 'composio'
+              ? t('Composio bietet 200+ Integrationen (GitHub, Gmail, Slack, Notion, Linear, Jira, etc.). API-Key von composio.dev eintragen.',
+                 'Composio provides 200+ integrations (GitHub, Gmail, Slack, Notion, Linear, Jira, etc.). Enter your API key from composio.dev.')
+              : activeInt === 'spotify'
               ? t('Benötigt eine Spotify App im Developer Dashboard. Client-ID und -Secret eintragen, dann Authorization Code Grant durchführen.',
                  'Requires a Spotify App in the Developer Dashboard. Enter Client ID and Secret, then perform Authorization Code Grant.')
               : activeInt === 'discord'

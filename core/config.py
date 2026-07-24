@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from pathlib import Path
@@ -37,10 +38,27 @@ def _openai_cfg():
     oms = [m.strip() for m in os.environ.get("OPENAI_MODELS", "").split(",") if m.strip()]
     return ob, ok, oms
 
+def _ai_config_cfg():
+    """Read provider config from ai_config.json (set via web UI)."""
+    ai_cfg_file = BASE / 'data' / 'ai_config.json'
+    if ai_cfg_file.exists():
+        try:
+            fc = json.loads(ai_cfg_file.read_text())
+            if fc.get('provider') == 'openai':
+                return fc.get('base_url', '').rstrip('/'), fc.get('api_key', ''), fc.get('model', '')
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return '', '', ''
+
 def _openai_prefixes():
     raw = os.environ.get("OPENAI_MODEL_PREFIXES", "gpt-,o1-,o3-,claude-,gemini-,minimax-")
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 def _is_openai(model):
     ob, ok, oms = _openai_cfg()
-    return ob and (model in oms or any(model.startswith(p) for p in _openai_prefixes()))
+    if ob and (model in oms or any(model.startswith(p) for p in _openai_prefixes())):
+        return True
+    ai_ob, ai_ok, ai_model = _ai_config_cfg()
+    if ai_ob:
+        return True
+    return False
