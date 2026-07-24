@@ -1,6 +1,8 @@
-import json, numpy as np
-from pathlib import Path
+import json
 from collections import Counter, defaultdict
+from pathlib import Path
+
+import numpy as np
 from sklearn.decomposition import PCA
 
 chunks = json.loads(Path("data/chunks.json").read_text())
@@ -19,7 +21,8 @@ sim = normed @ normed.T
 
 edges = []
 for i in range(n):
-    s = sim[i].copy(); s[i] = 0
+    s = sim[i].copy()
+    s[i] = 0
     candidates = np.where(s > 0.35)[0]
     top = candidates[np.argsort(-s[candidates])[:5]]
     for j in top:
