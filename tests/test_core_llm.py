@@ -9,10 +9,10 @@ class TestLoadOpenAIConfig:
     @patch("core.llm.os.path.exists")
     def test_returns_openai_env_fallback(self, mock_exists, mock_cfg):
         mock_exists.return_value = False
-        mock_cfg.return_value = ("https://api.openai.com/v1", "sk-env-key", ["gpt-4"])
+        mock_cfg.return_value = ("https://api.openai.example.com/v1", "sk-env-key", ["gpt-4"])
         from core.llm import _load_openai_config
         base, key = _load_openai_config()
-        assert "api.openai.com" in base
+        assert "openai.example.com" in base
         assert key == "sk-env-key"
 
     @patch("core.llm._openai_cfg")
@@ -67,7 +67,7 @@ class TestChatWithTools:
     @patch("core.llm.requests.post")
     @patch("core.llm._load_openai_config")
     def test_openai_chat_success(self, mock_cfg, mock_post):
-        mock_cfg.return_value = ("https://api.openai.com/v1", "sk-key")
+        mock_cfg.return_value = ("https://api.openai.example.com/v1", "sk-key")
         with patch("core.llm._is_openai", return_value=True):
             mock_resp = MagicMock()
             mock_resp.json.return_value = {
@@ -185,7 +185,7 @@ class TestChatWithToolsStream:
     @patch("core.llm.requests.post")
     @patch("core.llm._load_openai_config")
     def test_openai_stream_yields_content(self, mock_cfg, mock_post):
-        mock_cfg.return_value = ("https://api.openai.com/v1", "sk-key")
+        mock_cfg.return_value = ("https://api.openai.example.com/v1", "sk-key")
         mock_resp = MagicMock()
         mock_resp.ok = True
         mock_resp.iter_lines.return_value = [

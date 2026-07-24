@@ -55,7 +55,7 @@ class TestCheckToolSupport:
     @patch("core.model._is_openai")
     def test_openai_model_always_supported(self, mock_is_openai, mock_post, mock_cfg):
         mock_is_openai.return_value = True
-        mock_cfg.return_value = ("https://api.openai.com/v1", "sk-key")
+        mock_cfg.return_value = ("https://api.openai.example.com/v1", "sk-key")
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"choices": [{"message": {"content": "hi"}}]}
         mock_post.return_value = mock_resp
