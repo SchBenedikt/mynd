@@ -1,9 +1,11 @@
 import json
 import sys
+from unittest.mock import MagicMock
 
 import pytest
 
 import app.audit as audit
+import core.tools as tools
 from core.sandbox import _linux_command, run_sandboxed
 from core.tools import _validate_http_url
 
@@ -54,4 +56,116 @@ def test_audit_redacts_nested_secrets_and_omits_results(monkeypatch, tmp_path):
     assert 'result_preview' not in event
 
 
+def test_ssrf_redirect_chain_blocked(monkeypatch):
+    monkeypatch.delenv('MYND_HTTP_ALLOW_PRIVATE_HOSTS', raising=False)
 
+    redirect_response = MagicMock()
+    redirect_response.is_redirect = True
+    redirect_response.is_permanent_redirect = False
+    redirect_response.headers = {'Location': 'http://internal.admin/service'}
+    redirect_response.status_code = 301
+
+    call_count = 0
+
+    def mock_request(method, url, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return redirect_response
+        raise AssertionError('Second request issued — redirect was not validated')
+
+    monkeypatch.setattr('core.tools.requests.request', mock_request)
+
+    res_map = {
+        'example.test': [('family', 'type', 'proto', 'canonname', ('203.0.113.1', 0))],
+        'internal.admin': [('family', 'type', 'proto', 'canonname', ('10.0.0.99', 0))],
+    }
+
+    def mock_getaddrinfo(host, port, *args, **kwargs):
+        return res_map.get(host.rstrip('.').lower(), [(None, None, None, None, ('127.0.0.1', 0))])
+
+    monkeypatch.setattr('core.tools.socket.getaddrinfo', mock_getaddrinfo)
+
+    result = tools.http_request(url='http://example.test/page')
+    assert '❌' in result
+    assert 'blocked' in result.lower()
+
+
+def test_ssrf_dns_rebinding_detected(monkeypatch):
+    monkeypatch.delenv('MYND_HTTP_ALLOW_PRIVATE_HOSTS', raising=False)
+
+    import socket as _sock
+
+    call_count = 0
+
+    def mock_getaddrinfo(host, port, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return [(_sock.AF_INET, _sock.SOCK_STREAM, _sock.IPPROTO_TCP, '', ('1.2.3.4', 0))]
+        return [(_sock.AF_INET, _sock.SOCK_STREAM, _sock.IPPROTO_TCP, '', ('5.6.7.8', 0))]
+
+    monkeypatch.setattr('core.tools.socket.getaddrinfo', mock_getaddrinfo)
+
+    result = tools.http_request(url='http://example.test/resource')
+    assert '❌' in result
+    assert 'blocked' in result.lower()
+
+
+def test_shell_injection_patterns(monkeypatch):
+    monkeypatch.setattr(tools, 'PERMISSION_MODE', 'auto')
+    dangerous_patterns = [
+        ('$(cat /etc/passwd)', 'blocked'),
+        ('`cat /etc/passwd`', 'blocked'),
+        ('${HOME}', 'blocked'),
+    ]
+    for cmd, expected_sub in dangerous_patterns:
+        result = tools.execute_bash(cmd)
+        assert '❌' in result and expected_sub in result, f'Pattern {cmd!r} should be blocked'
+
+
+def test_null_byte_injection_blocked(monkeypatch, tmp_path):
+    workspace = tmp_path / 'workspace'
+    monkeypatch.setenv('MYND_WORKSPACE_DIR', str(workspace))
+    workspace.mkdir()
+
+    result_read = tools.read_local_file('safe.txt\x00evil')
+    assert result_read.startswith('❌')
+
+    result_write = tools.write_local_file('safe.txt\x00evil', 'data')
+    assert result_write.startswith('❌')
+
+
+def test_very_long_input_handling():
+    very_long = 'x' * 200000
+
+    result = tools.execute_bash(very_long)
+    assert result.startswith('❌')
+    assert 'maximum' in result or 'exceeds' in result or 'Länge' in result
+
+    result = tools.http_request(url=f'http://example.com/{very_long[:50000]}')
+    assert result.startswith('❌')
+
+    very_long_100k = 'x' * 200000
+    result = tools.write_local_file('test_long.txt', very_long_100k)
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_html_injection_in_outputs(monkeypatch, tmp_path):
+    workspace = tmp_path / 'workspace'
+    monkeypatch.setenv('MYND_WORKSPACE_DIR', str(workspace))
+    workspace.mkdir()
+
+    html_file = workspace / 'page.html'
+    html_file.write_text('<script>alert(1)</script>')
+
+    result = tools.read_local_file('page.html')
+    assert '<script>' in result
+    assert result == '<script>alert(1)</script>'
+
+    html_path = workspace / '<img src=x onerror=alert(1)>.txt'
+    html_path.write_text('content')
+
+    result = tools.read_local_file('<img src=x onerror=alert(1)>.txt')
+    assert 'content' in result or '❌' in result

@@ -150,6 +150,7 @@ class TestKnowledgeAPI:
             "chunks",
             [{"source": "Projects/Mynd/README.md", "text": "hello", "headings": []}],
         )
+        monkeypatch.setattr(app_routes, "_load_memory", lambda: {})
 
         response = client.get("/api/knowledge/graph")
         assert response.status_code == 200

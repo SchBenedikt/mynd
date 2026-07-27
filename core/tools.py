@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import warnings
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -20,7 +21,26 @@ from defusedxml import ElementTree
 
 from .config import BASE, CHUNKS, EMBS, MEMORY_FILE, C
 from .embed import embed
+from .planner import create_plan as _plan_create
+from .planner import delete_plan as _plan_delete
+from .planner import get_plan as _plan_get
+from .planner import list_plans as _plan_list
+from .planner import update_step as _plan_update
+from .reasoning import evaluate_reasoning as _evaluate_reasoning
+from .reasoning import reason_step_by_step as _reason_step_by_step
+from .reasoning import tree_of_thought as _tree_of_thought
+from .reflection import get_daily_summary as _reflection_daily
+from .reflection import get_failure_analysis, get_tool_performance
+from .reflection import get_improvement_suggestions as _reflection_suggestions
+from .reflection import prune_history as _reflection_prune
 from .sandbox import SandboxUnavailableError, run_sandboxed
+from .skills import learn_skill as _learn_skill
+from .skills import recall_skills as _recall_skills
+from .skills import skill_delete as _skill_delete
+from .skills import skill_list as _skill_list
+from .tool_creator import create_tool as _create_tool
+from .tool_creator import delete_tool as _delete_tool
+from .tool_creator import list_created_tools as _list_created_tools
 from .vault import _vault_get, vault_delete, vault_get, vault_list, vault_set
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -83,6 +103,47 @@ def _extract_tagged_blocks(text, opening, closing):
         blocks.append(text[start:end].strip())
         offset = end + len(closing)
     return blocks
+
+
+INPUT_MAX = 100000
+
+_rate_limit_data = defaultdict(list)
+_rate_limit_lock = threading.Lock()
+
+
+def _check_rate_limit(tool_name):
+    now = time.monotonic()
+    with _rate_limit_lock:
+        calls = _rate_limit_data[tool_name]
+        calls = [t for t in calls if now - t < 1.0]
+        if len(calls) >= 10:
+            return False, f"⏱ Rate limit exceeded for {tool_name} (>10 calls/second)"
+        calls.append(now)
+        _rate_limit_data[tool_name] = calls
+        return True, None
+
+
+def _validate_str(value, name, max_len=INPUT_MAX):
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string, got {type(value).__name__}")
+    if len(value) > max_len:
+        raise ValueError(f"{name} exceeds maximum length ({max_len})")
+    if '\0' in value:
+        raise ValueError(f"{name} contains null bytes")
+    return value
+
+
+def _rate_limited(name):
+    def decorator(fn):
+        def wrapper(*args, **kwargs):
+            ok, err = _check_rate_limit(name)
+            if not ok:
+                return err
+            return fn(*args, **kwargs)
+        wrapper.__name__ = fn.__name__
+        wrapper.__module__ = fn.__module__
+        return wrapper
+    return decorator
 
 
 def _parse_tool_arguments(text):
@@ -209,6 +270,16 @@ def _confirm_cmd(cmd):
 
 
 def execute_bash(command):
+    try:
+        _validate_str(command, "command", max_len=10000)
+    except ValueError as e:
+        return f"❌ {e}"
+    if len(command) < 1:
+        return "❌ Empty command"
+    _bash_dangerous = ['$(', '`', '${']
+    for pat in _bash_dangerous:
+        if pat in command:
+            return f"❌ Dangerous pattern '{pat}' blocked in command"
     if PERMISSION_MODE == "ask":
         ok = _request_tool_confirmation("execute_bash", command)
         if ok is not True:
@@ -234,6 +305,34 @@ def execute_bash(command):
 
 
 def execute_ssh(host="", command="", user="", port=22, key="", password="", profile=""):
+    try:
+        _validate_str(host, "host", max_len=500)
+        _validate_str(command, "command", max_len=10000)
+        _validate_str(user, "user", max_len=200)
+        _validate_str(key, "key", max_len=50000)
+        _validate_str(password, "password", max_len=50000)
+        _validate_str(profile, "profile", max_len=200)
+    except ValueError as e:
+        return f"❌ {e}"
+
+    if host:
+        import re as _re
+        host = host.strip()
+        if not _re.match(r'^[a-zA-Z0-9.\-:\[\]]+$', host):
+            return "❌ Invalid hostname characters"
+        if host.startswith('.') or host.endswith('.'):
+            return "❌ Hostname cannot start or end with a dot"
+        if len(host) > 253:
+            return "❌ Hostname too long"
+
+    if port is not None:
+        try:
+            port = int(port)
+            if port < 1 or port > 65535:
+                return "❌ Port must be between 1 and 65535"
+        except (ValueError, TypeError):
+            return "❌ Invalid port number"
+
     if PERMISSION_MODE == "ask":
         ok = _request_tool_confirmation("execute_ssh", command)
         if ok is not True:
@@ -264,7 +363,7 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
             return "❌ Keine Host/IP. `vault_set vm/<profil>/ip <ip>` oder host-Parameter angeben."
 
         validated = command.strip()
-        if not validated or len(validated) > 10000:
+        if not validated:
             return "❌ Ungültiger Befehl"
         cmd_parts = shlex.split(validated)
 
@@ -274,6 +373,7 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
                 keyfile = f.name
             os.chmod(keyfile, 0o600)
             ssh_cmd = ['ssh', '-i', keyfile, '-o', 'StrictHostKeyChecking=accept-new',
+                       # TODO: Use proper known_hosts management instead of /dev/null
                        '-o', 'UserKnownHostsFile=/dev/null',
                        '-p', str(port), f'{user}@{host}'] + cmd_parts
         elif password:
@@ -312,6 +412,7 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
 
 def search_documents(query, top_k=10):
     try:
+        _validate_str(query, "query", max_len=5000)
         chunks = json.loads(CHUNKS.read_text())
         embs = np.load(EMBS)
         qe = embed([query])[0]
@@ -332,10 +433,15 @@ def search_documents(query, top_k=10):
 
 
 def _workspace_path(path):
+    if '\0' in str(path):
+        raise ValueError('Path contains null bytes')
     root = Path(os.getenv('MYND_WORKSPACE_DIR', BASE / 'data' / 'workspace')).expanduser().resolve()
     candidate = Path(path).expanduser()
     if not candidate.is_absolute():
         candidate = root / candidate
+    _max_depth = 50
+    if len(candidate.parts) > _max_depth:
+        raise ValueError(f'Path exceeds maximum depth ({_max_depth})')
     candidate = candidate.resolve(strict=False)
     if candidate != root and root not in candidate.parents:
         raise ValueError(f'Path is outside the allowed workspace: {root}')
@@ -344,6 +450,7 @@ def _workspace_path(path):
 
 def read_local_file(path):
     try:
+        _validate_str(path, "path", max_len=2000)
         p = _workspace_path(path)
         if not p.exists():
             return f"❌ Datei nicht gefunden: {p}"
@@ -354,6 +461,8 @@ def read_local_file(path):
 
 def write_local_file(path, content):
     try:
+        _validate_str(path, "path", max_len=2000)
+        _validate_str(content, "content", max_len=1000000)
         p = _workspace_path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content)
@@ -363,6 +472,10 @@ def write_local_file(path, content):
 
 
 def execute_python(code):
+    try:
+        _validate_str(code, "code", max_len=50000)
+    except ValueError as e:
+        return f"❌ {e}"
     if PERMISSION_MODE == "ask":
         ok = _request_tool_confirmation("execute_python", code[:120])
         if ok is not True:
@@ -396,6 +509,10 @@ def execute_python(code):
 
 
 def think(thought, auto_plan=False):
+    try:
+        _validate_str(thought, "thought")
+    except ValueError as e:
+        return f"❌ {e}"
     complex_keywords = [
         'recherchiere', 'vergleiche', 'analysiere', 'erstelle', 'baue', 'entwickle',
         'konfiguriere', 'installiere', 'automatisiere', 'optimiere', 'migriere',
@@ -416,6 +533,7 @@ def think(thought, auto_plan=False):
 
 def prompt_user(message, secret=False):
     try:
+        _validate_str(message, "message")
         if secret:
             import getpass
             val = getpass.getpass(f"  {C.CYAN}🔒 {message}{C.RESET} ")
@@ -429,10 +547,14 @@ def prompt_user(message, secret=False):
 def _validate_http_url(url):
     from urllib.parse import urlparse
 
+    if url.lower().startswith(('gopher://', 'dict://', 'ftp://')):
+        raise ValueError(f'Blocked URL scheme in: {url[:30]}')
+
     parsed = urlparse(url)
     if parsed.scheme not in ('http', 'https') or not parsed.hostname:
         raise ValueError('Only absolute http:// and https:// URLs are allowed')
     hostname = parsed.hostname.rstrip('.').lower()
+
     allow_private = {
         item.strip().lower()
         for item in os.getenv('MYND_HTTP_ALLOW_PRIVATE_HOSTS', '').split(',')
@@ -440,10 +562,29 @@ def _validate_http_url(url):
     }
     if hostname in allow_private:
         return
+
+    # Block raw IP addresses to prevent hex/octal bypass attacks
     try:
-        addresses = {item[4][0] for item in socket.getaddrinfo(hostname, parsed.port or 443)}
+        ipaddress.ip_address(hostname)
+        raise ValueError(f'Raw IP address hostname is not allowed: {hostname}')
+    except ValueError:
+        if hostname.replace('.', '').replace(':', '').isdigit() and '.' in hostname:
+            raise ValueError(f'Raw IP address hostname is not allowed: {hostname}')
+
+    try:
+        addrs_before = {item[4][0] for item in socket.getaddrinfo(hostname, parsed.port or 443)}
     except socket.gaierror as exc:
         raise ValueError(f'Host resolution failed: {hostname}') from exc
+
+    # Simple DNS rebinding check: resolve again and compare
+    try:
+        addrs_after = {item[4][0] for item in socket.getaddrinfo(hostname, parsed.port or 443)}
+        if addrs_before != addrs_after:
+            raise ValueError(f'DNS rebinding detected for: {hostname}')
+    except socket.gaierror:
+        pass
+
+    addresses = addrs_before
     for address in addresses:
         ip = ipaddress.ip_address(address)
         if not ip.is_global:
@@ -498,6 +639,11 @@ def safe_http_request(method, url, *, headers=None, data=None, timeout=60, max_b
 
 def http_request(method="GET", url="", headers=None, body="", auth_user="", auth_pass=""):
     try:
+        _validate_str(url, "url", max_len=10000)
+        _validate_str(method, "method", max_len=10)
+        _validate_str(body, "body", max_len=1000000)
+        _validate_str(auth_user, "auth_user", max_len=5000)
+        _validate_str(auth_pass, "auth_pass", max_len=5000)
         h = {}
         if headers:
             if isinstance(headers, str):
@@ -535,6 +681,10 @@ def http_request(method="GET", url="", headers=None, body="", auth_user="", auth
 
 def image_search(query, max_results=6):
     """Durchsucht DuckDuckGo nach Bildern und liefert Markdown-kodierte Thumbnails + Quellen."""
+    try:
+        _validate_str(query, "query", max_len=5000)
+    except ValueError as e:
+        return f"❌ {e}"
     if not _DDGS_AVAILABLE:
         return '❌ Keine Suchbibliothek verfügbar (pip install ddgs)'
     try:
@@ -555,6 +705,10 @@ def image_search(query, max_results=6):
         return f"❌ Bildersuche fehlgeschlagen: {e}"
 
 def web_search(query, max_results=10):
+    try:
+        _validate_str(query, "query", max_len=5000)
+    except ValueError as e:
+        return f"❌ {e}"
     if not _DDGS_AVAILABLE:
         return '❌ Keine Suchbibliothek verfügbar (pip install ddgs)'
     try:
@@ -644,6 +798,7 @@ def _fetch_news_from_rss(category, max_results):
 
 def fetch_news(category="top", max_results=10):
     try:
+        _validate_str(category, "category", max_len=200)
         max_results = max(1, min(int(max_results or 10), 20))
         category = (category or "top").strip().lower()
         if category not in ("top", "technologie"):
@@ -700,6 +855,7 @@ def fetch_news(category="top", max_results=10):
 
 def memory_get(key=""):
     try:
+        _validate_str(key, "key", max_len=5000)
         m = json.loads(MEMORY_FILE.read_text()) if MEMORY_FILE.exists() else {}
         if key:
             return m.get(key, "")
@@ -709,6 +865,8 @@ def memory_get(key=""):
 def memory_set(key, value):
     with _memory_lock:
         try:
+            _validate_str(key, "key", max_len=5000)
+            _validate_str(value, "value", max_len=100000)
             m = json.loads(MEMORY_FILE.read_text()) if MEMORY_FILE.exists() else {}
             m[key] = value
             MEMORY_FILE.write_text(json.dumps(m, indent=2, ensure_ascii=False))
@@ -720,6 +878,7 @@ def memory_set(key, value):
 def memory_delete(key):
     with _memory_lock:
         try:
+            _validate_str(key, "key", max_len=5000)
             m = json.loads(MEMORY_FILE.read_text()) if MEMORY_FILE.exists() else {}
             if key in m:
                 del m[key]
@@ -730,13 +889,110 @@ def memory_delete(key):
             return f"❌ {e}"
 
 
-# ── Sub-Agent Delegation ───────────────────────────────────────
+# ── Reflection ─────────────────────────────────────────────────
+
+def reflect_on_failure(tool_name="", max_recent=5):
+    try:
+        _validate_str(tool_name, "tool_name", max_len=200)
+    except ValueError as e:
+        return f"❌ {e}"
+    analysis = get_failure_analysis(tool_name=tool_name or None, max_recent=max_recent)
+    if analysis:
+        return analysis
+    return 'Keine relevanten Fehlermuster gefunden.'
+
+
+def reset_failures(tool_name=""):
+    try:
+        _validate_str(tool_name, "tool_name", max_len=200)
+    except ValueError as e:
+        return f"❌ {e}"
+    from .reflection import _load as _rl
+    from .reflection import _save as _rs
+    data = _rl()
+    if tool_name:
+        data['consecutive_failures'].pop(tool_name, None)
+    else:
+        data['consecutive_failures'] = {}
+    _rs(data)
+    return '✅ Fehlerzähler zurückgesetzt.'
+
+
+# ── Skill Learning & Retrieval ────────────────────────────────
+
+def learn_skill(name, description, steps, tags="", context=""):
+    try:
+        _validate_str(name, "name", max_len=500)
+        _validate_str(description, "description", max_len=5000)
+        _validate_str(tags, "tags", max_len=5000)
+        _validate_str(context, "context", max_len=100000)
+    except ValueError as e:
+        return f"❌ {e}"
+    if isinstance(steps, str):
+        try:
+            _validate_str(steps, "steps", max_len=100000)
+            steps = json.loads(steps)
+        except (json.JSONDecodeError, TypeError):
+            return '❌ steps muss ein JSON-Array sein.'
+    tag_list = [t.strip() for t in tags.split(',') if t.strip()] if tags else []
+    return _learn_skill(name, description, steps, tags=tag_list, context=context)
+
+
+def recall_skills(context, max_results=5):
+    try:
+        _validate_str(context, "context", max_len=100000)
+    except ValueError as e:
+        return f"❌ {e}"
+    results = _recall_skills(context, max_results=max_results)
+    if not results:
+        return 'Keine relevanten Skills gefunden.'
+    lines = [f'Relevante Skills für: {context}', '']
+    for r in results:
+        score_display = '⭐' * min(int(r['relevance'] // 5) + 1, 5)
+        lines.append(f'{score_display} {r["name"]}')
+        lines.append(f'   {r["description"]}')
+        tags = ', '.join(r.get('tags', []))
+        if tags:
+            lines.append(f'   Tags: {tags}')
+        if r.get('pattern'):
+            lines.append(f'   Schritte: {len(r["pattern"])}')
+        lines.append('')
+    return '\n'.join(lines).strip()
+
+
+def list_skills(tag=""):
+    try:
+        _validate_str(tag, "tag", max_len=200)
+    except ValueError as e:
+        return f"❌ {e}"
+    results = _skill_list(tag=tag)
+    if not results:
+        return 'Keine Skills gespeichert.'
+    lines = ['📋 Gespeicherte Skills:', '']
+    for r in results:
+        tags = ', '.join(r.get('tags', []))
+        tag_str = f' [{tags}]' if tags else ''
+        lines.append(f'  • {r["name"]}{tag_str} – {r["description"]}')
+    lines.append(f'\n{len(results)} Skills insgesamt.')
+    return '\n'.join(lines)
+
+
+def delete_skill(name):
+    try:
+        _validate_str(name, "name", max_len=500)
+    except ValueError as e:
+        return f"❌ {e}"
+    return _skill_delete(name)
+
 
 def delegate(task, context="", model=""):
     """Delegate a sub-task to a focused sub-agent. Use for complex multi-step
     research, parallel analysis, or when you need a dedicated agent to work
     on a sub-problem while you handle the main task."""
     try:
+        _validate_str(task, "task", max_len=50000)
+        _validate_str(context, "context", max_len=100000)
+        _validate_str(model, "model", max_len=200)
         prompt = f"Du bist ein fokussierter Sub-Agent. Löse folgende Aufgabe:\n\n{task}"
         if context:
             prompt += f"\n\nKontext:\n{context}"
@@ -767,29 +1023,153 @@ def delegate(task, context="", model=""):
 def create_plan(steps, description=""):
     """Create a structured multi-step plan before executing. Use this for
     complex tasks that need coordination of multiple tools across multiple rounds.
-    Returns the plan as a checklist."""
+    Returns the plan as a checklist with tracking ID."""
     try:
-        if isinstance(steps, str):
-            steps = [s.strip() for s in steps.split("\n") if s.strip()]
-        plan = {
-            "description": description or "Mehrschritt-Plan",
-            "total_steps": len(steps),
-            "steps": [{"id": i + 1, "task": s, "status": "pending"} for i, s in enumerate(steps)],
-            "created": __import__('datetime').datetime.now().isoformat(),
-        }
-        lines = [f"## 📋 Plan: {plan['description']}", ""]
-        for s in plan["steps"]:
-            lines.append(f"  [{s['id']}] ⬜ **{s['task'][:80]}**")
-            if len(s['task']) > 80:
-                lines[-1] = lines[-1][:-2] + "...**"
-        lines.append(f"\n{plan['total_steps']} Schritte insgesamt.")
-        return "\n".join(lines)
+        _validate_str(steps, "steps", max_len=50000)
+        _validate_str(description, "description", max_len=5000)
+        plan_id, result = _plan_create(steps, description=description)
+        if plan_id:
+            return f'📋 Plan-ID: {plan_id}\n\n{result}'
+        return result
     except Exception:
         logger.exception("create_plan failed")
         return "❌ Plan-Erstellung fehlgeschlagen."
 
 
-# ── agent-browser Integration ───────────────────────────────
+def get_plan(plan_id):
+    try:
+        _validate_str(plan_id, "plan_id", max_len=200)
+        _, result = _plan_get(plan_id)
+        return result
+    except Exception:
+        logger.exception("get_plan failed")
+        return "❌ Plan abrufen fehlgeschlagen."
+
+
+def update_plan_step(plan_id, step_id, status, result=""):
+    try:
+        _validate_str(plan_id, "plan_id", max_len=200)
+        _validate_str(status, "status", max_len=50)
+        _validate_str(result, "result", max_len=50000)
+        return _plan_update(plan_id, int(step_id), status, result=result)
+    except Exception:
+        logger.exception("update_plan_step failed")
+        return "❌ Plan-Update fehlgeschlagen."
+
+
+def list_plans(status=""):
+    try:
+        _validate_str(status, "status", max_len=200)
+        plans = _plan_list(status=status or None)
+        if not plans:
+            return "Keine Pläne gefunden."
+        lines = ["📋 Pläne:", ""]
+        for p in plans:
+            lines.append(f'  • {p["id"]} [{p["status"]}] {p["progress"]} – {p["description"][:60]}')
+        return "\n".join(lines)
+    except Exception:
+        logger.exception("list_plans failed")
+        return "❌ Plan-Liste fehlgeschlagen."
+
+
+def delete_plan(plan_id):
+    try:
+        _validate_str(plan_id, "plan_id", max_len=200)
+        return _plan_delete(plan_id)
+    except Exception:
+        logger.exception("delete_plan failed")
+        return "❌ Plan-Löschen fehlgeschlagen."
+
+
+# ── Performance Analytics ─────────────────────────────────────
+
+def analyze_performance(tool_name=""):
+    try:
+        _validate_str(tool_name, "tool_name", max_len=200)
+        stats = get_tool_performance(tool_name=tool_name or None)
+        if not stats:
+            return "Keine Daten verfügbar."
+        lines = [f'📊 Performance-Analyse{f" für {tool_name}" if tool_name else ""}:', '']
+        for name, s in sorted(stats.items(), key=lambda x: x[1]['success_rate']):
+            bar_len = int(s['success_rate'] / 10)
+            bar = '█' * bar_len + '░' * (10 - bar_len)
+            lines.append(
+                f'  {bar} {name}: {s["success_rate"]:.0f}% ({s["calls"]}x, '
+                f'Ø {s["avg_ms"]:.0f}ms, max {s["max_ms"]}ms)'
+            )
+        return '\n'.join(lines)
+    except Exception:
+        logger.exception("analyze_performance failed")
+        return '❌ Performance-Analyse fehlgeschlagen.'
+
+
+def get_improvement_suggestions():
+    try:
+        return _reflection_suggestions()
+    except Exception:
+        logger.exception("get_improvement_suggestions failed")
+        return '❌ Verbesserungsvorschläge fehlgeschlagen.'
+
+
+def get_daily_summary():
+    try:
+        return _reflection_daily()
+    except Exception:
+        logger.exception("get_daily_summary failed")
+        return '❌ Tagesübersicht fehlgeschlagen.'
+
+
+def prune_history(days=30):
+    try:
+        return _reflection_prune(days=days)
+    except Exception:
+        logger.exception("prune_history failed")
+        return '❌ Aufräumen fehlgeschlagen.'
+
+
+# ── Advanced Reasoning ────────────────────────────────────────
+
+def reason_deep(problem, method="tot", branches=3, depth=3, steps=""):
+    """Führe TIEFGEHENDE Reasoning-Analyse durch. Nutze DAS bei komplexen
+    Problemen, die mehrstufiges Denken erfordern.
+
+    Methoden:
+      tot  – Tree-of-Thought: mehrere Denkpfade werden parallel erkundet,
+             evaluiert und der beste wird ausgewählt. Ideal bei offenen,
+             mehrdeutigen Problemen.
+      step – Schritt-für-Schritt: logische Schritte mit Verifikation.
+             Ideal bei sequenziellen oder mathematischen Problemen.
+
+    Returns a structured analysis with evaluations and confidence."""
+    try:
+        _validate_str(problem, "problem", max_len=50000)
+        _validate_str(method, "method", max_len=20)
+        if method == "step":
+            steps_list = [s.strip() for s in steps.split("\n") if s.strip()] if steps else None
+            result = _reason_step_by_step(problem, steps=steps_list)
+        else:
+            result = _tree_of_thought(problem, branches=branches, depth=depth)
+        return json.dumps(result, ensure_ascii=False, indent=2)[:8000]
+    except Exception:
+        logger.exception("reason_deep failed")
+        return "❌ Reasoning fehlgeschlagen."
+
+
+def evaluate_reasoning(problem, reasoning):
+    """Bewerte und bewerte einen Reasoning-Pfad. Gibt Score (0-1),
+    Stärken, Schwächen und Verbesserungsvorschläge.
+    Nutze DAS um die Qualität deiner Analysen zu prüfen."""
+    try:
+        _validate_str(problem, "problem", max_len=50000)
+        _validate_str(reasoning, "reasoning", max_len=50000)
+        result = _evaluate_reasoning(problem, reasoning)
+        return json.dumps(result, ensure_ascii=False, indent=2)[:8000]
+    except Exception:
+        logger.exception("evaluate_reasoning failed")
+        return "❌ Evaluierung fehlgeschlagen."
+
+
+# ── Sub-Agent Delegation (Enhanced) ───────────────────────────
 
 def agent_browser(action, selector="", text="", url=""):
     """Steuere den Browser via agent-browser CLI.
@@ -805,6 +1185,10 @@ def agent_browser(action, selector="", text="", url=""):
       scroll <dir>      – Scrollen (up/down)
     """
     try:
+        _validate_str(action, "action", max_len=50)
+        _validate_str(selector, "selector", max_len=5000)
+        _validate_str(text, "text", max_len=50000)
+        _validate_str(url, "url", max_len=10000)
         cmd = ["agent-browser"]
         action = action.strip().lower()
         if action == "goto" and url:
@@ -855,6 +1239,30 @@ def agent_browser(action, selector="", text="", url=""):
         return "❌ agent-browser Zeitüberschreitung (>30s)"
     except Exception as e:
         return f"❌ agent-browser Fehler: {e}"
+
+
+# ── Tool Creation ─────────────────────────────────────────────
+
+def create_tool(name, description, parameters, code):
+    try:
+        _validate_str(name, "name", max_len=500)
+        _validate_str(description, "description", max_len=5000)
+        _validate_str(code, "code", max_len=100000)
+    except ValueError as e:
+        return f"❌ {e}"
+    return _create_tool(name, description, parameters, code)
+
+
+def delete_tool(name):
+    try:
+        _validate_str(name, "name", max_len=500)
+    except ValueError as e:
+        return f"❌ {e}"
+    return _delete_tool(name)
+
+
+def list_created_tools():
+    return _list_created_tools()
 
 
 CORE_TOOLS = [
@@ -1028,29 +1436,184 @@ CORE_TOOLS = [
             "url": {"type": "string", "description": "URL für goto-Aktion"}
         }, "required": ["action"]}
     }},
+    {"type": "function", "function": {
+        "name": "reason_deep",
+        "description": "Führe TIEFGEHENDES Reasoning durch. Bei komplexen, mehrdeutigen Problemen: Tree-of-Thought (tot) erkundet mehrere Denkpfade parallel und wählt den besten. Bei sequenziellen/mathematischen Problemen: Schritt-für-Schritt (step) mit Verifikation jedes Schritts. Liefert strukturierte Analyse mit Bewertungen und Konfidenz.",
+        "parameters": {"type": "object", "properties": {
+            "problem": {"type": "string", "description": "Das Problem oder die Frage, die analysiert werden soll"},
+            "method": {"type": "string", "description": "Methode: 'tot' (Tree-of-Thought, default) oder 'step' (Schritt-für-Schritt)", "default": "tot"},
+            "branches": {"type": "integer", "description": "Anzahl Denkpfade bei tot-Methode (1-5, default 3)", "default": 3},
+            "depth": {"type": "integer", "description": "Tiefe pro Pfad bei tot-Methode (1-5, default 3)", "default": 3},
+            "steps": {"type": "string", "description": "Optional: eigene Schritte für step-Methode, einer pro Zeile"}
+        }, "required": ["problem"]}
+    }},
+    {"type": "function", "function": {
+        "name": "evaluate_reasoning",
+        "description": "Bewerte einen Reasoning-Pfad nach Klarheit, Korrektheit, Vollständigkeit. Gibt Score (0-1), Stärken, Schwächen und Verbesserungsvorschläge. Nutze DAS um die Qualität deiner Analysen zu prüfen und zu verbessern.",
+        "parameters": {"type": "object", "properties": {
+            "problem": {"type": "string", "description": "Das ursprüngliche Problem"},
+            "reasoning": {"type": "string", "description": "Der zu evaluierende Reasoning-Pfad"}
+        }, "required": ["problem", "reasoning"]}
+    }},
+    {"type": "function", "function": {
+        "name": "reflect_on_failure",
+        "description": "Analysiere Fehlermuster bei Tool-Aufrufen. Zeigt welche Tools häufig fehlschlagen und gibt Strategie-Empfehlungen. Nutze DAS nach Fehlschlägen, um zu verstehen was schiefläuft.",
+        "parameters": {"type": "object", "properties": {
+            "tool_name": {"type": "string", "description": "Tool-Name (leer = alle Tools)"},
+            "max_recent": {"type": "integer", "description": "Anzahl der letzten Aufrufe zur Analyse (default 5)", "default": 5}
+        }, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "learn_skill",
+        "description": "Lerne eine neue Fähigkeit (Skill) für zukünftige Aufgaben. Speichert ein erfolgreiches Pattern von Tool-Schritten, das später automatisch abgerufen werden kann. Nutze DAS wenn du ein nützliches Muster entdeckt hast.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Eindeutiger Skill-Name, z.B. 'truenas_status_check'"},
+            "description": {"type": "string", "description": "Beschreibung wofür der Skill gut ist und wann er eingesetzt werden sollte"},
+            "steps": {"type": "string", "description": "JSON-Array der Tool-Schritte: [{'tool': 'name', 'args': {...}}, ...]"},
+            "tags": {"type": "string", "description": "Komma-getrennte Tags für bessere Auffindbarkeit (optional)"},
+            "context": {"type": "string", "description": "Kontext/Hintergrund für den Skill (optional)"}
+        }, "required": ["name", "description", "steps"]}
+    }},
+    {"type": "function", "function": {
+        "name": "recall_skills",
+        "description": "Rufe relevante, zuvor gelernte Skills basierend auf dem aktuellen Kontext ab. Die Skills werden semantisch gematcht. Nutze DAS zu Beginn einer Aufgabe um von früheren Erfahrungen zu profitieren.",
+        "parameters": {"type": "object", "properties": {
+            "context": {"type": "string", "description": "Aktuelle Aufgabe oder Kontext zur Skill-Suche"},
+            "max_results": {"type": "integer", "description": "Maximale Anzahl Skills (default 5)", "default": 5}
+        }, "required": ["context"]}
+    }},
+    {"type": "function", "function": {
+        "name": "list_skills",
+        "description": "Liste alle gelernten Skills auf, optional gefiltert nach Tag.",
+        "parameters": {"type": "object", "properties": {
+            "tag": {"type": "string", "description": "Optional: Nur Skills mit diesem Tag anzeigen"}
+        }, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "delete_skill",
+        "description": "Lösche einen gelernten Skill.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Name des zu löschenden Skills"}
+        }, "required": ["name"]}
+    }},
+    {"type": "function", "function": {
+        "name": "create_tool",
+        "description": "Erstelle ein NEUES Tool/Plugin zur Laufzeit. Der Agent kann sich so selbst neue Fähigkeiten geben. Code wird auf Sicherheit geprüft und bei Erfolg sofort geladen. Nutze DAS wenn du eine wiederkehrende Aufgabe automatisieren willst oder ein spezialisiertes Tool brauchst.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Eindeutiger Tool-Name (A-Z, a-z, 0-9, _, -)"},
+            "description": {"type": "string", "description": "Beschreibung für das LLM wann/wie das Tool genutzt wird"},
+            "parameters": {"type": "object", "description": "JSON-Schema der Parameter: {'param_name': {'type': 'string', 'description': '...'}}"},
+            "code": {"type": "string", "description": "Python-Code (function-body). Parameter-Namen müssen mit 'parameters' übereinstimmen. Importe: requests, json, datetime, re, math, Path. KEIN input(), subprocess, os.system, eval, exec."}
+        }, "required": ["name", "description", "parameters", "code"]}
+    }},
+    {"type": "function", "function": {
+        "name": "delete_tool",
+        "description": "Lösche ein zuvor erstelltes Tool/Plugin. Nur selbst-erstellte Tools können gelöscht werden, keine System-Plugins.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Name des zu löschenden Tools"}
+        }, "required": ["name"]}
+    }},
+    {"type": "function", "function": {
+        "name": "list_created_tools",
+        "description": "Liste alle selbst-erstellten Tools auf. Zeigt nur dynamisch erstellte Tools, keine System-Plugins.",
+        "parameters": {"type": "object", "properties": {}}
+    }},
+    {"type": "function", "function": {
+        "name": "get_plan",
+        "description": "Zeige den aktuellen Status eines Plans. Ruft Fortschritt, abgeschlossene/fehlgeschlagene Schritte und Ergebnisse ab.",
+        "parameters": {"type": "object", "properties": {
+            "plan_id": {"type": "string", "description": "Plan-ID (erhalten bei create_plan)"}
+        }, "required": ["plan_id"]}
+    }},
+    {"type": "function", "function": {
+        "name": "update_plan_step",
+        "description": "Aktualisiere den Status eines Plan-Schritts. Setze auf 'done' bei Erfolg, 'failed' bei Fehler. Der Fortschritt wird automatisch berechnet.",
+        "parameters": {"type": "object", "properties": {
+            "plan_id": {"type": "string", "description": "Plan-ID"},
+            "step_id": {"type": "integer", "description": "Schritt-Nummer (1-based)"},
+            "status": {"type": "string", "description": "Neuer Status: 'done', 'failed', 'in_progress'"},
+            "result": {"type": "string", "description": "Ergebnis/Begründung (optional)"}
+        }, "required": ["plan_id", "step_id", "status"]}
+    }},
+    {"type": "function", "function": {
+        "name": "list_plans",
+        "description": "Liste alle aktiven und abgeschlossenen Pläne auf. Optional filterbar nach Status.",
+        "parameters": {"type": "object", "properties": {
+            "status": {"type": "string", "description": "Filter: 'active', 'completed', 'completed_with_errors' (optional)"}
+        }, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "delete_plan",
+        "description": "Lösche einen Plan und seinen Verlauf.",
+        "parameters": {"type": "object", "properties": {
+            "plan_id": {"type": "string", "description": "Plan-ID"}
+        }, "required": ["plan_id"]}
+    }},
+    {"type": "function", "function": {
+        "name": "analyze_performance",
+        "description": "Analysiere die Performance aller Tools: Erfolgsrate, Anzahl Aufrufe, durchschnittliche/maximale Dauer. Zeigt eine sortierte Übersicht mit visuellen Balken. Nutze DAS um Engpässe zu identifizieren.",
+        "parameters": {"type": "object", "properties": {
+            "tool_name": {"type": "string", "description": "Optional: Nur dieses Tool analysieren"}
+        }, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "get_improvement_suggestions",
+        "description": "Analysiere Tool-Nutzung und gib konkrete Verbesserungsvorschläge basierend auf Erfolgsraten, Latenz und Nutzungsmustern.",
+        "parameters": {"type": "object", "properties": {}}
+    }},
+    {"type": "function", "function": {
+        "name": "get_daily_summary",
+        "description": "Zeige eine Zusammenfassung der heutigen Tool-Aufrufe: Anzahl, Erfolgsrate, häufigste Tools, Durchschnittsdauer.",
+        "parameters": {"type": "object", "properties": {}}
+    }},
+    {"type": "function", "function": {
+        "name": "prune_history",
+        "description": "Bereinige alte Reflexions-Daten. Entfernt Einträge älter als die angegebenen Tage. Hilft, die Datenbank schlank zu halten.",
+        "parameters": {"type": "object", "properties": {
+            "days": {"type": "integer", "description": "Maximales Alter in Tagen (default: 30)", "default": 30}
+        }, "required": []}
+    }},
 ]
 
 CORE_MAP = {
-    "execute_bash": execute_bash,
-    "execute_python": execute_python,
-    "execute_ssh": execute_ssh,
-    "search_documents": search_documents,
-    "web_search": web_search,
-    "fetch_news": fetch_news,
-    "read_local_file": read_local_file,
-    "write_local_file": write_local_file,
-    "think": think,
-    "prompt_user": prompt_user,
-    "memory_get": memory_get,
-    "memory_set": memory_set,
-    "memory_delete": memory_delete,
-    "vault_get": vault_get,
-    "vault_set": vault_set,
-    "vault_delete": vault_delete,
-    "vault_list": vault_list,
-    "http_request": http_request,
-    "image_search": image_search,
-    "delegate": delegate,
-    "create_plan": create_plan,
-    "agent_browser": agent_browser,
+    "execute_bash": _rate_limited("execute_bash")(execute_bash),
+    "execute_python": _rate_limited("execute_python")(execute_python),
+    "execute_ssh": _rate_limited("execute_ssh")(execute_ssh),
+    "search_documents": _rate_limited("search_documents")(search_documents),
+    "web_search": _rate_limited("web_search")(web_search),
+    "fetch_news": _rate_limited("fetch_news")(fetch_news),
+    "read_local_file": _rate_limited("read_local_file")(read_local_file),
+    "write_local_file": _rate_limited("write_local_file")(write_local_file),
+    "think": _rate_limited("think")(think),
+    "prompt_user": _rate_limited("prompt_user")(prompt_user),
+    "memory_get": _rate_limited("memory_get")(memory_get),
+    "memory_set": _rate_limited("memory_set")(memory_set),
+    "memory_delete": _rate_limited("memory_delete")(memory_delete),
+    "vault_get": _rate_limited("vault_get")(vault_get),
+    "vault_set": _rate_limited("vault_set")(vault_set),
+    "vault_delete": _rate_limited("vault_delete")(vault_delete),
+    "vault_list": _rate_limited("vault_list")(vault_list),
+    "http_request": _rate_limited("http_request")(http_request),
+    "image_search": _rate_limited("image_search")(image_search),
+    "delegate": _rate_limited("delegate")(delegate),
+    "create_plan": _rate_limited("create_plan")(create_plan),
+    "agent_browser": _rate_limited("agent_browser")(agent_browser),
+    "reason_deep": _rate_limited("reason_deep")(reason_deep),
+    "evaluate_reasoning": _rate_limited("evaluate_reasoning")(evaluate_reasoning),
+    "reflect_on_failure": _rate_limited("reflect_on_failure")(reflect_on_failure),
+    "learn_skill": _rate_limited("learn_skill")(learn_skill),
+    "recall_skills": _rate_limited("recall_skills")(recall_skills),
+    "list_skills": _rate_limited("list_skills")(list_skills),
+    "delete_skill": _rate_limited("delete_skill")(delete_skill),
+    "create_tool": _rate_limited("create_tool")(create_tool),
+    "delete_tool": _rate_limited("delete_tool")(delete_tool),
+    "list_created_tools": _rate_limited("list_created_tools")(list_created_tools),
+    "get_plan": _rate_limited("get_plan")(get_plan),
+    "update_plan_step": _rate_limited("update_plan_step")(update_plan_step),
+    "list_plans": _rate_limited("list_plans")(list_plans),
+    "delete_plan": _rate_limited("delete_plan")(delete_plan),
+    "analyze_performance": _rate_limited("analyze_performance")(analyze_performance),
+    "get_improvement_suggestions": _rate_limited("get_improvement_suggestions")(get_improvement_suggestions),
+    "get_daily_summary": _rate_limited("get_daily_summary")(get_daily_summary),
+    "prune_history": _rate_limited("prune_history")(prune_history),
 }

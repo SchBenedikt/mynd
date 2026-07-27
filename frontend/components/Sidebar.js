@@ -130,6 +130,9 @@ export default function Sidebar() {
         <button className="nav-item" onClick={() => router.push('/projects')} title={tr('Projekte', 'Projects')}>
           <i className="fas fa-folder"></i><span>{tr('Projekte', 'Projects')}</span>
         </button>
+        <button className="nav-item" onClick={() => router.push('/knowledge-graph')} title={tr('Wissensgraph', 'Knowledge Graph')}>
+          <i className="fas fa-project-diagram"></i><span>{tr('Wissensgraph', 'Knowledge Graph')}</span>
+        </button>
       </div>
 
       <div className="chat-history">

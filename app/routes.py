@@ -910,7 +910,7 @@ def knowledge_graph_data():
 
 
 def _knowledge_graph():
-    """Build a deterministic document/folder graph from the indexed chunks."""
+    """Build a graph from indexed chunks + memory items."""
     by_source = {}
     for chunk in knowledge_base.chunks:
         source = str(chunk.get('source') or 'Unknown')
@@ -950,6 +950,41 @@ def _knowledge_graph():
                     'properties': {'path': parent},
                 })
             edges.append({'from': folder_id, 'to': document_id, 'type': 'contains'})
+
+    memory_data = _load_memory()
+    memory_nodes = {}
+    for key, value in memory_data.items():
+        mem_id = 'memory-' + hashlib.sha256(key.encode('utf-8')).hexdigest()[:16]
+        val_str = str(value)[:200]
+        memory_nodes[key] = mem_id
+        label = key.split('/')[-1].replace('_', ' ').title() if '/' in key else key.title()
+        nodes.append({
+            'id': mem_id,
+            'label': label[:40],
+            'type': 'memory',
+            'properties': {
+                'key': key,
+                'value': val_str,
+                'full_key': key,
+            },
+        })
+
+    memory_keys = list(memory_data.keys())
+    for i, k1 in enumerate(memory_keys):
+        for k2 in memory_keys[i + 1:]:
+            k1_parts = set(k1.lower().replace('/', ' ').split())
+            k2_parts = set(k2.lower().replace('/', ' ').split())
+            overlap = k1_parts & k2_parts
+            if overlap:
+                v1 = str(memory_data[k1]).lower()
+                v2 = str(memory_data[k2]).lower()
+                value_overlap = len(set(v1.split()) & set(v2.split())) > 1
+                if value_overlap or (k1.split('/')[0] == k2.split('/')[0]):
+                    edges.append({
+                        'from': memory_nodes[k1],
+                        'to': memory_nodes[k2],
+                        'type': 'related',
+                    })
 
     updated_at = datetime.fromtimestamp(CHUNKS.stat().st_mtime, UTC) if CHUNKS.exists() else datetime.now(UTC)
     return {
