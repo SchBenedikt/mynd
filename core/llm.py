@@ -1,5 +1,7 @@
 import json
+import logging
 import os
+import time
 from datetime import datetime
 
 import requests
@@ -7,6 +9,32 @@ import requests
 from .config import OLLAMA, C, _is_openai, _openai_cfg
 
 DATA_DIR = None
+
+RETRY_MAX_ATTEMPTS = 5
+RETRY_BASE_DELAY = 1.0
+RETRY_MAX_DELAY = 60.0
+
+
+def _retry_with_backoff(func, *args, **kwargs):
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            return func(*args, **kwargs)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            if attempt == RETRY_MAX_ATTEMPTS - 1:
+                raise
+            delay = min(RETRY_BASE_DELAY * (2 ** attempt), RETRY_MAX_DELAY)
+            logging.warning(f"Retry {attempt + 1}/{RETRY_MAX_ATTEMPTS} after {delay:.1f}s: {e}")
+            time.sleep(delay)
+        except requests.RequestException as e:
+            status = e.response.status_code if e.response is not None else None
+            if status in (429, 500, 502, 503):
+                if attempt == RETRY_MAX_ATTEMPTS - 1:
+                    raise
+                delay = min(RETRY_BASE_DELAY * (2 ** attempt), RETRY_MAX_DELAY)
+                logging.warning(f"Retry {attempt + 1}/{RETRY_MAX_ATTEMPTS} after {delay:.1f}s (HTTP {status}): {e}")
+                time.sleep(delay)
+            else:
+                raise
 
 
 def _get_data_dir():
@@ -45,27 +73,36 @@ def chat_with_tools(model, msgs, tools):
             if tools:
                 body["tools"] = tools
             h = {"Authorization": f"Bearer {ok}", "Content-Type": "application/json"}
-            r = requests.post(f"{ob}/v1/chat/completions", json=body, headers=h, timeout=300)
-            data = r.json()
-            if "choices" in data:
-                m = data["choices"][0].get("message", {})
-                return {
-                    "message": {
-                        "role": m.get("role", "assistant"),
-                        "content": m.get("content", ""),
-                        "tool_calls": m.get("tool_calls"),
+
+            def _do_request():
+                r = requests.post(f"{ob}/v1/chat/completions", json=body, headers=h, timeout=300)
+                r.raise_for_status()
+                data = r.json()
+                if "choices" in data:
+                    m = data["choices"][0].get("message", {})
+                    return {
+                        "message": {
+                            "role": m.get("role", "assistant"),
+                            "content": m.get("content", ""),
+                            "tool_calls": m.get("tool_calls"),
+                        }
                     }
-                }
-            return {"error": str(data)[:500]}
+                return {"error": str(data)[:500]}
+
+            return _retry_with_backoff(_do_request)
         body = {"model": model, "messages": msgs, "stream": False}
         if tools:
             body["tools"] = tools
         low_temp_models = [m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()]
         if model in low_temp_models:
             body.setdefault("options", {})["temperature"] = 0.3
-        r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300)
-        r.raise_for_status()
-        return r.json()
+
+        def _do_request():
+            r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300)
+            r.raise_for_status()
+            return r.json()
+
+        return _retry_with_backoff(_do_request)
     except requests.exceptions.Timeout:
         return {"error": "Ollama-Timeout – das Modell hat nicht rechtzeitig geantwortet."}
     except requests.exceptions.ConnectionError:
@@ -88,8 +125,13 @@ def chat_with_tools_stream(model, msgs, tools):
             if tools:
                 body["tools"] = tools
             h = {"Authorization": f"Bearer {ok}", "Content-Type": "application/json"}
-            r = requests.post(f"{ob}/v1/chat/completions", json=body, headers=h, timeout=300, stream=True)
-            r.raise_for_status()
+
+            def _do_request():
+                r = requests.post(f"{ob}/v1/chat/completions", json=body, headers=h, timeout=300, stream=True)
+                r.raise_for_status()
+                return r
+
+            r = _retry_with_backoff(_do_request)
             full_content = ""
             final_msg = None
             for line in r.iter_lines(decode_unicode=True):
@@ -129,15 +171,20 @@ def chat_with_tools_stream(model, msgs, tools):
         low_temp_models = [m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()]
         if model in low_temp_models:
             body.setdefault("options", {})["temperature"] = 0.3
-        r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300, stream=True)
-        if not r.ok:
-            import logging as _lg
-            _lg.error(f"Ollama 400: {r.text[:500]}")
-            _lg.error(f"Request msgs: {len(msgs)}, total chars: {sum(len(str(m)) for m in msgs)}")
-            _lg.error(f"Tool names: {[t.get('function',{}).get('name','?') for t in (tools or [])]}")
-            import traceback as _tb
-            _lg.error(f"Stack:\n{''.join(_tb.format_stack()[-10:])}")
-        r.raise_for_status()
+
+        def _do_request():
+            r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300, stream=True)
+            if not r.ok:
+                import logging as _lg
+                _lg.error(f"Ollama 400: {r.text[:500]}")
+                _lg.error(f"Request msgs: {len(msgs)}, total chars: {sum(len(str(m)) for m in msgs)}")
+                _lg.error(f"Tool names: {[t.get('function',{}).get('name','?') for t in (tools or [])]}")
+                import traceback as _tb
+                _lg.error(f"Stack:\n{''.join(_tb.format_stack()[-10:])}")
+            r.raise_for_status()
+            return r
+
+        r = _retry_with_backoff(_do_request)
         full_content = ""
         full_thinking = ""
         full_tool_calls = None
@@ -188,73 +235,77 @@ def run_tool_loop(model, user_msg, system_prompt, tools, tool_map, max_rounds=10
         msgs.insert(0, {"role": "system", "content": system_prompt})
     msgs.append({"role": "user", "content": user_msg})
 
-    for rnd in range(max_rounds):
-        resp = chat_with_tools(model, msgs, tools)
-        if "error" in resp:
-            return f"❌ Modell-Fehler: {resp['error']}", msgs
-        if "message" not in resp:
-            return f"❌ Ungültige Antwort (kein 'message'): {str(resp)[:500]}", msgs
-        msg = resp["message"]
+    try:
+        for rnd in range(max_rounds):
+            resp = chat_with_tools(model, msgs, tools)
+            if "error" in resp:
+                return f"❌ Modell-Fehler: {resp['error']}", msgs
+            if "message" not in resp:
+                return f"❌ Ungültige Antwort (kein 'message'): {str(resp)[:500]}", msgs
+            msg = resp["message"]
 
-        if not msg.get("tool_calls"):
-            msgs.append({"role": "assistant", "content": msg.get("content", "")})
-            return msg.get("content", ""), msgs
+            if not msg.get("tool_calls"):
+                msgs.append({"role": "assistant", "content": msg.get("content", "")})
+                return msg.get("content", ""), msgs
 
-        content = msg.get("content", "")
-        if content.strip():
-            print(f"  {C.YELLOW}💬 {content[:500]}{C.RESET}", flush=True)
-        msgs.append({
-            "role": "assistant",
-            "content": content,
-            "tool_calls": msg.get("tool_calls"),
-        })
-
-        tool_count = len(msg["tool_calls"])
-        print(f"  {C.DIM}▸ Runde {rnd+1}/{max_rounds} · {tool_count} Tool(s){C.RESET}", flush=True)
-
-        for tc in msg["tool_calls"]:
-            fn = tc["function"]
-            name = fn["name"]
-            args_raw = fn.get("arguments", {})
-            if isinstance(args_raw, str):
-                try:
-                    args = json.loads(args_raw)
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    args = {}
-            else:
-                args = args_raw
-            tool_call_id = tc.get("id", "")
-            func = tool_map.get(name)
-            if func:
-                try:
-                    t0 = datetime.now()
-                    result = func(**args)
-                    dt = (datetime.now() - t0).total_seconds()
-                except Exception as e:
-                    result = f"❌ Fehler: {e}"
-                    dt = 0
-            else:
-                result = f"❌ Unbekanntes Tool: {name}"
-                dt = 0
-            r_len = len(str(result))
-            status = f"{C.GREEN}✓{C.RESET}" if not result.startswith("❌") else f"{C.RED}✗{C.RESET}"
-            if name == "think":
-                print(f"    {C.DIM}└─ {status} {name}  {dt:.1f}s{C.RESET}", flush=True)
-            else:
-                a_str = json.dumps(args)[:120]
-                print(f"    {status} {C.BOLD}{name}{C.RESET} {C.DIM}{a_str} · {dt:.1f}s · {r_len} Z{C.RESET}", flush=True)
+            content = msg.get("content", "")
+            if content.strip():
+                print(f"  {C.YELLOW}💬 {content[:500]}{C.RESET}", flush=True)
             msgs.append({
-                "role": "tool",
-                "content": str(result)[:8000],
-                "name": name,
-                "tool_call_id": tool_call_id,
+                "role": "assistant",
+                "content": content,
+                "tool_calls": msg.get("tool_calls"),
             })
 
-    msgs.append({
-        "role": "user",
-        "content": "Du hast das Limit erreicht. Fasse zusammen, was du bisher herausgefunden hast.",
-    })
-    resp = chat_with_tools(model, msgs, [])
-    if "message" in resp:
-        return ("⚠️ Max Runden erreicht.\n\n" + resp["message"].get("content", "")), msgs
-    return "⚠️ Max Runden erreicht (keine Abschlussantwort).", msgs
+            tool_count = len(msg["tool_calls"])
+            print(f"  {C.DIM}▸ Runde {rnd+1}/{max_rounds} · {tool_count} Tool(s){C.RESET}", flush=True)
+
+            for tc in msg["tool_calls"]:
+                fn = tc["function"]
+                name = fn["name"]
+                args_raw = fn.get("arguments", {})
+                if isinstance(args_raw, str):
+                    try:
+                        args = json.loads(args_raw)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        args = {}
+                else:
+                    args = args_raw
+                tool_call_id = tc.get("id", "")
+                func = tool_map.get(name)
+                if func:
+                    try:
+                        t0 = datetime.now()
+                        result = func(**args)
+                        dt = (datetime.now() - t0).total_seconds()
+                    except Exception as e:
+                        result = f"❌ Fehler: {e}"
+                        dt = 0
+                else:
+                    result = f"❌ Unbekanntes Tool: {name}"
+                    dt = 0
+                r_len = len(str(result))
+                status = f"{C.GREEN}✓{C.RESET}" if not result.startswith("❌") else f"{C.RED}✗{C.RESET}"
+                if name == "think":
+                    print(f"    {C.DIM}└─ {status} {name}  {dt:.1f}s{C.RESET}", flush=True)
+                else:
+                    a_str = json.dumps(args)[:120]
+                    print(f"    {status} {C.BOLD}{name}{C.RESET} {C.DIM}{a_str} · {dt:.1f}s · {r_len} Z{C.RESET}", flush=True)
+                msgs.append({
+                    "role": "tool",
+                    "content": str(result)[:8000],
+                    "name": name,
+                    "tool_call_id": tool_call_id,
+                })
+
+        msgs.append({
+            "role": "user",
+            "content": "Du hast das Limit erreicht. Fasse zusammen, was du bisher herausgefunden hast.",
+        })
+        resp = chat_with_tools(model, msgs, [])
+        if "message" in resp:
+            return ("⚠️ Max Runden erreicht.\n\n" + resp["message"].get("content", "")), msgs
+        return "⚠️ Max Runden erreicht (keine Abschlussantwort).", msgs
+    except Exception as e:
+        logging.error(f"Unexpected error in run_tool_loop: {e}", exc_info=True)
+        return f"❌ Unerwarteter Fehler: {e}", msgs

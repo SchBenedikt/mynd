@@ -68,6 +68,68 @@ class TestKnowledgeBase:
         KnowledgeBase()  # Should not crash, should log warning
         assert mock_logger.warning.called
 
+    # ── Enhanced KB: Query Rewriting ─────────────────────────
+
+    def test_expand_query_returns_original(self):
+        from app.helpers import KnowledgeBase
+        kb = KnowledgeBase()
+        results = kb._expand_query("hello world")
+        assert "hello world" in results
+        assert len(results) <= 3
+
+    def test_expand_query_extracts_keywords_from_questions(self):
+        from app.helpers import KnowledgeBase
+        kb = KnowledgeBase()
+        results = kb._expand_query("Wie installiere ich docker auf ubuntu?")
+        assert any('docker' in r.lower() for r in results)
+
+    def test_expand_query_no_duplicates(self):
+        from app.helpers import KnowledgeBase
+        kb = KnowledgeBase()
+        results = kb._expand_query("test")
+        assert len(results) == len(set(results))
+
+    def test_expand_query_short_query(self):
+        from app.helpers import KnowledgeBase
+        kb = KnowledgeBase()
+        results = kb._expand_query("hi")
+        assert "hi" in results
+
+    @patch("app.helpers._embed_fn")
+    def test_enhanced_search_uses_rewritten_queries(self, mock_embed):
+        mock_embed.side_effect = [
+            np.array([[1.0, 0.0]], dtype=np.float32),
+            np.array([[0.0, 1.0]], dtype=np.float32),
+        ]
+        from app.helpers import KnowledgeBase
+        kb = KnowledgeBase()
+        kb.chunks = [
+            {"text": "python programming guide", "source": "doc1"},
+            {"text": "docker container setup", "source": "doc2"},
+        ]
+        kb.embs = np.array([
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ], dtype=np.float32)
+        results = kb.search("Wie programmiere ich in python?", k=5)
+        assert len(results) >= 1
+
+    @patch("app.helpers._embed_fn")
+    def test_enhanced_search_deduplicates(self, mock_embed):
+        mock_embed.side_effect = [
+            np.array([[1.0, 0.0]], dtype=np.float32),
+            np.array([[0.99, 0.01]], dtype=np.float32),
+        ]
+        from app.helpers import KnowledgeBase
+        kb = KnowledgeBase()
+        kb.chunks = [
+            {"text": "the one and only result", "source": "doc1"},
+        ]
+        kb.embs = np.array([[0.8, 0.2]], dtype=np.float32)
+        results = kb.search("python programming", k=5)
+        assert len(results) == 1
+        assert results[0]['source'] == 'doc1'
+
 
 # ── System Prompt Builder ─────────────────────────────────────
 
