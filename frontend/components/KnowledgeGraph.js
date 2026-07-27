@@ -247,7 +247,7 @@ export default function KnowledgeGraphComponent({ embedded = false }) {
 
     el.__dataInitialized = true;
     return () => { if (simRef.current) { simRef.current.stop(); simRef.current = null; } };
-  }, [filtered, graphData, hoveredNode]); // eslint-disable-line
+  }, [filtered, graphData, hoveredNode]);
 
   // ── Controls ──
   const resetZoom = () => {
