@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import * as d3 from 'd3';
 import styles from './KnowledgeGraph.module.css';
 import { apiFetch } from '../lib/api';
-import { useTheme } from '../hooks/useTheme';
 
 const NODE_TYPES = [
   { key: 'memory', color: '#FF6B9D', icon: '🧠', label: 'Erinnerung' },
@@ -32,8 +31,6 @@ export default function KnowledgeGraphComponent({ embedded = false }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const simRef = useRef(null);
-  const { darkMode } = useTheme();
-
   const [graphData, setGraphData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,7 +39,7 @@ export default function KnowledgeGraphComponent({ embedded = false }) {
   const [selectedNode, setSelectedNode] = useState(null);
   const [relatedData, setRelatedData] = useState(null);
   const [search, setSearch] = useState('');
-  const [hoveredNode, setHoveredNode] = useState(null);
+  const [hoveredNode, _setHoveredNode] = useState(null);
 
   const load = useCallback(async (opts = {}) => {
     const refresh = opts.refresh || false;
