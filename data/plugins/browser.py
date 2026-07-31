@@ -68,19 +68,36 @@ BLOCKED_DOMAINS = {
 }
 
 
+_PLAYWRIGHT_LIB = None
+
+
+def _get_sync_api():
+    """Import the sync API from patchright (preferred) or playwright."""
+    global _PLAYWRIGHT_LIB
+    if _PLAYWRIGHT_LIB is not None:
+        return _PLAYWRIGHT_LIB
+    try:
+        import patchright.sync_api as _lib
+    except ImportError:
+        try:
+            import playwright.sync_api as _lib
+        except ImportError:
+            raise RuntimeError(
+                "Browser automation library not installed. Run:\n"
+                "  pip3 install patchright playwright-stealth\n"
+                "  patchright install chromium"
+            )
+    _PLAYWRIGHT_LIB = _lib
+    return _lib
+
+
 def _ensure_browser():
-    """Lazily start Playwright + Chromium per thread."""
+    """Lazily start Patchright/Playwright + Chromium per thread."""
     tl = _thread_local
     if hasattr(tl, 'browser') and tl.browser and tl.browser.is_connected():
         return tl.browser
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        raise RuntimeError(
-            "Playwright not installed. Run:\n"
-            "  pip3 install playwright playwright-stealth\n"
-            "  playwright install chromium"
-        )
+    sync_api = _get_sync_api()
+    sync_playwright = sync_api.sync_playwright
     tl.playwright = sync_playwright().start()
     tl.browser = tl.playwright.chromium.launch(
         headless=True,

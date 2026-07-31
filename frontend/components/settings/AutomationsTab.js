@@ -222,6 +222,7 @@ function AutoForm({ auto, schema, onSave, onCancel, L, language }) {
             <select value={draft.trigger?.type||'cron'} onChange={e=>setTrigger('type',e.target.value)} style={{width:'100%',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'6px 8px',color:'var(--ink)'}}>
               <option value="cron">{L('Cron (zeitgesteuert)','Cron (scheduled)')}</option>
               <option value="interval">{L('Intervall','Interval')}</option>
+              <option value="webhook">{L('Webhook (externer Aufruf)','Webhook (external call)')}</option>
             </select>
           </div>
           {draft.trigger?.type === 'cron' ? (
@@ -266,6 +267,24 @@ function AutoForm({ auto, schema, onSave, onCancel, L, language }) {
             </div>
           </div>
         )}
+        {draft.trigger?.type === 'webhook' && (
+          <div style={{marginTop:8, background:'var(--bg)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', padding:10, fontSize:'0.82em'}}>
+            <div style={{fontWeight:600, marginBottom:4}}>{L('Webhook-URL','Webhook URL')}</div>
+            {draft.id && draft.webhook_token ? (
+              <code style={{wordBreak:'break-all', fontSize:'0.8em', color:'var(--brand)'}}>{`${typeof window !== 'undefined' ? window.location.origin : ''}/api/automations/webhook/${draft.id}/${draft.webhook_token}`}</code>
+            ) : (
+              <span style={{color:'var(--muted)'}}>{L('Die Webhook-URL wird nach dem Speichern angezeigt.','The webhook URL is shown after saving.')}</span>
+            )}
+            <div style={{marginTop:6}}>{L('Rufe die URL per POST auf, um die Automation auszulösen.','Call the URL via POST to trigger the automation.')}</div>
+          </div>
+        )}
+      </div>
+
+      <div style={{borderTop:'1px solid var(--border)', paddingTop:8}}>
+        <label style={{display:'flex', alignItems:'center', gap:8, fontSize:'0.85em', cursor:'pointer'}}>
+          <input type="checkbox" checked={!!draft.notify} onChange={e=>set('notify', e.target.checked)} style={{width:16, height:16}} />
+          {L('Benachrichtigung nach Ausführung erzeugen','Create a notification after execution')}
+        </label>
       </div>
 
       <div style={{borderTop:'1px solid var(--border)', paddingTop:8}}>
@@ -283,6 +302,10 @@ function AutoForm({ auto, schema, onSave, onCancel, L, language }) {
               <label style={{fontSize:'0.8em',color:'var(--muted)',display:'block',marginBottom:2}}>{L('Tool','Tool')}</label>
               <select value={step.tool} onChange={e=>setStep(i,'tool',e.target.value)} style={{width:'100%',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'6px 8px',color:'var(--ink)',marginBottom:6}}>
                 <option value="">– {L('Bitte wählen','Select')} –</option>
+                <optgroup label="⚡ KI & Benachrichtigung">
+                  <option value="ai_task">ai_task ({L('KI-Schritt: prompt zusammenfassen/analysieren','AI step: summarize/analyze via prompt')})</option>
+                  <option value="notify">notify ({L('Benachrichtigung speichern','Save a notification')})</option>
+                </optgroup>
                 {(() => {
                   const groups = {};
                   (schema?.tools || []).forEach(t => {

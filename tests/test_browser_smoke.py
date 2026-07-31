@@ -3,7 +3,11 @@
 import os
 
 import pytest
-from playwright.sync_api import expect, sync_playwright
+
+try:
+    from patchright.sync_api import expect, sync_playwright
+except ImportError:
+    from playwright.sync_api import expect, sync_playwright
 
 pytestmark = pytest.mark.skipif(
     not os.getenv('MYND_BROWSER_BASE_URL'),

@@ -31,8 +31,8 @@ chromadb>=1.5.0
 ddgs>=1.0.0
 requests-html>=0.10.0
 
-# Browser automation
-playwright>=1.40.0
+# Browser automation (patchright = stealth fork of Playwright, drop-in)
+patchright>=1.40.0
 
 # Scheduling
 APScheduler>=3.10.0
