@@ -130,6 +130,96 @@ class TestChatWithTools:
         called_json = mock_post.call_args[1]["json"]
         assert "options" not in called_json
 
+    @patch("core.llm._is_openai", return_value=False)
+    @patch("core.llm.requests.post")
+    def test_keep_alive_sent_to_ollama(self, mock_post, mock_is_openai):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"message": {"role": "assistant", "content": "ok"}}
+        mock_resp.raise_for_status.return_value = None
+        mock_post.return_value = mock_resp
+
+        from core.llm import chat_with_tools
+        chat_with_tools("gemma3", [{"role": "user", "content": "hi"}], [])
+        called_json = mock_post.call_args[1]["json"]
+        assert called_json.get("keep_alive") == "30m"
+
+    @patch("core.llm._is_openai", return_value=False)
+    @patch("core.llm.requests.post")
+    def test_keep_alive_respects_env(self, mock_post, mock_is_openai):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"message": {"role": "assistant", "content": "ok"}}
+        mock_resp.raise_for_status.return_value = None
+        mock_post.return_value = mock_resp
+
+        from core.llm import chat_with_tools
+        with patch.dict("os.environ", {"OLLAMA_KEEP_ALIVE": "-1"}):
+            chat_with_tools("gemma3", [{"role": "user", "content": "hi"}], [])
+            called_json = mock_post.call_args[1]["json"]
+            assert called_json.get("keep_alive") == "-1"
+
+    @patch("core.llm._is_openai", return_value=False)
+    @patch("core.llm.requests.post")
+    def test_ollama_410_retries_then_friendly_error(self, mock_post, mock_is_openai):
+        import requests as _requests
+
+        from core.llm import RETRY_MAX_ATTEMPTS, chat_with_tools
+
+        def _make_410():
+            r = MagicMock()
+            r.status_code = 410
+            r.raise_for_status.side_effect = _requests.exceptions.HTTPError(
+                "410 Client Error: Gone", response=r
+            )
+            return r
+
+        mock_post.side_effect = [_make_410() for _ in range(RETRY_MAX_ATTEMPTS)]
+        with patch("core.llm.time.sleep"):
+            result = chat_with_tools("gemma3", [{"role": "user", "content": "hi"}], [])
+        assert "error" in result
+        assert "entladen" in result["error"] or "Gone" in result["error"]
+        assert mock_post.call_count == RETRY_MAX_ATTEMPTS
+
+    @patch("core.llm._is_openai", return_value=False)
+    @patch("core.llm.requests.post")
+    def test_ollama_410_recovers_on_retry(self, mock_post, mock_is_openai):
+        import requests as _requests
+
+        def _make_410():
+            r = MagicMock()
+            r.status_code = 410
+            r.raise_for_status.side_effect = _requests.exceptions.HTTPError(
+                "410 Client Error: Gone", response=r
+            )
+            return r
+
+        ok_resp = MagicMock()
+        ok_resp.json.return_value = {"message": {"role": "assistant", "content": "recovered"}}
+        ok_resp.raise_for_status.return_value = None
+
+        from core.llm import chat_with_tools
+        mock_post.side_effect = [_make_410(), ok_resp]
+        with patch("core.llm.time.sleep"):
+            result = chat_with_tools("gemma3", [{"role": "user", "content": "hi"}], [])
+        assert "message" in result
+        assert result["message"]["content"] == "recovered"
+
+    @patch("core.llm._is_openai", return_value=False)
+    @patch("core.llm.requests.post")
+    def test_ollama_404_returns_model_hint(self, mock_post, mock_is_openai):
+        import requests as _requests
+
+        r = MagicMock()
+        r.status_code = 404
+        r.raise_for_status.side_effect = _requests.exceptions.HTTPError(
+            "404 Client Error: Not Found", response=r
+        )
+
+        from core.llm import chat_with_tools
+        mock_post.side_effect = [r]
+        result = chat_with_tools("gemma3", [{"role": "user", "content": "hi"}], [])
+        assert "error" in result
+        assert "ollama pull" in result["error"]
+
 
 class TestChatWithToolsStream:
     @patch("core.llm.requests.post")
@@ -181,6 +271,26 @@ class TestChatWithToolsStream:
         from core.llm import chat_with_tools_stream
         events = list(chat_with_tools_stream("gemma3", [{"role": "user", "content": "hi"}], []))
         assert any("error" in e[2] for e in events if e[0] == "")
+
+    @patch("core.llm.requests.post")
+    @patch("core.llm._is_openai", return_value=False)
+    def test_ollama_stream_410_yields_friendly_error(self, mock_is_openai, mock_post):
+        import requests as _requests
+
+        r = MagicMock()
+        r.ok = False
+        r.status_code = 410
+        r.raise_for_status.side_effect = _requests.exceptions.HTTPError(
+            "410 Client Error: Gone", response=r
+        )
+
+        from core.llm import RETRY_MAX_ATTEMPTS, chat_with_tools_stream
+        mock_post.side_effect = [r] * RETRY_MAX_ATTEMPTS
+        with patch("core.llm.time.sleep"):
+            events = list(chat_with_tools_stream("gemma3", [{"role": "user", "content": "hi"}], []))
+        errors = [e[2]["error"] for e in events if e[0] == "" and isinstance(e[2], dict) and "error" in e[2]]
+        assert errors, "expected an error event"
+        assert "entladen" in errors[0] or "Gone" in errors[0]
 
     @patch("core.llm.requests.post")
     @patch("core.llm._load_openai_config")

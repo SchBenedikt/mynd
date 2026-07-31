@@ -430,3 +430,53 @@ class TestModelWarmUp:
         assert t.daemon is True
         assert t.name == "model-warmup"
         t.join(timeout=0.1)
+
+class TestOllamaClient410:
+    def test_chat_retries_once_on_410(self, monkeypatch):
+        from app.ollama_client import OllamaClient
+
+        class _Resp:
+            def __init__(self, status, payload=None):
+                self.status_code = status
+                self._payload = payload or {}
+
+            def json(self):
+                return self._payload
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    import requests
+                    raise requests.exceptions.HTTPError(
+                        f"{self.status_code} Client Error", response=self
+                    )
+
+        calls = []
+
+        def fake_post(url, json=None, timeout=None):
+            calls.append(json)
+            if len(calls) == 1:
+                return _Resp(410)
+            return _Resp(200, {"message": {"role": "assistant", "content": "recovered"}})
+
+        monkeypatch.setattr("app.ollama_client.requests.post", fake_post)
+        client = OllamaClient(base_url="http://127.0.0.1:11434", model="gemma3")
+        result = client.chat([{"role": "user", "content": "hi"}])
+        assert len(calls) == 2
+        assert calls[0].get("keep_alive") == "30m"
+        assert result["message"]["content"] == "recovered"
+
+    def test_chat_410_twice_returns_friendly_error(self, monkeypatch):
+        from app.ollama_client import OllamaClient
+
+        class _Resp:
+            status_code = 410
+
+            def raise_for_status(self):
+                import requests
+                raise requests.exceptions.HTTPError("410 Client Error: Gone", response=self)
+
+        monkeypatch.setattr("app.ollama_client.requests.post", lambda *a, **k: _Resp())
+        client = OllamaClient(base_url="http://127.0.0.1:11434", model="gemma3")
+        result = client.chat([{"role": "user", "content": "hi"}])
+        assert result.get("error") and "entladen" in result["error"]
+

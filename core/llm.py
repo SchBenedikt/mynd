@@ -15,6 +15,10 @@ RETRY_BASE_DELAY = 1.0
 RETRY_MAX_DELAY = 60.0
 
 
+def _keep_alive():
+    return os.getenv('OLLAMA_KEEP_ALIVE', '30m')
+
+
 def _retry_with_backoff(func, *args, **kwargs):
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
@@ -27,7 +31,8 @@ def _retry_with_backoff(func, *args, **kwargs):
             time.sleep(delay)
         except requests.RequestException as e:
             status = e.response.status_code if e.response is not None else None
-            if status in (429, 500, 502, 503):
+            # 410 Gone: Ollama hat das Modell entladen – erneuter Versuch lädt es neu.
+            if status in (410, 429, 500, 502, 503):
                 if attempt == RETRY_MAX_ATTEMPTS - 1:
                     raise
                 delay = min(RETRY_BASE_DELAY * (2 ** attempt), RETRY_MAX_DELAY)
@@ -96,6 +101,7 @@ def chat_with_tools(model, msgs, tools):
         low_temp_models = [m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()]
         if model in low_temp_models:
             body.setdefault("options", {})["temperature"] = 0.3
+        body["keep_alive"] = _keep_alive()
 
         def _do_request():
             r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300)
@@ -107,6 +113,13 @@ def chat_with_tools(model, msgs, tools):
         return {"error": "Ollama-Timeout – das Modell hat nicht rechtzeitig geantwortet."}
     except requests.exceptions.ConnectionError:
         return {"error": "Ollama nicht erreichbar – bitte prüfe ob 'ollama serve' läuft."}
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        if status == 410:
+            return {"error": "Ollama hat das Modell entladen (410 Gone) – bitte erneut versuchen oder 'ollama pull " + model + "' ausführen."}
+        if status == 404:
+            return {"error": f"Modell '{model}' nicht gefunden – bitte in Ollama importieren ('ollama pull {model}')."}
+        return {"error": f"LLM-Fehler (HTTP {status}): {e}"}
     except Exception as e:
         return {"error": f"LLM-Fehler: {e}"}
 
@@ -171,6 +184,7 @@ def chat_with_tools_stream(model, msgs, tools):
         low_temp_models = [m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()]
         if model in low_temp_models:
             body.setdefault("options", {})["temperature"] = 0.3
+        body["keep_alive"] = _keep_alive()
 
         def _do_request():
             r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300, stream=True)
@@ -223,6 +237,14 @@ def chat_with_tools_stream(model, msgs, tools):
         yield "", "", {"error": "Ollama-Timeout – das Modell hat nicht rechtzeitig geantwortet."}
     except requests.exceptions.ConnectionError:
         yield "", "", {"error": "Ollama nicht erreichbar – bitte prüfe ob 'ollama serve' läuft."}
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        if status == 410:
+            yield "", "", {"error": "Ollama hat das Modell entladen (410 Gone) – bitte erneut versuchen oder 'ollama pull " + model + "' ausführen."}
+        elif status == 404:
+            yield "", "", {"error": f"Modell '{model}' nicht gefunden – bitte in Ollama importieren ('ollama pull {model}')."}
+        else:
+            yield "", "", {"error": f"LLM-Fehler (HTTP {status}): {e}"}
     except Exception as e:
         yield "", "", {"error": f"LLM-Fehler: {e}"}
 

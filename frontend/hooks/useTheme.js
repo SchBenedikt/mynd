@@ -2,74 +2,74 @@
 
 import { useState, useEffect } from 'react';
 
-function loadTheme() {
-  if (typeof window === 'undefined') return { theme: 'gold', darkMode: 'light', contrastColor: '' };
-  const savedTheme = localStorage.getItem('theme') || 'gold';
-  const savedDarkMode = localStorage.getItem('darkMode') || 'light';
-  const savedContrast = localStorage.getItem('contrastColor') || '';
+function readStored() {
+  let theme = 'gold';
+  let darkMode = 'light';
+  let contrastColor = '';
   try {
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    document.documentElement.setAttribute('data-mode', savedDarkMode);
-    if (savedContrast) {
-      document.documentElement.style.setProperty('--brand', savedContrast);
-    }
+    theme = localStorage.getItem('theme') || 'gold';
+    darkMode = localStorage.getItem('darkMode') || 'light';
+    contrastColor = localStorage.getItem('contrastColor') || '';
   } catch {}
-  return { theme: savedTheme, darkMode: savedDarkMode, contrastColor: savedContrast };
+  return { theme, darkMode, contrastColor };
+}
+
+function resolveMode(mode) {
+  if (mode === 'auto') {
+    if (typeof window === 'undefined') return 'light';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return mode;
+}
+
+function applyTheme({ theme, darkMode, contrastColor }) {
+  if (typeof document === 'undefined') return;
+  document.documentElement.setAttribute('data-theme', theme);
+  document.documentElement.setAttribute('data-mode', resolveMode(darkMode));
+  if (contrastColor) {
+    document.documentElement.style.setProperty('--brand', contrastColor);
+  } else {
+    document.documentElement.style.removeProperty('--brand');
+  }
 }
 
 export function useTheme() {
-  const initial = loadTheme();
-  const [theme, setThemeState] = useState(initial.theme);
-  const [darkMode, setDarkModeState] = useState(initial.darkMode);
-  const [contrastColor, setContrastColorState] = useState(initial.contrastColor);
+  const [state, setState] = useState(readStored);
+  const { theme, darkMode, contrastColor } = state;
 
   useEffect(() => {
-  const savedDarkMode = localStorage.getItem('darkMode') || 'light';
-
-    applyDarkMode(savedDarkMode);
-
+    applyTheme({ theme, darkMode, contrastColor });
+    if (darkMode !== 'auto') return undefined;
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = () => {
-      if (savedDarkMode === 'auto') applyDarkMode('auto');
+      document.documentElement.setAttribute('data-mode', mediaQuery.matches ? 'dark' : 'light');
     };
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
-
-  const applyDarkMode = (mode) => {
-    if (mode === 'auto') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.setAttribute('data-mode', prefersDark ? 'dark' : 'light');
-    } else {
-      document.documentElement.setAttribute('data-mode', mode);
-    }
-  };
+  }, [theme, darkMode, contrastColor]);
 
   const setTheme = (newTheme) => {
-    setThemeState(newTheme);
-    localStorage.setItem('theme', newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
-    
-    if (contrastColor) {
-      document.documentElement.style.setProperty('--brand', contrastColor);
-    } else {
-      document.documentElement.style.removeProperty('--brand');
-    }
+    const next = { ...state, theme: newTheme };
+    setState(next);
+    try { localStorage.setItem('theme', newTheme); } catch {}
+    applyTheme(next);
   };
 
   const setDarkMode = (mode) => {
-    setDarkModeState(mode);
-    localStorage.setItem('darkMode', mode);
-    applyDarkMode(mode);
+    const next = { ...state, darkMode: mode };
+    setState(next);
+    try { localStorage.setItem('darkMode', mode); } catch {}
+    applyTheme(next);
   };
 
   const setContrastColor = (color) => {
-    setContrastColorState(color);
+    const next = { ...state, contrastColor: color };
+    setState(next);
     if (color) {
-      localStorage.setItem('contrastColor', color);
+      try { localStorage.setItem('contrastColor', color); } catch {}
       document.documentElement.style.setProperty('--brand', color);
     } else {
-      localStorage.removeItem('contrastColor');
+      try { localStorage.removeItem('contrastColor'); } catch {}
       document.documentElement.style.removeProperty('--brand');
     }
   };

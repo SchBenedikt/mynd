@@ -48,6 +48,7 @@ class OllamaClient:
             "model": self.model,
             "messages": msgs,
             "stream": False,
+            "keep_alive": os.getenv('OLLAMA_KEEP_ALIVE', '30m'),
             "options": {"temperature": 0.1, "max_tokens": 2048}
         }
 
@@ -60,6 +61,13 @@ class OllamaClient:
                 gr.raise_for_status()
                 gd = gr.json()
                 return {"message": {"role": "assistant", "content": gd.get("response", "")}}
+            if resp.status_code == 410:
+                # Modell wurde entladen – einmalig neu laden und erneut versuchen.
+                retry = requests.post(url, json=payload, timeout=120)
+                if retry.status_code == 410:
+                    return {"error": "Ollama hat das Modell entladen (410 Gone) – bitte erneut versuchen."}
+                retry.raise_for_status()
+                return retry.json()
             resp.raise_for_status()
             return resp.json()
         except requests.exceptions.RequestException as e:
