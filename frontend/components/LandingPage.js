@@ -169,7 +169,10 @@ export default function LandingPage() {
       if (LANGUAGES.includes(stored)) setLang(stored);
     } catch {}
     const mode = (() => { try { return localStorage.getItem('darkMode') || 'light'; } catch(e) { return 'light'; } })();
-    document.documentElement.setAttribute('data-mode', mode);
+    const resolved = mode === 'auto'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : mode;
+    document.documentElement.setAttribute('data-mode', resolved);
   }, []);
 
   useEffect(() => {

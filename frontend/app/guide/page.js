@@ -54,7 +54,10 @@ export default function GuidePage() {
 
   useEffect(() => {
     const mode = (() => { try { return localStorage.getItem('darkMode') || 'light'; } catch { return 'light'; } })();
-    document.documentElement.setAttribute('data-mode', mode);
+    const resolved = mode === 'auto'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : mode;
+    document.documentElement.setAttribute('data-mode', resolved);
     const observer = new IntersectionObserver(
       entries => { for (const e of entries) { if (e.isIntersecting) { setActiveId(e.target.id); break; } } },
       { rootMargin: '-100px 0px -66% 0px' }
