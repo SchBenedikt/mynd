@@ -86,7 +86,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - run: pip install uv
       - run: uv sync --locked --extra dev
-      - run: uv run playwright install --with-deps chromium
+      - run: uv run patchright install --with-deps chromium
       - run: npm ci
         working-directory: frontend
       - run: npm run build --prefix frontend
