@@ -314,7 +314,7 @@ class AutomationEngine:
             return {"success": True, "results": results, "log": log}
         except Exception as e:
             logger.exception(f"Automation {aid} fehlgeschlagen: {e}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": "Automation execution failed"}
 
     def _schedule_auto(self, auto: dict):
         from apscheduler.triggers.cron import CronTrigger

@@ -2121,23 +2121,37 @@ def list_automation_history():
     history.sort(key=lambda h: h.get('timestamp', ''), reverse=True)
     return jsonify({'success': True, 'history': history[:limit]})
 
+_SAFE_WEBHOOK_ERRORS = frozenset({
+    "Automation nicht gefunden",
+    "Automation hat keinen Webhook-Trigger",
+    "Ungültiges Webhook-Token",
+    "Automation ist deaktiviert",
+})
+
 @app.route('/api/automations/webhook/<aid>/<token>', methods=['POST'])
 def automation_webhook(aid, token):
     try:
         result = automation_engine.trigger_by_token(aid, token)
         if result.get('error'):
-            return jsonify({'success': False, 'error': result['error']}), 403
+            if result['error'] in _SAFE_WEBHOOK_ERRORS:
+                return jsonify({'success': False, 'error': result['error']}), 403
+            logger.warning('Webhook automation %s failed', aid)
+            return jsonify({'success': False, 'error': 'Automation execution failed'}), 500
         return jsonify({'success': True, 'results': result.get('results', []), 'log': result.get('log', {})})
     except Exception:
-        logger.exception(f'automation webhook ({aid}) failed')
+        logger.warning('Webhook automation %s raised an exception', aid)
         return jsonify({'success': False, 'error': 'Webhook execution failed'}), 500
 
 @app.route('/api/notifications/latest', methods=['GET'])
 def list_notifications():
-    limit = request.args.get('limit', 20, type=int)
-    notifications = automation_engine.load_notifications()
-    notifications.sort(key=lambda n: n.get('created_at', ''), reverse=True)
-    return jsonify({'success': True, 'notifications': notifications[:limit]})
+    try:
+        limit = request.args.get('limit', 20, type=int)
+        notifications = automation_engine.load_notifications()
+        notifications.sort(key=lambda n: n.get('created_at', ''), reverse=True)
+        return jsonify({'success': True, 'notifications': notifications[:limit]})
+    except Exception:
+        logger.warning('Failed to load notifications')
+        return jsonify({'success': True, 'notifications': []})
 
 @app.route('/api/notifications/read', methods=['POST'])
 def read_notifications():
