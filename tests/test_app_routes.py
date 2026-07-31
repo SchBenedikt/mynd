@@ -2,6 +2,8 @@
 
 import io
 import re
+import threading
+import time
 
 import pytest
 
@@ -361,3 +363,70 @@ class TestBackupSecurity:
         assert response.status_code == 200
         assert response.get_json()["restored"] == 0
         assert not (tmp_path / "outside.json").exists()
+
+
+def _load_main_script():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "mynd_main_script", Path(__file__).resolve().parents[1] / "app.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestModelWarmUp:
+    def test_warm_up_calls_ollama_and_handles_ok(self, monkeypatch):
+        _main = _load_main_script()
+        _ollama = _main.ollama_client
+        calls = []
+
+        def fake_chat(messages):
+            calls.append(messages)
+            return {"response": "OK"}
+
+        monkeypatch.setattr(_ollama, "chat", fake_chat)
+        _main._warm_up_model()
+        assert len(calls) == 1
+        assert calls[0][0]["content"] == "Reply only with: OK"
+
+    def test_warm_up_handles_error_result_without_raising(self, monkeypatch, caplog):
+        _main = _load_main_script()
+        _ollama = _main.ollama_client
+        monkeypatch.setattr(
+            _ollama,
+            "chat",
+            lambda messages: {"error": "model not loaded"},
+        )
+        _main._warm_up_model()
+        assert any("Model warm-up" in r.message for r in caplog.records)
+
+    def test_warm_up_handles_exception_without_raising(self, monkeypatch, caplog):
+        _main = _load_main_script()
+        _ollama = _main.ollama_client
+        def boom(messages):
+            raise RuntimeError("ollama unreachable")
+
+        monkeypatch.setattr(_ollama, "chat", boom)
+        _main._warm_up_model()
+        assert any("Model warm-up failed" in r.message for r in caplog.records)
+
+    def test_warm_up_runs_in_daemon_thread(self, monkeypatch):
+        _main = _load_main_script()
+        _ollama = _main.ollama_client
+        started = threading.Event()
+        real_chat = _ollama.chat
+
+        def slow_chat(messages):
+            started.set()
+            time.sleep(5)
+            return real_chat(messages)
+
+        monkeypatch.setattr(_ollama, "chat", slow_chat)
+        t = threading.Thread(target=_main._warm_up_model, daemon=True, name="model-warmup")
+        t.start()
+        assert started.wait(timeout=2)
+        assert t.daemon is True
+        assert t.name == "model-warmup"
+        t.join(timeout=0.1)

@@ -27,14 +27,16 @@ Advance the AI agent architecture toward general superintelligence (AGI/ASI): pl
 - LLM retry: exponential backoff (1s-16s, 5 retries) on connection errors, timeouts, HTTP 429/5xx; no retry on 400/401/403/404
 - Permission mode: reads `MYND_PERMISSION_MODE` env var (defaults to `'semi'`); no longer hardcoded to `'auto'`
 - Advanced Reasoning: `core/reasoning.py` — `tree_of_thought()` (generate multiple branches, evaluate, select best path), `reason_step_by_step()` (sequential reasoning with verification per step), `evaluate_reasoning()` (score 0-1 on clarity/correctness/completeness), `confidence_score()` (LOW/MEDIUM/HIGH with gaps); exposed as `reason_deep` and `evaluate_reasoning` tools
-- 364+ tests pass, 4 skipped (browser), Ruff clean
+- 400+ tests pass, 4 skipped (browser), Ruff clean, frontend ESLint clean
 
 ## Key Gaps to ASI
 - No multi-agent coordination (sub-agents run independently, no aggregation)
 - No recursive self-improvement (no code review + patch cycle)
 - No planning verification loop (no execute → verify → retry)
-- SSH password pipe still broken (issue #98)
 - AFFiNE v0.27.2 write endpoints return 404 (CRUD tools export Yjs binary as fallback)
+- Issue #121: sequential LLM warm-up blocks server start in app.py
+- Issue #122: AI config validation missing (empty API key, unverified model, missing embedding model)
+- Issue #123: nextcloud_tasks_query returns COMPLETED tasks — filter option missing
 
 ## Work State
 ### Completed
@@ -52,13 +54,18 @@ Advance the AI agent architecture toward general superintelligence (AGI/ASI): pl
 - **In-memory caching fix**: for reflection + skills modules (eliminates disk I/O on every call)
 - **116 new tests**: planner module (29 tests), reflection analytics (25 tests), security hardening (11 tests), security boundaries (9 tests), tool wrappers (79 tests) — 341 total
 - **Advanced Reasoning** (`core/reasoning.py`): Tree-of-Thought (parallel branches + evaluation + selection), Step-by-Step (with per-step verification), evaluation scoring, confidence analysis; exposed as `reason_deep` + `evaluate_reasoning` tools — 23 new tests
+- **PR #120**: closed all 6 open GitHub issues — SSH password via stdin pipe (no more `SSHPASS` env leak, #98), browser automation migrated to `patchright` (stealth fork, playwright fallback, #115), new Apple Reminders plugin (macOS AppleScript, #113), new iMessage plugin (send + read/search chat.db, #112), Composio verified already implemented (#111), automations extended (`ai_task` LLM steps, `notify` steps + `/api/notifications/*`, webhook trigger with secret token + `POST /api/automations/webhook/<aid>/<token>`, notify flag, frontend webhook/notify/ai_task UI, #114)
+- **Latency fixes (PR #120)**: `check_tool_support` cached 30min shared across all endpoints (was live LLM round-trip per request); `/api/ai/greeting` cached per time-period; stream sends first SSE byte before blocking web search; real proactive briefing on dashboard (`/api/assistant/briefing/current` returns calendar/email/tasks/photos overview, COMPLETED tasks filtered, 15min cache)
+- **New plugins** `data/plugins/reminders.py` (7 tools) + `data/plugins/imessage.py` (4 tools); new tests `tests/test_core_scheduler.py` (16) + `tests/test_apple_plugins.py` (13)
 
 ## CI Status
-- 364 tests pass, 4 skipped (browser), Ruff clean
+- 400 tests pass, 4 skipped (browser), Ruff clean, frontend ESLint clean
+- CI uses `uv sync --locked` (patchright, not playwright) — `uv.lock` must stay in sync
 - `python3 -m pytest --ignore=tests/test_plugin_affine.py`
 - `ruff check`
 
 ## Relevant Files
+- `core/scheduler.py`: automation engine — cron/interval/webhook triggers, `ai_task` LLM steps, `notify` steps, notifications store, webhook token generation
 - `app/agent_loop.py` (908 lines): main agent loops (sync + streaming) — reflection injection, skill injection, tool result tracking, context size enforcement, bypass logic
 - `core/llm.py`: `chat_with_tools()` + `run_tool_loop()` — LLM interaction layer with retry + backoff
 - `app/helpers.py` (17+): KnowledgeBase — hybrid search RAG with query expansion, re-ranking, context enrichment
