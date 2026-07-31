@@ -72,7 +72,7 @@ from core.plugin_base import (
     set_plugin_enabled,
     uninstall_plugin,
 )
-from core.scheduler import CRON_HELP, TRIGGER_EXAMPLES
+from core.scheduler import CRON_HELP, TRIGGER_EXAMPLES, TRIGGER_TYPES
 from core.tools import CORE_TOOLS, PERMISSION_HELP, vault_delete, vault_set, web_search
 from core.utils import call_with_timeout
 from core.vault import load_vault
@@ -84,6 +84,27 @@ load_plugins()
 _init_automation_engine()
 
 # Patch prompt_user — agent_loop.py handles PERMISSION_MODE
+
+_TOOL_SUPPORT_CACHE = {}
+_TOOL_SUPPORT_TTL = 30 * 60  # seconds
+_NO_TOOL_MODEL_KEYWORDS = tuple(k.strip().lower() for k in os.getenv('NO_TOOL_MODEL_KEYWORDS', 'phi,tinyllama').split(',') if k.strip())
+
+def _cached_tool_support(model, base_url):
+    """Cached check_tool_support — avoids a live LLM round-trip on every request."""
+    if any(k in str(model).lower() for k in _NO_TOOL_MODEL_KEYWORDS):
+        return False
+    key = f"{model}:{base_url}"
+    now = time.time()
+    cached = _TOOL_SUPPORT_CACHE.get(key)
+    if cached and now - cached[1] < _TOOL_SUPPORT_TTL:
+        return cached[0]
+    try:
+        result = check_tool_support(model, base_url)
+    except Exception:
+        logger.exception("check_tool_support failed")
+        result = True
+    _TOOL_SUPPORT_CACHE[key] = (result, now)
+    return result
 
 # ── /api/auth/* ────────────────────────────────────────────
 @app.route('/api/auth/me', methods=['GET'])
@@ -453,10 +474,7 @@ def chat():
     _store_credentials_from_message(message)
     system_prompt = _build_agent_system_prompt(message, language)
     cfg = load_ai_config()
-    model_has_tools = check_tool_support(ollama_client.model, cfg.get('base_url'))
-    _ntk = [k.strip().lower() for k in os.getenv('NO_TOOL_MODEL_KEYWORDS', 'phi,tinyllama').split(',') if k.strip()]
-    if any(k in ollama_client.model.lower() for k in _ntk):
-        model_has_tools = False
+    model_has_tools = _cached_tool_support(ollama_client.model, cfg.get('base_url'))
     no_tool_context = ""
     if not model_has_tools:
         wc_res, wc_err = call_with_timeout(web_search, (message,), {"max_results": 10}, timeout=8)
@@ -532,7 +550,8 @@ def agent_query_stream():
         return jsonify({'success': False, 'error': 'No prompt'}), 400
     _store_credentials_from_message(prompt)
     base_prompt = _build_agent_system_prompt(prompt, language)
-    source_hint = ""
+    active_model = requested_model or ollama_client.model
+    cfg = load_ai_config()
 
     def _get_web_context_safe(query, max_results):
         try:
@@ -543,44 +562,36 @@ def agent_query_stream():
         except Exception:
             return "⚠️ Web-Suche nicht verfügbar"
 
-    if preferred_source == 'web':
-        web_context = _get_web_context_safe(prompt, 10)
-        source_hint = f"\n\n⚠️ Internet-Suche aktiviert.\n<untrusted_data type=\"web_search\">\n{web_context}\n</untrusted_data>\n\n"
-    elif preferred_source == 'deep':
-        web_context = _get_web_context_safe(prompt, 15)
-        source_hint = f"\n\n⚠️ Deep Research Modus aktiviert.\n<untrusted_data type=\"deep_search\">\n{web_context}\n</untrusted_data>\n\n"
-    elif preferred_source == 'local':
-        source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
-
-    system_prompt = base_prompt + source_hint
-    active_model = requested_model or ollama_client.model
-    cfg = load_ai_config()
-
-    # Tool-support cache
-    if not hasattr(agent_query_stream, '_tool_cache'):
-        agent_query_stream._tool_cache = {}
-    cache_key = f"{active_model}:{cfg.get('base_url','')}"
-    if cache_key not in agent_query_stream._tool_cache:
-        agent_query_stream._tool_cache[cache_key] = check_tool_support(active_model, cfg.get('base_url'))
-    model_has_tools = agent_query_stream._tool_cache[cache_key]
-    _ntk = [k.strip().lower() for k in os.getenv('NO_TOOL_MODEL_KEYWORDS', 'phi,tinyllama').split(',') if k.strip()]
-    if any(k in active_model.lower() for k in _ntk):
-        model_has_tools = False
-
-    if not model_has_tools:
-        tool_list = _get_tool_names_for_prompt()
-        vault_block = _get_vault_keys_for_prompt()
-        system_prompt = (
-            f"Heute ist {datetime.now().strftime('%A, %d. %B %Y, %H:%M')}.\n\n"
-            "Du bist ein KI-Assistent. Du kannst Tools über das folgende XML-Format aufrufen:\n\n"
-            "<tool_code><tool name=\"TOOL_NAME\" arg1=\"wert1\" arg2=\"wert2\"/></tool_code>\n\n"
-            f"Verfügbare Tools:\n{tool_list}\n\n"
-            f"{vault_block}"
-            f"- Answer in the user's selected language ({language}).\n"
-        )
-
     def generate():
         yield f"data: {json.dumps({'type': 'status', 'message': '⏳ Starte...'})}\n\n"
+        # Everything potentially blocking runs AFTER the first SSE byte so the
+        # frontend sees an immediate connection.
+        if preferred_source == 'web':
+            web_context = _get_web_context_safe(prompt, 10)
+            source_hint = f"\n\n⚠️ Internet-Suche aktiviert.\n<untrusted_data type=\"web_search\">\n{web_context}\n</untrusted_data>\n\n"
+        elif preferred_source == 'deep':
+            web_context = _get_web_context_safe(prompt, 15)
+            source_hint = f"\n\n⚠️ Deep Research Modus aktiviert.\n<untrusted_data type=\"deep_search\">\n{web_context}\n</untrusted_data>\n\n"
+        elif preferred_source == 'local':
+            source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
+        else:
+            source_hint = ""
+
+        system_prompt = base_prompt + source_hint
+
+        model_has_tools = _cached_tool_support(active_model, cfg.get('base_url'))
+        if not model_has_tools:
+            tool_list = _get_tool_names_for_prompt()
+            vault_block = _get_vault_keys_for_prompt()
+            system_prompt = (
+                f"Heute ist {datetime.now().strftime('%A, %d. %B %Y, %H:%M')}.\n\n"
+                "Du bist ein KI-Assistent. Du kannst Tools über das folgende XML-Format aufrufen:\n\n"
+                "<tool_code><tool name=\"TOOL_NAME\" arg1=\"wert1\" arg2=\"wert2\"/></tool_code>\n\n"
+                f"Verfügbare Tools:\n{tool_list}\n\n"
+                f"{vault_block}"
+                f"- Answer in the user's selected language ({language}).\n"
+            )
+
         agent_tools = [] if not model_has_tools else None
         for event in web_agent_loop_stream(active_model, prompt, system_prompt, max_rounds=100, tools=agent_tools, owner=owner):
             yield f"data: {json.dumps(event)}\n\n"
@@ -860,7 +871,7 @@ def api_ai_check_models():
         return jsonify({'error': 'Cannot fetch models from ' + base_url}), 502
     results = []
     for model in all_models:
-        supported = check_tool_support(model, base_url)
+        supported = _cached_tool_support(model, base_url)
         results.append({'model': model, 'tool_support': supported})
     return jsonify({'base_url': base_url, 'results': results})
 
@@ -1406,11 +1417,82 @@ def api_references():
     return jsonify({'success': True, 'refs': refs})
 
 # ── Stubs (501) ────────────────────────────────────────────
+_BRIEFING_CACHE = {}
+_BRIEFING_TTL = 15 * 60  # seconds
+
+def _gather_briefing_items():
+    """Collect today's calendar, email, tasks and photos into dashboard items.
+
+    Returns a banner-friendly overview item first, followed by detail items.
+    Photo sections are reduced to a short text line (their markdown thumbnails
+    render on the photos dashboard, not in the banner).
+    """
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    sections = []
+    photo_count = 0
+    try:
+        cal, _ = call_with_timeout(_nc_module.nextcloud_caldav_query, (today_str.replace("-", ""), today_str.replace("-", "")), timeout=10)
+        if cal and "❌" not in cal:
+            if "keine" in cal.lower():
+                sections.append({"key": "calendar", "title": "📅 Termine heute", "content": "Keine Termine."})
+            else:
+                sections.append({"key": "calendar", "title": "📅 Termine heute", "content": cal[:2000]})
+    except Exception:
+        pass
+    try:
+        accounts = _email_module._list_accounts()
+        if accounts and "❌" not in str(accounts) and accounts != "Keine E-Mail-Konten konfiguriert.":
+            unread, _ = call_with_timeout(_email_module.email_search, (), {"query": "UNSEEN", "max_results": 10}, timeout=8)
+            if unread and "❌" not in unread and "(keine)" not in unread:
+                sections.append({"key": "unread_emails", "title": "📧 Ungelesene E-Mails", "content": unread[:2000]})
+            unanswered, _ = call_with_timeout(_email_module.email_search, (), {"query": "UNANSWERED", "max_results": 10}, timeout=8)
+            if unanswered and "❌" not in unanswered and "(keine)" not in unanswered:
+                sections.append({"key": "unanswered_emails", "title": "✉️ Unbeantwortete E-Mails", "content": unanswered[:2000]})
+    except Exception:
+        pass
+    try:
+        tasks, _ = call_with_timeout(_nc_module.nextcloud_tasks_query, timeout=10)
+        if tasks and "❌" not in tasks and "(keine)" not in tasks:
+            open_lines = [ln for ln in tasks.splitlines() if "Status: COMPLETED" not in ln]
+            if open_lines:
+                sections.append({"key": "tasks", "title": "✅ Offene Aufgaben", "content": "\n".join(open_lines)[:2000]})
+    except Exception:
+        pass
+    try:
+        photos, _ = call_with_timeout(_immich_module.immich_search_photos, (), {"date_from": today_str, "date_to": today_str, "size": 5}, timeout=10)
+        if photos and "❌" not in photos and "(keine Ergebnisse)" not in photos:
+            photo_count = photos.count("immich/thumbnail")
+    except Exception:
+        pass
+
+    items = []
+    if sections:
+        summary_lines = [f"{s['title']}: {s['content'].splitlines()[0][:80]}" for s in sections]
+        if photo_count:
+            summary_lines.append(f"📸 {photo_count} Fotos heute")
+        items.append({
+            "key": "overview",
+            "title": "☀️ Dein Tagesüberblick",
+            "content": "\n".join(summary_lines),
+        })
+    if photo_count:
+        items.append({"key": "photos", "title": f"📸 {photo_count} Fotos heute", "content": f"{photo_count} Fotos heute aufgenommen."})
+    items.extend(sections)
+    return items
+
 @app.route('/api/assistant/briefing/current', methods=['GET'])
 def assistant_briefing():
-    # Proactive briefings are optional; an empty, successful response keeps the
-    # dashboard truthful until a scheduler has produced actionable items.
-    return jsonify({'success': True, 'items': [], 'generated_at': datetime.now(UTC).isoformat()})
+    force = request.args.get('force') == 'true'
+    now_ts = time.time()
+    cached = _BRIEFING_CACHE.get('items')
+    if not force and cached is not None and now_ts - _BRIEFING_CACHE.get('ts', 0) < _BRIEFING_TTL:
+        return jsonify({'success': True, 'items': cached, 'generated_at': _BRIEFING_CACHE.get('generated_at')})
+    items = _gather_briefing_items()
+    _BRIEFING_CACHE['items'] = items
+    _BRIEFING_CACHE['ts'] = now_ts
+    _BRIEFING_CACHE['generated_at'] = datetime.now(UTC).isoformat()
+    return jsonify({'success': True, 'items': items, 'generated_at': _BRIEFING_CACHE['generated_at']})
 
 @app.route('/api/registry/email/config', methods=['GET'])
 def registry_email_config():
@@ -1879,6 +1961,9 @@ def suggestions_query():
         defaults_en = ["What's on my calendar today?", 'Show me my tasks for today', "What's new in my files?"]
         return jsonify({'success': True, 'suggestions': defaults_de if lang == 'de' else defaults_en, 'time_period': tp, 'personalized': False})
 
+_GREETING_CACHE = {}
+_GREETING_CACHE_PERIODS = {'morning', 'afternoon', 'evening', 'night'}
+
 @app.route('/api/ai/greeting', methods=['POST'])
 def ai_greeting():
     data = request.json or {}
@@ -1890,6 +1975,10 @@ def ai_greeting():
     elif hour < 12: tp = 'morning'
     elif hour < 17: tp = 'afternoon'
     else: tp = 'evening'
+    cache_key = f"{tp}:{lang}:{name}"
+    cached = _GREETING_CACHE.get(cache_key)
+    if cached and cached[0] == now.strftime('%Y-%m-%d'):
+        return jsonify({'success': True, 'greeting': cached[1]})
     weekdays_de = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag']
     weekdays_en = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
     wd = (weekdays_de if lang == 'de' else weekdays_en)[now.weekday()]
@@ -1900,11 +1989,12 @@ def ai_greeting():
         resp = chat_with_tools(ollama_client.model, [{"role": "user", "content": prompt}], [])
         content = (resp.get("message") or resp).get("content", "").strip()
         if not content: raise ValueError("empty")
-        return jsonify({'success': True, 'greeting': content})
     except Exception:
         greetings = {'morning': 'Guten Morgen' if lang == 'de' else 'Good morning', 'afternoon': 'Guten Tag' if lang == 'de' else 'Good afternoon', 'evening': 'Guten Abend' if lang == 'de' else 'Good evening', 'night': 'Hallo' if lang == 'de' else 'Hello'}
         base = greetings.get(tp, 'Hallo' if lang == 'de' else 'Hello')
-        return jsonify({'success': True, 'greeting': f"{base}, {name}" if name else base})
+        content = f"{base}, {name}" if name else base
+    _GREETING_CACHE[cache_key] = (now.strftime('%Y-%m-%d'), content)
+    return jsonify({'success': True, 'greeting': content})
 
 # ── /api/backup/* ──────────────────────────────────────────
 @app.route('/api/backup/export', methods=['GET'])
@@ -2031,6 +2121,43 @@ def list_automation_history():
     history.sort(key=lambda h: h.get('timestamp', ''), reverse=True)
     return jsonify({'success': True, 'history': history[:limit]})
 
+@app.route('/api/automations/webhook/<aid>/<token>', methods=['POST'])
+def automation_webhook(aid, token):
+    try:
+        result = automation_engine.trigger_by_token(aid, token)
+        if result.get('error'):
+            return jsonify({'success': False, 'error': result['error']}), 403
+        return jsonify({'success': True, 'results': result.get('results', []), 'log': result.get('log', {})})
+    except Exception:
+        logger.exception(f'automation webhook ({aid}) failed')
+        return jsonify({'success': False, 'error': 'Webhook execution failed'}), 500
+
+@app.route('/api/notifications/latest', methods=['GET'])
+def list_notifications():
+    limit = request.args.get('limit', 20, type=int)
+    notifications = automation_engine.load_notifications()
+    notifications.sort(key=lambda n: n.get('created_at', ''), reverse=True)
+    return jsonify({'success': True, 'notifications': notifications[:limit]})
+
+@app.route('/api/notifications/read', methods=['POST'])
+def read_notifications():
+    data = request.json or {}
+    ids = data.get('ids', [])
+    if not isinstance(ids, list):
+        return jsonify({'success': False, 'error': 'ids must be an array'}), 400
+    notifications = automation_engine.load_notifications()
+    id_set = set(str(i) for i in ids)
+    for n in notifications:
+        if str(n.get('id')) in id_set:
+            n['read'] = True
+    automation_engine.save_notifications(notifications)
+    return jsonify({'success': True})
+
+@app.route('/api/notifications/clear', methods=['POST'])
+def clear_notifications():
+    automation_engine.save_notifications([])
+    return jsonify({'success': True})
+
 @app.route('/api/automations/schema', methods=['GET'])
 def automation_schema():
     plugin_tools, _ = get_all_tools()
@@ -2056,7 +2183,8 @@ def automation_schema():
                 tool_groups[tname] = pname
     return jsonify({
         'success': True, 'tools': all_tools, 'tool_groups': tool_groups,
-        'plugins': plugins_info, 'cron_help': CRON_HELP, 'trigger_examples': TRIGGER_EXAMPLES
+        'plugins': plugins_info, 'cron_help': CRON_HELP, 'trigger_examples': TRIGGER_EXAMPLES,
+        'trigger_types': sorted(TRIGGER_TYPES)
     })
 
 # ── /api/plugins/* ─────────────────────────────────────────
@@ -2103,39 +2231,15 @@ def tts_unavailable():
 def agent_briefing():
     try:
         now = datetime.now()
-        today_str = now.strftime("%Y-%m-%d")
-        date_str = now.strftime("%A, %d. %B %Y")
-        time_str = now.strftime("%H:%M")
-        briefing = {"date": date_str, "time": time_str, "sections": []}
-        try:
-            cal, _ = call_with_timeout(_nc_module.nextcloud_caldav_query, (today_str.replace("-",""), today_str.replace("-","")), timeout=10)
-            if cal and "❌" not in cal and "(keine)" not in cal:
-                briefing["sections"].append({"title": "📅 Termine heute", "content": cal[:2000]})
-        except Exception:
-            pass
-        try:
-            accounts = _email_module._list_accounts()
-            if accounts and "❌" not in str(accounts) and accounts != "Keine E-Mail-Konten konfiguriert.":
-                unread, _ = call_with_timeout(_email_module.email_search, (), {"query": "UNSEEN", "max_results": 10}, timeout=8)
-                if unread and "❌" not in unread and "(keine)" not in unread:
-                    briefing["sections"].append({"title": "📧 Ungelesene E-Mails", "content": unread[:2000]})
-                unanswered, _ = call_with_timeout(_email_module.email_search, (), {"query": "UNANSWERED", "max_results": 10}, timeout=8)
-                if unanswered and "❌" not in unanswered and "(keine)" not in unanswered:
-                    briefing["sections"].append({"title": "✉️ Unbeantwortete E-Mails", "content": unanswered[:2000]})
-        except Exception:
-            pass
-        try:
-            tasks, _ = call_with_timeout(_nc_module.nextcloud_tasks_query, timeout=10)
-            if tasks and "❌" not in tasks and "(keine)" not in tasks:
-                briefing["sections"].append({"title": "✅ Offene Aufgaben", "content": tasks[:2000]})
-        except Exception:
-            pass
-        try:
-            photos, _ = call_with_timeout(_immich_module.immich_search_photos, (), {"date_from": today_str, "date_to": today_str, "size": 5}, timeout=10)
-            if photos and "❌" not in photos and "(keine Ergebnisse)" not in photos:
-                briefing["sections"].append({"title": "📸 Heutige Fotos", "content": photos[:2000]})
-        except Exception:
-            pass
+        items = _gather_briefing_items()
+        _BRIEFING_CACHE['items'] = items
+        _BRIEFING_CACHE['ts'] = time.time()
+        _BRIEFING_CACHE['generated_at'] = now.isoformat()
+        briefing = {
+            "date": now.strftime("%A, %d. %B %Y"),
+            "time": now.strftime("%H:%M"),
+            "sections": [{"title": i["title"], "content": i["content"]} for i in items],
+        }
         return jsonify({"success": True, "briefing": briefing})
     except Exception:
         return jsonify({"success": False, "error": "Request failed"})

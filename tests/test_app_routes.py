@@ -228,6 +228,63 @@ class TestBriefingAPI:
         resp = client.get("/api/agent/briefing")
         assert resp.status_code in (200, 500, 502)
 
+    def test_assistant_briefing_returns_items(self, client, monkeypatch):
+        resp = client.get("/api/assistant/briefing/current")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert isinstance(data["items"], list)
+        assert "generated_at" in data
+
+    def test_assistant_briefing_forwards_gathered_items(self, client, monkeypatch):
+        fake_items = [{"key": "calendar", "title": "📅 Termine", "content": "10:00 Meeting"}]
+        monkeypatch.setattr(app_routes, "_gather_briefing_items", lambda: fake_items)
+        monkeypatch.setattr(app_routes, "_BRIEFING_CACHE", {})
+        resp = client.get("/api/assistant/briefing/current")
+        assert resp.status_code == 200
+        assert resp.get_json()["items"] == fake_items
+
+    def test_assistant_briefing_force_refreshes(self, client, monkeypatch):
+        calls = []
+        monkeypatch.setattr(app_routes, "_gather_briefing_items",
+                            lambda: calls.append(1) or [{"key": "x", "title": "T", "content": "C"}])
+        monkeypatch.setattr(app_routes, "_BRIEFING_CACHE", {})
+        client.get("/api/assistant/briefing/current?force=true")
+        client.get("/api/assistant/briefing/current?force=true")
+        assert len(calls) == 2
+
+    def test_greeting_cached_per_period(self, client, monkeypatch):
+        calls = []
+        monkeypatch.setattr(app_routes.ollama_client, "model", "test-model")
+        monkeypatch.setattr(app_routes, "_GREETING_CACHE", {})
+        monkeypatch.setattr("core.llm.chat_with_tools",
+                            lambda *a, **k: (calls.append(1), {"message": {"content": "Hallo"}})[1])
+        resp = client.post("/api/ai/greeting", json={"language": "de"})
+        assert resp.status_code == 200
+        resp2 = client.post("/api/ai/greeting", json={"language": "de"})
+        assert resp2.get_json()["greeting"] == "Hallo"
+        assert len(calls) == 1
+
+    def test_gather_briefing_filters_completed_tasks(self, monkeypatch):
+        monkeypatch.setattr(
+            app_routes._nc_module, "nextcloud_caldav_query",
+            lambda *a, **k: ("10:00 Meeting", None))
+        monkeypatch.setattr(app_routes._email_module, "_list_accounts",
+                            lambda: "Keine E-Mail-Konten konfiguriert.")
+        monkeypatch.setattr(
+            app_routes._nc_module, "nextcloud_tasks_query",
+            lambda: "📌 [Schule] Offen | Fällig: ? | Status: NEEDS-ACTION\n📌 [Schule] Alt | Fällig: ? | Status: COMPLETED")
+        monkeypatch.setattr(
+            app_routes._immich_module, "immich_search_photos",
+            lambda *a, **k: ("(keine Ergebnisse)", None))
+        items = app_routes._gather_briefing_items()
+        keys = [i["key"] for i in items]
+        assert keys[0] == "overview"
+        tasks_item = next(i for i in items if i["key"] == "tasks")
+        assert "COMPLETED" not in tasks_item["content"]
+        assert "Offen" in tasks_item["content"]
+        assert "Status: COMPLETED" not in items[0]["content"]
+
 
 class TestImmichAPI:
     def test_immich_config_missing_key(self, client):

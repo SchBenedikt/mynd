@@ -683,3 +683,51 @@ class TestThink:
         with patch("core.tools.create_plan", return_value="MOCK PLAN"):
             result = think("analysiere die Architektur")
             assert "Architektur" in result
+
+
+class TestSSHSecurity:
+    def test_ssh_password_not_in_env_and_piped_stdin(self):
+        from core import tools as _ct
+
+        with patch.object(_ct, "PERMISSION_MODE", "auto"):
+            self._run_ssh_case(_ct)
+        captured = self._ssh_captured
+        assert captured["cmd"][0] == "sshpass"
+        assert "-e" not in captured["cmd"]
+        assert captured["env"].get("SSHPASS") is None
+        assert "SSHPASS" not in captured["env"]
+        assert captured["input"] == "sup3rsecret\n"
+
+    def _run_ssh_case(self, _ct, password="sup3rsecret", stdout="hello"):
+        from types import SimpleNamespace
+
+        self._ssh_captured = {}
+        def fake_run(cmd, **kwargs):
+            self._ssh_captured["cmd"] = cmd
+            self._ssh_captured["env"] = kwargs.get("env")
+            self._ssh_captured["input"] = kwargs.get("input")
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        with patch("core.tools.subprocess.run", side_effect=fake_run):
+            result = _ct.execute_ssh(host="192.0.2.10", user="root", command="uptime",
+                                     password=password, port=22)
+        assert stdout in result
+
+    def test_ssh_without_password_sends_no_env_cleanup(self):
+        from types import SimpleNamespace
+
+        from core import tools as _ct
+
+        self._ssh_captured = {}
+        def fake_run(cmd, **kwargs):
+            self._ssh_captured["env"] = kwargs.get("env")
+            self._ssh_captured["input"] = kwargs.get("input")
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        with patch("core.tools.subprocess.run", side_effect=fake_run):
+            with patch.object(_ct, "PERMISSION_MODE", "auto"):
+                result = _ct.execute_ssh(host="192.0.2.11", user="root", command="uptime")
+
+        assert "ok" in result
+        assert self._ssh_captured["input"] is None
+        assert self._ssh_captured["env"].get("SSHPASS") is None

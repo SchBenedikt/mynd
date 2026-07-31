@@ -11,6 +11,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / 'data'
 AUTOMATIONS_FILE = DATA_DIR / 'automations.json'
 HISTORY_FILE = DATA_DIR / 'automations_history.json'
+NOTIFICATIONS_FILE = DATA_DIR / 'notifications.json'
+
+TRIGGER_TYPES = {"cron", "interval", "webhook"}
 
 CRON_HELP = {
     "minute": "0-59 (z.B. 0 = volle Stunde, */5 = alle 5 Min.)",
@@ -79,6 +82,7 @@ class AutomationEngine:
         self.data_dir = data_dir or DATA_DIR
         self.automations_file = self.data_dir / 'automations.json'
         self.history_file = self.data_dir / 'automations_history.json'
+        self.notifications_file = self.data_dir / 'notifications.json'
         self._running = False
         self._mutex = threading.Lock()
         self._scheduler = None
@@ -95,6 +99,26 @@ class AutomationEngine:
     def save_history(self, history):
         _save_json(self.history_file, history)
 
+    def load_notifications(self):
+        return _load_json(self.notifications_file, [])
+
+    def save_notifications(self, notifications):
+        _save_json(self.notifications_file, notifications)
+
+    def add_notification(self, title, content=""):
+        notifications = self.load_notifications()
+        entry = {
+            "id": f"{int(datetime.now().timestamp() * 1000)}",
+            "title": title,
+            "content": content,
+            "created_at": datetime.now().isoformat(),
+            "read": False,
+        }
+        notifications.append(entry)
+        notifications[:] = notifications[-100:]
+        self.save_notifications(notifications)
+        return entry
+
     def get_automation(self, aid: str) -> dict | None:
         for a in self.load_automations():
             if a.get("id") == aid:
@@ -102,6 +126,8 @@ class AutomationEngine:
         return None
 
     def add_automation(self, auto: dict):
+        if auto.get("trigger", {}).get("type") == "webhook" and not auto.get("webhook_token"):
+            auto["webhook_token"] = self.generate_webhook_token()
         automations = self.load_automations()
         automations.append(auto)
         self.save_automations(automations)
@@ -174,6 +200,25 @@ class AutomationEngine:
                 })
                 continue
             resolved_params = self._resolve_params(params, env)
+            if tool_name == "ai_task":
+                result, err = self._run_ai_step(resolved_params, results)
+                if err:
+                    results.append({"step": tool_name, "status": "error", "result": err})
+                    env[f"step_{len(results)-1}"] = err
+                    break
+                results.append({"step": tool_name, "status": "success", "result": str(result)})
+                env[f"step_{len(results)-1}"] = str(result)
+                env[tool_name + "_result"] = str(result)
+                continue
+            if tool_name == "notify":
+                title = str(resolved_params.get("title", "MYND Automation"))
+                content = str(resolved_params.get("content", ""))
+                self.add_notification(title, content)
+                result = f"✅ Benachrichtigung gespeichert: {title}"
+                results.append({"step": tool_name, "status": "success", "result": result})
+                env[f"step_{len(results)-1}"] = result
+                env[tool_name + "_result"] = result
+                continue
             func = self.tool_map.get(tool_name)
             if not func:
                 raise ValueError(f"Unbekanntes Tool: {tool_name}")
@@ -188,6 +233,56 @@ class AutomationEngine:
                 env[f"step_{len(results)-1}"] = err
                 break
         return results
+
+    def _run_ai_step(self, params, results):
+        """Execute an 'ai_task' step: LLM summarizes/analyzes prior step results."""
+        prompt = str(params.get("prompt", "")).strip()
+        if not prompt:
+            return None, "❌ ai_task braucht einen prompt"
+        context_lines = [
+            f"### Schritt {i + 1}: {r.get('step')}\n{r.get('result')}"
+            for i, r in enumerate(results)
+            if r.get("status") == "success"
+        ]
+        if context_lines:
+            prompt += "\n\nKontext aus vorherigen Schritten:\n" + "\n\n".join(context_lines)
+        language = str(params.get("language", "de"))
+        prompt += f"\n\nAntworte in {language}."
+        model = str(params.get("model", "")).strip() or self._default_model()
+        try:
+            from core.llm import chat_with_tools
+            resp = chat_with_tools(model, [{"role": "user", "content": prompt}], [])
+            content = (resp.get("message") or resp).get("content", "").strip()
+            if not content:
+                return None, "❌ LLM lieferte eine leere Antwort"
+            return content, None
+        except Exception as e:
+            return None, f"❌ AI-Schritt fehlgeschlagen: {e}"
+
+    @staticmethod
+    def _default_model():
+        try:
+            from app.ollama_client import ollama_client
+            return ollama_client.model
+        except Exception:
+            return ""
+
+    def trigger_by_token(self, aid: str, token: str) -> dict:
+        """Trigger an automation via its webhook secret token."""
+        auto = self.get_automation(aid)
+        if not auto:
+            return {"success": False, "error": "Automation nicht gefunden"}
+        if auto.get("trigger", {}).get("type") != "webhook":
+            return {"success": False, "error": "Automation hat keinen Webhook-Trigger"}
+        if not auto.get("webhook_token") or auto.get("webhook_token") != token:
+            return {"success": False, "error": "Ungültiges Webhook-Token"}
+        if not auto.get("enabled", True):
+            return {"success": False, "error": "Automation ist deaktiviert"}
+        return self.run_automation(aid)
+
+    def generate_webhook_token(self):
+        import secrets
+        return secrets.token_urlsafe(24)
 
     def run_automation(self, aid: str) -> dict:
         auto = self.get_automation(aid)
@@ -209,6 +304,13 @@ class AutomationEngine:
             if len(history) > 500:
                 history = history[-500:]
             self.save_history(history)
+            if auto.get("notify", False):
+                summary_lines = [
+                    f"  {'✅' if r.get('status') == 'success' else '⏭' if r.get('status') == 'skipped' else '❌'} {r.get('step')}: {str(r.get('result', ''))[:200]}"
+                    for r in results
+                ]
+                title = f"{'✅' if success else '⚠️'} Automation: {auto.get('name', aid)}"
+                self.add_notification(title, "\n".join(summary_lines))
             return {"success": True, "results": results, "log": log}
         except Exception as e:
             logger.exception(f"Automation {aid} fehlgeschlagen: {e}")
@@ -222,6 +324,10 @@ class AutomationEngine:
         trigger_cfg = auto.get("trigger", {})
         ttype = trigger_cfg.get("type", "cron")
 
+        if ttype == "webhook":
+            # Webhook automations run on demand via trigger_by_token(), not scheduled.
+            logger.info(f"Automation '{auto.get('name', aid)}' läuft über Webhook (nicht geplant)")
+            return
         if ttype == "cron":
             trigger = CronTrigger(
                 year=trigger_cfg.get("year"),

@@ -367,32 +367,35 @@ def execute_ssh(host="", command="", user="", port=22, key="", password="", prof
             return "❌ Ungültiger Befehl"
         cmd_parts = shlex.split(validated)
 
+        ssh_base = ['ssh', '-o', 'StrictHostKeyChecking=accept-new',
+                    '-o', 'UserKnownHostsFile=/dev/null',
+                    '-p', str(port), f'{user}@{host}']
         if key:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.key', delete=False) as f:
                 f.write(key)
                 keyfile = f.name
             os.chmod(keyfile, 0o600)
             ssh_cmd = ['ssh', '-i', keyfile, '-o', 'StrictHostKeyChecking=accept-new',
-                       # TODO: Use proper known_hosts management instead of /dev/null
                        '-o', 'UserKnownHostsFile=/dev/null',
                        '-p', str(port), f'{user}@{host}'] + cmd_parts
         elif password:
-            ssh_cmd = ['sshpass', '-e', 'ssh', '-o', 'StrictHostKeyChecking=accept-new',
+            # Pass the password via sshpass stdin (pipe) instead of the SSHPASS
+            # environment variable, which is readable from /proc/<pid>/environ.
+            ssh_cmd = ['sshpass', 'ssh', '-o', 'StrictHostKeyChecking=accept-new',
                        '-o', 'UserKnownHostsFile=/dev/null',
                        '-p', str(port), f'{user}@{host}'] + cmd_parts
         else:
-            ssh_cmd = ['ssh', '-o', 'StrictHostKeyChecking=accept-new',
-                       '-o', 'UserKnownHostsFile=/dev/null',
-                       '-p', str(port), f'{user}@{host}'] + cmd_parts
+            ssh_cmd = ssh_base + cmd_parts
 
-        ssh_env = {**os.environ, 'SSHPASS': password} if password else None
-        r = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=60, env=ssh_env)
+        # Never leak the password into the subprocess environment.
+        ssh_env = dict(os.environ)
+        ssh_env.pop('SSHPASS', None)
+        ssh_input = (password + '\n') if password else None
+        r = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=60, env=ssh_env, input=ssh_input)
         if key and password and r.returncode != 0:
             first_err = (r.stderr or r.stdout or "").strip()
-            password_cmd = ['sshpass', '-e', 'ssh', '-o', 'StrictHostKeyChecking=accept-new',
-                            '-o', 'UserKnownHostsFile=/dev/null',
-                            '-p', str(port), f'{user}@{host}'] + cmd_parts
-            r = subprocess.run(password_cmd, capture_output=True, text=True, timeout=60, env=ssh_env)
+            password_cmd = ['sshpass', 'ssh'] + ssh_base[1:]
+            r = subprocess.run(password_cmd, capture_output=True, text=True, timeout=60, env=ssh_env, input=password + '\n')
             if not (r.stdout or r.stderr).strip() and first_err:
                 r.stderr = first_err
         out = r.stdout.strip()[:5000] if r.stdout.strip() else r.stderr.strip()[:2000]
