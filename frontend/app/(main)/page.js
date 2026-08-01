@@ -524,7 +524,7 @@ export default function HomePage() {
   const loadProactiveBriefings = useCallback(async (force = false) => {
     try {
       const briefingUrl = force ? `${getApiBase()}/api/assistant/briefing/current?force=true` : `${getApiBase()}/api/assistant/briefing/current`;
-      const res = await fetch(briefingUrl);
+      const res = await apiFetch(briefingUrl);
       const data = await safeReadJson(res);
       if (!res.ok || data?.success === false) return;
       const items = Array.isArray(data?.items) ? data.items : [];

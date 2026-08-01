@@ -119,7 +119,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
       setLoading(true);
       setError('');
       try {
-        const res = await fetch(fetchUrl);
+        const res = await apiFetch(fetchUrl);
         const data = await res.json();
         if (!res.ok || data?.success === false) {
           throw new Error(data?.error || `Request failed with status ${res.status}`);
@@ -211,7 +211,7 @@ export default function ContextDataCard({ card, language: uiLanguage, onQueryAct
   };
 
   const refreshCurrent = async () => {
-    const res = await fetch(fetchUrl);
+    const res = await apiFetch(fetchUrl);
     const data = await res.json();
     if (!res.ok || data?.success === false) {
       throw new Error(data?.error || `Request failed with status ${res.status}`);
