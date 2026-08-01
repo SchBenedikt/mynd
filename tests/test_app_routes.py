@@ -480,3 +480,60 @@ class TestOllamaClient410:
         result = client.chat([{"role": "user", "content": "hi"}])
         assert result.get("error") and "entladen" in result["error"]
 
+
+class TestResolveActiveModel:
+    def _clear_model_cache(self):
+        app_routes._MODELS_CACHE.clear()
+
+    def test_no_requested_model_uses_configured(self, monkeypatch):
+        self._clear_model_cache()
+        cfg = {"provider": "ollama", "model": "gemma4:cloud", "base_url": "http://127.0.0.1:11434"}
+        monkeypatch.setattr(app_routes.ollama_client, "model", "gemma3:latest")
+        assert app_routes._resolve_active_model("", cfg) == "gemma4:cloud"
+
+    def test_requested_equals_configured_short_circuits(self, monkeypatch):
+        self._clear_model_cache()
+        cfg = {"provider": "ollama", "model": "gemma4:cloud", "base_url": "http://127.0.0.1:11434"}
+        monkeypatch.setattr(app_routes.ollama_client, "model", "gemma3:latest")
+        assert app_routes._resolve_active_model("gemma4:cloud", cfg) == "gemma4:cloud"
+
+    def test_requested_available_is_used(self, monkeypatch):
+        self._clear_model_cache()
+        cfg = {"provider": "ollama", "model": "gemma4:cloud", "base_url": "http://127.0.0.1:11434"}
+        monkeypatch.setattr(app_routes.ollama_client, "model", "gemma3:latest")
+        monkeypatch.setattr(
+            app_routes.ollama_client, "list_models",
+            lambda: ["gemma3:latest", "qwen3.6:27b"],
+        )
+        assert app_routes._resolve_active_model("qwen3.6:27b", cfg) == "qwen3.6:27b"
+
+    def test_requested_missing_falls_back_to_configured(self, monkeypatch):
+        self._clear_model_cache()
+        cfg = {"provider": "ollama", "model": "gemma4:cloud", "base_url": "http://127.0.0.1:11434"}
+        monkeypatch.setattr(app_routes.ollama_client, "model", "gemma3:latest")
+        monkeypatch.setattr(
+            app_routes.ollama_client, "list_models",
+            lambda: ["gemma3:latest"],
+        )
+        assert app_routes._resolve_active_model("minimax-m2.5:cloud", cfg) == "gemma4:cloud"
+
+    def test_non_ollama_provider_never_consults_model_list(self, monkeypatch):
+        self._clear_model_cache()
+        cfg = {"provider": "openai", "model": "gpt-4o", "base_url": "https://api.openai.com"}
+        monkeypatch.setattr(app_routes.ollama_client, "model", "gemma3:latest")
+        monkeypatch.setattr(
+            app_routes.ollama_client, "list_models",
+            lambda: (_ for _ in ()).throw(AssertionError("list_models must not be called")),
+        )
+        assert app_routes._resolve_active_model("gpt-4o", cfg) == "gpt-4o"
+
+    def test_non_ollama_provider_requested_model_passed_through(self, monkeypatch):
+        self._clear_model_cache()
+        cfg = {"provider": "openai", "model": "gpt-4o", "base_url": "https://api.openai.com"}
+        monkeypatch.setattr(app_routes.ollama_client, "model", "gemma3:latest")
+        monkeypatch.setattr(
+            app_routes.ollama_client, "list_models",
+            lambda: (_ for _ in ()).throw(AssertionError("list_models must not be called")),
+        )
+        assert app_routes._resolve_active_model("gpt-4o-mini", cfg) == "gpt-4o-mini"
+

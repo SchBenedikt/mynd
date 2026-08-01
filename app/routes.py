@@ -93,9 +93,9 @@ _MODELS_CACHE = {}
 _MODELS_TTL = 60  # seconds
 
 
-def _available_models():
+def _available_models(base_url):
     """Short-cached set of models currently known to Ollama."""
-    key = f"{ollama_client.base_url}:{ollama_client.model}"
+    key = base_url
     now = time.time()
     cached = _MODELS_CACHE.get(key)
     if cached and now - cached[1] < _MODELS_TTL:
@@ -105,19 +105,23 @@ def _available_models():
     return models
 
 
-def _resolve_active_model(requested):
+def _resolve_active_model(requested, cfg):
     """Use the requested model if it is actually available, else fall back to
-    the configured model. Prevents e.g. 410 Gone for retired/removed models."""
-    if not requested or requested == ollama_client.model:
-        return ollama_client.model
-    available = _available_models()
+    the configured model. Prevents e.g. 410 Gone for retired/removed models.
+    Only consults Ollama's model list for the ollama provider."""
+    configured = str(cfg.get('model') or ollama_client.model)
+    if not requested or requested == configured:
+        return configured
+    if cfg.get('provider') != 'ollama':
+        return requested
+    available = _available_models(str(cfg.get('base_url') or ollama_client.base_url))
     if available and requested in available:
         return requested
     logger.warning(
         'Requested model %r is not available – falling back to %r',
-        requested, ollama_client.model,
+        requested, configured,
     )
-    return ollama_client.model
+    return configured
 
 def _cached_tool_support(model, base_url):
     """Cached check_tool_support — avoids a live LLM round-trip on every request."""
@@ -580,8 +584,8 @@ def agent_query_stream():
         return jsonify({'success': False, 'error': 'No prompt'}), 400
     _store_credentials_from_message(prompt)
     base_prompt = _build_agent_system_prompt(prompt, language)
-    active_model = _resolve_active_model(requested_model)
     cfg = load_ai_config()
+    active_model = _resolve_active_model(requested_model, cfg)
 
     def _get_web_context_safe(query, max_results):
         try:
@@ -654,7 +658,8 @@ def agent_query():
     elif preferred_source == 'local':
         source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
     system_prompt = base_prompt + source_hint
-    active_model = _resolve_active_model(requested_model)
+    cfg = load_ai_config()
+    active_model = _resolve_active_model(requested_model, cfg)
     try:
         content, history, needs_input, research_stats = web_agent_loop(
             active_model, prompt, system_prompt, max_rounds=100, owner=request.current_user
