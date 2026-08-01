@@ -162,6 +162,10 @@ export default function LandingPage() {
   const [lang, setLang] = useState('en');
   const [active, setActive] = useState(0);
   const [expandedInt, setExpandedInt] = useState(null);
+  const [demoStep, setDemoStep] = useState(0);          // number of visible tool rows
+  const [demoSources, setDemoSources] = useState(false); // sources revealed?
+  const [typed, setTyped] = useState('');                // typewriter text of answer
+  const [playing, setPlaying] = useState(true);
 
   useEffect(() => {
     try {
@@ -176,11 +180,35 @@ export default function LandingPage() {
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setActive((prev) => (prev + 1) % SCENARIOS.length);
-    }, 6000);
-    return () => clearInterval(id);
-  }, []);
+    setDemoStep(0);
+    setDemoSources(false);
+    setTyped('');
+    setPlaying(true);
+  }, [active]);
+
+  useEffect(() => {
+    if (!playing) return undefined;
+    const s = SCENARIOS[active];
+    const totalTools = s.tools.length;
+    const answer = t(s.answer_de, s.answer_en);
+
+    if (demoStep < totalTools) {
+      const toolDelay = s.tools[demoStep].name === 'think' ? 1400 : 650;
+      const id = setTimeout(() => setDemoStep((v) => v + 1), toolDelay);
+      return () => clearTimeout(id);
+    }
+    if (!demoSources) {
+      const id = setTimeout(() => setDemoSources(true), 500);
+      return () => clearTimeout(id);
+    }
+    if (typed.length < answer.length) {
+      const id = setTimeout(() => setTyped(answer.slice(0, typed.length + 3)), 45);
+      return () => clearTimeout(id);
+    }
+    const id = setTimeout(() => setActive((prev) => (prev + 1) % SCENARIOS.length), 4200);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, demoStep, demoSources, typed, active, lang]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.document) {
@@ -292,7 +320,7 @@ export default function LandingPage() {
             </div>
 
             <div className="lp-trace-tools">
-              {s.tools.map((tool, i) => (
+              {s.tools.slice(0, demoStep).map((tool, i) => (
                 <div key={i} className={`lp-trace-tool${tool.name === 'think' ? ' think' : ''}`}>
                   <span className="lp-trace-tool-icon">{tool.name === 'think' ? '⟳' : '✓'}</span>
                   <span className="lp-trace-tool-name">{tool.name === 'think' ? '' : tool.name}</span>
@@ -304,31 +332,41 @@ export default function LandingPage() {
                   {tool.duration && <span className="lp-trace-tool-dur">{tool.duration}</span>}
                 </div>
               ))}
+              {demoStep < s.tools.length && (
+                <div className="lp-trace-tool is-pending">
+                  <span className="lp-trace-tool-icon">{'\u23F3'}</span>
+                  <span className="lp-trace-tool-name">{t(s.tools[demoStep].name === 'think' ? 'Denken...' : (s.tools[demoStep].name + '...'), s.tools[demoStep].name === 'think' ? 'Thinking...' : (s.tools[demoStep].name + '...'))}</span>
+                </div>
+              )}
             </div>
 
-            <div className="lp-trace-map">
-              <ol>
-                {s.sources.map((group, gi) => (
-                  group.entries.map((entry, ei) => (
-                    <li key={`${gi}-${ei}`}>
-                      <span className="lp-source-icon"><i className={`fas ${group.icon}`} aria-hidden="true" /></span>
-                      <div>
-                        <strong>{t(entry.label_de, entry.label_en)}</strong>
-                        <span>{t(entry.state_de, entry.state_en)}</span>
-                      </div>
-                    </li>
-                  ))
-                ))}
-              </ol>
-            </div>
+            {demoSources && (
+              <div className="lp-trace-map">
+                <ol>
+                  {s.sources.map((group, gi) => (
+                    group.entries.map((entry, ei) => (
+                      <li key={`${gi}-${ei}`}>
+                        <span className="lp-source-icon"><i className={`fas ${group.icon}`} aria-hidden="true" /></span>
+                        <div>
+                          <strong>{t(entry.label_de, entry.label_en)}</strong>
+                          <span>{t(entry.state_de, entry.state_en)}</span>
+                        </div>
+                      </li>
+                    ))
+                  ))}
+                </ol>
+              </div>
+            )}
 
             <div className="lp-trace-answer">
               <span className="lp-trace-answer-label">{t('ANTWORT', 'ANSWER')}</span>
-              <p>{t(s.answer_de, s.answer_en)}</p>
-              <div className="lp-trace-sources">
-                <span>{s.sources.length} {t('Quelle(n)', 'source(s)')}</span>
-                <span><i className={`fas ${s.icon}`} aria-hidden="true" /> {t(s.service_de, s.service_en)}</span>
-              </div>
+              <p>{typed}<span className="lp-trace-caret" /></p>
+              {demoSources && (
+                <div className="lp-trace-sources">
+                  <span>{s.sources.length} {t('Quelle(n)', 'source(s)')}</span>
+                  <span><i className={`fas ${s.icon}`} aria-hidden="true" /> {t(s.service_de, s.service_en)}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -64,6 +64,7 @@ export default function HomePage() {
 
   const [inputValue, setInputValue] = useState('');
   const [isThinking, setIsThinking] = useState(false);
+  const [streamStatus, setStreamStatus] = useState('');
   const [pendingQueue, setPendingQueue] = useState([]);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const fileInputRef = useRef(null);
@@ -283,6 +284,10 @@ export default function HomePage() {
       const currentMessages = chats.find((chat) => chat.id === targetChatId)?.messages || [];
       const contextMessages = options.messageId ? currentMessages : [...currentMessages, { role: 'user', content: text, id: userMessageId }];
       const conversationContext = contextMessages.slice(-8).map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
+      const history = contextMessages.slice(-8, -1).map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content || '',
+      })).filter((m) => m.content);
       let emailConfig = null;
       try {
         const emailConfigRes = await apiFetch('/api/registry/email/config');
@@ -296,7 +301,7 @@ export default function HomePage() {
             ? `${text}\n\n\u{1F4CE} Angeh\u00e4ngte Dateien:\n${uploadedFiles.map((f, i) => `  ${i + 1}. [${f.filename}](${f.url}) (${(f.size / 1024).toFixed(0)} KB)`).join('\n')}\n\nBitte lies diese Dateien ein und verarbeite sie gem\u00e4\u00df meiner Anfrage.`
             : text,
           language, model: model, preferred_source: source,
-          context: conversationContext, email_config: emailConfig,
+          context: conversationContext, history: history, email_config: emailConfig,
           account_id: emailConfig?.active_account_id || emailConfig?.selected_account_id || emailConfig?.account_id || ''
         })
       });
@@ -349,9 +354,11 @@ export default function HomePage() {
           } else if (event.type === 'status') {
             clearActiveThinkTool();
             const statusText = String(event.message || '').trim();
+            setStreamStatus(statusText || 'Anfrage l\u00e4uft...');
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = statusText || 'Anfrage l\u00e4uft...');
           } else if (event.type === 'tool_end') {
             clearActiveThinkTool();
+            setStreamStatus(`\u2713 ${event.tool} erledigt`);
             const idx = msgTools.findLastIndex(t => t.tool === event.tool && t.status === 'running');
             if (idx >= 0) msgTools[idx] = { ...msgTools[idx], ...event, status: 'done' };
             else msgTools.push({ ...event, status: 'done' });
@@ -359,6 +366,7 @@ export default function HomePage() {
             syncLiveTools();
           } else if (event.type === 'final') {
             clearActiveThinkTool();
+            setStreamStatus('');
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
             updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({
@@ -367,6 +375,7 @@ export default function HomePage() {
             if (options.fromVoice) voice.speakAssistantText(event.response);
           } else if (event.type === 'error') {
             clearActiveThinkTool();
+            setStreamStatus('');
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
             updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: `\u26a0\ufe0f Fehler: ${event.error}`, streamTrace: [...msgTools], isStreaming: false }));
@@ -391,6 +400,7 @@ export default function HomePage() {
       }
     } finally {
       setIsThinking(false);
+      setStreamStatus('');
       setUploadedFiles([]);
       requestAbortRef.current = null;
     }
@@ -780,7 +790,7 @@ export default function HomePage() {
         ) : (
           <>
             <MessageList
-              messages={messages} isThinking={isThinking} liveTools={liveTools}
+              messages={messages} isThinking={isThinking} liveTools={liveTools} streamStatus={streamStatus}
               markdownComponents={markdownComponents} handleMarkdownContentClick={handleMarkdownContentClick}
               messagesEndRef={messagesEndRef} sendMessage={sendMessage}
               calendarForm={forms.calendarForm} setCalendarForm={forms.setCalendarForm}

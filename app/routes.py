@@ -124,6 +124,30 @@ def _resolve_active_model(requested, cfg):
     )
     return configured
 
+_TOOL_SUPPORT_FILE = Path(__file__).resolve().parent.parent / 'data' / 'tool_support_cache.json'
+_TOOL_SUPPORT_DISK_TTL = 7 * 24 * 3600  # 7 days
+
+
+def _load_tool_support_disk():
+    """Load persistent tool-support results so a server restart never triggers
+    a live LLM round-trip for a model that was already probed."""
+    try:
+        if _TOOL_SUPPORT_FILE.exists():
+            data = json.loads(_TOOL_SUPPORT_FILE.read_text())
+            if isinstance(data, dict):
+                return data
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _save_tool_support_disk(cache):
+    try:
+        _TOOL_SUPPORT_FILE.write_text(json.dumps(cache))
+    except OSError:
+        pass
+
+
 def _cached_tool_support(model, base_url):
     """Cached check_tool_support — avoids a live LLM round-trip on every request."""
     if any(k in str(model).lower() for k in _NO_TOOL_MODEL_KEYWORDS):
@@ -133,12 +157,22 @@ def _cached_tool_support(model, base_url):
     cached = _TOOL_SUPPORT_CACHE.get(key)
     if cached and now - cached[1] < _TOOL_SUPPORT_TTL:
         return cached[0]
+
+    disk = _load_tool_support_disk()
+    stored = disk.get(key)
+    if stored and isinstance(stored, dict) and now - stored.get('ts', 0) < _TOOL_SUPPORT_DISK_TTL:
+        result = bool(stored.get('result', True))
+        _TOOL_SUPPORT_CACHE[key] = (result, now)
+        return result
+
     try:
         result = check_tool_support(model, base_url)
     except Exception:
         logger.exception("check_tool_support failed")
         result = True
     _TOOL_SUPPORT_CACHE[key] = (result, now)
+    disk[key] = {'result': result, 'ts': now}
+    _save_tool_support_disk(disk)
     return result
 
 # ── /api/auth/* ────────────────────────────────────────────
@@ -573,6 +607,32 @@ def chat_summarize():
     return jsonify({'success': True, 'summary': summary})
 
 # ── /api/agent/* ───────────────────────────────────────────
+def _build_history_msgs(system_prompt, data, prompt):
+    """Merge prior chat history into the message list so the LLM has context.
+
+    The frontend sends `history` as a list of {role, content} (optionally with
+    `name`). We rebuild the full message stack here so the agent actually sees
+    the previous turns instead of treating every prompt as a fresh conversation.
+    """
+    history = data.get('history') or []
+    if not isinstance(history, list) or not history:
+        return None
+    msgs = [{"role": "system", "content": system_prompt}]
+    for h in history:
+        if not isinstance(h, dict):
+            continue
+        role = str(h.get('role', ''))
+        content = str(h.get('content', ''))
+        if role not in ('user', 'assistant') or not content:
+            continue
+        entry = {"role": role, "content": content}
+        if h.get('name'):
+            entry["name"] = str(h['name'])
+        msgs.append(entry)
+    msgs.append({"role": "user", "content": prompt})
+    return msgs
+
+
 @app.route('/api/agent/query/stream', methods=['POST'])
 def agent_query_stream():
     data = request.json or {}
@@ -602,9 +662,11 @@ def agent_query_stream():
         # Everything potentially blocking runs AFTER the first SSE byte so the
         # frontend sees an immediate connection.
         if preferred_source == 'web':
+            yield f"data: {json.dumps({'type': 'status', 'message': '🔎 Suche im Web...'})}\n\n"
             web_context = _get_web_context_safe(prompt, 10)
             source_hint = f"\n\n⚠️ Internet-Suche aktiviert.\n<untrusted_data type=\"web_search\">\n{web_context}\n</untrusted_data>\n\n"
         elif preferred_source == 'deep':
+            yield f"data: {json.dumps({'type': 'status', 'message': '🔎 Deep Research...'})}\n\n"
             web_context = _get_web_context_safe(prompt, 15)
             source_hint = f"\n\n⚠️ Deep Research Modus aktiviert.\n<untrusted_data type=\"deep_search\">\n{web_context}\n</untrusted_data>\n\n"
         elif preferred_source == 'local':
@@ -614,6 +676,7 @@ def agent_query_stream():
 
         system_prompt = base_prompt + source_hint
 
+        yield f"data: {json.dumps({'type': 'status', 'message': '🧠 Prüfe Modell...'})}\n\n"
         model_has_tools = _cached_tool_support(active_model, cfg.get('base_url'))
         if not model_has_tools:
             tool_list = _get_tool_names_for_prompt()
@@ -628,7 +691,9 @@ def agent_query_stream():
             )
 
         agent_tools = [] if not model_has_tools else None
-        for event in web_agent_loop_stream(active_model, prompt, system_prompt, max_rounds=100, tools=agent_tools, owner=owner):
+        yield f"data: {json.dumps({'type': 'status', 'message': '💬 KI denkt nach...'})}\n\n"
+        initial_msgs = _build_history_msgs(system_prompt, data, prompt)
+        for event in web_agent_loop_stream(active_model, prompt, system_prompt, max_rounds=100, tools=agent_tools, owner=owner, initial_msgs=initial_msgs):
             yield f"data: {json.dumps(event)}\n\n"
 
     return Response(
@@ -663,7 +728,9 @@ def agent_query():
     active_model = _resolve_active_model(requested_model, cfg)
     try:
         content, history, needs_input, research_stats = web_agent_loop(
-            active_model, prompt, system_prompt, max_rounds=100, owner=request.current_user
+            active_model, prompt, system_prompt, max_rounds=100,
+            initial_msgs=_build_history_msgs(system_prompt, data, prompt),
+            owner=request.current_user
         )
     except Exception:
         logger.exception('agent_query() failed')

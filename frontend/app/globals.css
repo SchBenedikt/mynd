@@ -4170,6 +4170,34 @@ body {
   width: 100%;
 }
 
+.stream-status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.6rem;
+  background: color-mix(in srgb, var(--chip-bg) 55%, transparent 45%);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  width: 100%;
+}
+
+.stream-status-spinner {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent, #6c8);
+  border-radius: 50%;
+  animation: stream-status-spin 0.8s linear infinite;
+}
+
+@keyframes stream-status-spin {
+  to { transform: rotate(360deg); }
+}
+
 .live-round {
   margin-bottom: 0.2rem;
 }

@@ -328,6 +328,13 @@ html:has(.lp-guide) body {
   line-height: 1.6;
 }
 
+.lp-guide-tip-featured {
+  border: 1px solid var(--lp-accent);
+  background: rgba(145,160,255,.08);
+}
+.lp-guide-tip-featured i { color: var(--lp-accent); }
+.lp-guide-tip-featured span { color: var(--lp-ink); font-weight: 500; }
+
 /* Article footer */
 .lp-guide-article-footer {
   padding-top: 2rem;
