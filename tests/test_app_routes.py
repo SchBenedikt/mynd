@@ -537,3 +537,13 @@ class TestResolveActiveModel:
         )
         assert app_routes._resolve_active_model("gpt-4o-mini", cfg) == "gpt-4o-mini"
 
+    def test_non_string_requested_model_is_coerced(self, monkeypatch):
+        self._clear_model_cache()
+        cfg = {"provider": "ollama", "model": "gemma4:cloud", "base_url": "http://127.0.0.1:11434"}
+        monkeypatch.setattr(app_routes.ollama_client, "model", "gemma3:latest")
+        monkeypatch.setattr(
+            app_routes.ollama_client, "list_models",
+            lambda: ["gemma3:latest", "123"],
+        )
+        assert app_routes._resolve_active_model(123, cfg) == "123"
+

@@ -110,6 +110,7 @@ def _resolve_active_model(requested, cfg):
     the configured model. Prevents e.g. 410 Gone for retired/removed models.
     Only consults Ollama's model list for the ollama provider."""
     configured = str(cfg.get('model') or ollama_client.model)
+    requested = str(requested) if requested else ''
     if not requested or requested == configured:
         return configured
     if cfg.get('provider') != 'ollama':
