@@ -277,8 +277,8 @@ class TestBriefingAPI:
             app_routes._nc_module, "nextcloud_tasks_query",
             lambda: "📌 [Schule] Offen | Fällig: ? | Status: NEEDS-ACTION\n📌 [Schule] Alt | Fällig: ? | Status: COMPLETED")
         monkeypatch.setattr(
-            app_routes._immich_module, "immich_search_photos",
-            lambda *a, **k: ("(keine Ergebnisse)", None))
+            app_routes._immich_module, "immich_count_photos",
+            lambda *a, **k: 3)
         items = app_routes._gather_briefing_items()
         keys = [i["key"] for i in items]
         assert keys[0] == "overview"
@@ -286,6 +286,24 @@ class TestBriefingAPI:
         assert "COMPLETED" not in tasks_item["content"]
         assert "Offen" in tasks_item["content"]
         assert "Status: COMPLETED" not in items[0]["content"]
+        photos_item = next(i for i in items if i["key"] == "photos")
+        assert "3 Fotos heute" in photos_item["title"]
+
+    def test_gather_briefing_handles_negative_photo_count(self, monkeypatch):
+        monkeypatch.setattr(
+            app_routes._nc_module, "nextcloud_caldav_query",
+            lambda *a, **k: (None, None))
+        monkeypatch.setattr(app_routes._email_module, "_list_accounts",
+                            lambda: "Keine E-Mail-Konten konfiguriert.")
+        monkeypatch.setattr(
+            app_routes._nc_module, "nextcloud_tasks_query",
+            lambda: None)
+        monkeypatch.setattr(
+            app_routes._immich_module, "immich_count_photos",
+            lambda *a, **k: -1)
+        items = app_routes._gather_briefing_items()
+        assert items == []
+        assert all(i["key"] != "photos" for i in items)
 
 
 class TestImmichAPI:
@@ -294,6 +312,60 @@ class TestImmichAPI:
                            json={"url": ""},
                            content_type="application/json")
         assert resp.status_code in (200, 400)
+
+
+class TestAutomationsWebhook:
+    def test_webhook_public_without_bearer_token(self, monkeypatch):
+        """Webhook endpoints must be reachable without a Bearer token."""
+        monkeypatch.setattr(
+            app_routes.automation_engine, "trigger_by_token",
+            lambda aid, token: {"success": True, "results": [], "log": {}})
+        resp = app.test_client().post("/api/automations/webhook/abc/secret-token")
+        assert resp.status_code == 200
+        assert resp.get_json()["success"] is True
+
+    def test_webhook_rejects_bad_token(self, monkeypatch):
+        monkeypatch.setattr(
+            app_routes.automation_engine, "trigger_by_token",
+            lambda aid, token: {"success": False, "error": "Ungültiges Webhook-Token"})
+        resp = app.test_client().post("/api/automations/webhook/abc/wrong-token")
+        assert resp.status_code == 403
+
+
+class TestNotificationsAPI:
+    def test_notifications_latest_requires_auth(self):
+        resp = app.test_client().get("/api/notifications/latest")
+        assert resp.status_code == 401
+
+    def test_notifications_latest_returns_items(self, client, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            app_routes.automation_engine, "load_notifications",
+            lambda: [{"id": "1", "title": "T", "content": "C", "read": False,
+                      "created_at": "2026-08-01T10:00:00"}])
+        resp = client.get("/api/notifications/latest")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert data["notifications"][0]["title"] == "T"
+
+    def test_notifications_read_marks_selected(self, client, monkeypatch):
+        state = {"items": [{"id": "1", "read": False}, {"id": "2", "read": False}]}
+        monkeypatch.setattr(app_routes.automation_engine, "load_notifications",
+                            lambda: state["items"])
+        monkeypatch.setattr(app_routes.automation_engine, "save_notifications",
+                            lambda items: state.__setitem__("items", items))
+        resp = client.post("/api/notifications/read", json={"ids": ["1"]})
+        assert resp.status_code == 200
+        assert state["items"][0]["read"] is True
+        assert state["items"][1]["read"] is False
+
+    def test_notifications_clear(self, client, monkeypatch):
+        cleared = []
+        monkeypatch.setattr(app_routes.automation_engine, "save_notifications",
+                            lambda items: cleared.append(items))
+        resp = client.post("/api/notifications/clear")
+        assert resp.status_code == 200
+        assert cleared and cleared[-1] == []
 
 
 class TestSystemEndpoints:

@@ -2,6 +2,7 @@
 
 import { useSidebar } from '../../hooks/useSidebar';
 import Sidebar from '../../components/Sidebar';
+import NotificationBell from '../../components/NotificationBell';
 
 export default function MainLayout({ children }) {
   const { isSidebarCollapsed, canAnimate } = useSidebar();
@@ -10,6 +11,7 @@ export default function MainLayout({ children }) {
     <div className={`container ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}${!canAnimate ? ' no-animate' : ''}`} data-auth-view="workspace">
       <Sidebar />
       {children}
+      <NotificationBell />
     </div>
   );
 }

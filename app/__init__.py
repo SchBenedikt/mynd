@@ -71,6 +71,8 @@ def protect_api_by_default():
     }
     if request.path in public or (request.path == '/api/auth/config' and request.method == 'GET'):
         return None
+    if request.path.startswith('/api/automations/webhook/'):
+        return None
     if not SETUP_DONE_FILE.exists() and request.path in {
         '/api/setup/bootstrap', '/api/ollama/status',
         '/api/ollama/models', '/api/nextcloud/oauth/config',

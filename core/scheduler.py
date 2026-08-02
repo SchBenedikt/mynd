@@ -107,8 +107,11 @@ class AutomationEngine:
 
     def add_notification(self, title, content=""):
         notifications = self.load_notifications()
+        timestamp_ms = int(datetime.now().timestamp() * 1000)
+        while any(str(n.get("id")) == str(timestamp_ms) for n in notifications):
+            timestamp_ms += 1
         entry = {
-            "id": f"{int(datetime.now().timestamp() * 1000)}",
+            "id": f"{timestamp_ms}",
             "title": title,
             "content": content,
             "created_at": datetime.now().isoformat(),

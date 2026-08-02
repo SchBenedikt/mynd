@@ -1563,11 +1563,11 @@ def _gather_briefing_items():
     except Exception:
         pass
     try:
-        photos, _ = call_with_timeout(_immich_module.immich_search_photos, (), {"date_from": today_str, "date_to": today_str, "size": 5}, timeout=10)
-        if photos and "❌" not in photos and "(keine Ergebnisse)" not in photos:
-            photo_count = photos.count("immich/thumbnail")
+        photo_count = call_with_timeout(_immich_module.immich_count_photos, (today_str, today_str), timeout=10)[0]
+        if photo_count is None or photo_count < 0:
+            photo_count = 0
     except Exception:
-        pass
+        photo_count = 0
 
     items = []
     if sections:
