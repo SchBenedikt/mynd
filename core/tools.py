@@ -435,6 +435,142 @@ def search_documents(query, top_k=10):
         return "❌ Suche fehlgeschlagen"
 
 
+def _kb_search_structured(query, top_k=6, min_score=0.1):
+    """Semantische Suche über den lokalen Knowledge Base.
+
+    Returns a list of dicts: {"source", "text", "score", "kind"}.
+    kind is 'affine' when the source URI starts with affine://, else 'doc'.
+    """
+    try:
+        chunks = json.loads(CHUNKS.read_text())
+        embs = np.load(EMBS)
+        qe = embed([query])[0]
+        scores = np.array(
+            [float(np.dot(qe, e) / (np.linalg.norm(qe) * np.linalg.norm(e) + 1e-10)) for e in embs]
+        )
+        top = np.argsort(scores)[-top_k:][::-1]
+        out = []
+        for i in top:
+            if scores[i] > min_score:
+                src = str(chunks[i].get('source', 'Unbekannt'))
+                out.append({
+                    'source': src,
+                    'text': str(chunks[i].get('text', ''))[:400],
+                    'score': round(float(scores[i]), 3),
+                    'kind': 'affine' if src.lower().startswith('affine://') else 'doc',
+                })
+        return out
+    except Exception:
+        logger.exception("_kb_search_structured failed")
+        return []
+
+
+def _affine_search_structured(query, max_results=5):
+    """Volltextsuche über AFFiNE-Inhalte (Titel + Body). Returns list of dicts."""
+    try:
+        from data.plugins import affine as _affine_mod
+    except Exception:
+        return []
+    try:
+        raw = _affine_mod.affine_search_content(query_text=query, max_results=max_results)
+    except Exception:
+        logger.exception("affine_search_content failed")
+        return []
+    if not isinstance(raw, str) or "❌" in raw or "Keine Treffer" in raw:
+        return []
+    out = []
+    for block in re.split(r'\n  📄 ', raw):
+        block = block.strip()
+        if not block:
+            continue
+        lines = block.split('\n')
+        first = lines[0].strip('* `').strip()
+        snippet = next((line.strip(' _').strip() for line in lines[1:] if line.strip()), '')
+        out.append({
+            'source': f'affine://{first}',
+            'title': first,
+            'text': snippet[:300],
+            'kind': 'affine',
+        })
+    return out[:max_results]
+
+
+def _web_search_structured(query, max_results=6):
+    """Internetsuche via DuckDuckGo. Returns list of dicts {title, url, snippet}."""
+    if not _DDGS_AVAILABLE:
+        return []
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results, region='de-de'))
+        out = []
+        for r in results:
+            title = (r.get('title') or '').strip()
+            href = (r.get('href') or '').strip()
+            body = (r.get('body') or '').strip()[:250]
+            if title and href:
+                out.append({'title': title, 'url': href, 'snippet': body})
+        return out
+    except Exception:
+        logger.exception("web search failed in deep_research")
+        return []
+
+
+def deep_research(query, top_k=6, include_kb=True, include_affine=True, include_web=True):
+    """Kombinierte Tiefen-Recherche über mehrere Wissensquellen.
+
+    Durchsucht parallel (1) die lokale Knowledge Base (Nextcloud-Dokumente +
+    bereits indexierte AFFiNE-Inhalte), (2) die AFFiNE-Volltextsuche und
+    (3) das Internet. Liefert eine strukturierte Antwort mit klar getrennten,
+    nummerierten Quellen, die die KI direkt zitieren kann.
+    """
+    try:
+        _validate_str(query, "query", max_len=5000)
+    except ValueError as e:
+        return f"❌ {e}"
+
+    sections = []
+    source_index = 1
+    all_sources = []
+
+    def _push(section_title, items, fmt):
+        nonlocal source_index
+        if not items:
+            return
+        lines = [f"### {section_title}"]
+        for item in items:
+            label = f"({source_index})"
+            lines.append(fmt(label, item))
+            all_sources.append({'label': source_index, 'section': section_title, **item})
+            source_index += 1
+        sections.append('\n'.join(lines))
+
+    if include_kb:
+        kb = _kb_search_structured(query, top_k=top_k)
+        _push("Lokale Dokumente & Notizen (Wissensbasis)", kb,
+              lambda label, it: f"{label} **[Quelle: {it['source']}]** (Score: {it['score']})\n   {it['text']}")
+
+    if include_affine:
+        affine = _affine_search_structured(query, max_results=5)
+        _push("AFFiNE – persönliche Wissensdatenbank", affine,
+              lambda label, it: f"{label} **{it.get('title', it['source'])}**\n   {it.get('text', '')}")
+
+    if include_web:
+        web = _web_search_structured(query, max_results=top_k)
+        _push("Internet", web,
+              lambda label, it: f"{label} [{it['title']}]({it['url']})\n   {it.get('snippet', '')}")
+
+    if not sections:
+        return f"❌ Keine Ergebnisse aus Knowledge Base, AFFiNE oder Web für '{query}'."
+
+    header = (
+        f"🔎 DEEP RESEARCH zu: „{query}“\n"
+        "Die folgenden Quellen stammen aus mehreren unabhängigen Systemen "
+        "(lokale Wissensbasis, AFFiNE, Internet). Zitiere sie in deiner Antwort "
+        "mit den Nummern in Klammern, z. B. (1), (2), (3).\n\n"
+    )
+    return header + "\n\n".join(sections)
+
+
 def _workspace_path(path):
     if '\0' in str(path):
         raise ValueError('Path contains null bytes')
@@ -1303,6 +1439,17 @@ CORE_TOOLS = [
         }, "required": ["query"]}
     }},
     {"type": "function", "function": {
+        "name": "deep_research",
+        "description": "KOMBINIERTE Tiefen-Recherche über ALLE Wissensquellen in EINEM Aufruf: (1) lokale Wissensbasis (Nextcloud-Dokumente + indexierte AFFiNE-Inhalte), (2) AFFiNE-Volltextsuche, (3) Internet. Liefert nummerierte Quellen, die du direkt zitieren kannst. Nutze DAS für komplexe Recherche-Fragen, bei denen mehrere Quellen relevant sind – statt mehrere Einzel-Suchen zu starten. Optional können Quellen per include_kb/include_affine/include_web deaktiviert werden.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Suchbegriff oder Frage"},
+            "top_k": {"type": "integer", "description": "Anzahl Ergebnisse pro Quelle (default 6)", "default": 6},
+            "include_kb": {"type": "boolean", "description": "Lokale Wissensbasis durchsuchen (default true)", "default": True},
+            "include_affine": {"type": "boolean", "description": "AFFiNE durchsuchen (default true)", "default": True},
+            "include_web": {"type": "boolean", "description": "Internet durchsuchen (default true)", "default": True}
+        }, "required": ["query"]}
+    }},
+    {"type": "function", "function": {
         "name": "web_search",
         "description": "Durchsuche das INTERNET via DuckDuckGo nach aktuellen Informationen, Nachrichten, Webseiten. Nutze DAS für aktuelle Themen, die NICHT in den indexierten Dokumenten sind. Wenn der User dir eine URL gibt, rufe http_request auf, um deren Inhalt zu laden.",
         "parameters": {"type": "object", "properties": {
@@ -1583,6 +1730,7 @@ CORE_MAP = {
     "execute_python": _rate_limited("execute_python")(execute_python),
     "execute_ssh": _rate_limited("execute_ssh")(execute_ssh),
     "search_documents": _rate_limited("search_documents")(search_documents),
+    "deep_research": _rate_limited("deep_research")(deep_research),
     "web_search": _rate_limited("web_search")(web_search),
     "fetch_news": _rate_limited("fetch_news")(fetch_news),
     "read_local_file": _rate_limited("read_local_file")(read_local_file),

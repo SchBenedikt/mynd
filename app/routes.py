@@ -73,7 +73,7 @@ from core.plugin_base import (
     uninstall_plugin,
 )
 from core.scheduler import CRON_HELP, TRIGGER_EXAMPLES, TRIGGER_TYPES
-from core.tools import CORE_TOOLS, PERMISSION_HELP, vault_delete, vault_set, web_search
+from core.tools import CORE_TOOLS, PERMISSION_HELP, deep_research, vault_delete, vault_set, web_search
 from core.utils import call_with_timeout
 from core.vault import load_vault
 from core.vault import vault_get as _vg
@@ -657,6 +657,20 @@ def agent_query_stream():
         except Exception:
             return "⚠️ Web-Suche nicht verfügbar"
 
+    def _get_deep_research_safe(query, top_k):
+        try:
+            dr, err = call_with_timeout(
+                deep_research,
+                (query,),
+                {"top_k": top_k, "include_kb": True, "include_affine": True, "include_web": True},
+                timeout=25,
+            )
+            if err:
+                return "⚠️ Deep Research nicht verfügbar"
+            return dr or "Keine Ergebnisse gefunden."
+        except Exception:
+            return "⚠️ Deep Research nicht verfügbar"
+
     def generate():
         yield f"data: {json.dumps({'type': 'status', 'message': '⏳ Starte...'})}\n\n"
         # Everything potentially blocking runs AFTER the first SSE byte so the
@@ -666,9 +680,14 @@ def agent_query_stream():
             web_context = _get_web_context_safe(prompt, 10)
             source_hint = f"\n\n⚠️ Internet-Suche aktiviert.\n<untrusted_data type=\"web_search\">\n{web_context}\n</untrusted_data>\n\n"
         elif preferred_source == 'deep':
-            yield f"data: {json.dumps({'type': 'status', 'message': '🔎 Deep Research...'})}\n\n"
-            web_context = _get_web_context_safe(prompt, 15)
-            source_hint = f"\n\n⚠️ Deep Research Modus aktiviert.\n<untrusted_data type=\"deep_search\">\n{web_context}\n</untrusted_data>\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'message': '🔎 Deep Research (Wissensbasis + AFFiNE + Web)...'})}\n\n"
+            deep_context = _get_deep_research_safe(prompt, 8)
+            source_hint = (
+                "\n\n⚠️ Deep Research Modus aktiviert – die folgenden Ergebnisse stammen aus der lokalen "
+                "Wissensbasis (Nextcloud-Dokumente + indexierte AFFiNE-Inhalte), der AFFiNE-Volltextsuche "
+                "und dem Internet. Zitiere die nummerierten Quellen in deiner Antwort.\n"
+                f"<untrusted_data type=\"deep_search\">\n{deep_context}\n</untrusted_data>\n\n"
+            )
         elif preferred_source == 'local':
             source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
         else:
@@ -719,8 +738,12 @@ def agent_query():
         web_context = _get_web_context_safe_v2(prompt, 10)
         source_hint = f"\n\n⚠️ Internet-Suche aktiviert.\n<untrusted_data type=\"web_search\">\n{web_context}\n</untrusted_data>\n\n"
     elif preferred_source == 'deep':
-        web_context = _get_web_context_safe_v2(prompt, 15)
-        source_hint = f"\n\n⚠️ Deep Research Modus aktiviert.\n<untrusted_data type=\"deep_search\">\n{web_context}\n</untrusted_data>\n\n"
+        deep_context = _get_deep_research_safe_v2(prompt, 8)
+        source_hint = (
+            "\n\n⚠️ Deep Research Modus aktiviert – Ergebnisse aus lokaler Wissensbasis, AFFiNE "
+            "und Internet. Zitiere die nummerierten Quellen.\n"
+            f"<untrusted_data type=\"deep_search\">\n{deep_context}\n</untrusted_data>\n\n"
+        )
     elif preferred_source == 'local':
         source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
     system_prompt = base_prompt + source_hint
@@ -759,6 +782,20 @@ def _get_web_context_safe_v2(query, max_results):
         return result or "Keine Ergebnisse gefunden."
     except Exception:
         return "⚠️ Web-Suche nicht verfügbar"
+
+def _get_deep_research_safe_v2(query, top_k):
+    try:
+        result, error = call_with_timeout(
+            deep_research,
+            (query,),
+            {"top_k": top_k, "include_kb": True, "include_affine": True, "include_web": True},
+            timeout=25,
+        )
+        if error:
+            return "⚠️ Deep Research nicht verfügbar"
+        return result or "Keine Ergebnisse gefunden."
+    except Exception:
+        return "⚠️ Deep Research nicht verfügbar"
 
 @app.route('/api/agent/input', methods=['POST'])
 def agent_input():
