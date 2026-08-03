@@ -484,8 +484,10 @@ def _affine_search_structured(query, max_results=5):
         if not block:
             continue
         lines = block.split('\n')
-        first = lines[0].strip('* `').strip()
+        first = _clean_title(lines[0].strip('* `').strip())
         snippet = next((line.strip(' _').strip() for line in lines[1:] if line.strip()), '')
+        if not first or '🔍 Volltext-Suche' in first or 'max_results' in first or '… und weitere' in first:
+            continue
         out.append({
             'source': f'affine://{first}',
             'title': first,
@@ -493,6 +495,16 @@ def _affine_search_structured(query, max_results=5):
             'kind': 'affine',
         })
     return out[:max_results]
+
+
+def _clean_title(text):
+    """Strip markdown artefacts and collapse whitespace for use in link text."""
+    if not text:
+        return ''
+    cleaned = re.sub(r'[*_~`]+', '', text)
+    cleaned = cleaned.split('`')[0] if '`' in cleaned else cleaned
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
 
 
 def _web_search_structured(query, max_results=6):
@@ -547,12 +559,12 @@ def deep_research(query, top_k=6, include_kb=True, include_affine=True, include_
     if include_kb:
         kb = _kb_search_structured(query, top_k=top_k)
         _push("Lokale Dokumente & Notizen (Wissensbasis)", kb,
-              lambda label, it: f"{label} **[Quelle: {it['source']}]** (Score: {it['score']})\n   {it['text']}")
+              lambda label, it: f"{label} **[{it['source']}]({it['source']})** (Score: {it['score']})\n   {it['text']}")
 
     if include_affine:
         affine = _affine_search_structured(query, max_results=5)
         _push("AFFiNE – persönliche Wissensdatenbank", affine,
-              lambda label, it: f"{label} **{it.get('title', it['source'])}**\n   {it.get('text', '')}")
+              lambda label, it: f"{label} **[{it.get('title', it['source'])}]({it['source']})**\n   {it.get('text', '')}")
 
     if include_web:
         web = _web_search_structured(query, max_results=top_k)
@@ -562,13 +574,21 @@ def deep_research(query, top_k=6, include_kb=True, include_affine=True, include_
     if not sections:
         return f"❌ Keine Ergebnisse aus Knowledge Base, AFFiNE oder Web für '{query}'."
 
-    header = (
-        f"🔎 DEEP RESEARCH zu: „{query}“\n"
+    lines = [
+        "🔎 DEEP RESEARCH zu: „" + query + "“",
         "Die folgenden Quellen stammen aus mehreren unabhängigen Systemen "
         "(lokale Wissensbasis, AFFiNE, Internet). Zitiere sie in deiner Antwort "
-        "mit den Nummern in Klammern, z. B. (1), (2), (3).\n\n"
-    )
-    return header + "\n\n".join(sections)
+        "mit den Nummern in Klammern, z. B. (1), (2), (3).\n",
+    ]
+    lines.append("\n\n".join(sections))
+    lines.append("\n\n## Quellen")
+    for s in all_sources:
+        title = _clean_title(s.get('title') or s.get('source', ''))
+        if s.get('url'):
+            lines.append(f"({s['label']}) [{title}]({s['url']})")
+        else:
+            lines.append(f"({s['label']}) [{title}]({s['source']})")
+    return "\n".join(lines)
 
 
 def _workspace_path(path):

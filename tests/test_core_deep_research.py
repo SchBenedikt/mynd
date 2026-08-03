@@ -62,8 +62,9 @@ def test_deep_research_combines_all_sources(monkeypatch):
     assert "(1)" in result
     assert "(2)" in result
     assert "(3)" in result
-    assert "doc:a.md" in result
-    assert "Affine Doc" in result
+    assert "## Quellen" in result
+    assert "[doc:a.md]" in result
+    assert "(2) [Affine Doc](affine://x)" in result
     assert "https://example.com" in result
 
 
