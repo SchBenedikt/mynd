@@ -77,14 +77,6 @@ TOOLS = [
         }
     },
     {
-        "name": "web_search",
-        "description": "Internetsuche – aktuelle Informationen, Nachrichten, Fakten aus dem Web",
-        "parameters": {
-            "query": {"type": "string", "description": "Suchbegriff"},
-            "max_results": {"type": "number", "description": "Maximale Ergebnisanzahl (default: 5)"}
-        }
-    },
-    {
         "name": "system_save_text",
         "description": "Speichert Text/Inhalt in eine Datei im generated/-Verzeichnis. Für Berichte, Zusammenfassungen, Exporte.",
         "parameters": {
@@ -557,33 +549,6 @@ def weather_forecast(days=3, latitude=48.85, longitude=11.5):
         return f"❌ {e}"
 
 
-# ── Web Search ──────────────────────────────────────────
-
-def web_search(query, max_results=5):
-    try:
-        from ddgs import DDGS
-    except ImportError:
-        from duckduckgo_search import DDGS
-    max_results = int(max_results)
-    try:
-        with DDGS() as client:
-            results = list(client.text(query, max_results=max_results))
-        if not results:
-            return f"❌ Keine Ergebnisse für '{query}'."
-        lines = [f"🔍 **Web-Suche: {query}**"]
-        for i, r in enumerate(results[:max_results], 1):
-            title = r.get("title", "?")
-            href = r.get("href", r.get("link", ""))
-            snippet = (r.get("body", "") or "")[:200]
-            lines.append(f"\n**{i}. {title}**")
-            lines.append(f"  {snippet}")
-            if href:
-                lines.append(f"  🔗 {href}")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"❌ Web-Suche fehlgeschlagen: {e}"
-
-
 # ── Text speichern ──────────────────────────────────────
 
 _GENERATED_DIR = Path(__file__).resolve().parents[2] / 'data' / 'generated'
@@ -611,13 +576,12 @@ TOOL_MAP = {
     "timer_remove": timer_remove,
     "weather_get": weather_get,
     "weather_forecast": weather_forecast,
-    "web_search": web_search,
     "system_save_text": system_save_text,
 }
 
 
 PROMPT_EXTRA = (
-    "SYSTEM (Server-Informationen, Timer, Wetter & Web-Suche):\n"
+    "SYSTEM (Server-Informationen, Timer, Wetter):\n"
     "  - **system_get_info**: Server-Details (CPU, RAM, OS, Uptime, Python-Version)\n"
     "  - **system_get_disk_usage**: Festplattenbelegung\n"
     "  - **system_get_processes(top_n=10)**: Top-Prozesse nach CPU\n"
@@ -627,7 +591,6 @@ PROMPT_EXTRA = (
     "  - **timer_remove(id)**: Timer löschen\n"
     "  - **weather_get(latitude=48.85, longitude=11.5)**: Aktuelles Wetter (Temperatur, Regen, Wind)\n"
     "  - **weather_forecast(days=3, latitude=48.85, longitude=11.5)**: Wettervorhersage für die nächsten Tage\n"
-    "  - **web_search(query, max_results=5)**: Internetsuche für aktuelle Infos, Nachrichten, Fakten\n"
     "  - **system_save_text(filename, content, description)**: Speichert Text/Inhalt als Datei\n"
     "  HA-Wetter: Nutzt Home-Assistant-Sensoren (Temperatur, Feuchte, Wind) falls verfügbar\n"
     "  Fallback: Open-Meteo (kostenlos, kein API-Key)\n"

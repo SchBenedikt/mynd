@@ -342,6 +342,7 @@ export default function LandingPage() {
 
             {demoSources && (
               <div className="lp-trace-map">
+                <div className="lp-trace-line" aria-hidden="true"><span /></div>
                 <ol>
                   {s.sources.map((group, gi) => (
                     group.entries.map((entry, ei) => (
@@ -456,7 +457,7 @@ export default function LandingPage() {
               <article key={i} className="lp-question">
                 <div className="lp-question-icon"><i className={`fas ${item.icon}`} /></div>
                 <div className="lp-question-body">
-                  <h3>{item.q_en}</h3>
+                  <h3>{t(item.q_de, item.q_en)}</h3>
                   <p>{t(item.a_de, item.a_en)}</p>
                 </div>
               </article>

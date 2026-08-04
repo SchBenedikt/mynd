@@ -713,6 +713,9 @@ def agent_query_stream():
         yield f"data: {json.dumps({'type': 'status', 'message': '💬 KI denkt nach...'})}\n\n"
         initial_msgs = _build_history_msgs(system_prompt, data, prompt)
         for event in web_agent_loop_stream(active_model, prompt, system_prompt, max_rounds=100, tools=agent_tools, owner=owner, initial_msgs=initial_msgs):
+            if event.get('type') == 'final' and preferred_source == 'deep' and deep_context:
+                event = dict(event)
+                event['response'] = _ensure_deep_sources(event.get('response', ''), deep_context)
             yield f"data: {json.dumps(event)}\n\n"
 
     return Response(
@@ -771,6 +774,8 @@ def agent_query():
         })
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
+    if preferred_source == 'deep' and deep_context:
+        content = _ensure_deep_sources(content, deep_context)
     return jsonify({'success': True, 'response': sanitize_response_text(content)})
 
 def _get_web_context_safe_v2(query, max_results):
@@ -796,6 +801,81 @@ def _get_deep_research_safe_v2(query, top_k):
         return result or "Keine Ergebnisse gefunden."
     except Exception:
         return "⚠️ Deep Research nicht verfügbar"
+
+
+_SOURCE_LINE_RE = re.compile(r'^\((\d+)\)\s*\[(.*?)\]\((.*?)\)\s*$')
+
+def _extract_source_lines(text):
+    """Return raw '(N) [title](url)' lines found in text.
+
+    Parses the dedicated '## Quellen' section of the deep_research output.
+    Section rows like '(1) **[x](y)** (Score: 0.97)' are skipped because they
+    carry markdown/score artifacts and their numbering can collide with the
+    global numbering used in citations.
+    """
+    out = []
+    seen = set()
+    in_sources = False
+    for line in str(text or '').splitlines():
+        line_s = line.strip()
+        if line_s.startswith('## Quellen'):
+            in_sources = True
+            continue
+        if in_sources and _SOURCE_LINE_RE.match(line_s):
+            if line_s not in seen:
+                seen.add(line_s)
+                out.append(line_s)
+            continue
+        if in_sources and line_s:
+            in_sources = False
+    # Fallback: falls keine '## Quellen'-Sektion existiert, nimm alle gültigen
+    # '(N) [title](url)'-Zeilen (robust gegen leicht abweichende Formatierung).
+    if not out:
+        for line in str(text or '').splitlines():
+            line_s = line.strip()
+            if _SOURCE_LINE_RE.match(line_s) and line_s not in seen:
+                seen.add(line_s)
+                out.append(line_s)
+    return out
+
+
+def _ensure_deep_sources(content, deep_context, max_sources=12):
+    """Ergänzt die finale Antwort um eine nummerierte Quellenliste, damit das
+    Frontend die Inline-Zitate wie (14) als Links rendern kann.
+
+    Die LLM zitiert die nummerierten Quellen im Text, gibt die '## Quellen'-Liste
+    aber oft nicht (oder nur unvollständig/umnummeriert) zurück. Da das Backend
+    die komplette Deep-Research-Quellenliste kennt, ergänzen wir jede Quellzeil,
+    deren Nummer im Text zitiert wird, aber nicht schon im Antworttext steht.
+    """
+    text = str(content or '')
+    if not text.strip():
+        return text
+    cited = set(int(n) for n in re.findall(r'\((\d+)\)', text))
+    if not cited:
+        return text
+    deep_lines = _extract_source_lines(deep_context)
+    if not deep_lines:
+        return text
+    by_number = {}
+    for ln in deep_lines:
+        m = _SOURCE_LINE_RE.match(ln)
+        if m:
+            by_number.setdefault(int(m.group(1)), ln)
+    existing = set(_extract_source_lines(text))
+    existing_nums = set()
+    for ln in existing:
+        m = _SOURCE_LINE_RE.match(ln)
+        if m:
+            existing_nums.add(int(m.group(1)))
+    missing = []
+    for num in sorted(cited):
+        if num in by_number and num not in existing_nums:
+            missing.append(by_number[num])
+    if not missing:
+        return text
+    missing = missing[:max_sources]
+    return text.rstrip() + '\n\n## Quellen\n' + '\n'.join(missing) + '\n'
 
 @app.route('/api/agent/input', methods=['POST'])
 def agent_input():
@@ -2315,7 +2395,14 @@ def clear_notifications():
 @app.route('/api/automations/schema', methods=['GET'])
 def automation_schema():
     plugin_tools, _ = get_all_tools()
-    all_tools = CORE_TOOLS + plugin_tools
+    seen = set()
+    all_tools = []
+    for t in CORE_TOOLS + plugin_tools:
+        tname = t.get('function', {}).get('name', '')
+        if not tname or tname in seen:
+            continue
+        seen.add(tname)
+        all_tools.append(t)
     plugins_info = []
     tool_groups = {}
     for t in CORE_TOOLS:

@@ -10,7 +10,7 @@ import ContextDataCard from './ContextDataCard';
 import ResearchStats from './ResearchStats';
 import GeneratedFileCard from './GeneratedFileCard';
 import BrowserPreview from './BrowserPreview';
-import { parseSourceList, embedCitations, stripSourceList, renumberSources } from '../lib/sources';
+import { parseSourceList, embedCitations, stripSourceList } from '../lib/sources';
 import { prepareStreamingMarkdown } from '../lib/streamingMarkdown';
 
 function _stripToolTags(text) {
@@ -155,11 +155,10 @@ export default function MessageList({
             ? (() => {
                 const cleaned = _stripToolTags(msg.content);
                 const { sources } = parseSourceList(cleaned);
-                const renumbered = renumberSources(sources);
                 const mainContent = sources.length > 0
-                  ? embedCitations(stripSourceList(cleaned), renumbered)
+                  ? embedCitations(stripSourceList(cleaned), sources)
                   : embedCitations(cleaned, sources);
-                return { sources: renumbered, mainContent };
+                return { sources: sources, mainContent };
               })()
             : null;
           const displayContent = processed ? processed.mainContent : _stripToolTags(msg.content);

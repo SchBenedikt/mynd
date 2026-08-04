@@ -11,7 +11,6 @@ from data.plugins.system import (
     timer_set,
     weather_forecast,
     weather_get,
-    web_search,
 )
 
 
@@ -75,6 +74,8 @@ class TestWeather:
 
 class TestWebSearch:
     def test_web_search_returns_results(self):
+        from core.tools import web_search
+
         result = web_search("Python Programmierung", max_results=3)
         assert isinstance(result, str)
         # Should either return results or a meaningful error
