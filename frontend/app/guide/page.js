@@ -151,20 +151,49 @@ export default function GuidePage() {
               'MYND ist deine lokale Personal-AI-Plattform. Stelle Fragen zu deinen Dateien, Geräten und Diensten — alles läuft auf deiner eigenen Infrastruktur.',
               'MYND is your local personal AI platform. Ask questions about your files, devices and services — everything runs on your own infrastructure.'
             )}</p>
+
+            <div className="lp-guide-tip lp-guide-tip-featured"><i className="fas fa-globe" /><span>{t(
+              'Gute Nachricht: Du brauchst nicht beides einzurichten. Das Backend allein reicht aus — es serviert die Weboberfläche automatisch mit. Wenn dein Backend läuft, öffnest du einfach deine Instanz (z. B. https://mynd.schächner.de) und meldest dich dort an.',
+              'Good news: you don\'t need to set up both. The backend alone is enough — it serves the web UI automatically. Once your backend runs, just open your instance (e.g. https://mynd.schächner.de) and sign in there.'
+            )}</span></div>
+
+            <h3>{t('Überblick: Backend-only vs. Backend + Frontend', 'Overview: backend-only vs. backend + frontend')}</h3>
+            <div className="lp-guide-table">
+              <div className="lp-guide-tr lp-guide-th"><span>{t('Vergleich', 'Comparison')}</span><span>{t('Backend only', 'Backend only')}</span><span>{t('Backend + Frontend', 'Backend + Frontend')}</span></div>
+              <div className="lp-guide-tr"><span>{t('Setup-Aufwand', 'Setup effort')}</span><span>{t('Minimal — ein Server, ein Befehl', 'Minimal — one server, one command')}</span><span>{t('Höher — zwei Server, Build + Dev-Modus', 'Higher — two servers, build + dev mode')}</span></div>
+              <div className="lp-guide-tr"><span>{t('Zugriff auf die UI', 'UI access')}</span><span className="lp-guide-mono">https://mynd.schächner.de</span><span className="lp-guide-mono">http://localhost:3000</span></div>
+              <div className="lp-guide-tr"><span>{t('Für wen?', 'For whom?')}</span><span>{t('Empfohlen für den Normalbetrieb — deine Instanz läuft rund um die Uhr', 'Recommended for day-to-day use — your instance runs 24/7')}</span><span>{t('Für Entwicklung, Themes & UI-Basteln direkt am Code', 'For development, theming & UI tinkering directly on the code')}</span></div>
+              <div className="lp-guide-tr"><span>{t('Ports', 'Ports')}</span><span>{t('Nur Backend-Port 5001', 'Backend port 5001 only')}</span><span>{t('5001 (Backend) + 3000 (Frontend)', '5001 (backend) + 3000 (frontend)')}</span></div>
+            </div>
+
             <h3>{t('1. Systemvoraussetzungen', '1. System requirements')}</h3>
-            <p>{t('Python 3.10+, Node.js 18+, 4 GB RAM (8+ empfohlen), 20+ GB Speicher.', 'Python 3.10+, Node.js 18+, 4 GB RAM (8+ recommended), 20+ GB storage.')}</p>
+            <p>{t('Python 3.10+, Node.js 18+ (nur fürs Frontend-Setup), 4 GB RAM (8+ empfohlen), 20+ GB Speicher.', 'Python 3.10+, Node.js 18+ (frontend setup only), 4 GB RAM (8+ recommended), 20+ GB storage.')}</p>
+
             <h3>{t('2. Backend installieren & starten', '2. Install & start the backend')}</h3>
             <pre className="lp-guide-code"><code>{`git clone https://github.com/SchBenedikt/mynd.git
 cd mynd
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python app.py`}</code></pre>
-            <p>{t('Der Server läuft auf http://0.0.0.0:5001.', 'The server runs on http://0.0.0.0:5001.')}</p>
-            <h3>{t('3. Frontend starten', '3. Start the frontend')}</h3>
+            <p>{t(
+              'Der Server läuft auf http://0.0.0.0:5001 und liefert die Web-UI automatisch mit aus. Öffne einfach die Adresse deiner Instanz im Browser — auf dem lokalen Rechner http://localhost:5001, von außen z. B. https://mynd.schächner.de (dahinter ein Reverse Proxy wie nginx).',
+              'The server runs on http://0.0.0.0:5001 and serves the web UI automatically. Just open your instance address in the browser — http://localhost:5001 on the local machine, externally e.g. https://mynd.schächner.de (behind a reverse proxy like nginx).'
+            )}</p>
+
+            <h3>{t('3. Frontend separat starten (optional)', '3. Start the frontend separately (optional)')}</h3>
+            <p>{t(
+              'Nur nötig, wenn du die UI selbst entwickeln oder anpassen möchtest. Das Frontend ist eine Next.js-App, die als eigenständiger Dev-Server läuft und per API mit dem Backend spricht.',
+              'Only needed if you want to develop or customize the UI yourself. The frontend is a Next.js app that runs as its own dev server and talks to the backend via API.'
+            )}</p>
             <pre className="lp-guide-code"><code>{`cd frontend
 npm install
 npm run dev`}</code></pre>
-            <p>{t('Die UI ist erreichbar unter http://localhost:3000.', 'The UI is at http://localhost:3000.')}</p>
+            <p>{t('Die UI ist dann erreichbar unter http://localhost:3000.', 'The UI is then available at http://localhost:3000.')}</p>
+            <p>{t(
+              'Wichtig: In diesem Setup musst du das Backend (Schritt 2) zusätzlich laufen lassen — das Frontend zeigt ohne Backend nur die leere Seite. Für den Produktivbetrieb reicht das Backend-only-Setup; ein separates Frontend brauchst du nicht.',
+              'Important: In this setup you must also run the backend (step 2) — the frontend shows an empty page without it. For production, the backend-only setup is sufficient; you do not need a separate frontend.'
+            )}</p>
+
             <h3>{t('4. Account erstellen & KI konfigurieren', '4. Create account & configure AI')}</h3>
             <p>{t(
               'Öffne die UI, klicke "Sign in" → "Create account". Gehe zu Settings → AI und wähle deinen Modellanbieter (Ollama oder OpenAI-kompatibel). Danach unter Settings → Integrations die gewünschten Dienste verbinden.',

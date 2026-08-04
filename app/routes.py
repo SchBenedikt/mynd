@@ -73,7 +73,7 @@ from core.plugin_base import (
     uninstall_plugin,
 )
 from core.scheduler import CRON_HELP, TRIGGER_EXAMPLES, TRIGGER_TYPES
-from core.tools import CORE_TOOLS, PERMISSION_HELP, vault_delete, vault_set, web_search
+from core.tools import CORE_TOOLS, PERMISSION_HELP, deep_research, vault_delete, vault_set, web_search
 from core.utils import call_with_timeout
 from core.vault import load_vault
 from core.vault import vault_get as _vg
@@ -124,6 +124,30 @@ def _resolve_active_model(requested, cfg):
     )
     return configured
 
+_TOOL_SUPPORT_FILE = Path(__file__).resolve().parent.parent / 'data' / 'tool_support_cache.json'
+_TOOL_SUPPORT_DISK_TTL = 7 * 24 * 3600  # 7 days
+
+
+def _load_tool_support_disk():
+    """Load persistent tool-support results so a server restart never triggers
+    a live LLM round-trip for a model that was already probed."""
+    try:
+        if _TOOL_SUPPORT_FILE.exists():
+            data = json.loads(_TOOL_SUPPORT_FILE.read_text())
+            if isinstance(data, dict):
+                return data
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _save_tool_support_disk(cache):
+    try:
+        _TOOL_SUPPORT_FILE.write_text(json.dumps(cache))
+    except OSError:
+        pass
+
+
 def _cached_tool_support(model, base_url):
     """Cached check_tool_support — avoids a live LLM round-trip on every request."""
     if any(k in str(model).lower() for k in _NO_TOOL_MODEL_KEYWORDS):
@@ -133,12 +157,22 @@ def _cached_tool_support(model, base_url):
     cached = _TOOL_SUPPORT_CACHE.get(key)
     if cached and now - cached[1] < _TOOL_SUPPORT_TTL:
         return cached[0]
+
+    disk = _load_tool_support_disk()
+    stored = disk.get(key)
+    if stored and isinstance(stored, dict) and now - stored.get('ts', 0) < _TOOL_SUPPORT_DISK_TTL:
+        result = bool(stored.get('result', True))
+        _TOOL_SUPPORT_CACHE[key] = (result, now)
+        return result
+
     try:
         result = check_tool_support(model, base_url)
     except Exception:
         logger.exception("check_tool_support failed")
         result = True
     _TOOL_SUPPORT_CACHE[key] = (result, now)
+    disk[key] = {'result': result, 'ts': now}
+    _save_tool_support_disk(disk)
     return result
 
 # ── /api/auth/* ────────────────────────────────────────────
@@ -573,6 +607,32 @@ def chat_summarize():
     return jsonify({'success': True, 'summary': summary})
 
 # ── /api/agent/* ───────────────────────────────────────────
+def _build_history_msgs(system_prompt, data, prompt):
+    """Merge prior chat history into the message list so the LLM has context.
+
+    The frontend sends `history` as a list of {role, content} (optionally with
+    `name`). We rebuild the full message stack here so the agent actually sees
+    the previous turns instead of treating every prompt as a fresh conversation.
+    """
+    history = data.get('history') or []
+    if not isinstance(history, list) or not history:
+        return None
+    msgs = [{"role": "system", "content": system_prompt}]
+    for h in history:
+        if not isinstance(h, dict):
+            continue
+        role = str(h.get('role', ''))
+        content = str(h.get('content', ''))
+        if role not in ('user', 'assistant') or not content:
+            continue
+        entry = {"role": role, "content": content}
+        if h.get('name'):
+            entry["name"] = str(h['name'])
+        msgs.append(entry)
+    msgs.append({"role": "user", "content": prompt})
+    return msgs
+
+
 @app.route('/api/agent/query/stream', methods=['POST'])
 def agent_query_stream():
     data = request.json or {}
@@ -597,16 +657,37 @@ def agent_query_stream():
         except Exception:
             return "⚠️ Web-Suche nicht verfügbar"
 
+    def _get_deep_research_safe(query, top_k):
+        try:
+            dr, err = call_with_timeout(
+                deep_research,
+                (query,),
+                {"top_k": top_k, "include_kb": True, "include_affine": True, "include_web": True},
+                timeout=25,
+            )
+            if err:
+                return "⚠️ Deep Research nicht verfügbar"
+            return dr or "Keine Ergebnisse gefunden."
+        except Exception:
+            return "⚠️ Deep Research nicht verfügbar"
+
     def generate():
         yield f"data: {json.dumps({'type': 'status', 'message': '⏳ Starte...'})}\n\n"
         # Everything potentially blocking runs AFTER the first SSE byte so the
         # frontend sees an immediate connection.
         if preferred_source == 'web':
+            yield f"data: {json.dumps({'type': 'status', 'message': '🔎 Suche im Web...'})}\n\n"
             web_context = _get_web_context_safe(prompt, 10)
             source_hint = f"\n\n⚠️ Internet-Suche aktiviert.\n<untrusted_data type=\"web_search\">\n{web_context}\n</untrusted_data>\n\n"
         elif preferred_source == 'deep':
-            web_context = _get_web_context_safe(prompt, 15)
-            source_hint = f"\n\n⚠️ Deep Research Modus aktiviert.\n<untrusted_data type=\"deep_search\">\n{web_context}\n</untrusted_data>\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'message': '🔎 Deep Research (Wissensbasis + AFFiNE + Web)...'})}\n\n"
+            deep_context = _get_deep_research_safe(prompt, 8)
+            source_hint = (
+                "\n\n⚠️ Deep Research Modus aktiviert – die folgenden Ergebnisse stammen aus der lokalen "
+                "Wissensbasis (Nextcloud-Dokumente + indexierte AFFiNE-Inhalte), der AFFiNE-Volltextsuche "
+                "und dem Internet. Zitiere die nummerierten Quellen in deiner Antwort.\n"
+                f"<untrusted_data type=\"deep_search\">\n{deep_context}\n</untrusted_data>\n\n"
+            )
         elif preferred_source == 'local':
             source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
         else:
@@ -614,6 +695,7 @@ def agent_query_stream():
 
         system_prompt = base_prompt + source_hint
 
+        yield f"data: {json.dumps({'type': 'status', 'message': '🧠 Prüfe Modell...'})}\n\n"
         model_has_tools = _cached_tool_support(active_model, cfg.get('base_url'))
         if not model_has_tools:
             tool_list = _get_tool_names_for_prompt()
@@ -628,7 +710,12 @@ def agent_query_stream():
             )
 
         agent_tools = [] if not model_has_tools else None
-        for event in web_agent_loop_stream(active_model, prompt, system_prompt, max_rounds=100, tools=agent_tools, owner=owner):
+        yield f"data: {json.dumps({'type': 'status', 'message': '💬 KI denkt nach...'})}\n\n"
+        initial_msgs = _build_history_msgs(system_prompt, data, prompt)
+        for event in web_agent_loop_stream(active_model, prompt, system_prompt, max_rounds=100, tools=agent_tools, owner=owner, initial_msgs=initial_msgs):
+            if event.get('type') == 'final' and preferred_source == 'deep' and deep_context:
+                event = dict(event)
+                event['response'] = _ensure_deep_sources(event.get('response', ''), deep_context)
             yield f"data: {json.dumps(event)}\n\n"
 
     return Response(
@@ -654,8 +741,12 @@ def agent_query():
         web_context = _get_web_context_safe_v2(prompt, 10)
         source_hint = f"\n\n⚠️ Internet-Suche aktiviert.\n<untrusted_data type=\"web_search\">\n{web_context}\n</untrusted_data>\n\n"
     elif preferred_source == 'deep':
-        web_context = _get_web_context_safe_v2(prompt, 15)
-        source_hint = f"\n\n⚠️ Deep Research Modus aktiviert.\n<untrusted_data type=\"deep_search\">\n{web_context}\n</untrusted_data>\n\n"
+        deep_context = _get_deep_research_safe_v2(prompt, 8)
+        source_hint = (
+            "\n\n⚠️ Deep Research Modus aktiviert – Ergebnisse aus lokaler Wissensbasis, AFFiNE "
+            "und Internet. Zitiere die nummerierten Quellen.\n"
+            f"<untrusted_data type=\"deep_search\">\n{deep_context}\n</untrusted_data>\n\n"
+        )
     elif preferred_source == 'local':
         source_hint = "\n\n⚠️ Nur lokale Dokumente.\n"
     system_prompt = base_prompt + source_hint
@@ -663,7 +754,9 @@ def agent_query():
     active_model = _resolve_active_model(requested_model, cfg)
     try:
         content, history, needs_input, research_stats = web_agent_loop(
-            active_model, prompt, system_prompt, max_rounds=100, owner=request.current_user
+            active_model, prompt, system_prompt, max_rounds=100,
+            initial_msgs=_build_history_msgs(system_prompt, data, prompt),
+            owner=request.current_user
         )
     except Exception:
         logger.exception('agent_query() failed')
@@ -681,6 +774,8 @@ def agent_query():
         })
     if content is None:
         content = "⚠️ Die Anfrage konnte nicht verarbeitet werden."
+    if preferred_source == 'deep' and deep_context:
+        content = _ensure_deep_sources(content, deep_context)
     return jsonify({'success': True, 'response': sanitize_response_text(content)})
 
 def _get_web_context_safe_v2(query, max_results):
@@ -692,6 +787,95 @@ def _get_web_context_safe_v2(query, max_results):
         return result or "Keine Ergebnisse gefunden."
     except Exception:
         return "⚠️ Web-Suche nicht verfügbar"
+
+def _get_deep_research_safe_v2(query, top_k):
+    try:
+        result, error = call_with_timeout(
+            deep_research,
+            (query,),
+            {"top_k": top_k, "include_kb": True, "include_affine": True, "include_web": True},
+            timeout=25,
+        )
+        if error:
+            return "⚠️ Deep Research nicht verfügbar"
+        return result or "Keine Ergebnisse gefunden."
+    except Exception:
+        return "⚠️ Deep Research nicht verfügbar"
+
+
+_SOURCE_LINE_RE = re.compile(r'^\((\d+)\)\s*\[(.*?)\]\((.*?)\)\s*$')
+
+def _extract_source_lines(text):
+    """Return raw '(N) [title](url)' lines found in text.
+
+    Parses the dedicated '## Quellen' section of the deep_research output.
+    Section rows like '(1) **[x](y)** (Score: 0.97)' are skipped because they
+    carry markdown/score artifacts and their numbering can collide with the
+    global numbering used in citations.
+    """
+    out = []
+    seen = set()
+    in_sources = False
+    for line in str(text or '').splitlines():
+        line_s = line.strip()
+        if line_s.startswith('## Quellen'):
+            in_sources = True
+            continue
+        if in_sources and _SOURCE_LINE_RE.match(line_s):
+            if line_s not in seen:
+                seen.add(line_s)
+                out.append(line_s)
+            continue
+        if in_sources and line_s:
+            in_sources = False
+    # Fallback: falls keine '## Quellen'-Sektion existiert, nimm alle gültigen
+    # '(N) [title](url)'-Zeilen (robust gegen leicht abweichende Formatierung).
+    if not out:
+        for line in str(text or '').splitlines():
+            line_s = line.strip()
+            if _SOURCE_LINE_RE.match(line_s) and line_s not in seen:
+                seen.add(line_s)
+                out.append(line_s)
+    return out
+
+
+def _ensure_deep_sources(content, deep_context, max_sources=12):
+    """Ergänzt die finale Antwort um eine nummerierte Quellenliste, damit das
+    Frontend die Inline-Zitate wie (14) als Links rendern kann.
+
+    Die LLM zitiert die nummerierten Quellen im Text, gibt die '## Quellen'-Liste
+    aber oft nicht (oder nur unvollständig/umnummeriert) zurück. Da das Backend
+    die komplette Deep-Research-Quellenliste kennt, ergänzen wir jede Quellzeil,
+    deren Nummer im Text zitiert wird, aber nicht schon im Antworttext steht.
+    """
+    text = str(content or '')
+    if not text.strip():
+        return text
+    cited = set(int(n) for n in re.findall(r'\((\d+)\)', text))
+    if not cited:
+        return text
+    deep_lines = _extract_source_lines(deep_context)
+    if not deep_lines:
+        return text
+    by_number = {}
+    for ln in deep_lines:
+        m = _SOURCE_LINE_RE.match(ln)
+        if m:
+            by_number.setdefault(int(m.group(1)), ln)
+    existing = set(_extract_source_lines(text))
+    existing_nums = set()
+    for ln in existing:
+        m = _SOURCE_LINE_RE.match(ln)
+        if m:
+            existing_nums.add(int(m.group(1)))
+    missing = []
+    for num in sorted(cited):
+        if num in by_number and num not in existing_nums:
+            missing.append(by_number[num])
+    if not missing:
+        return text
+    missing = missing[:max_sources]
+    return text.rstrip() + '\n\n## Quellen\n' + '\n'.join(missing) + '\n'
 
 @app.route('/api/agent/input', methods=['POST'])
 def agent_input():
@@ -1496,11 +1680,11 @@ def _gather_briefing_items():
     except Exception:
         pass
     try:
-        photos, _ = call_with_timeout(_immich_module.immich_search_photos, (), {"date_from": today_str, "date_to": today_str, "size": 5}, timeout=10)
-        if photos and "❌" not in photos and "(keine Ergebnisse)" not in photos:
-            photo_count = photos.count("immich/thumbnail")
+        photo_count = call_with_timeout(_immich_module.immich_count_photos, (today_str, today_str), timeout=10)[0]
+        if photo_count is None or photo_count < 0:
+            photo_count = 0
     except Exception:
-        pass
+        photo_count = 0
 
     items = []
     if sections:
@@ -2211,7 +2395,14 @@ def clear_notifications():
 @app.route('/api/automations/schema', methods=['GET'])
 def automation_schema():
     plugin_tools, _ = get_all_tools()
-    all_tools = CORE_TOOLS + plugin_tools
+    seen = set()
+    all_tools = []
+    for t in CORE_TOOLS + plugin_tools:
+        tname = t.get('function', {}).get('name', '')
+        if not tname or tname in seen:
+            continue
+        seen.add(tname)
+        all_tools.append(t)
     plugins_info = []
     tool_groups = {}
     for t in CORE_TOOLS:

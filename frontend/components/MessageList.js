@@ -10,7 +10,8 @@ import ContextDataCard from './ContextDataCard';
 import ResearchStats from './ResearchStats';
 import GeneratedFileCard from './GeneratedFileCard';
 import BrowserPreview from './BrowserPreview';
-import { parseSourceList, embedCitations, stripSourceList, renumberSources } from '../lib/sources';
+import { parseSourceList, embedCitations, stripSourceList } from '../lib/sources';
+import { prepareStreamingMarkdown } from '../lib/streamingMarkdown';
 
 function _stripToolTags(text) {
   if (!text) return text;
@@ -123,7 +124,7 @@ function LiveTools({ tools, thinking }) {
 }
 
 export default function MessageList({
-  messages, isThinking, liveTools,
+  messages, isThinking, liveTools, streamStatus,
   markdownComponents, handleMarkdownContentClick,
   messagesEndRef, sendMessage,
   calendarForm, setCalendarForm, submitCalendarForm, closeCalendarForm,
@@ -154,11 +155,10 @@ export default function MessageList({
             ? (() => {
                 const cleaned = _stripToolTags(msg.content);
                 const { sources } = parseSourceList(cleaned);
-                const renumbered = renumberSources(sources);
                 const mainContent = sources.length > 0
-                  ? embedCitations(stripSourceList(cleaned), renumbered)
+                  ? embedCitations(stripSourceList(cleaned), sources)
                   : embedCitations(cleaned, sources);
-                return { sources: renumbered, mainContent };
+                return { sources: sources, mainContent };
               })()
             : null;
           const displayContent = processed ? processed.mainContent : _stripToolTags(msg.content);
@@ -167,15 +167,21 @@ export default function MessageList({
           <div key={msg.id} className={`message ${msg.role} ${msg.queued ? 'queued' : ''}`}>
             <div className={`bubble${msg.isStreaming ? ' streaming' : ''}`} data-msg-id={msg.id}>
               {msg.role === 'assistant' && <LiveTools tools={trace} thinking={msg.thinking} />}
+              {msg.role === 'assistant' && msg.isStreaming && streamStatus && !msg.content && (
+                <div className="stream-status">
+                  <span className="stream-status-spinner" />
+                  <span>{streamStatus}</span>
+                </div>
+              )}
               {msg.role === 'assistant' && msg.researchStats && msg.researchStats.length > 0 && (
                 <ResearchStats stats={msg.researchStats} />
               )}
               {msg.role === 'assistant' ? (
                 <div onClickCapture={handleMarkdownContentClick}>
                   {processed ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{processed.mainContent}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{msg.isStreaming ? prepareStreamingMarkdown(processed.mainContent) : processed.mainContent}</ReactMarkdown>
                   ) : (
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{_stripToolTags(msg.content)}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>{msg.isStreaming ? prepareStreamingMarkdown(_stripToolTags(msg.content)) : _stripToolTags(msg.content)}</ReactMarkdown>
                   )}
                 </div>
               ) : msg.content}

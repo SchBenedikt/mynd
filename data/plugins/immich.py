@@ -161,6 +161,34 @@ def _format_asset(a):
     return f'• {label}  ({w}x{hh})  {dt}'
 
 
+def immich_count_photos(date_from='', date_to=''):
+    """Count photos/videos taken in a date range via /search/statistics.
+
+    Uses takenAfter/takenBefore (actual capture date, not upload time) and
+    counts all asset types without a page-size limit.
+    Returns an int, or -1 on error.
+    """
+    try:
+        base, err = _base()
+        if err:
+            return -1
+        h, err = _headers()
+        if err:
+            return -1
+        body = {}
+        if date_from:
+            body['takenAfter'] = f'{date_from}T00:00:00.000Z'
+            body['takenBefore'] = f'{date_to or date_from}T23:59:59.999Z'
+        r = requests.post(f'{base}/search/statistics', json=body, headers=h, timeout=15)
+        if r.status_code != 200:
+            return -1
+        data = r.json()
+        total = data.get('total')
+        return int(total) if isinstance(total, (int, float)) else -1
+    except Exception:
+        return -1
+
+
 def immich_search_photos(query='', person='', date_from='', date_to='', page=1, size=20, smart=False):
     try:
         page, size = int(page), int(size)
@@ -181,8 +209,8 @@ def immich_search_photos(query='', person='', date_from='', date_to='', page=1, 
                 return f'❌ Person "{person}" nicht gefunden'
             body = {'page': page, 'personIds': pids, 'size': size}
             if date_from:
-                body['createdAfter'] = f'{date_from}T00:00:00.000Z'
-                body['createdBefore'] = f'{date_to or date_from}T23:59:59.999Z'
+                body['takenAfter'] = f'{date_from}T00:00:00.000Z'
+                body['takenBefore'] = f'{date_to or date_from}T23:59:59.999Z'
             if use_smart and query:
                 body['query'] = query
                 data, err = _search_smart(body, size)
@@ -191,16 +219,16 @@ def immich_search_photos(query='', person='', date_from='', date_to='', page=1, 
         elif use_smart:
             body = {'page': page, 'size': size, 'query': query}
             if date_from:
-                body['createdAfter'] = f'{date_from}T00:00:00.000Z'
-                body['createdBefore'] = f'{date_to or date_from}T23:59:59.999Z'
+                body['takenAfter'] = f'{date_from}T00:00:00.000Z'
+                body['takenBefore'] = f'{date_to or date_from}T23:59:59.999Z'
             data, err = _search_smart(body, size)
         elif query or date_from:
             body = {'page': page}
             if query:
                 body['query'] = query
             if date_from:
-                body['createdAfter'] = f'{date_from}T00:00:00.000Z'
-                body['createdBefore'] = f'{date_to or date_from}T23:59:59.999Z'
+                body['takenAfter'] = f'{date_from}T00:00:00.000Z'
+                body['takenBefore'] = f'{date_to or date_from}T23:59:59.999Z'
             data, err = _search_metadata(body, size)
         else:
             base, err = _base()

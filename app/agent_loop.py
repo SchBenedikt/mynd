@@ -545,11 +545,14 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
 
 
 # ── Streaming Agent Loop ───────────────────────────────────
-def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=None, owner=None):
+def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=None, owner=None, initial_msgs=None):
     if tools is None:
         tools = AGENT_TOOLS
-    msgs = [{"role": "system", "content": system_prompt}]
-    msgs.append({"role": "user", "content": user_msg})
+    if initial_msgs is not None:
+        msgs = list(initial_msgs)
+    else:
+        msgs = [{"role": "system", "content": system_prompt}]
+        msgs.append({"role": "user", "content": user_msg})
     consecutive_think = 0
     bypass_executed = False
     intermediate_continuations = 0

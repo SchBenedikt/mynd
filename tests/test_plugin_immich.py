@@ -2,6 +2,7 @@
 
 import pytest
 
+import data.plugins.immich as immich_mod
 from data.plugins.immich import (
     _fmt_bytes,
     _format_asset,
@@ -59,3 +60,48 @@ class TestServerStats:
         result = immich_get_server_stats()
         assert isinstance(result, str)
         assert len(result) > 0
+
+
+class TestCountPhotos:
+    def test_missing_url_returns_negative(self, monkeypatch):
+        monkeypatch.setattr(immich_mod, "_base",
+                            lambda: (None, "❌ Immich URL fehlt (vault: immich/url)"))
+        assert immich_mod.immich_count_photos("2026-08-01", "2026-08-01") == -1
+
+    def test_missing_key_returns_negative(self, monkeypatch):
+        monkeypatch.setattr(immich_mod, "_base",
+                            lambda: ("http://immich.local/api", None))
+        monkeypatch.setattr(immich_mod, "_headers",
+                            lambda: (None, "❌ Immich API-Key fehlt (vault: immich/api_key)"))
+        assert immich_mod.immich_count_photos("2026-08-01", "2026-08-01") == -1
+
+    def test_http_error_returns_negative(self, monkeypatch):
+        class Resp:
+            status_code = 500
+        monkeypatch.setattr(immich_mod, "_base",
+                            lambda: ("http://immich.local/api", None))
+        monkeypatch.setattr(immich_mod, "_headers",
+                            lambda: ({}, None))
+        monkeypatch.setattr("requests.post", lambda *a, **k: Resp())
+        assert immich_mod.immich_count_photos("2026-08-01", "2026-08-01") == -1
+
+    def test_success_returns_total(self, monkeypatch):
+        class Resp:
+            status_code = 200
+
+            def json(self):
+                return {"total": 23}
+        calls = {}
+        def fake_post(url, json=None, headers=None, timeout=None):
+            calls["body"] = json
+            return Resp()
+        monkeypatch.setattr(immich_mod, "_base",
+                            lambda: ("http://immich.local/api", None))
+        monkeypatch.setattr(immich_mod, "_headers",
+                            lambda: ({}, None))
+        monkeypatch.setattr("requests.post", fake_post)
+        assert immich_mod.immich_count_photos("2026-08-01", "2026-08-01") == 23
+        body = calls["body"]
+        assert body["takenAfter"] == "2026-08-01T00:00:00.000Z"
+        assert body["takenBefore"] == "2026-08-01T23:59:59.999Z"
+        assert "createdAfter" not in body

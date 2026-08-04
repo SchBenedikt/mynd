@@ -34,13 +34,17 @@ export function parseSourceList(content) {
 export function embedCitations(content, sources) {
   if (!sources || sources.length === 0) return content;
 
-  const origToNew = {};
-  sources.forEach((s, i) => { origToNew[s.number] = i + 1; });
+  const byNumber = {};
+  sources.forEach((s) => { byNumber[s.number] = s; });
 
+  // Ersetze (N) im Text nur, wenn die Original-Nummer N in der Quellenliste
+  // existiert. Wir nummerieren hier NICHT um, damit die Zitate im Text mit den
+  // angezeigten Quellennummern übereinstimmen.
   return content.replace(/\((\d+)\)/g, (match, num) => {
-    const n = origToNew[parseInt(num)];
-    if (n) {
-      return `[(${n})](${sources.find(s => s.number === parseInt(num))?.url || ''})`;
+    const n = parseInt(num);
+    const src = byNumber[n];
+    if (src) {
+      return `[(${n})](${src.url || ''})`;
     }
     return match;
   });
