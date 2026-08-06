@@ -62,6 +62,8 @@ def _load_openai_config():
                     from core.vault import vault_get as _vg
                     key = _vg('ai/api_key') or ''
                 return base or 'https://api.openai.com/v1', key
+            if fc.get('provider') == 'openai-oauth':
+                return 'http://127.0.0.1:10531/v1', ''
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             pass
     ob, ok, _ = _openai_cfg()
