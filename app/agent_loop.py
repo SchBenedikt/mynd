@@ -266,7 +266,39 @@ def _detect_generated_files(age_seconds=5):
     return files
 
 
-def _decorate_response_with_media(content, stats):
+def _language_from_prompt(system_prompt):
+    match = re.search(r'selected language \(([^)]+)\)', str(system_prompt or ''))
+    return match.group(1).strip().lower() if match else 'en'
+
+
+def _suggest_follow_ups(content, language='en', max_items=4):
+    """Return deterministic, low-risk follow-ups based on the answer context."""
+    text = str(content or '').strip()
+    if not text:
+        return []
+    lower = text.lower()
+    if language.startswith('de'):
+        candidates = [
+            'Kannst du die wichtigsten Punkte kurz zusammenfassen?',
+            'Welche nächsten Schritte empfiehlst du?',
+            'Welche Quellen oder Details sollte ich noch prüfen?',
+            'Kannst du mir ein konkretes Beispiel dazu geben?',
+        ]
+    else:
+        candidates = [
+            'Can you summarize the key points?',
+            'What next steps do you recommend?',
+            'Which sources or details should I verify?',
+            'Can you give me a concrete example?',
+        ]
+    if any(marker in lower for marker in ('calendar', 'kalender', 'appointment', 'termin')):
+        candidates.insert(0, 'Show me the related calendar details.') if not language.startswith('de') else candidates.insert(0, 'Zeige mir die zugehörigen Kalenderdetails.')
+    if any(marker in lower for marker in ('source', 'quelle', 'http://', 'https://')):
+        candidates.insert(0, 'Open or compare the cited sources.') if not language.startswith('de') else candidates.insert(0, 'Öffne oder vergleiche die genannten Quellen.')
+    return list(dict.fromkeys(candidates))[:max_items]
+
+
+def _decorate_response_with_media(content, stats, language='en'):
     content = _strip_tool_code_blocks(content)
     with_sources = _ensure_numbered_sources(content, stats)
     result = _append_source_images(with_sources, stats)
@@ -416,7 +448,7 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
                     })
                     continue
                 msgs.append(_assistant_message(text))
-                final_text, files = _decorate_response_with_media(text, stats)
+                final_text, files = _decorate_response_with_media(text, stats, system_prompt.split('selected language (', 1)[-1].split(')', 1)[0] if 'selected language (' in system_prompt else 'en')
                 return final_text, msgs, None, stats
 
             content = msg.get("content", "")
@@ -536,7 +568,7 @@ def web_agent_loop(model, user_msg, system_prompt, max_rounds=8, tools=None, ini
         if "message" in resp:
             content = "⚠️ Max Runden erreicht.\n\n" + resp["message"].get("content", "")
             msgs.append({"role": "assistant", "content": content})
-            final_text, files = _decorate_response_with_media(content, stats)
+            final_text, files = _decorate_response_with_media(content, stats, system_prompt.split('selected language (', 1)[-1].split(')', 1)[0] if 'selected language (' in system_prompt else 'en')
             return final_text, msgs, None, stats
         return "⚠️ Max Runden erreicht.", msgs, None, stats
     except Exception:
@@ -587,8 +619,8 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
             if final_msg is None:
                 text = accumulated.strip()
                 if text:
-                    final_text, files = _decorate_response_with_media(text, stats)
-                    yield {"type": "final", "response": final_text, "research_stats": stats, "files": files}
+                    final_text, files = _decorate_response_with_media(text, stats, _language_from_prompt(system_prompt))
+                    yield {"type": "final", "response": final_text, "research_stats": stats, "files": files, "follow_up_suggestions": _suggest_follow_ups(final_text, _language_from_prompt(system_prompt))}
                 else:
                     yield {"type": "error", "error": "Keine Antwort vom Modell"}
                 return
@@ -699,8 +731,8 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
                     })
                     continue
                 msgs.append(_assistant_message(text))
-                final_text, files = _decorate_response_with_media(text, stats)
-                yield {"type": "final", "response": final_text, "research_stats": stats, "files": files}
+                final_text, files = _decorate_response_with_media(text, stats, _language_from_prompt(system_prompt))
+                yield {"type": "final", "response": final_text, "research_stats": stats, "files": files, "follow_up_suggestions": _suggest_follow_ups(final_text, _language_from_prompt(system_prompt))}
                 return
 
             content = final_msg.get("content", "")
@@ -823,8 +855,8 @@ def web_agent_loop_stream(model, user_msg, system_prompt, max_rounds=8, tools=No
         if "message" in resp:
             content = "⚠️ Max Runden erreicht.\n\n" + resp["message"].get("content", "")
             msgs.append({"role": "assistant", "content": content})
-            final_text, files = _decorate_response_with_media(content, stats)
-            yield {"type": "final", "response": final_text, "research_stats": stats, "files": files}
+            final_text, files = _decorate_response_with_media(content, stats, _language_from_prompt(system_prompt))
+            yield {"type": "final", "response": final_text, "research_stats": stats, "files": files, "follow_up_suggestions": _suggest_follow_ups(final_text, _language_from_prompt(system_prompt))}
             return
         yield {"type": "final", "response": "⚠️ Max Runden erreicht.", "research_stats": stats}
         return
