@@ -748,6 +748,7 @@ def serve_browser_download(filename):
     return send_from_directory(BROWSER_DOWNLOADS_DIR, filename)
 
 @app.route('/api/upload', methods=['POST'])
+@require_auth
 def upload_file():
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file provided'}), 400
@@ -758,23 +759,31 @@ def upload_file():
     if request.content_length and request.content_length > _max_upload_size:
         return jsonify({'success': False, 'error': 'File exceeds 50 MB limit'}), 400
     try:
-        safe_name = re.sub(r'[^\w\.\-]', '_', f.filename)
-        dest = os.path.realpath(os.path.join(UPLOAD_DIR, safe_name))
-        if not dest.startswith(os.path.realpath(UPLOAD_DIR)):
-            return jsonify({'success': False, 'error': 'Invalid path'}), 400
+        owner = re.sub(r'[^A-Za-z0-9_-]', '_', str(request.current_user))[:80] or 'user'
+        owner_dir = Path(UPLOAD_DIR) / owner
+        owner_dir.mkdir(parents=True, exist_ok=True)
+        display_name = re.sub(r'[^\w\.\-]', '_', Path(f.filename).name)
+        display_name = display_name[:180] or 'upload'
+        object_name = f'{secrets.token_hex(16)}_{display_name}'
+        dest = owner_dir / object_name
         data = f.read(_max_upload_size + 1)
         if len(data) > _max_upload_size:
             return jsonify({'success': False, 'error': 'File exceeds 50 MB limit'}), 400
-        Path(dest).write_bytes(data)
-        size = os.path.getsize(dest)
-        return jsonify({'success': True, 'filename': safe_name, 'size': size, 'url': f'/api/uploads/{safe_name}'})
+        dest.write_bytes(data)
+        size = dest.stat().st_size
+        return jsonify({'success': True, 'filename': display_name, 'object_id': object_name, 'size': size, 'url': f'/api/uploads/{object_name}'})
     except Exception:
         return jsonify({'success': False, 'error': 'Upload failed'}), 500
 
 @app.route('/api/uploads/<path:filename>')
 @require_auth
 def serve_upload(filename):
-    return send_from_directory(UPLOAD_DIR, filename)
+    owner = re.sub(r'[^A-Za-z0-9_-]', '_', str(request.current_user))[:80] or 'user'
+    owner_dir = Path(UPLOAD_DIR) / owner
+    safe_filename = Path(filename).name
+    if safe_filename != filename or not re.fullmatch(r'[0-9a-f]{32}_[\w.\-]{1,180}', safe_filename):
+        return jsonify({'success': False, 'error': 'Invalid upload id'}), 400
+    return send_from_directory(owner_dir, safe_filename)
 
 # ── /api/ollama/* / /api/ai/* ──────────────────────────────
 @app.route('/api/ollama/status', methods=['GET'])

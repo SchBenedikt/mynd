@@ -202,6 +202,7 @@ MYND is **local-first** in the sense that application state, credentials, files,
 | **AI Model** | Conversations | Configurable Ollama / OpenAI endpoint |
 | **Email** | Credentials + messages | Your IMAP/SMTP server |
 | **Smart Home** | API commands | Your Home Assistant instance |
+| **Uploads** | Uploaded file contents | Local per-user storage only |
 | **Immich** | Search queries | Your Immich server |
 
 > ⚠️ When using cloud-based AI providers (OpenAI, etc.), your conversation text is sent to their API. For full local operation, use Ollama with a local model.
@@ -215,6 +216,7 @@ MYND is **local-first** in the sense that application state, credentials, files,
 - All `/api/` routes authenticated by default
 - Configurable confirmation modes for privileged tools
 - Workspace-restricted file access and optional bubblewrap sandboxing on Linux
+- Chat uploads use random object IDs and per-user storage isolation
 - Audit log for all privileged tool calls (`data/audit.jsonl`)
 
 > Existing plaintext vaults are encrypted automatically on first access. Back up the external vault key separately; losing it makes the encrypted vault unrecoverable.
