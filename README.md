@@ -160,6 +160,7 @@ Most configuration is available from the web UI:
 - **Theme** — 7 color themes, light/dark/auto
 - **Users** — Registration toggle, role management
 - **Indexing** — Document sync & embedding
+- **Projects** — Organize chats with validated local project data
 - **Language** — 12 languages available
 
 ---
