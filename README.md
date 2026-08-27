@@ -26,7 +26,7 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 | **🗺️ Browser Automation** | Headless Playwright + agent-browser CLI — [128 tools total](FEATURES.md) |
 | **📷 Photo Search** | Semantic photo search via Immich |
 | **🏠 Smart Home** | Home Assistant — lights, switches, sensors, cameras, scenes, scripts |
-| **📅 Productivity** | CalDAV calendars & tasks (Nextcloud), timer reminders |
+| **📅 Productivity** | CalDAV calendars & tasks (Nextcloud), task status/due-date filters, timer reminders |
 | **📧 Email** | IMAP/SMTP integration for reading & sending |
 | **🤖 Automations** | Cron-based automations, daily briefing, scheduled actions |
 | **🔌 Plugin System** | Extensible registry for repository-reviewed local plugins, toggle at runtime |

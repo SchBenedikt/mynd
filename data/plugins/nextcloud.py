@@ -262,7 +262,27 @@ def nextcloud_caldav_query(start_date="", end_date=""):
     except Exception as e:
         return f"❌ {e}"
 
-def nextcloud_tasks_query():
+def _parse_bool(value, default=False):
+    if value is None:
+        return default
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
+
+def _parse_ical_date(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    raw = raw.split(':', 1)[-1].rstrip('Z')
+    if 'T' in raw:
+        raw = raw.split('T', 1)[0]
+    raw = raw.replace('-', '')
+    if not re.fullmatch(r'\d{8}', raw):
+        return None
+    return raw
+
+
+def nextcloud_tasks_query(include_completed=False, due_before='', due_after=''):
+    """List Nextcloud VTODOs with explicit completion and due-date filters."""
     try:
         url, dav, user, pw = _nc()
         auth = HTTPBasicAuth(user, pw)
@@ -285,17 +305,33 @@ def nextcloud_tasks_query():
                 headers={"Content-Type":"application/xml; charset=utf-8","Depth":"1"}, timeout=30)
             if r.status_code not in (207, 200):
                 continue
-            for match in re.finditer(r'BEGIN:VTODO(.*?)END:VTODO', r.text, re.DOTALL):
+            task_payload = r.text
+            if 'BEGIN:VTODO' not in task_payload:
+                task_payload = re.sub(r'<[^>]+>', '', task_payload)
+                task_payload = re.sub(r'(?<!\n)(BEGIN:VTODO|END:VTODO|SUMMARY:|DUE:|STATUS:|COMPLETED:)', r'\n\1', task_payload)
+                task_payload = task_payload.replace('\\r', '').replace('\\n', '\n')
+            for match in re.finditer(r'BEGIN:VTODO(.*?)END:VTODO', task_payload, re.DOTALL):
                 t = match.group(1)
                 def _ex(tag):
                     m = re.search(tag + r'[;:](.*?)(?:\r?\n|$)', t)
                     return m.group(1).strip() if m else ""
                 summary = _ex('SUMMARY').replace('\\,',',').replace('\\n',' ')
                 due = _ex('DUE')
-                status = _ex('STATUS')
+                status = _ex('STATUS').upper()
+                completed_value = _ex('COMPLETED')
+                is_completed = status == 'COMPLETED' or bool(completed_value)
+                if not _parse_bool(include_completed) and is_completed:
+                    continue
+                due_ymd = _parse_ical_date(due)
+                before_ymd = _parse_ical_date(due_before)
+                after_ymd = _parse_ical_date(due_after)
+                if before_ymd and (not due_ymd or due_ymd > before_ymd):
+                    continue
+                if after_ymd and (not due_ymd or due_ymd < after_ymd):
+                    continue
                 if summary:
-                    all_tasks.append(f"📌 [{cal_name}] {summary} | Fällig: {due or '?'} | Status: {status or '?'}")
-        return '\n'.join(all_tasks[:50]) if all_tasks else "Keine Aufgaben gefunden."
+                    all_tasks.append(f"📌 [{cal_name}] {summary} | Fällig: {due or '?'} | Status: {status or 'NEEDS-ACTION'}")
+        return '\n'.join(all_tasks[:50]) if all_tasks else "Keine passenden Aufgaben gefunden."
     except Exception as e:
         return f"❌ {e}"
 
@@ -847,7 +883,7 @@ TOOLS = [
     {"type":"function","function":{"name":"nextcloud_request","description":"Sende HTTP-Request an die Nextcloud-API (WebDAV/CalDAV/CardDAV/OCS). Methoden: GET, PUT, DELETE, PROPFIND, REPORT, MKCOL, MOVE, COPY.","parameters":{"type":"object","properties":{"method":{"type":"string","description":"GET, PUT, DELETE, PROPFIND, MKCOL, MOVE, COPY"},"path":{"type":"string","description":"Pfad relativ zur WebDAV-Basis"},"headers":{"type":"object","description":"Zusätzliche HTTP-Header (optional)"},"body":{"type":"string","description":"Request-Body (optional)"},"depth":{"type":"string","description":"Depth für PROPFIND (0, 1, infinity)"}},"required":["method","path"]}}},  # noqa: E501
     {"type":"function","function":{"name":"nextcloud_caldav_query","description":"Rufe Kalendereinträge (Termine) von ALLEN Nextcloud-Kalendern ab. Erkennt alle Kalender automatisch. Datumsfilter optional (YYYYMMDD).","parameters":{"type":"object","properties":{"start_date":{"type":"string","description":"Start YYYYMMDD (optional)"},"end_date":{"type":"string","description":"Ende YYYYMMDD (optional)"}}}}},  # noqa: E501
     {"type":"function","function":{"name":"nextcloud_caldav_create","description":"Erstelle einen neuen Kalender-Termin. Datum im iCal-Format: 20260628T090000. Kalendername optional (default 'Persönlich').","parameters":{"type":"object","properties":{"summary":{"type":"string","description":"Titel des Termins"},"dtstart":{"type":"string","description":"Start (iCal: 20260628T090000)"},"dtend":{"type":"string","description":"Ende (iCal, optional)"},"description":{"type":"string","description":"Beschreibung (optional)"},"calendar_name":{"type":"string","description":"Kalendername (default: Persönlich)"}},"required":["summary","dtstart"]}}},  # noqa: E501
-    {"type":"function","function":{"name":"nextcloud_tasks_query","description":"Rufe Aufgaben/Todos von ALLEN Nextcloud-Kalendern ab.","parameters":{"type":"object","properties":{}}}},  # noqa: E501
+    {"type":"function","function":{"name":"nextcloud_tasks_query","description":"Rufe offene Nextcloud-Aufgaben ab; erledigte Aufgaben werden standardmäßig ausgeblendet. Optional abgeschlossene Aufgaben sowie Fälligkeitsbereich einschließen.","parameters":{"type":"object","properties":{"include_completed":{"type":"boolean","description":"Erledigte Aufgaben einschließen (Standard: false)"},"due_before":{"type":"string","description":"Nur Aufgaben bis zu diesem Datum, YYYY-MM-DD (optional)"},"due_after":{"type":"string","description":"Nur Aufgaben ab diesem Datum, YYYY-MM-DD (optional)"}},"required":[]}}},  # noqa: E501
     {"type":"function","function":{"name":"nextcloud_tasks_create","description":"Erstelle eine neue Aufgabe/Todo in Nextcloud. Datum im iCal-Format: 20260628. Standard-Kalender: 'Aufgaben'.","parameters":{"type":"object","properties":{"summary":{"type":"string","description":"Aufgaben-Titel"},"due":{"type":"string","description":"Fällig bis (iCal: 20260628, optional)"},"description":{"type":"string","description":"Beschreibung (optional)"},"calendar_name":{"type":"string","description":"Kalendername (default: Aufgaben)"}},"required":["summary"]}}},  # noqa: E501
     {"type":"function","function":{"name":"nextcloud_contact_search","description":"Suche in ALLEN Nextcloud-Adressbüchern nach Kontakten. Query ist Name, E-Mail oder Telefonnummer. Liefert Name, E-Mail, Telefon, Firma und UID zurück.","parameters":{"type":"object","properties":{"query":{"type":"string","description":"Suchbegriff (Name, E-Mail oder Telefon)"}},"required":["query"]}}},  # noqa: E501
     {"type":"function","function":{"name":"nextcloud_contact_get","description":"Rufe einen einzelnen Nextcloud-Kontakt per UID ab. Liefert die vollständige vCard. Die UID bekommst du aus nextcloud_contact_search.","parameters":{"type":"object","properties":{"uid":{"type":"string","description":"Die UID des Kontakts (aus nextcloud_contact_search)"}},"required":["uid"]}}},  # noqa: E501
@@ -902,7 +938,7 @@ PROMPT_EXTRA = (
     "  - **nextcloud_request**: Beliebiger WebDAV/CalDAV/CardDAV/OCS-Request\n"
     "  - **nextcloud_caldav_query**: Termine abrufen (mit Datumsfilter)\n"
     "  - **nextcloud_caldav_create**: Termin erstellen\n"
-    "  - **nextcloud_tasks_query**: Aufgaben abrufen\n"
+    "  - **nextcloud_tasks_query(include_completed=false, due_before='', due_after='')**: Offene Aufgaben abrufen; optional Status und Fälligkeitsbereich filtern\n"
     "  - **nextcloud_tasks_create**: Aufgabe erstellen\n"
     "  - **nextcloud_contact_search**: Kontakte suchen (Name/E-Mail/Telefon)\n"
     "  - **nextcloud_contact_get**: Einzelnen Kontakt per UID abrufen\n"
