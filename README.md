@@ -31,7 +31,7 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 | **🤖 Automations** | Cron-based automations, daily briefing, scheduled actions |
 | **🔌 Plugin System** | Extensible registry for repository-reviewed local plugins, toggle at runtime |
 | **🔐 Vault** | Local credential storage for API keys, passwords, and integration configuration; provider checks reject unsafe private URLs |
-| **🛡️ Auth** | Password-based login, configurable registration, role-based access |
+| **🛡️ Auth** | Password-based login, configurable registration, role-based access, hashed expiring bearer sessions |
 | **🎨 Themes** | 7 color themes × light/dark/modes |
 | **🌐 Multi-language** | UI in 12 languages: DE, EN, FR, ES, IT, PT, NL, PL, TR, RU, JA, ZH |
 
@@ -57,7 +57,7 @@ make dev
 
 Open **http://localhost:3000**. The API runs at `http://127.0.0.1:5001`.
 
-On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log. Indexing runs expose a cancellation-aware stop operation and reject duplicate starts while a run is active.
+On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log. Bearer sessions are stored as hashes, expire automatically, and rotate on refresh. Indexing runs expose a cancellation-aware stop operation and reject duplicate starts while a run is active.
 
 ---
 

@@ -1,4 +1,5 @@
 from unittest.mock import Mock
+import time
 
 import pytest
 
@@ -9,7 +10,7 @@ from app import app
 @pytest.fixture(autouse=True)
 def add_authenticated_user():
     import app.state as state
-    state.AUTH_USERS["security-test"] = {"role": "admin", "token": "security-test-token"}
+    state.AUTH_USERS["security-test"] = {"role": "admin", "token_hash": state.token_hash("security-test-token"), "token_expires_at": time.time() + 3600}
     yield
     state.AUTH_USERS.pop("security-test", None)
 

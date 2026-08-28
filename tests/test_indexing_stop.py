@@ -1,6 +1,9 @@
 import threading
+import time
 
 import pytest
+
+import app.state as state
 
 import app.routes as routes
 from app import app
@@ -8,8 +11,7 @@ from app import app
 
 @pytest.fixture(autouse=True)
 def authenticated_user(monkeypatch):
-    import app.state as state
-    state.AUTH_USERS["index-test"] = {"role": "admin", "token": "test-client-token"}
+    state.AUTH_USERS["index-test"] = {"role": "admin", "token_hash": state.token_hash("test-client-token"), "token_expires_at": time.time() + 3600}
     yield
     state.AUTH_USERS.pop("index-test", None)
 

@@ -1,13 +1,15 @@
 import io
 import re
+import time
 
 import app as app_module
+import app.state as state
 from app import app
 
 
 def _client(username, token):
     app.config['TESTING'] = True
-    app_module.AUTH_USERS[username] = {'name': username, 'role': 'user', 'token': token}
+    app_module.AUTH_USERS[username] = {'name': username, 'role': 'user', 'token_hash': state.token_hash(token), 'token_expires_at': time.time() + 3600}
     client = app.test_client()
     client.environ_base['HTTP_AUTHORIZATION'] = f'Bearer {token}'
     return client

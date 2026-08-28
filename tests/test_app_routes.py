@@ -20,7 +20,8 @@ def client():
     app_module.AUTH_USERS["test-client"] = {
         "name": "Test Client",
         "role": "admin",
-        "token": "test-client-token",
+        "token_hash": app_state.token_hash("test-client-token"),
+        "token_expires_at": time.time() + 3600,
     }
     with app.test_client() as client:
         client.environ_base["HTTP_AUTHORIZATION"] = "Bearer test-client-token"
@@ -69,7 +70,7 @@ class TestAuthAPI:
         monkeypatch.setitem(
             app_module.AUTH_USERS,
             "refresh-user",
-            {"name": "Refresh User", "role": "user", "token": "old-token"},
+            {"name": "Refresh User", "role": "user", "token_hash": app_state.token_hash("old-token"), "token_expires_at": time.time() + 3600},
         )
 
         response = client.post(
@@ -351,7 +352,7 @@ class TestBackupSecurity:
         monkeypatch.setitem(
             app_module.AUTH_USERS,
             "admin",
-            {"name": "Admin", "role": "admin", "token": "test-admin-token"},
+            {"name": "Admin", "role": "admin", "token_hash": app_state.token_hash("test-admin-token"), "token_expires_at": time.time() + 3600},
         )
 
         response = client.post(

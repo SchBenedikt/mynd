@@ -64,7 +64,7 @@ from app.helpers import (
 from app.ollama_client import load_ai_config, ollama_client, save_ai_config
 from app.scheduler import _init_automation_engine, automation_engine
 from app.session_store import agent_sessions
-from app.state import INDEXING_CANCEL, INDEXING_STATUS, save_auth_users
+from app.state import INDEXING_CANCEL, INDEXING_STATUS, issue_auth_token, revoke_auth_token, save_auth_users, token_hash
 from core.model import check_tool_support
 from core.plugin_base import (
     get_all_plugins,
@@ -166,8 +166,7 @@ def auth_login():
     username = data.get('username', '')
     password = data.get('password', '')
     if username in AUTH_USERS and _verify_password(AUTH_USERS[username], password):
-        token = os.urandom(32).hex()
-        AUTH_USERS[username]['token'] = token
+        token = issue_auth_token(AUTH_USERS[username])
         save_auth_users()
         return jsonify({
             'authenticated': True,
@@ -185,8 +184,7 @@ def auth_login():
 def auth_refresh():
     from app.state import AUTH_USERS
     username = request.current_user
-    token = secrets.token_hex(32)
-    AUTH_USERS[username]['token'] = token
+    token = issue_auth_token(AUTH_USERS[username])
     save_auth_users()
     return jsonify({'success': True, 'token': token})
 
@@ -213,11 +211,11 @@ def auth_register():
         return jsonify({'success': False, 'error': 'Password too short (min 4 characters)'}), 400
     if username in AUTH_USERS:
         return jsonify({'success': False, 'error': 'User already exists'}), 409
-    token = os.urandom(32).hex()
     AUTH_USERS[username] = {
         'password_hash': generate_password_hash(password),
-        'name': name, 'role': 'user', 'token': token,
+        'name': name, 'role': 'user',
     }
+    token = issue_auth_token(AUTH_USERS[username])
     save_auth_users()
     return jsonify({
         'success': True, 'authenticated': True,
@@ -231,8 +229,8 @@ def auth_logout():
     if auth.startswith('Bearer '):
         token = auth[7:]
         for user in AUTH_USERS.values():
-            if secrets.compare_digest(str(user.get('token', '')), token):
-                user.pop('token', None)
+            if user.get('token_hash') == token_hash(token):
+                revoke_auth_token(user)
                 save_auth_users()
                 break
     return jsonify({'success': True})
@@ -302,6 +300,7 @@ def auth_profile():
             AUTH_USERS[username]['name'] = name
         if password:
             _set_password(AUTH_USERS[username], password)
+            revoke_auth_token(AUTH_USERS[username])
         save_auth_users()
     current = AUTH_USERS.get(username, {})
     return jsonify({'success': True, 'user': {
@@ -367,6 +366,7 @@ def admin_users_reset():
     if not password:
         return jsonify({'success': False, 'error': 'Password required'}), 400
     _set_password(AUTH_USERS[username], password)
+    revoke_auth_token(AUTH_USERS[username])
     save_auth_users()
     return jsonify({'success': True})
 

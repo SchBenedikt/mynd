@@ -1,8 +1,11 @@
 """Tests for the automation engine (core/scheduler.py) and its API."""
 
+import time
+
 import pytest
 
 import app as app_module
+import app.state as app_state
 from app import app
 from core.scheduler import AutomationEngine
 
@@ -19,7 +22,8 @@ def client():
     app_module.AUTH_USERS["test-client"] = {
         "name": "Test Client",
         "role": "admin",
-        "token": "test-client-token",
+        "token_hash": app_state.token_hash("test-client-token"),
+        "token_expires_at": time.time() + 3600,
     }
     with app.test_client() as client:
         client.environ_base["HTTP_AUTHORIZATION"] = "Bearer test-client-token"
