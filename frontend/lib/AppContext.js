@@ -34,7 +34,14 @@ function loadActiveChatId() {
 function loadProjects() {
   try {
     const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw || raw.length > 100000) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((project) => (
+      project && typeof project === 'object' &&
+      typeof project.id === 'string' && project.id.length > 0 && project.id.length <= 200 &&
+      typeof project.name === 'string' && project.name.trim().length > 0 && project.name.length <= 200
+    ));
   } catch { return []; }
 }
 

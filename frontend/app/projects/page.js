@@ -13,7 +13,24 @@ const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
 function loadChats() {
   try {
     const raw = localStorage.getItem(CHAT_STORAGE_KEY);
-    if (raw) { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; }
+    if (!raw || raw.length > 1000000) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch(e) {}
+  return [];
+}
+
+function loadProjects() {
+  try {
+    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
+    if (!raw || raw.length > 100000) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((project) => (
+      project && typeof project === 'object' &&
+      typeof project.id === 'string' && project.id.length > 0 && project.id.length <= 200 &&
+      typeof project.name === 'string' && project.name.trim().length > 0 && project.name.length <= 200
+    ));
   } catch(e) {}
   return [];
 }
@@ -25,7 +42,7 @@ export default function ProjectsPage() {
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
 
   const { isSidebarCollapsed, toggleSidebar, canAnimate } = useSidebar();
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState(loadProjects);
   const [chats, setChats] = useState(loadChats);
   const [activeProject, setActiveProject] = useState(null);
   const [newProjectName, setNewProjectName] = useState('');
@@ -65,10 +82,6 @@ export default function ProjectsPage() {
     return () => document.removeEventListener('click', close);
   }, []);
 
-  useEffect(() => {
-    const pRaw = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    if (pRaw) try { setProjects(JSON.parse(pRaw)); } catch(e) {}
-  }, []);
 
   const createProject = () => {
     const name = newProjectName.trim();

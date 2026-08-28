@@ -7,6 +7,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from flask import Response, jsonify, request, send_from_directory, stream_with_context
@@ -63,7 +64,7 @@ from app.helpers import (
 from app.ollama_client import load_ai_config, ollama_client, save_ai_config
 from app.scheduler import _init_automation_engine, automation_engine
 from app.session_store import agent_sessions
-from app.state import INDEXING_STATUS, save_auth_users
+from app.state import INDEXING_CANCEL, INDEXING_STATUS, issue_auth_token, revoke_auth_token, save_auth_users, token_hash
 from core.model import check_tool_support
 from core.plugin_base import (
     get_all_plugins,
@@ -165,8 +166,7 @@ def auth_login():
     username = data.get('username', '')
     password = data.get('password', '')
     if username in AUTH_USERS and _verify_password(AUTH_USERS[username], password):
-        token = os.urandom(32).hex()
-        AUTH_USERS[username]['token'] = token
+        token = issue_auth_token(AUTH_USERS[username])
         save_auth_users()
         return jsonify({
             'authenticated': True,
@@ -184,8 +184,7 @@ def auth_login():
 def auth_refresh():
     from app.state import AUTH_USERS
     username = request.current_user
-    token = secrets.token_hex(32)
-    AUTH_USERS[username]['token'] = token
+    token = issue_auth_token(AUTH_USERS[username])
     save_auth_users()
     return jsonify({'success': True, 'token': token})
 
@@ -212,11 +211,11 @@ def auth_register():
         return jsonify({'success': False, 'error': 'Password too short (min 4 characters)'}), 400
     if username in AUTH_USERS:
         return jsonify({'success': False, 'error': 'User already exists'}), 409
-    token = os.urandom(32).hex()
     AUTH_USERS[username] = {
         'password_hash': generate_password_hash(password),
-        'name': name, 'role': 'user', 'token': token,
+        'name': name, 'role': 'user',
     }
+    token = issue_auth_token(AUTH_USERS[username])
     save_auth_users()
     return jsonify({
         'success': True, 'authenticated': True,
@@ -230,8 +229,8 @@ def auth_logout():
     if auth.startswith('Bearer '):
         token = auth[7:]
         for user in AUTH_USERS.values():
-            if secrets.compare_digest(str(user.get('token', '')), token):
-                user.pop('token', None)
+            if user.get('token_hash') == token_hash(token):
+                revoke_auth_token(user)
                 save_auth_users()
                 break
     return jsonify({'success': True})
@@ -301,6 +300,7 @@ def auth_profile():
             AUTH_USERS[username]['name'] = name
         if password:
             _set_password(AUTH_USERS[username], password)
+            revoke_auth_token(AUTH_USERS[username])
         save_auth_users()
     current = AUTH_USERS.get(username, {})
     return jsonify({'success': True, 'user': {
@@ -366,6 +366,7 @@ def admin_users_reset():
     if not password:
         return jsonify({'success': False, 'error': 'Password required'}), 400
     _set_password(AUTH_USERS[username], password)
+    revoke_auth_token(AUTH_USERS[username])
     save_auth_users()
     return jsonify({'success': True})
 
@@ -748,6 +749,7 @@ def serve_browser_download(filename):
     return send_from_directory(BROWSER_DOWNLOADS_DIR, filename)
 
 @app.route('/api/upload', methods=['POST'])
+@require_auth
 def upload_file():
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file provided'}), 400
@@ -758,23 +760,31 @@ def upload_file():
     if request.content_length and request.content_length > _max_upload_size:
         return jsonify({'success': False, 'error': 'File exceeds 50 MB limit'}), 400
     try:
-        safe_name = re.sub(r'[^\w\.\-]', '_', f.filename)
-        dest = os.path.realpath(os.path.join(UPLOAD_DIR, safe_name))
-        if not dest.startswith(os.path.realpath(UPLOAD_DIR)):
-            return jsonify({'success': False, 'error': 'Invalid path'}), 400
+        owner = re.sub(r'[^A-Za-z0-9_-]', '_', str(request.current_user))[:80] or 'user'
+        owner_dir = Path(UPLOAD_DIR) / owner
+        owner_dir.mkdir(parents=True, exist_ok=True)
+        display_name = re.sub(r'[^\w\.\-]', '_', Path(f.filename).name)
+        display_name = display_name[:180] or 'upload'
+        object_name = f'{secrets.token_hex(16)}_{display_name}'
+        dest = owner_dir / object_name
         data = f.read(_max_upload_size + 1)
         if len(data) > _max_upload_size:
             return jsonify({'success': False, 'error': 'File exceeds 50 MB limit'}), 400
-        Path(dest).write_bytes(data)
-        size = os.path.getsize(dest)
-        return jsonify({'success': True, 'filename': safe_name, 'size': size, 'url': f'/api/uploads/{safe_name}'})
+        dest.write_bytes(data)
+        size = dest.stat().st_size
+        return jsonify({'success': True, 'filename': display_name, 'object_id': object_name, 'size': size, 'url': f'/api/uploads/{object_name}'})
     except Exception:
         return jsonify({'success': False, 'error': 'Upload failed'}), 500
 
 @app.route('/api/uploads/<path:filename>')
 @require_auth
 def serve_upload(filename):
-    return send_from_directory(UPLOAD_DIR, filename)
+    owner = re.sub(r'[^A-Za-z0-9_-]', '_', str(request.current_user))[:80] or 'user'
+    owner_dir = Path(UPLOAD_DIR) / owner
+    safe_filename = Path(filename).name
+    if safe_filename != filename or not re.fullmatch(r'[0-9a-f]{32}_[\w.\-]{1,180}', safe_filename):
+        return jsonify({'success': False, 'error': 'Invalid upload id'}), 400
+    return send_from_directory(owner_dir, safe_filename)
 
 # ── /api/ollama/* / /api/ai/* ──────────────────────────────
 @app.route('/api/ollama/status', methods=['GET'])
@@ -899,12 +909,21 @@ def api_ai_check_models():
     base_url = str(data.get('base_url', ollama_client.base_url)).rstrip('/')
     if not (base_url.startswith('http://') or base_url.startswith('https://')):
         return jsonify({'error': 'Invalid base_url'}), 400
+    parsed = urlparse(base_url)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.hostname:
+        return jsonify({'error': 'Invalid model provider URL'}), 400
     try:
-        r = requests.get(f"{base_url}/api/tags", timeout=8)
+        from core.tools import _validate_http_url
+        _validate_http_url(base_url)
+    except ValueError as exc:
+        logger.warning('Blocked unsafe model check URL %r: %s', base_url, exc)
+        return jsonify({'error': 'Model provider URL is not allowed'}), 400
+    try:
+        r = requests.get(f"{base_url}/api/tags", timeout=8, allow_redirects=False)
         r.raise_for_status()
         all_models = sorted(set(m['name'] for m in r.json().get('models', [])))
     except Exception:
-        return jsonify({'error': 'Cannot fetch models from ' + base_url}), 502
+        return jsonify({'error': 'Cannot fetch models from configured provider'}), 502
     results = []
     for model in all_models:
         supported = _cached_tool_support(model, base_url)
@@ -1169,37 +1188,60 @@ def api_memory_delete(key):
 def indexing_start():
     global INDEXING_STATUS
     with _app_lock:
-        INDEXING_STATUS = {'status': 'running', 'progress': 0, 'current_file': '', 'processed_files': 0, 'total_files': 0, 'errors': [], 'elapsed_time': 0, 'started_at': time.time()}
+        if INDEXING_STATUS.get('status') in ('running', 'stopping'):
+            return jsonify({'success': False, 'error': 'Indexing is already running'}), 409
+        INDEXING_CANCEL.clear()
+        run_id = secrets.token_hex(16)
+        INDEXING_STATUS = {
+            'status': 'running', 'progress': 0, 'current_file': '',
+            'processed_files': 0, 'total_files': 0, 'errors': [],
+            'elapsed_time': 0, 'started_at': time.time(), 'run_id': run_id,
+        }
 
-    def run_index():
+    def run_index(active_run_id):
         global INDEXING_STATUS
         try:
             from scripts.sync_nextcloud import main as sync_main
             logger.info("Starting Nextcloud sync...")
             with _app_lock:
+                if INDEXING_STATUS.get('run_id') != active_run_id or INDEXING_CANCEL.is_set():
+                    return
                 INDEXING_STATUS['current_file'] = 'Syncing from Nextcloud...'
-            sync_main()
+            sync_main(cancel_event=INDEXING_CANCEL)
             with _app_lock:
-                INDEXING_STATUS['current_file'] = 'Indexing complete'
-                INDEXING_STATUS['status'] = 'completed'
-                INDEXING_STATUS['progress'] = 100
+                if INDEXING_STATUS.get('run_id') != active_run_id:
+                    return
+                if INDEXING_CANCEL.is_set() or INDEXING_STATUS.get('status') == 'stopping':
+                    INDEXING_STATUS['status'] = 'stopped'
+                    INDEXING_STATUS['current_file'] = 'Indexing stopped'
+                else:
+                    INDEXING_STATUS['current_file'] = 'Indexing complete'
+                    INDEXING_STATUS['status'] = 'completed'
+                    INDEXING_STATUS['progress'] = 100
                 INDEXING_STATUS['elapsed_time'] = time.time() - INDEXING_STATUS.get('started_at', time.time())
-            knowledge_base._load()
+            if not INDEXING_CANCEL.is_set():
+                knowledge_base._load()
         except Exception as e:
             with _app_lock:
-                INDEXING_STATUS['status'] = 'error'
-                INDEXING_STATUS['errors'].append('Indexing failed; check the backend log')
+                if INDEXING_STATUS.get('run_id') == active_run_id:
+                    INDEXING_STATUS['status'] = 'stopped' if INDEXING_CANCEL.is_set() else 'error'
+                    if not INDEXING_CANCEL.is_set():
+                        INDEXING_STATUS['errors'].append('Indexing failed; check the backend log')
             logger.error(f"Indexing error: {e}")
 
-    threading.Thread(target=run_index, daemon=True).start()
-    return jsonify({'status': 'started', 'message': 'Indexing started'})
+    threading.Thread(target=run_index, args=(run_id,), daemon=True).start()
+    return jsonify({'status': 'started', 'run_id': run_id, 'message': 'Indexing started'})
 
 @app.route('/api/indexing/stop', methods=['POST'])
 def indexing_stop():
     global INDEXING_STATUS
     with _app_lock:
-        INDEXING_STATUS = {'status': 'stopped', 'progress': 0}
-    return jsonify({'status': 'stopped'})
+        if INDEXING_STATUS.get('status') not in ('running', 'stopping'):
+            return jsonify({'status': INDEXING_STATUS.get('status', 'idle')})
+        INDEXING_CANCEL.set()
+        INDEXING_STATUS['status'] = 'stopping'
+        INDEXING_STATUS['current_file'] = 'Stopping indexing...'
+    return jsonify({'status': 'stopping'})
 
 @app.route('/api/indexing/progress', methods=['GET'])
 def indexing_progress():

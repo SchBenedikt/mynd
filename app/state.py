@@ -1,5 +1,8 @@
+import hashlib
 import json
+import secrets
 import threading
+import time
 
 from werkzeug.security import generate_password_hash
 
@@ -13,6 +16,27 @@ _PRIVILEGED_TOOL_PREFIXES = ('execute_', 'browser_', 'nextcloud_', 'vault_', 'me
 _PRIVILEGED_TOOL_NAMES = frozenset({'write_local_file', 'http_request', 'agent_browser', 'think'})
 
 _auth_lock = threading.Lock()
+
+
+AUTH_TOKEN_TTL = 24 * 60 * 60
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(str(token).encode('utf-8')).hexdigest()
+
+
+def issue_auth_token(user: dict) -> str:
+    token = secrets.token_hex(32)
+    user['token_hash'] = token_hash(token)
+    user['token_expires_at'] = time.time() + AUTH_TOKEN_TTL
+    user.pop('token', None)
+    return token
+
+
+def revoke_auth_token(user: dict) -> None:
+    user.pop('token', None)
+    user.pop('token_hash', None)
+    user.pop('token_expires_at', None)
 
 
 def save_auth_users():
@@ -41,5 +65,7 @@ if not AUTH_USERS:
 
 INDEXING_STATUS = {
     'status': 'idle', 'progress': 0, 'current_file': '',
-    'processed_files': 0, 'total_files': 0, 'errors': [], 'elapsed_time': 0
+    'processed_files': 0, 'total_files': 0, 'errors': [], 'elapsed_time': 0,
+    'run_id': None,
 }
+INDEXING_CANCEL = threading.Event()
