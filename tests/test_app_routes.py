@@ -177,6 +177,14 @@ class TestKnowledgeAPI:
 
 
 class TestSecurityAPI:
+    def test_health_reports_loaded_chunk_count(self, client):
+        response = client.get('/api/health')
+
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload['status'] == 'ok'
+        assert payload['knowledge_base']['chunks'] == len(app_routes.knowledge_base.chunks)
+
     def test_security_status(self, client):
         resp = client.get('/api/security/status')
         assert resp.status_code == 200

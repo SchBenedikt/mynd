@@ -613,7 +613,7 @@ def api_health():
         {
             'status': 'ok',
             'provider': {'name': provider, 'configured': provider_configured},
-            'knowledge_base': {'loaded': knowledge_base is not None, 'chunks': len(CHUNKS)},
+            'knowledge_base': {'loaded': knowledge_base is not None, 'chunks': len(knowledge_base.chunks)},
         }
     )
 
