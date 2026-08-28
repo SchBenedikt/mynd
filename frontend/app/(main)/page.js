@@ -66,6 +66,7 @@ export default function HomePage() {
   const [isThinking, setIsThinking] = useState(false);
   const [pendingQueue, setPendingQueue] = useState([]);
   const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef(null);
   const [pendingUserInput, setPendingUserInput] = useState(null);
   const [pendingUserInputValue, setPendingUserInputValue] = useState('');
@@ -238,10 +239,7 @@ export default function HomePage() {
     requestAbortRef.current.abort();
     requestAbortRef.current = null;
     setIsThinking(false);
-    if (activeChatId) {
-      appendMessageToChat(activeChatId, { role: 'assistant', content: 'Anfrage abgebrochen.', id: createMessageId() });
-    }
-  }, [activeChatId, appendMessageToChat]);
+  }, []);
 
   const sendMessage = useCallback(async (text, options = {}) => {
     if (!text.trim()) return;
@@ -310,9 +308,11 @@ export default function HomePage() {
       }
       assistantMessageId = createMessageId();
       insertMessageAfter(targetChatId, userMessageId, { role: 'assistant', content: '', id: assistantMessageId });
+      if (!res.body) throw new Error('Streaming response is unavailable');
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let receivedTerminalEvent = false;
       const msgTools = [];
       let activeThinkToolIndex = -1;
       const syncLiveTools = () => { setLiveTools(prev => ({ ...prev, [assistantMessageId]: [...msgTools] })); };
@@ -358,19 +358,22 @@ export default function HomePage() {
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = `\u2713 ${event.tool} (${(event.duration_ms/1000).toFixed(1)}s)`);
             syncLiveTools();
           } else if (event.type === 'final') {
+            receivedTerminalEvent = true;
             clearActiveThinkTool();
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
             updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({
-              ...msg, content: event.response, researchStats: event.research_stats || [], files: event.files || [], streamTrace: [...msgTools], isStreaming: false
+              ...msg, content: event.response, researchStats: event.research_stats || [], sources: event.sources || [], followUpSuggestions: event.follow_up_suggestions || event.followUpSuggestions || [], files: event.files || [], streamTrace: [...msgTools], isStreaming: false
             }));
             if (options.fromVoice) voice.speakAssistantText(event.response);
           } else if (event.type === 'error') {
+            receivedTerminalEvent = true;
             clearActiveThinkTool();
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
             updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: `\u26a0\ufe0f Fehler: ${event.error}`, streamTrace: [...msgTools], isStreaming: false }));
           } else if (event.type === 'needs_input') {
+            receivedTerminalEvent = true;
             clearActiveThinkTool();
             document.getElementById('thinking-text') && (document.getElementById('thinking-text').textContent = '');
             setLiveTools(prev => { const n = {...prev}; delete n[assistantMessageId]; return n; });
@@ -378,12 +381,59 @@ export default function HomePage() {
           }
         }
       }
+      // A proxy may close an SSE response without a trailing newline. Process
+      // that final frame before treating the stream as interrupted.
+      buffer += decoder.decode();
+      const trailingLine = buffer.trim();
+      if (!receivedTerminalEvent && trailingLine.startsWith('data: ')) {
+        try {
+          const trailingEvent = JSON.parse(trailingLine.slice(6));
+          if (trailingEvent.type === 'final' && assistantMessageId) {
+            receivedTerminalEvent = true;
+            updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({
+              ...msg,
+              content: trailingEvent.response || msg.content || '',
+              researchStats: trailingEvent.research_stats || [],
+              sources: trailingEvent.sources || [],
+              followUpSuggestions: trailingEvent.follow_up_suggestions || trailingEvent.followUpSuggestions || [],
+              files: trailingEvent.files || [],
+              streamTrace: [...msgTools],
+              isStreaming: false,
+            }));
+          } else if (trailingEvent.type === 'error' && assistantMessageId) {
+            receivedTerminalEvent = true;
+            updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({
+              ...msg,
+              content: `⚠️ Fehler: ${trailingEvent.error || 'Die Anfrage ist fehlgeschlagen.'}`,
+              streamTrace: [...msgTools],
+              isStreaming: false,
+            }));
+          }
+        } catch {
+          // The normal incomplete-stream fallback below handles malformed data.
+        }
+      }
+      if (!receivedTerminalEvent && assistantMessageId) {
+        updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({
+          ...msg,
+          content: (msg.content || '') + '\n\n⚠️ Die Verbindung wurde ohne Abschluss beendet. Bitte versuche es erneut.',
+          streamTrace: [...msgTools],
+          isStreaming: false,
+        }));
+      }
     } catch (err) {
-      if (err?.name === 'AbortError') return;
+      if (err?.name === 'AbortError') {
+        if (assistantMessageId) {
+          updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: 'Anfrage abgebrochen.', isStreaming: false }));
+        } else {
+          insertMessageAfter(targetChatId, userMessageId, { role: 'assistant', content: 'Anfrage abgebrochen.', id: createMessageId() });
+        }
+        return;
+      }
       const isTimeout = /timeout|timed ?out|econnrefused|econnreset|networkerror/i.test(String(err?.message || ''));
       const friendlyMessage = isTimeout
-        ? '\u26a0\ufe0f Die Anfrage hat zu lange gedauert. Bitte versuche es mit einer k\u00fcrzeren oder einfacheren Formulierung erneut.'
-        : (err?.message || '\u26a0\ufe0f Die Anfrage konnte nicht verarbeitet werden. Bitte versuche es erneut.');
+        ? '⚠️ Die Anfrage hat zu lange gedauert. Bitte versuche es mit einer kürzeren oder einfacheren Formulierung erneut.'
+        : '⚠️ Die Verbindung zum KI-Dienst ist fehlgeschlagen. Bitte prüfe den Serverstatus und versuche es erneut.';
       if (assistantMessageId) {
         updateMessageInChat(targetChatId, assistantMessageId, (msg) => ({ ...msg, content: (msg.content || '') + '\n\n' + friendlyMessage }));
       } else {
@@ -392,11 +442,20 @@ export default function HomePage() {
     } finally {
       setIsThinking(false);
       setUploadedFiles([]);
+      setUploadError('');
       requestAbortRef.current = null;
+      if (assistantMessageId) {
+        setLiveTools(prev => { const next = { ...prev }; delete next[assistantMessageId]; return next; });
+      }
     }
   // The streaming request callback owns a single request snapshot; changing helper identities must not restart it.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isThinking, activeChatId, chats, language, model, source, uploadedFiles, voice.speakAssistantText]);
+
+  useEffect(() => () => {
+    requestAbortRef.current?.abort();
+    requestAbortRef.current = null;
+  }, []);
 
   sendMessageRef.current = sendMessage;
 
@@ -419,14 +478,25 @@ export default function HomePage() {
 
   const handleFileUpload = useCallback(async (files) => {
     const uploaded = [];
+    setUploadError('');
     for (const file of files) {
       const formData = new FormData();
       formData.append('file', file);
       try {
         const res = await apiFetch('/api/upload', { method: 'POST', body: formData });
-        const data = await res.json();
-        if (data.success) uploaded.push(data);
-      } catch (e) { console.error('Upload error:', e); }
+        const data = await safeReadJson(res);
+        if (!res.ok || !data?.success) {
+          const message = res.status === 401
+            ? 'Bitte melde dich erneut an.'
+            : res.status === 400 && String(data?.error || '').includes('50 MB')
+              ? 'Die Datei ist größer als 50 MB.'
+              : 'Die Datei konnte nicht hochgeladen werden.';
+          throw new Error(message);
+        }
+        uploaded.push(data);
+      } catch (error) {
+        setUploadError(error?.message || 'Die Datei konnte nicht hochgeladen werden.');
+      }
     }
     setUploadedFiles(prev => [...prev, ...uploaded]);
   }, []);
@@ -809,8 +879,8 @@ export default function HomePage() {
               fileInputRef={fileInputRef}
               onFileUpload={handleFileUpload}
               uploadedFiles={uploadedFiles}
-              setUploadedFiles={setUploadedFiles}
               onRemoveUploadedFile={removeUploadedFile}
+              uploadError={uploadError}
             />
           </>
         )}

@@ -20,7 +20,7 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 
 | | |
 |---|---|
-| **💬 Agentic Chat** | Streaming AI chat with tool-calling, multi-round planning, sub-agent delegation |
+| **💬 Agentic Chat** | Streaming AI chat with tool-calling, multi-round planning, sub-agent delegation, source panels, and contextual follow-up suggestions |
 | **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings); indexing can be stopped cooperatively |
 | **🌐 Web Research** | DuckDuckGo search, news aggregation, multi-source research |
 | **🗺️ Browser Automation** | Headless Playwright + agent-browser CLI — [128 tools total](FEATURES.md) |
@@ -55,7 +55,7 @@ uv run playwright install chromium
 make dev
 ```
 
-Open **http://localhost:3000**. The API runs at `http://127.0.0.1:5001`.
+Open **http://localhost:3001**. The API runs at `http://127.0.0.1:5001`.
 
 On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log. Bearer sessions are stored as hashes, expire automatically, and rotate on refresh. Indexing runs expose a cancellation-aware stop operation and reject duplicate starts while a run is active.
 
@@ -120,7 +120,7 @@ For the complete tool reference, see **[FEATURES.md](FEATURES.md)**. Plugin auth
 # Start the system
 make dev
 
-# Then open http://localhost:3000 and try:
+# Then open http://localhost:3001 and try:
 #   "Open spiegel.de and take a screenshot"
 #   "What's in the news today?"
 #   "Find the photo from last summer in Italy"
@@ -137,9 +137,11 @@ make dev
 
 | Variable | Purpose | Default |
 |---|---|---|
+| `MYND_PORT` | Backend API port | `5001` |
+| `MYND_FRONTEND_PORT` | Development frontend port | `3001` |
 | `OLLAMA_BASE_URL` | Ollama API endpoint | `http://127.0.0.1:11434` |
 | `OLLAMA_MODEL` | Default chat model | `gemma3:latest` |
-| `CORS_ALLOWED_ORIGINS` | Allowed frontend origins | `http://localhost:3000` |
+| `CORS_ALLOWED_ORIGINS` | Allowed frontend origins | `http://localhost:3001` |
 | `NEXTCLOUD_URL` | Nextcloud instance URL | — |
 | `NEXTCLOUD_USERNAME` | Nextcloud username | — |
 | `NEXTCLOUD_PASSWORD` | Nextcloud app password | — |

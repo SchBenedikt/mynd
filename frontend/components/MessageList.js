@@ -46,6 +46,29 @@ function CollapsibleSources({ sources }) {
   );
 }
 
+function FollowUpSuggestions({ suggestions, onSelect, language }) {
+  const items = Array.isArray(suggestions)
+    ? suggestions.filter((item) => typeof item === 'string' && item.trim()).slice(0, 4)
+    : [];
+  if (!items.length) return null;
+  return (
+    <div className="follow-up-suggestions" aria-label={language === 'de' ? 'Vorgeschlagene Folgefragen' : 'Suggested follow-up questions'}>
+      <div className="follow-up-heading">
+        <i className="fas fa-wand-magic-sparkles" aria-hidden="true" />
+        <span>{language === 'de' ? 'Weiterfragen' : 'Continue the conversation'}</span>
+      </div>
+      <div className="follow-up-list">
+        {items.map((suggestion, index) => (
+          <button key={`${suggestion}-${index}`} type="button" onClick={() => onSelect(suggestion)}>
+            {suggestion}
+            <i className="fas fa-arrow-up-right-from-square" aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LiveTools({ tools, thinking }) {
   const mergedThinking = (tools || []).filter(t => t.tool === 'think').map(t => t.args?.thought || '').join('').trim() || (thinking || '').trim();
   const actionTools = (tools || []).filter(t => t.tool !== 'think' && t.tool !== 'status');
@@ -208,6 +231,9 @@ export default function MessageList({
                   <GeneratedFileCard key={`${file.name}-${idx}`} file={file} />
                 ))}
               </div>
+            )}
+            {msg.role === 'assistant' && msg.followUpSuggestions && msg.followUpSuggestions.length > 0 && (
+              <FollowUpSuggestions suggestions={msg.followUpSuggestions} onSelect={sendMessage} language={language} />
             )}
             {msg.role === 'assistant' && msg.uiCards && msg.uiCards.length > 0 && (
               <div className="context-cards-wrap">
