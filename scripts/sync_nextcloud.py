@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sys
+import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -228,9 +229,11 @@ class NextcloudSyncer:
 
         return False
 
-    def sync_folder(self, folder: str = "") -> list[dict]:
-        """Sync a single folder recursively."""
+    def sync_folder(self, folder: str = "", cancel_event: threading.Event | None = None) -> list[dict]:
+        """Sync a single folder recursively, stopping at safe file boundaries."""
         synced_files = []
+        if cancel_event and cancel_event.is_set():
+            return synced_files
 
         try:
             items = self.client.list_folder(folder)
@@ -240,11 +243,13 @@ class NextcloudSyncer:
             return synced_files
 
         for item in items:
+            if cancel_event and cancel_event.is_set():
+                break
             rel_path = item['path']
 
             if item['is_dir']:
                 # Recurse into subdirectories
-                synced_files.extend(self.sync_folder(rel_path))
+                synced_files.extend(self.sync_folder(rel_path, cancel_event))
             elif self._should_sync(rel_path):
                 if self._is_file_changed(rel_path, item):
                     local_path = self.local_dir / rel_path
@@ -273,15 +278,22 @@ class NextcloudSyncer:
 
         return synced_files
 
-    def full_sync(self) -> dict:
+    def full_sync(self, cancel_event: threading.Event | None = None) -> dict:
         """Perform full sync of all configured folders."""
         logger.info("Starting full sync...")
+        if cancel_event and cancel_event.is_set():
+            return {'stats': self.stats, 'files': []}
         self.stats = {'downloaded': 0, 'skipped': 0, 'errors': 0, 'parsed': 0}
         all_synced = []
 
         for folder in self.sync_folders:
+            if cancel_event and cancel_event.is_set():
+                break
             logger.info(f"Syncing folder: {folder}")
-            all_synced.extend(self.sync_folder(folder))
+            all_synced.extend(self.sync_folder(folder, cancel_event))
+
+        if cancel_event and cancel_event.is_set():
+            return {'stats': self.stats, 'files': all_synced}
 
         # Clean up deleted files
         self._cleanup_deleted(all_synced)
@@ -318,7 +330,7 @@ class NextcloudSyncer:
         self.state.save(self.state_file)
 
 
-def main():
+def main(cancel_event: threading.Event | None = None):
     parser = argparse.ArgumentParser(description='Nextcloud WebDAV Sync')
     parser.add_argument('--once', action='store_true', help='Run once and exit')
     parser.add_argument('--interval', type=int, default=300, help='Sync interval in seconds')
@@ -352,7 +364,7 @@ def main():
     syncer = NextcloudSyncer(client, local_dir, state_file, allowed_extensions, sync_folders)
 
     if args.once:
-        result = syncer.full_sync()
+        result = syncer.full_sync(cancel_event)
 
         if args.parse and result['files']:
             logger.info("Parsing downloaded documents...")

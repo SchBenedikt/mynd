@@ -41,5 +41,7 @@ if not AUTH_USERS:
 
 INDEXING_STATUS = {
     'status': 'idle', 'progress': 0, 'current_file': '',
-    'processed_files': 0, 'total_files': 0, 'errors': [], 'elapsed_time': 0
+    'processed_files': 0, 'total_files': 0, 'errors': [], 'elapsed_time': 0,
+    'run_id': None,
 }
+INDEXING_CANCEL = threading.Event()

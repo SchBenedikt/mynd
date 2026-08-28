@@ -21,7 +21,7 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 | | |
 |---|---|
 | **💬 Agentic Chat** | Streaming AI chat with tool-calling, multi-round planning, sub-agent delegation |
-| **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings) |
+| **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings); indexing can be stopped cooperatively |
 | **🌐 Web Research** | DuckDuckGo search, news aggregation, multi-source research |
 | **🗺️ Browser Automation** | Headless Playwright + agent-browser CLI — [128 tools total](FEATURES.md) |
 | **📷 Photo Search** | Semantic photo search via Immich |
@@ -57,7 +57,7 @@ make dev
 
 Open **http://localhost:3000**. The API runs at `http://127.0.0.1:5001`.
 
-On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log.
+On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log. Indexing runs expose a cancellation-aware stop operation and reject duplicate starts while a run is active.
 
 ---
 

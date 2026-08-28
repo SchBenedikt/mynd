@@ -63,7 +63,7 @@ from app.helpers import (
 from app.ollama_client import load_ai_config, ollama_client, save_ai_config
 from app.scheduler import _init_automation_engine, automation_engine
 from app.session_store import agent_sessions
-from app.state import INDEXING_STATUS, save_auth_users
+from app.state import INDEXING_CANCEL, INDEXING_STATUS, save_auth_users
 from core.model import check_tool_support
 from core.plugin_base import (
     get_all_plugins,
@@ -1178,37 +1178,60 @@ def api_memory_delete(key):
 def indexing_start():
     global INDEXING_STATUS
     with _app_lock:
-        INDEXING_STATUS = {'status': 'running', 'progress': 0, 'current_file': '', 'processed_files': 0, 'total_files': 0, 'errors': [], 'elapsed_time': 0, 'started_at': time.time()}
+        if INDEXING_STATUS.get('status') in ('running', 'stopping'):
+            return jsonify({'success': False, 'error': 'Indexing is already running'}), 409
+        INDEXING_CANCEL.clear()
+        run_id = secrets.token_hex(16)
+        INDEXING_STATUS = {
+            'status': 'running', 'progress': 0, 'current_file': '',
+            'processed_files': 0, 'total_files': 0, 'errors': [],
+            'elapsed_time': 0, 'started_at': time.time(), 'run_id': run_id,
+        }
 
-    def run_index():
+    def run_index(active_run_id):
         global INDEXING_STATUS
         try:
             from scripts.sync_nextcloud import main as sync_main
             logger.info("Starting Nextcloud sync...")
             with _app_lock:
+                if INDEXING_STATUS.get('run_id') != active_run_id or INDEXING_CANCEL.is_set():
+                    return
                 INDEXING_STATUS['current_file'] = 'Syncing from Nextcloud...'
-            sync_main()
+            sync_main(cancel_event=INDEXING_CANCEL)
             with _app_lock:
-                INDEXING_STATUS['current_file'] = 'Indexing complete'
-                INDEXING_STATUS['status'] = 'completed'
-                INDEXING_STATUS['progress'] = 100
+                if INDEXING_STATUS.get('run_id') != active_run_id:
+                    return
+                if INDEXING_CANCEL.is_set() or INDEXING_STATUS.get('status') == 'stopping':
+                    INDEXING_STATUS['status'] = 'stopped'
+                    INDEXING_STATUS['current_file'] = 'Indexing stopped'
+                else:
+                    INDEXING_STATUS['current_file'] = 'Indexing complete'
+                    INDEXING_STATUS['status'] = 'completed'
+                    INDEXING_STATUS['progress'] = 100
                 INDEXING_STATUS['elapsed_time'] = time.time() - INDEXING_STATUS.get('started_at', time.time())
-            knowledge_base._load()
+            if not INDEXING_CANCEL.is_set():
+                knowledge_base._load()
         except Exception as e:
             with _app_lock:
-                INDEXING_STATUS['status'] = 'error'
-                INDEXING_STATUS['errors'].append('Indexing failed; check the backend log')
+                if INDEXING_STATUS.get('run_id') == active_run_id:
+                    INDEXING_STATUS['status'] = 'stopped' if INDEXING_CANCEL.is_set() else 'error'
+                    if not INDEXING_CANCEL.is_set():
+                        INDEXING_STATUS['errors'].append('Indexing failed; check the backend log')
             logger.error(f"Indexing error: {e}")
 
-    threading.Thread(target=run_index, daemon=True).start()
-    return jsonify({'status': 'started', 'message': 'Indexing started'})
+    threading.Thread(target=run_index, args=(run_id,), daemon=True).start()
+    return jsonify({'status': 'started', 'run_id': run_id, 'message': 'Indexing started'})
 
 @app.route('/api/indexing/stop', methods=['POST'])
 def indexing_stop():
     global INDEXING_STATUS
     with _app_lock:
-        INDEXING_STATUS = {'status': 'stopped', 'progress': 0}
-    return jsonify({'status': 'stopped'})
+        if INDEXING_STATUS.get('status') not in ('running', 'stopping'):
+            return jsonify({'status': INDEXING_STATUS.get('status', 'idle')})
+        INDEXING_CANCEL.set()
+        INDEXING_STATUS['status'] = 'stopping'
+        INDEXING_STATUS['current_file'] = 'Stopping indexing...'
+    return jsonify({'status': 'stopping'})
 
 @app.route('/api/indexing/progress', methods=['GET'])
 def indexing_progress():
