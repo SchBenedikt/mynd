@@ -1,7 +1,5 @@
-import re
 
 from data.plugins import nextcloud
-
 
 VTODO_RESPONSE = """<multistatus xmlns:d=\"DAV:\">
 <d:response><d:href>/tasks.ics</d:href><d:propstat><d:prop><calendar-data xmlns=\"urn:ietf:params:xml:ns:caldav\"><VCALENDAR>

@@ -7,11 +7,9 @@ import { useLanguage } from '../../hooks/useLanguage';
 import { usePageTitle } from '../../hooks/usePageTitle';
 import './login.css';
 
-const TOKEN_KEY = 'mynd_token_v1';
-
 const COPY = {
-  en: { signIn:'Sign in', register:'Register', create:'Create account', subtitle:'Sign in to continue', newAccount:'Create a new account', username:'Username', displayName:'Display name (optional)', password:'Password', confirm:'Confirm password', repeat:'Repeat password', min:'At least 4 characters', signingIn:'Signing in…', creating:'Creating account…', server:'Server connection', serverHint:'Address of the local backend server', required:'Username and password are required', shortUser:'Username must contain at least 2 characters', shortPass:'Password must contain at least 4 characters', mismatch:'Passwords do not match', created:'Account created! Redirecting…', failed:'Sign-in failed', registerFailed:'Registration failed', network:'Network error — backend is unreachable', displayNamePlaceholder:'How should you be displayed?' },
-  de: { signIn:'Anmelden', register:'Registrieren', create:'Account erstellen', subtitle:'Melde dich an', newAccount:'Neuen Account erstellen', username:'Benutzername', displayName:'Anzeigename (optional)', password:'Passwort', confirm:'Passwort bestätigen', repeat:'Passwort wiederholen', min:'Mindestens 4 Zeichen', signingIn:'Anmeldung läuft…', creating:'Account wird erstellt…', server:'Server-Verbindung', serverHint:'Adresse des lokalen Backend-Servers', required:'Benutzername und Passwort erforderlich', shortUser:'Benutzername zu kurz (mind. 2 Zeichen)', shortPass:'Passwort zu kurz (mind. 4 Zeichen)', mismatch:'Passwörter stimmen nicht überein', created:'Account erstellt! Weiterleitung…', failed:'Anmeldung fehlgeschlagen', registerFailed:'Registrierung fehlgeschlagen', network:'Netzwerkfehler — Backend nicht erreichbar', displayNamePlaceholder:'Wie möchtest du angezeigt werden?' },
+  en: { signIn:'Sign in', register:'Register', create:'Create account', subtitle:'Sign in to continue', newAccount:'Create a new account', username:'Username', displayName:'Display name (optional)', password:'Password', confirm:'Confirm password', repeat:'Repeat password', min:'At least 12 characters', signingIn:'Signing in…', creating:'Creating account…', server:'Server connection', serverHint:'Address of the local backend server', required:'Username and password are required', shortUser:'Username must contain at least 2 characters', shortPass:'Password must contain at least 12 characters', mismatch:'Passwords do not match', created:'Account created! Redirecting…', failed:'Sign-in failed', registerFailed:'Registration failed', network:'Network error — backend is unreachable', displayNamePlaceholder:'How should you be displayed?' },
+  de: { signIn:'Anmelden', register:'Registrieren', create:'Account erstellen', subtitle:'Melde dich an', newAccount:'Neuen Account erstellen', username:'Benutzername', displayName:'Anzeigename (optional)', password:'Passwort', confirm:'Passwort bestätigen', repeat:'Passwort wiederholen', min:'Mindestens 12 Zeichen', signingIn:'Anmeldung läuft…', creating:'Account wird erstellt…', server:'Server-Verbindung', serverHint:'Adresse des lokalen Backend-Servers', required:'Benutzername und Passwort erforderlich', shortUser:'Benutzername zu kurz (mind. 2 Zeichen)', shortPass:'Passwort zu kurz (mind. 12 Zeichen)', mismatch:'Passwörter stimmen nicht überein', created:'Account erstellt! Weiterleitung…', failed:'Anmeldung fehlgeschlagen', registerFailed:'Registrierung fehlgeschlagen', network:'Netzwerkfehler — Backend nicht erreichbar', displayNamePlaceholder:'Wie möchtest du angezeigt werden?' },
   fr: { signIn:'Se connecter', register:"S'inscrire", create:'Créer un compte', subtitle:'Connectez-vous pour continuer', username:"Nom d'utilisateur", password:'Mot de passe', confirm:'Confirmer le mot de passe', signingIn:'Connexion…', creating:'Création…', server:'Connexion au serveur', network:'Erreur réseau — serveur inaccessible', displayNamePlaceholder:"Comment souhaitez-vous être affiché ?" },
   es: { signIn:'Iniciar sesión', register:'Registrarse', create:'Crear cuenta', subtitle:'Inicia sesión para continuar', username:'Usuario', password:'Contraseña', confirm:'Confirmar contraseña', signingIn:'Iniciando sesión…', creating:'Creando cuenta…', server:'Conexión del servidor', network:'Error de red — servidor no disponible', displayNamePlaceholder:'¿Cómo quieres aparecer?' },
   it: { signIn:'Accedi', register:'Registrati', create:'Crea account', subtitle:'Accedi per continuare', username:'Nome utente', password:'Password', confirm:'Conferma password', signingIn:'Accesso…', creating:'Creazione…', server:'Connessione server', network:'Errore di rete — server non raggiungibile', displayNamePlaceholder:'Come vuoi essere visualizzato?' },
@@ -60,7 +58,7 @@ export default function LoginPage() {
     if (!loginUser || !loginPass) return c.required;
     if (loginUser.length < 2) return c.shortUser;
     if (tab === 'register') {
-      if (loginPass.length < 4) return c.shortPass;
+      if (loginPass.length < 12) return c.shortPass;
       if (loginPass !== loginPassConfirm) return c.mismatch;
     }
     return '';
@@ -95,8 +93,11 @@ export default function LoginPage() {
         body: JSON.stringify(body)
       });
       const data = await resp.json();
-      if (resp.ok && data.token) {
-        try { localStorage.setItem(TOKEN_KEY, data.token); } catch {}
+      if (resp.ok && data.authenticated) {
+        try {
+          localStorage.removeItem('mynd_token_v1');
+          if (data.user) localStorage.setItem('mynd_user_v1', JSON.stringify(data.user));
+        } catch {}
         if (tab === 'register') {
           setLoginSuccess(c.created);
           await new Promise(r => setTimeout(r, 800));

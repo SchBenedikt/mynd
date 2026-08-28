@@ -17,6 +17,7 @@ import ChatSummaryModal from '../../components/ChatSummaryModal';
 import DOMPurify from 'dompurify';
 import { apiFetch, getApiBase } from '../../lib/api';
 import { isChatModel, uniqueSortedModels } from '../../lib/modelUtils';
+import { userStorageKey } from '../../lib/userStorage';
 import {
   CHAT_STORAGE_KEY, ACTIVE_CHAT_STORAGE_KEY, DISPLAY_NAME_STORAGE_KEY,
   BRIEFING_SEEN_KEY, TTS_PROVIDER_STORAGE_KEY, LOCATION_AUTO_RESOLVE_KEY,
@@ -119,9 +120,7 @@ export default function HomePage() {
 
   const fetchUser = useCallback(async () => {
     try {
-      const storedToken = localStorage.getItem('mynd_token_v1');
-      if (!storedToken) return;
-      const res = await apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${storedToken}` } });
+      const res = await apiFetch('/api/auth/me');
       const data = await safeReadJson(res);
       if (res.ok && data && data.authenticated && data.user) setUser(data.user);
     } catch {}
@@ -279,8 +278,10 @@ export default function HomePage() {
     let assistantMessageId = null;
     try {
       const currentMessages = chats.find((chat) => chat.id === targetChatId)?.messages || [];
-      const contextMessages = options.messageId ? currentMessages : [...currentMessages, { role: 'user', content: text, id: userMessageId }];
-      const conversationContext = contextMessages.slice(-8).map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
+      const conversationHistory = currentMessages
+        .filter((message) => message?.id !== userMessageId && ['user', 'assistant'].includes(message?.role))
+        .slice(-12)
+        .map((message) => ({ role: message.role, content: String(message.content || '').slice(0, 8000) }));
       let emailConfig = null;
       try {
         const emailConfigRes = await apiFetch('/api/registry/email/config');
@@ -294,7 +295,8 @@ export default function HomePage() {
             ? `${text}\n\n\u{1F4CE} Angeh\u00e4ngte Dateien:\n${uploadedFiles.map((f, i) => `  ${i + 1}. [${f.filename}](${f.url}) (${(f.size / 1024).toFixed(0)} KB)`).join('\n')}\n\nBitte lies diese Dateien ein und verarbeite sie gem\u00e4\u00df meiner Anfrage.`
             : text,
           language, model: model, preferred_source: source,
-          context: conversationContext, email_config: emailConfig,
+          history: conversationHistory,
+          email_config: emailConfig,
           account_id: emailConfig?.active_account_id || emailConfig?.selected_account_id || emailConfig?.account_id || ''
         })
       });
@@ -571,9 +573,7 @@ export default function HomePage() {
       setHealth({ ollama: ollama.connected ? 'ok' : 'error', kb: kb.database_path ? 'ok' : 'error', embeddings: kb.semantic_search_available ? (embeddingsComplete ? 'ok' : 'loading') : 'error' });
     } catch (err) { setHealth({ ollama: 'error', kb: 'error', embeddings: 'error' }); }
     try {
-      const storedToken = (() => { try { return localStorage.getItem('mynd_token_v1'); } catch(e) { return null; } })();
-      const headers = storedToken ? { 'Authorization': `Bearer ${storedToken}` } : {};
-      const meRes = await apiFetch('/api/auth/me', { headers });
+      const meRes = await apiFetch('/api/auth/me');
       const me = await safeReadJson(meRes);
       if (meRes.ok && me && me.authenticated) setUser(me.user);
       else setUser(null);
@@ -701,15 +701,15 @@ export default function HomePage() {
   useEffect(() => {
     if (!activeChatId || !proactiveBriefings.length) return;
     let seen = [];
-    try { seen = JSON.parse(localStorage.getItem(BRIEFING_SEEN_KEY) || '[]'); if (!Array.isArray(seen)) seen = []; } catch { seen = []; }
+    try { seen = JSON.parse(localStorage.getItem(userStorageKey(BRIEFING_SEEN_KEY)) || '[]'); if (!Array.isArray(seen)) seen = []; } catch { seen = []; }
     const unseen = proactiveBriefings.filter((item) => item?.key && !seen.includes(item.key));
     if (!unseen.length) return;
     unseen.forEach((item) => { appendMessageToChat(activeChatId, { role: 'assistant', content: `## ${item.title || 'Briefing'}\n\n${item.content || ''}`, id: createMessageId(), sources: [], uiCards: [] }); });
-    try { const nextSeen = [...new Set([...seen, ...unseen.map((item) => item.key)])]; localStorage.setItem(BRIEFING_SEEN_KEY, JSON.stringify(nextSeen)); } catch (err) { console.error('Could not persist seen briefings:', err); }
+    try { const nextSeen = [...new Set([...seen, ...unseen.map((item) => item.key)])]; localStorage.setItem(userStorageKey(BRIEFING_SEEN_KEY), JSON.stringify(nextSeen)); } catch (err) { console.error('Could not persist seen briefings:', err); }
   }, [activeChatId, proactiveBriefings, appendMessageToChat]);
 
   useEffect(() => {
-    try { const rawDisplayName = localStorage.getItem(DISPLAY_NAME_STORAGE_KEY); if (rawDisplayName) setDisplayName(rawDisplayName); }
+    try { const rawDisplayName = localStorage.getItem(userStorageKey(DISPLAY_NAME_STORAGE_KEY)); if (rawDisplayName) setDisplayName(rawDisplayName); }
     catch (err) { console.error('Error loading data:', err); }
   }, []);
 
@@ -728,7 +728,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!chats.length || !activeChatId) return;
     const cleanChats = chats.filter(c => (c.messages?.length || 0) > 0 || c.title !== 'Neuer Chat');
-    try { localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(cleanChats)); localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, activeChatId); }
+    try { localStorage.setItem(userStorageKey(CHAT_STORAGE_KEY), JSON.stringify(cleanChats)); localStorage.setItem(userStorageKey(ACTIVE_CHAT_STORAGE_KEY), activeChatId); }
     catch (err) { console.error('Error saving chat history:', err); }
   }, [chats, activeChatId]);
 

@@ -1,9 +1,14 @@
 const DEFAULT_BACKEND = 'http://127.0.0.1:5001';
-const TOKEN_KEY = 'mynd_token_v1';
 const BACKEND_KEY = 'backendUrl';
 
 function cleanUrl(url) {
-  return url.replace(/\/+$/, '');
+  try {
+    const parsed = new URL(String(url));
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return DEFAULT_BACKEND;
+    return parsed.origin + parsed.pathname.replace(/\/+$/, '');
+  } catch {
+    return DEFAULT_BACKEND;
+  }
 }
 
 function guessBackendFromPage() {
@@ -12,6 +17,9 @@ function guessBackendFromPage() {
     const u = new URL(window.location.href);
     const saved = localStorage.getItem(BACKEND_KEY);
     if (saved) return saved;
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+      return `${u.protocol}//${u.hostname}:5001`;
+    }
     if (u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') {
       return `${u.protocol}//${u.hostname}:5001`;
     }
@@ -27,15 +35,20 @@ export function getApiBase() {
 }
 
 export async function apiFetch(path, options = {}) {
-  const url = path.startsWith('http') ? path : `${getApiBase()}${path}`;
-  const headers = new Headers(options.headers || {});
-  if (typeof window !== 'undefined' && !headers.has('Authorization')) {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) headers.set('Authorization', `Bearer ${token}`);
+  const base = getApiBase();
+  let url;
+  if (/^https?:\/\//i.test(path)) {
+    const candidate = new URL(path);
+    if (candidate.origin !== new URL(base).origin) throw new Error('Cross-origin API URL is not allowed');
+    url = candidate.toString();
+  } else {
+    if (!String(path).startsWith('/')) throw new Error('API path must start with /');
+    url = `${base}${path}`;
   }
-  const response = await fetch(url, { ...options, headers });
+  const headers = new Headers(options.headers || {});
+  const response = await fetch(url, { ...options, headers, credentials: 'include' });
   if (response.status === 401 && typeof window !== 'undefined') {
-    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem('mynd_token_v1');
     window.dispatchEvent(new CustomEvent('auth-expired'));
   }
   return response;

@@ -4,10 +4,7 @@ import { useState, useEffect } from 'react';
 import { apiFetch } from '../../lib/api';
 
 function getAuthHeaders() {
-  try {
-    const token = localStorage.getItem('mynd_token_v1');
-    return token ? { 'Authorization': `Bearer ${token}` } : {};
-  } catch { return {}; }
+  return {};
 }
 
 export default function AdminTab({ tr, language }) {

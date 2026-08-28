@@ -75,8 +75,7 @@ def create_plan(steps, description=''):
         'completed_steps': 0,
         'failed_steps': 0,
         'steps': [
-            {'id': i + 1, 'task': s, 'status': 'pending', 'result': '', 'verified': False}
-            for i, s in enumerate(steps)
+            {'id': i + 1, 'task': s, 'status': 'pending', 'result': '', 'verified': False} for i, s in enumerate(steps)
         ],
         'current_step': 0,
     }
@@ -174,13 +173,15 @@ def list_plans(status=None):
             continue
         done = plan.get('completed_steps', 0) + plan.get('failed_steps', 0)
         total = plan.get('total_steps', 1)
-        result.append({
-            'id': plan_id,
-            'description': plan.get('description', ''),
-            'status': plan.get('status', 'unknown'),
-            'progress': f'{done}/{total}',
-            'created': plan.get('created', ''),
-        })
+        result.append(
+            {
+                'id': plan_id,
+                'description': plan.get('description', ''),
+                'status': plan.get('status', 'unknown'),
+                'progress': f'{done}/{total}',
+                'created': plan.get('created', ''),
+            }
+        )
     return result
 
 

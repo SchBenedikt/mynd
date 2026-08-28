@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { userStorageKey } from '../../lib/userStorage';
 import { useLanguage } from '../../hooks/useLanguage';
 import { usePageTitle } from '../../hooks/usePageTitle';
 import { useSidebar } from '../../hooks/useSidebar';
@@ -12,7 +13,7 @@ const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
 
 function loadChats() {
   try {
-    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    const raw = localStorage.getItem(userStorageKey(CHAT_STORAGE_KEY));
     if (!raw || raw.length > 1000000) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -22,7 +23,7 @@ function loadChats() {
 
 function loadProjects() {
   try {
-    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
+    const raw = localStorage.getItem(userStorageKey(PROJECTS_STORAGE_KEY));
     if (!raw || raw.length > 100000) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -109,7 +110,7 @@ export default function ProjectsPage() {
   const filteredChats = activeProject ? chats.filter(c => c.project === activeProject) : [];
 
   useEffect(() => {
-    try { localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects)); } catch(e) {}
+    try { localStorage.setItem(userStorageKey(PROJECTS_STORAGE_KEY), JSON.stringify(projects)); } catch(e) {}
   }, [projects]);
 
   return (
@@ -154,7 +155,7 @@ export default function ProjectsPage() {
                   <div className="section-label">{groupLabels[key]}</div>
                   {items.map(c => (
                     <div key={c.id} className="history-item"
-                      onClick={() => { try { localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, c.id); } catch(e) {} router.push('/'); }}
+                      onClick={() => { try { localStorage.setItem(userStorageKey(ACTIVE_CHAT_STORAGE_KEY), c.id); } catch(e) {} router.push('/'); }}
                       role="button" tabIndex={0} title={c.title}>
                       <i className="fas fa-comment"></i>
                       <span className="history-title">{c.title}</span>
@@ -164,10 +165,10 @@ export default function ProjectsPage() {
                         </button>
                         {menuChat === c.id && (
                           <div className="chat-context-menu" onClick={e => e.stopPropagation()}>
-                            <button onClick={e => { e.stopPropagation(); try { localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, c.id); } catch(ex) {} setMenuChat(null); router.push('/'); }}>
+                            <button onClick={e => { e.stopPropagation(); try { localStorage.setItem(userStorageKey(ACTIVE_CHAT_STORAGE_KEY), c.id); } catch(ex) {} setMenuChat(null); router.push('/'); }}>
                               <i className="fas fa-external-link-alt"></i> {tr('Öffnen', 'Open')}
                             </button>
-                            <button className="danger" onClick={e => { e.stopPropagation(); setMenuChat(null); setChats(prev => { const next = prev.filter(x => x.id !== c.id); try { localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(next)); } catch(ex) {} return next; }); }}>
+                            <button className="danger" onClick={e => { e.stopPropagation(); setMenuChat(null); setChats(prev => { const next = prev.filter(x => x.id !== c.id); try { localStorage.setItem(userStorageKey(CHAT_STORAGE_KEY), JSON.stringify(next)); } catch(ex) {} return next; }); }}>
                               <i className="fas fa-trash"></i> {tr('Löschen', 'Delete')}
                             </button>
                           </div>

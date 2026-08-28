@@ -1,4 +1,6 @@
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 import requests as _requests
@@ -7,14 +9,21 @@ from .config import OLLAMA
 
 
 def _request_embeddings(texts, model):
-    response = _requests.post(
-        f"{OLLAMA}/api/embed", json={"model": model, "input": texts}, timeout=120
-    )
+    base_url = OLLAMA
+    config_file = Path(__file__).resolve().parents[1] / 'data' / 'ai_config.json'
+    if config_file.exists():
+        try:
+            config = json.loads(config_file.read_text())
+            if config.get('provider') == 'ollama' and config.get('base_url'):
+                base_url = str(config['base_url']).rstrip('/')
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+    response = _requests.post(f'{base_url}/api/embed', json={'model': model, 'input': texts}, timeout=120)
     response.raise_for_status()
     payload = response.json()
-    if "embeddings" not in payload:
-        raise ValueError("Ollama response does not contain embeddings")
-    return payload["embeddings"]
+    if 'embeddings' not in payload:
+        raise ValueError('Ollama response does not contain embeddings')
+    return payload['embeddings']
 
 
 def embed(texts, model=None):

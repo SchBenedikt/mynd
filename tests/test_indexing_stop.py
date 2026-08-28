@@ -3,9 +3,8 @@ import time
 
 import pytest
 
-import app.state as state
-
 import app.routes as routes
+import app.state as state
 from app import app
 
 

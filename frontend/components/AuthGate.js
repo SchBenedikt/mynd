@@ -6,8 +6,6 @@ import './AuthGate.css';
 import { apiFetch } from '../lib/api';
 import LandingPage from './LandingPage';
 
-const TOKEN_KEY = 'mynd_token_v1';
-
 export default function AuthGate({ children }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -15,6 +13,7 @@ export default function AuthGate({ children }) {
   const [setupRequired, setSetupRequired] = useState(false);
   const [user, setUser] = useState(null);
   const [forceOpen, setForceOpen] = useState(false);
+  const [requireLogin, setRequireLogin] = useState(true);
   const lastReplaceRef = useRef(0);
 
   const guardedReplace = useCallback((url) => {
@@ -26,20 +25,18 @@ export default function AuthGate({ children }) {
 
   useEffect(() => {
     let cancelled = false;
-    const storedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch(e) { return null; } })();
     const timeout = setTimeout(() => {
       if (!cancelled) setReady(true);
     }, 4000);
     Promise.allSettled([
-      storedToken
-        ? apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${storedToken}` } })
-            .then((r) => r.json())
-            .then((data) => {
-              if (!cancelled && data?.authenticated && data.user) {
-                setUser({ ...data.user, token: storedToken });
-              }
-            })
-        : Promise.resolve(),
+      apiFetch('/api/auth/me')
+        .then((r) => r.json())
+        .then((data) => {
+          if (!cancelled && data?.authenticated && data.user) {
+            setUser(data.user);
+            try { localStorage.setItem('mynd_user_v1', JSON.stringify(data.user)); } catch {}
+          }
+        }),
       apiFetch('/api/setup/status')
         .then((r) => r.json())
         .then((data) => {
@@ -47,6 +44,11 @@ export default function AuthGate({ children }) {
           const needsSetup = Boolean(data?.success && data.needs_setup);
           setSetupRequired(needsSetup);
           if (needsSetup && pathname !== '/setup') guardedReplace('/setup');
+        }),
+      apiFetch('/api/auth/config')
+        .then((r) => r.json())
+        .then((data) => {
+          if (!cancelled && data?.success) setRequireLogin(data.requireLogin !== false);
         })
     ]).finally(() => {
       clearTimeout(timeout);
@@ -76,13 +78,12 @@ export default function AuthGate({ children }) {
   useEffect(() => {
     const handleLogin = () => {
       try {
-        const storedToken = localStorage.getItem(TOKEN_KEY);
-        if (!storedToken) return;
-        apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${storedToken}` } })
+        apiFetch('/api/auth/me')
           .then(r => r.json())
           .then(data => {
             if (data?.authenticated && data.user) {
-              setUser({ ...data.user, token: storedToken });
+              setUser(data.user);
+              try { localStorage.setItem('mynd_user_v1', JSON.stringify(data.user)); } catch {}
               setForceOpen(false);
             }
           })
@@ -106,9 +107,9 @@ export default function AuthGate({ children }) {
   useEffect(() => {
     if (!ready) return;
     if (pathname === '/' || pathname?.startsWith('/setup') || pathname === '/login' || pathname === '/developers' || pathname === '/guide') return;
-    if (user && !forceOpen) return;
+    if ((user && !forceOpen) || !requireLogin) return;
     guardedReplace('/login');
-  }, [ready, pathname, user, forceOpen, guardedReplace]);
+  }, [ready, pathname, user, forceOpen, requireLogin, guardedReplace]);
 
   if (!ready) return (
     <div className="authgate-skeleton">
@@ -140,7 +141,7 @@ export default function AuthGate({ children }) {
   if (pathname === '/login') return children;
   if (pathname === '/developers') return children;
   if (pathname === '/guide') return children;
-  if (user && !forceOpen) return children;
+  if ((user && !forceOpen) || !requireLogin) return children;
   if (pathname === '/') return <LandingPage />;
   return null;
 }

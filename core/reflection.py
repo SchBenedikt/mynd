@@ -49,14 +49,16 @@ def record_tool_result(name, args, result, success, duration_ms):
         data = _load()
         data.setdefault('history', [])
         data.setdefault('consecutive_failures', {})
-        data['history'].append({
-            'name': name,
-            'args': _safe_args(args),
-            'success': success,
-            'duration_ms': duration_ms,
-            'result_preview': str(result)[:200],
-            'timestamp': datetime.now().isoformat(),
-        })
+        data['history'].append(
+            {
+                'name': name,
+                'args': _safe_args(args),
+                'success': success,
+                'duration_ms': duration_ms,
+                'result_preview': str(result)[:200],
+                'timestamp': datetime.now().isoformat(),
+            }
+        )
         if len(data['history']) > 500:
             data['history'] = data['history'][-300:]
         if not success:
@@ -87,7 +89,14 @@ def get_tool_performance(tool_name=None):
     for h in history:
         name = h['name']
         if name not in stats:
-            stats[name] = {'calls': 0, 'failures': 0, 'total_ms': 0, 'min_ms': float('inf'), 'max_ms': 0, 'consecutive_failures': 0}
+            stats[name] = {
+                'calls': 0,
+                'failures': 0,
+                'total_ms': 0,
+                'min_ms': float('inf'),
+                'max_ms': 0,
+                'consecutive_failures': 0,
+            }
         stats[name]['calls'] += 1
         stats[name]['total_ms'] += h.get('duration_ms', 0)
         stats[name]['min_ms'] = min(stats[name]['min_ms'], h.get('duration_ms', 0))
@@ -114,21 +123,13 @@ def get_improvement_suggestions():
                 f'– Parameter oder Strategie überprüfen'
             )
         elif s['success_rate'] < 80 and s['calls'] >= 5:
-            suggestions.append(
-                f'⚡ {name}: {s["success_rate"]:.0f}% Erfolgsrate – leicht verbesserungswürdig'
-            )
+            suggestions.append(f'⚡ {name}: {s["success_rate"]:.0f}% Erfolgsrate – leicht verbesserungswürdig')
         if s['avg_ms'] > 10000 and s['calls'] >= 3:
-            suggestions.append(
-                f'🐌 {name}: Ø {s["avg_ms"]:.0f}ms ({s["calls"]}x) – sehr langsam, Timeout erhöhen?'
-            )
+            suggestions.append(f'🐌 {name}: Ø {s["avg_ms"]:.0f}ms ({s["calls"]}x) – sehr langsam, Timeout erhöhen?')
         if s['avg_ms'] > 5000 and s['calls'] >= 5:
-            suggestions.append(
-                f'⏱ {name}: Ø {s["avg_ms"]:.0f}ms – monitoringwürdig'
-            )
+            suggestions.append(f'⏱ {name}: Ø {s["avg_ms"]:.0f}ms – monitoringwürdig')
         if s['calls'] < 3 and s['failures'] == 0:
-            suggestions.append(
-                f'📌 {name}: erst {s["calls"]}x genutzt, alle erfolgreich – neue Fähigkeit?'
-            )
+            suggestions.append(f'📌 {name}: erst {s["calls"]}x genutzt, alle erfolgreich – neue Fähigkeit?')
     if not suggestions:
         suggestions.append('✅ Alle Tools arbeiten innerhalb der erwarteten Parameter.')
     return '\n'.join(suggestions[:10])
@@ -136,6 +137,7 @@ def get_improvement_suggestions():
 
 def get_daily_summary():
     from datetime import date as _date
+
     today = _date.today().isoformat()
     with _reflection_lock:
         data = _load()
@@ -167,6 +169,7 @@ def prune_history(days=30):
     global _dirty
     from datetime import datetime as _dt
     from datetime import timedelta as _td
+
     cutoff = (_dt.now() - _td(days=days)).isoformat()
     with _reflection_lock:
         data = _load()

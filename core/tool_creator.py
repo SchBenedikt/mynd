@@ -9,29 +9,74 @@ PLUGIN_DIR = Path(__file__).resolve().parent.parent / 'data' / 'plugins'
 TOOL_NAME_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 
 CORE_TOOL_NAMES = {
-    'execute_bash', 'execute_python', 'execute_ssh', 'search_documents',
-    'web_search', 'fetch_news', 'read_local_file', 'write_local_file',
-    'think', 'prompt_user', 'vault_get', 'vault_set', 'vault_delete',
-    'vault_list', 'http_request', 'image_search',
-    'memory_get', 'memory_set', 'memory_delete',
-    'delegate', 'create_plan', 'agent_browser',
-    'reflect_on_failure', 'learn_skill', 'recall_skills',
-    'list_skills', 'delete_skill',
+    'execute_bash',
+    'execute_python',
+    'execute_ssh',
+    'search_documents',
+    'web_search',
+    'fetch_news',
+    'read_local_file',
+    'write_local_file',
+    'think',
+    'prompt_user',
+    'vault_get',
+    'vault_set',
+    'vault_delete',
+    'vault_list',
+    'http_request',
+    'image_search',
+    'memory_get',
+    'memory_set',
+    'memory_delete',
+    'delegate',
+    'create_plan',
+    'agent_browser',
+    'reflect_on_failure',
+    'learn_skill',
+    'recall_skills',
+    'list_skills',
+    'delete_skill',
 }
 
 SYSTEM_PLUGINS = {
-    'system', 'browser', 'email', 'immich', 'nextcloud', 'homeassistant',
-    'affine', 'truenas', 'discord', 'spotify', 'composio', 'python_exec',
+    'system',
+    'browser',
+    'email',
+    'immich',
+    'nextcloud',
+    'homeassistant',
+    'affine',
+    'truenas',
+    'discord',
+    'spotify',
+    'composio',
+    'python_exec',
 }
 
-FORBIDDEN_IMPORTS = frozenset({
-    'ctypes', '_ctypes', 'socket', 'multiprocessing', 'subprocess',
-    '__builtins__', 'builtins',
-})
+FORBIDDEN_IMPORTS = frozenset(
+    {
+        'ctypes',
+        '_ctypes',
+        'socket',
+        'multiprocessing',
+        'subprocess',
+        '__builtins__',
+        'builtins',
+    }
+)
 
-_DANGEROUS_FUNCS = frozenset({
-    'exec', 'eval', '__import__', 'compile', 'open', 'breakpoint', 'help', 'input',
-})
+_DANGEROUS_FUNCS = frozenset(
+    {
+        'exec',
+        'eval',
+        '__import__',
+        'compile',
+        'open',
+        'breakpoint',
+        'help',
+        'input',
+    }
+)
 
 DANGEROUS_CALLS = frozenset(_DANGEROUS_FUNCS - {'open'})
 DANGEROUS_GETATTR_TARGETS = frozenset(_DANGEROUS_FUNCS | {'__builtins__'})
@@ -43,11 +88,19 @@ DANGEROUS_ATTR_CALLS = frozenset(
 )
 
 DANGEROUS_PATTERNS = [
-    'os.system', 'os.popen', 'os.fork', 'os.exec',
+    'os.system',
+    'os.popen',
+    'os.fork',
+    'os.exec',
     'shutil.rmtree',
-    '__import__', 'eval(', 'exec(',
+    '__import__',
+    'eval(',
+    'exec(',
     'base64.b64decode',
-    'compile(', 'breakpoint(', 'help(', 'input(',
+    'compile(',
+    'breakpoint(',
+    'help(',
+    'input(',
 ]
 
 MAX_CODE_LENGTH = 50000
@@ -103,9 +156,7 @@ class _SecurityVisitor(ast.NodeVisitor):
                 second = node.args[1]
                 if isinstance(second, ast.Constant) and isinstance(second.value, str):
                     if second.value in DANGEROUS_GETATTR_TARGETS:
-                        self.errors.append(
-                            f'\u274c Verbotener getattr-Zugriff: getattr(..., {second.value!r})'
-                        )
+                        self.errors.append(f'\u274c Verbotener getattr-Zugriff: getattr(..., {second.value!r})')
 
             if func_name == 'open':
                 has_write = False
@@ -130,15 +181,11 @@ class _SecurityVisitor(ast.NodeVisitor):
         ):
             if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
                 if node.slice.value in FORBIDDEN_IMPORTS | DANGEROUS_GETATTR_TARGETS:
-                    self.errors.append(
-                        f'\u274c Verbotener sys.modules-Zugriff: {node.slice.value!r}'
-                    )
+                    self.errors.append(f'\u274c Verbotener sys.modules-Zugriff: {node.slice.value!r}')
 
         if isinstance(node.value, ast.Name) and node.value.id == '__builtins__':
             if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
-                self.errors.append(
-                    f'\u274c Verbotener __builtins__-Zugriff: __builtins__[{node.slice.value!r}]'
-                )
+                self.errors.append(f'\u274c Verbotener __builtins__-Zugriff: __builtins__[{node.slice.value!r}]')
 
         self.generic_visit(node)
 
@@ -182,6 +229,7 @@ def create_tool(name, description, parameters, code):
         return f'\u274c Tool erstellt, aber Laden fehlgeschlagen: {e}'
     try:
         from app.agent_loop import refresh_tools as _refresh
+
         _refresh()
     except Exception:
         pass
@@ -197,11 +245,13 @@ def delete_tool(name):
     plugin_path.unlink()
     try:
         from core.plugin_base import reload_plugins
+
         reload_plugins()
     except Exception:
         pass
     try:
         from app.agent_loop import refresh_tools as _refresh
+
         _refresh()
     except Exception:
         pass
@@ -262,6 +312,7 @@ def _validate(name, description, parameters, code):
 def _verify_and_load(plugin_path, name):
     try:
         from core.plugin_base import get_all_tools, get_registry, reload_plugins
+
         reload_plugins()
         registry = get_registry()
         if name not in registry:

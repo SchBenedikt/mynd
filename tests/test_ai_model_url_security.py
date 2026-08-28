@@ -1,5 +1,5 @@
-from unittest.mock import Mock
 import time
+from unittest.mock import Mock
 
 import pytest
 
