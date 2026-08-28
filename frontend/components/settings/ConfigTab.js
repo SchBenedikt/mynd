@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../../lib/api';
+import { userStorageKey } from '../../lib/userStorage';
 import {
   getModelBaseName,
   normalizeModelName,
@@ -296,7 +297,7 @@ export default function ConfigTab({ tr, language }) {
     const trimmed = displayName.trim();
     if (!trimmed) return;
     try {
-      localStorage.setItem(DISPLAY_NAME_STORAGE_KEY, trimmed);
+      localStorage.setItem(userStorageKey(DISPLAY_NAME_STORAGE_KEY), trimmed);
       setDisplayName(trimmed);
     } catch (err) {
       console.error('Error saving display name:', err);
@@ -339,7 +340,7 @@ export default function ConfigTab({ tr, language }) {
     loadEmbeddingStatus();
     loadSecurityMode();
     try {
-      const storedName = localStorage.getItem(DISPLAY_NAME_STORAGE_KEY);
+      const storedName = localStorage.getItem(userStorageKey(DISPLAY_NAME_STORAGE_KEY));
       if (storedName) setDisplayName(storedName);
     } catch (err) {
       console.error('Error loading display name:', err);

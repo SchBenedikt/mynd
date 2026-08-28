@@ -26,8 +26,8 @@ def _retry_with_backoff(func, *args, **kwargs):
         except (requests.ConnectionError, requests.Timeout) as e:
             if attempt == RETRY_MAX_ATTEMPTS - 1:
                 raise
-            delay = min(RETRY_BASE_DELAY * (2 ** attempt), RETRY_MAX_DELAY)
-            logging.warning(f"Retry {attempt + 1}/{RETRY_MAX_ATTEMPTS} after {delay:.1f}s: {e}")
+            delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
+            logging.warning(f'Retry {attempt + 1}/{RETRY_MAX_ATTEMPTS} after {delay:.1f}s: {e}')
             time.sleep(delay)
         except requests.RequestException as e:
             status = e.response.status_code if e.response is not None else None
@@ -35,8 +35,8 @@ def _retry_with_backoff(func, *args, **kwargs):
             if status in (410, 429, 500, 502, 503):
                 if attempt == RETRY_MAX_ATTEMPTS - 1:
                     raise
-                delay = min(RETRY_BASE_DELAY * (2 ** attempt), RETRY_MAX_DELAY)
-                logging.warning(f"Retry {attempt + 1}/{RETRY_MAX_ATTEMPTS} after {delay:.1f}s (HTTP {status}): {e}")
+                delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
+                logging.warning(f'Retry {attempt + 1}/{RETRY_MAX_ATTEMPTS} after {delay:.1f}s (HTTP {status}): {e}')
                 time.sleep(delay)
             else:
                 raise
@@ -60,68 +60,100 @@ def _load_openai_config():
                 key = str(fc.get('api_key', ''))
                 if key == '***':
                     from core.vault import vault_get as _vg
+
                     key = _vg('ai/api_key') or ''
-                return base or 'https://api.openai.com/v1', key
+                return (base or 'https://api.openai.com'), key
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             pass
     ob, ok, _ = _openai_cfg()
     return ob.removesuffix('/v1'), ok
 
 
+def _load_runtime_ai_config():
+    config = {
+        'provider': 'ollama',
+        'base_url': OLLAMA,
+        'model': os.getenv('OLLAMA_MODEL', 'gemma3:latest'),
+        'embedding_model': os.getenv('EMBEDDING_MODEL', 'nomic-embed-text'),
+        'api_key': '',
+    }
+    path = os.path.join(_get_data_dir(), 'ai_config.json')
+    if os.path.exists(path):
+        try:
+            stored = json.loads(open(path, encoding='utf-8').read())
+            if isinstance(stored, dict):
+                for key in ('provider', 'base_url', 'model', 'embedding_model'):
+                    if stored.get(key):
+                        config[key] = str(stored[key])
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return config
+
+
 def chat_with_tools(model, msgs, tools):
     try:
-        if _is_openai(model):
+        runtime = _load_runtime_ai_config()
+        if runtime.get('provider') == 'openai' or _is_openai(model):
             ob, ok = _load_openai_config()[:2]
             if not ob:
-                return {"error": "OpenAI-kompatibler Anbieter nicht konfiguriert (base_url fehlt)."}
-            body = {"model": model, "messages": msgs, "stream": False}
+                return {'error': 'OpenAI-kompatibler Anbieter nicht konfiguriert (base_url fehlt).'}
+            if not ok:
+                return {'error': 'OpenAI-kompatibler Anbieter nicht konfiguriert (API-Key fehlt).'}
+            body = {'model': model, 'messages': msgs, 'stream': False}
             if tools:
-                body["tools"] = tools
-            h = {"Authorization": f"Bearer {ok}", "Content-Type": "application/json"}
+                body['tools'] = tools
+            h = {'Authorization': f'Bearer {ok}', 'Content-Type': 'application/json'}
 
             def _do_request():
-                r = requests.post(f"{ob}/v1/chat/completions", json=body, headers=h, timeout=300)
+                r = requests.post(f'{ob}/v1/chat/completions', json=body, headers=h, timeout=300)
                 r.raise_for_status()
                 data = r.json()
-                if "choices" in data:
-                    m = data["choices"][0].get("message", {})
+                if 'choices' in data:
+                    m = data['choices'][0].get('message', {})
                     return {
-                        "message": {
-                            "role": m.get("role", "assistant"),
-                            "content": m.get("content", ""),
-                            "tool_calls": m.get("tool_calls"),
+                        'message': {
+                            'role': m.get('role', 'assistant'),
+                            'content': m.get('content', ''),
+                            'tool_calls': m.get('tool_calls'),
                         }
                     }
-                return {"error": str(data)[:500]}
+                return {'error': str(data)[:500]}
 
             return _retry_with_backoff(_do_request)
-        body = {"model": model, "messages": msgs, "stream": False}
+        body = {'model': model, 'messages': msgs, 'stream': False}
         if tools:
-            body["tools"] = tools
-        low_temp_models = [m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()]
+            body['tools'] = tools
+        low_temp_models = [
+            m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()
+        ]
         if model in low_temp_models:
-            body.setdefault("options", {})["temperature"] = 0.3
-        body["keep_alive"] = _keep_alive()
+            body.setdefault('options', {})['temperature'] = 0.3
+        body['keep_alive'] = _keep_alive()
 
         def _do_request():
-            r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300)
+            base_url = str(runtime.get('base_url') or OLLAMA).rstrip('/')
+            r = requests.post(f'{base_url}/api/chat', json=body, timeout=300)
             r.raise_for_status()
             return r.json()
 
         return _retry_with_backoff(_do_request)
     except requests.exceptions.Timeout:
-        return {"error": "Ollama-Timeout – das Modell hat nicht rechtzeitig geantwortet."}
+        return {'error': 'Ollama-Timeout – das Modell hat nicht rechtzeitig geantwortet.'}
     except requests.exceptions.ConnectionError:
-        return {"error": "Ollama nicht erreichbar – bitte prüfe ob 'ollama serve' läuft."}
+        return {'error': "Ollama nicht erreichbar – bitte prüfe ob 'ollama serve' läuft."}
     except requests.exceptions.HTTPError as e:
         status = e.response.status_code if e.response is not None else None
         if status == 410:
-            return {"error": "Ollama hat das Modell entladen (410 Gone) – bitte erneut versuchen oder 'ollama pull " + model + "' ausführen."}
+            return {
+                'error': "Ollama hat das Modell entladen (410 Gone) – bitte erneut versuchen oder 'ollama pull "
+                + model
+                + "' ausführen."
+            }
         if status == 404:
-            return {"error": f"Modell '{model}' nicht gefunden – bitte in Ollama importieren ('ollama pull {model}')."}
-        return {"error": f"LLM-Fehler (HTTP {status}): {e}"}
+            return {'error': f"Modell '{model}' nicht gefunden – bitte in Ollama importieren ('ollama pull {model}')."}
+        return {'error': f'LLM-Fehler (HTTP {status}): {e}'}
     except Exception as e:
-        return {"error": f"LLM-Fehler: {e}"}
+        return {'error': f'LLM-Fehler: {e}'}
 
 
 def chat_with_tools_stream(model, msgs, tools):
@@ -129,24 +161,29 @@ def chat_with_tools_stream(model, msgs, tools):
     event_type is 'content', 'think', or '' (for final/error).
     """
     try:
-        if _is_openai(model):
+        runtime = _load_runtime_ai_config()
+        if runtime.get('provider') == 'openai' or _is_openai(model):
             ob, ok = _load_openai_config()[:2]
             if not ob:
-                yield "", "", {"error": "OpenAI-kompatibler Anbieter nicht konfiguriert (base_url fehlt)."}
+                yield '', '', {'error': 'OpenAI-kompatibler Anbieter nicht konfiguriert (base_url fehlt).'}
                 return
-            body = {"model": model, "messages": msgs, "stream": True}
+            if not ok:
+                yield '', '', {'error': 'OpenAI-kompatibler Anbieter nicht konfiguriert (API-Key fehlt).'}
+                return
+            body = {'model': model, 'messages': msgs, 'stream': True}
             if tools:
-                body["tools"] = tools
-            h = {"Authorization": f"Bearer {ok}", "Content-Type": "application/json"}
+                body['tools'] = tools
+            h = {'Authorization': f'Bearer {ok}', 'Content-Type': 'application/json'}
 
             def _do_request():
-                r = requests.post(f"{ob}/v1/chat/completions", json=body, headers=h, timeout=300, stream=True)
+                r = requests.post(f'{ob}/v1/chat/completions', json=body, headers=h, timeout=300, stream=True)
                 r.raise_for_status()
                 return r
 
             r = _retry_with_backoff(_do_request)
-            full_content = ""
+            full_content = ''
             final_msg = None
+            tool_call_parts = {}
             for line in r.iter_lines(decode_unicode=True):
                 if not line or not line.strip():
                     continue
@@ -158,49 +195,69 @@ def chat_with_tools_stream(model, msgs, tools):
                     chunk = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                choices = chunk.get("choices", [])
+                choices = chunk.get('choices', [])
                 if not choices:
                     continue
-                delta = choices[0].get("delta", {})
-                delta_content = delta.get("content", "")
+                delta = choices[0].get('delta', {})
+                delta_content = delta.get('content', '')
                 if delta_content:
                     full_content += delta_content
-                    yield "content", delta_content, None
-                if choices[0].get("finish_reason"):
-                    tool_calls = delta.get("tool_calls")
+                    yield 'content', delta_content, None
+                for tool_delta in delta.get('tool_calls') or []:
+                    index = int(tool_delta.get('index', 0))
+                    current = tool_call_parts.setdefault(
+                        index,
+                        {
+                            'id': tool_delta.get('id', ''),
+                            'type': tool_delta.get('type', 'function'),
+                            'function': {'name': '', 'arguments': ''},
+                        },
+                    )
+                    if tool_delta.get('id'):
+                        current['id'] = tool_delta['id']
+                    function_delta = tool_delta.get('function') or {}
+                    current['function']['name'] += str(function_delta.get('name') or '')
+                    current['function']['arguments'] += str(function_delta.get('arguments') or '')
+                if choices[0].get('finish_reason'):
+                    tool_calls = [tool_call_parts[index] for index in sorted(tool_call_parts)] or None
                     final_msg = {
-                        "role": "assistant",
-                        "content": full_content,
-                        "tool_calls": tool_calls,
+                        'role': 'assistant',
+                        'content': full_content,
+                        'tool_calls': tool_calls,
                     }
-                    yield "", "", final_msg
+                    yield '', '', final_msg
                     return
             if not final_msg:
-                yield "", "", {"error": "Vorzeitiges Ende des Streams"}
+                yield '', '', {'error': 'Vorzeitiges Ende des Streams'}
             return
-        body = {"model": model, "messages": msgs, "stream": True}
+        body = {'model': model, 'messages': msgs, 'stream': True}
         if tools:
-            body["tools"] = tools
-        low_temp_models = [m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()]
+            body['tools'] = tools
+        low_temp_models = [
+            m.strip() for m in os.getenv('LOW_TEMP_MODELS', 'minimax-m2.5:cloud').split(',') if m.strip()
+        ]
         if model in low_temp_models:
-            body.setdefault("options", {})["temperature"] = 0.3
-        body["keep_alive"] = _keep_alive()
+            body.setdefault('options', {})['temperature'] = 0.3
+        body['keep_alive'] = _keep_alive()
 
         def _do_request():
-            r = requests.post(f"{OLLAMA}/api/chat", json=body, timeout=300, stream=True)
+            base_url = str(runtime.get('base_url') or OLLAMA).rstrip('/')
+            r = requests.post(f'{base_url}/api/chat', json=body, timeout=300, stream=True)
             if not r.ok:
                 import logging as _lg
-                _lg.error(f"Ollama 400: {r.text[:500]}")
-                _lg.error(f"Request msgs: {len(msgs)}, total chars: {sum(len(str(m)) for m in msgs)}")
-                _lg.error(f"Tool names: {[t.get('function',{}).get('name','?') for t in (tools or [])]}")
+
+                _lg.error(f'Ollama 400: {r.text[:500]}')
+                _lg.error(f'Request msgs: {len(msgs)}, total chars: {sum(len(str(m)) for m in msgs)}')
+                _lg.error(f'Tool names: {[t.get("function", {}).get("name", "?") for t in (tools or [])]}')
                 import traceback as _tb
-                _lg.error(f"Stack:\n{''.join(_tb.format_stack()[-10:])}")
+
+                _lg.error(f'Stack:\n{"".join(_tb.format_stack()[-10:])}')
             r.raise_for_status()
             return r
 
         r = _retry_with_backoff(_do_request)
-        full_content = ""
-        full_thinking = ""
+        full_content = ''
+        full_thinking = ''
         full_tool_calls = None
         final_msg = None
         for line in r.iter_lines(decode_unicode=True):
@@ -210,82 +267,96 @@ def chat_with_tools_stream(model, msgs, tools):
                 chunk = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            msg = chunk.get("message", {})
-            think_text = msg.get("thinking", "")
-            content_text = msg.get("content", "")
+            msg = chunk.get('message', {})
+            think_text = msg.get('thinking', '')
+            content_text = msg.get('content', '')
             if think_text:
                 full_thinking += think_text
-                yield "think", think_text, None
+                yield 'think', think_text, None
             if content_text:
                 full_content += content_text
-                yield "content", content_text, None
-            if msg.get("tool_calls"):
-                full_tool_calls = msg.get("tool_calls")
-            if chunk.get("done"):
+                yield 'content', content_text, None
+            if msg.get('tool_calls'):
+                full_tool_calls = msg.get('tool_calls')
+            if chunk.get('done'):
                 final_msg = {
-                    "role": "assistant",
-                    "content": full_content,
-                    "thinking": full_thinking,
-                    "tool_calls": full_tool_calls,
+                    'role': 'assistant',
+                    'content': full_content,
+                    'thinking': full_thinking,
+                    'tool_calls': full_tool_calls,
                 }
-                yield "", "", final_msg
+                yield '', '', final_msg
                 return
         if not final_msg:
             # Return empty content instead of error – gives the model a chance to retry
-            yield "", "", {"role": "assistant", "content": full_content or "", "tool_calls": full_tool_calls}
+            yield '', '', {'role': 'assistant', 'content': full_content or '', 'tool_calls': full_tool_calls}
     except requests.exceptions.Timeout:
-        yield "", "", {"error": "Ollama-Timeout – das Modell hat nicht rechtzeitig geantwortet."}
+        yield '', '', {'error': 'Ollama-Timeout – das Modell hat nicht rechtzeitig geantwortet.'}
     except requests.exceptions.ConnectionError:
-        yield "", "", {"error": "Ollama nicht erreichbar – bitte prüfe ob 'ollama serve' läuft."}
+        yield '', '', {'error': "Ollama nicht erreichbar – bitte prüfe ob 'ollama serve' läuft."}
     except requests.exceptions.HTTPError as e:
         status = e.response.status_code if e.response is not None else None
         if status == 410:
-            yield "", "", {"error": "Ollama hat das Modell entladen (410 Gone) – bitte erneut versuchen oder 'ollama pull " + model + "' ausführen."}
+            yield (
+                '',
+                '',
+                {
+                    'error': "Ollama hat das Modell entladen (410 Gone) – bitte erneut versuchen oder 'ollama pull "
+                    + model
+                    + "' ausführen."
+                },
+            )
         elif status == 404:
-            yield "", "", {"error": f"Modell '{model}' nicht gefunden – bitte in Ollama importieren ('ollama pull {model}')."}
+            yield (
+                '',
+                '',
+                {'error': f"Modell '{model}' nicht gefunden – bitte in Ollama importieren ('ollama pull {model}')."},
+            )
         else:
-            yield "", "", {"error": f"LLM-Fehler (HTTP {status}): {e}"}
+            yield '', '', {'error': f'LLM-Fehler (HTTP {status}): {e}'}
     except Exception as e:
-        yield "", "", {"error": f"LLM-Fehler: {e}"}
+        yield '', '', {'error': f'LLM-Fehler: {e}'}
 
 
 def run_tool_loop(model, user_msg, system_prompt, tools, tool_map, max_rounds=100, history=None):
     msgs = list(history) if history else []
-    if msgs and msgs[0].get("role") == "system":
-        msgs[0] = {"role": "system", "content": system_prompt}
+    if msgs and msgs[0].get('role') == 'system':
+        msgs[0] = {'role': 'system', 'content': system_prompt}
     else:
-        msgs.insert(0, {"role": "system", "content": system_prompt})
-    msgs.append({"role": "user", "content": user_msg})
+        msgs.insert(0, {'role': 'system', 'content': system_prompt})
+    msgs.append({'role': 'user', 'content': user_msg})
 
     try:
         for rnd in range(max_rounds):
             resp = chat_with_tools(model, msgs, tools)
-            if "error" in resp:
-                return f"❌ Modell-Fehler: {resp['error']}", msgs
-            if "message" not in resp:
+            if 'error' in resp:
+                return f'❌ Modell-Fehler: {resp["error"]}', msgs
+            if 'message' not in resp:
                 return f"❌ Ungültige Antwort (kein 'message'): {str(resp)[:500]}", msgs
-            msg = resp["message"]
+            msg = resp['message']
 
-            if not msg.get("tool_calls"):
-                msgs.append({"role": "assistant", "content": msg.get("content", "")})
-                return msg.get("content", ""), msgs
+            if not msg.get('tool_calls'):
+                msgs.append({'role': 'assistant', 'content': msg.get('content', '')})
+                return msg.get('content', ''), msgs
 
-            content = msg.get("content", "")
+            content = msg.get('content', '')
             if content.strip():
-                print(f"  {C.YELLOW}💬 {content[:500]}{C.RESET}", flush=True)
-            msgs.append({
-                "role": "assistant",
-                "content": content,
-                "tool_calls": msg.get("tool_calls"),
-            })
+                print(f'  {C.YELLOW}💬 {content[:500]}{C.RESET}', flush=True)
+            msgs.append(
+                {
+                    'role': 'assistant',
+                    'content': content,
+                    'tool_calls': msg.get('tool_calls'),
+                }
+            )
 
-            tool_count = len(msg["tool_calls"])
-            print(f"  {C.DIM}▸ Runde {rnd+1}/{max_rounds} · {tool_count} Tool(s){C.RESET}", flush=True)
+            tool_count = len(msg['tool_calls'])
+            print(f'  {C.DIM}▸ Runde {rnd + 1}/{max_rounds} · {tool_count} Tool(s){C.RESET}', flush=True)
 
-            for tc in msg["tool_calls"]:
-                fn = tc["function"]
-                name = fn["name"]
-                args_raw = fn.get("arguments", {})
+            for tc in msg['tool_calls']:
+                fn = tc['function']
+                name = fn['name']
+                args_raw = fn.get('arguments', {})
                 if isinstance(args_raw, str):
                     try:
                         args = json.loads(args_raw)
@@ -293,7 +364,7 @@ def run_tool_loop(model, user_msg, system_prompt, tools, tool_map, max_rounds=10
                         args = {}
                 else:
                     args = args_raw
-                tool_call_id = tc.get("id", "")
+                tool_call_id = tc.get('id', '')
                 func = tool_map.get(name)
                 if func:
                     try:
@@ -301,33 +372,40 @@ def run_tool_loop(model, user_msg, system_prompt, tools, tool_map, max_rounds=10
                         result = func(**args)
                         dt = (datetime.now() - t0).total_seconds()
                     except Exception as e:
-                        result = f"❌ Fehler: {e}"
+                        result = f'❌ Fehler: {e}'
                         dt = 0
                 else:
-                    result = f"❌ Unbekanntes Tool: {name}"
+                    result = f'❌ Unbekanntes Tool: {name}'
                     dt = 0
                 r_len = len(str(result))
-                status = f"{C.GREEN}✓{C.RESET}" if not result.startswith("❌") else f"{C.RED}✗{C.RESET}"
-                if name == "think":
-                    print(f"    {C.DIM}└─ {status} {name}  {dt:.1f}s{C.RESET}", flush=True)
+                status = f'{C.GREEN}✓{C.RESET}' if not result.startswith('❌') else f'{C.RED}✗{C.RESET}'
+                if name == 'think':
+                    print(f'    {C.DIM}└─ {status} {name}  {dt:.1f}s{C.RESET}', flush=True)
                 else:
                     a_str = json.dumps(args)[:120]
-                    print(f"    {status} {C.BOLD}{name}{C.RESET} {C.DIM}{a_str} · {dt:.1f}s · {r_len} Z{C.RESET}", flush=True)
-                msgs.append({
-                    "role": "tool",
-                    "content": str(result)[:8000],
-                    "name": name,
-                    "tool_call_id": tool_call_id,
-                })
+                    print(
+                        f'    {status} {C.BOLD}{name}{C.RESET} {C.DIM}{a_str} · {dt:.1f}s · {r_len} Z{C.RESET}',
+                        flush=True,
+                    )
+                msgs.append(
+                    {
+                        'role': 'tool',
+                        'content': str(result)[:8000],
+                        'name': name,
+                        'tool_call_id': tool_call_id,
+                    }
+                )
 
-        msgs.append({
-            "role": "user",
-            "content": "Du hast das Limit erreicht. Fasse zusammen, was du bisher herausgefunden hast.",
-        })
+        msgs.append(
+            {
+                'role': 'user',
+                'content': 'Du hast das Limit erreicht. Fasse zusammen, was du bisher herausgefunden hast.',
+            }
+        )
         resp = chat_with_tools(model, msgs, [])
-        if "message" in resp:
-            return ("⚠️ Max Runden erreicht.\n\n" + resp["message"].get("content", "")), msgs
-        return "⚠️ Max Runden erreicht (keine Abschlussantwort).", msgs
+        if 'message' in resp:
+            return ('⚠️ Max Runden erreicht.\n\n' + resp['message'].get('content', '')), msgs
+        return '⚠️ Max Runden erreicht (keine Abschlussantwort).', msgs
     except Exception as e:
-        logging.error(f"Unexpected error in run_tool_loop: {e}", exc_info=True)
-        return f"❌ Unerwarteter Fehler: {e}", msgs
+        logging.error(f'Unexpected error in run_tool_loop: {e}', exc_info=True)
+        return f'❌ Unerwarteter Fehler: {e}', msgs

@@ -19,17 +19,16 @@ export default function SetupWizard() {
   const [setupError, setSetupError] = useState('');
   const [setupComplete, setSetupComplete] = useState(false);
   const [setupFlowStarted, setSetupFlowStarted] = useState(false);
-  const [nextcloudConfigLoaded, setNextcloudConfigLoaded] = useState(false);
   const [animDir, setAnimDir] = useState('next');
 
   const [setupForm, setSetupForm] = useState({
     adminName: '', adminPassword: ''
   });
   const [nextcloudForm, setNextcloudForm] = useState({
-    clientId: '', clientSecret: '', nextcloudUrl: ''
+    nextcloudUrl: ''
   });
   const [aiForm, setAiForm] = useState({
-    baseUrl: 'http://127.0.0.1:11434', model: '', embeddingModel: ''
+    provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: '', embeddingModel: '', apiKey: ''
   });
   const [aiModels, setAiModels] = useState([]);
   const [authConfigForm, setAuthConfigForm] = useState({
@@ -58,21 +57,7 @@ export default function SetupWizard() {
   }, []);
 
   useEffect(() => {
-    if (setupMode === 'nextcloud' && !nextcloudConfigLoaded) {
-      apiFetch('/api/nextcloud/oauth/config')
-        .then((r) => r.json())
-        .then((data) => {
-          if (data?.configured) {
-            setNextcloudForm((cur) => ({ ...cur, clientId: data.client_id || cur.clientId, nextcloudUrl: data.nextcloud_url || cur.nextcloudUrl }));
-          }
-        })
-        .catch((e) => console.warn('Nextcloud config:', e?.message))
-        .finally(() => setNextcloudConfigLoaded(true));
-    }
-  }, [setupMode, nextcloudConfigLoaded]);
-
-  useEffect(() => {
-    if (setupMode === 'ai' && aiModels.length === 0) {
+    if (setupMode === 'ai' && aiForm.provider === 'ollama' && aiModels.length === 0) {
       apiFetch('/api/ollama/models')
         .then(r => r.json())
         .then(data => setAiModels(Array.isArray(data?.models) ? data.models : []))
@@ -86,7 +71,7 @@ export default function SetupWizard() {
         })
         .catch((e) => console.warn('System config:', e?.message));
     }
-  }, [setupMode, aiModels]);
+  }, [setupMode, aiModels, aiForm.provider]);
 
   const setupAlreadyFinished = Boolean(setupStatus && !setupStatus.needs_setup && !setupFlowStarted);
   useEffect(() => { if (setupAlreadyFinished) router.replace('/'); }, [setupAlreadyFinished, router]);
@@ -128,8 +113,9 @@ export default function SetupWizard() {
     if (setupMode === 'review') {
       setSetupMode('ai');
     } else if (setupMode === 'ai') {
-      if (setupPath === 'nextcloud') setSetupMode('nextcloud');
-      else setSetupMode('admin');
+      setSetupMode('admin');
+    } else if (setupMode === 'admin' && setupPath === 'nextcloud') {
+      setSetupMode('nextcloud');
     } else {
       setSetupMode('choose');
     }
@@ -137,8 +123,8 @@ export default function SetupWizard() {
 
   const submitAdmin = async (ev) => {
     ev.preventDefault();
-    if (!setupForm.adminPassword.trim()) {
-      setSetupError('Passwort eingeben');
+    if (setupForm.adminPassword.trim().length < 12) {
+      setSetupError('Das Passwort muss mindestens 12 Zeichen enthalten.');
       return;
     }
     setSetupSubmitting(true);
@@ -159,9 +145,25 @@ export default function SetupWizard() {
     setSetupError('');
     setSetupMessage('');
     try {
-      await postSetup({ mode: 'nextcloud', client_id: nextcloudForm.clientId, client_secret: nextcloudForm.clientSecret, nextcloud_url: nextcloudForm.nextcloudUrl });
-      setSetupPath('nextcloud');
-      setMode('ai');
+      const startResponse = await apiFetch('/api/nextcloud/loginflow/start', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nextcloud_url: nextcloudForm.nextcloudUrl })
+      });
+      const start = await startResponse.json();
+      if (!startResponse.ok || !start.success) throw new Error(start?.error || 'Nextcloud-Anmeldung konnte nicht gestartet werden.');
+      const loginWindow = window.open(start.login_url, '_blank', 'noopener,noreferrer');
+      if (!loginWindow) setSetupMessage('Bitte öffne das Nextcloud-Anmeldefenster über den erlaubten Browser-Popup.');
+      let connected = false;
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const pollResponse = await apiFetch(`/api/nextcloud/loginflow/poll?flow_id=${encodeURIComponent(start.flow_id)}`);
+        const poll = await pollResponse.json();
+        if (pollResponse.ok && poll.status === 'connected') { connected = true; break; }
+        if (poll.status && poll.status !== 'pending') throw new Error(poll?.error || 'Nextcloud-Anmeldung fehlgeschlagen.');
+      }
+      if (!connected) throw new Error('Die Nextcloud-Anmeldung ist abgelaufen. Bitte erneut versuchen.');
+      setSetupMessage('Nextcloud ist verbunden. Lege jetzt den lokalen Administrator an.');
+      setMode('admin');
     } catch (err) {
       setSetupError(err.message || 'Fehler beim Speichern');
     } finally { setSetupSubmitting(false); }
@@ -173,7 +175,7 @@ export default function SetupWizard() {
     setSetupMessage('');
     try {
       if (aiForm.model) {
-        await postSetup({ mode: 'ai', base_url: aiForm.baseUrl, model: aiForm.model, embedding_model: aiForm.embeddingModel });
+        await postSetup({ mode: 'ai', provider: aiForm.provider, base_url: aiForm.baseUrl, model: aiForm.model, embedding_model: aiForm.embeddingModel, api_key: aiForm.apiKey });
       }
       await postSetup({ mode: 'auth_config', allowRegistration: authConfigForm.allowRegistration, requireLogin: authConfigForm.requireLogin });
       await postSetup({ mode: 'system', enable_ollama: false, enable_immich: false });
@@ -199,33 +201,21 @@ export default function SetupWizard() {
     setMode('nextcloud');
   };
 
-  const redirectUri = typeof window !== 'undefined' ? `${window.location.origin}/api/auth/nextcloud/callback` : '/api/auth/nextcloud/callback';
-  const [copyOk, setCopyOk] = useState(false);
-
-  const copyRedirectUri = () => {
-    const input = document.createElement('input');
-    input.value = redirectUri;
-    document.body.appendChild(input);
-    input.select();
-    try { document.execCommand('copy'); setCopyOk(true); setTimeout(() => setCopyOk(false), 2000); } catch (e) {}
-    document.body.removeChild(input);
-  };
-
   const nextcloudHint = [
-    'In Nextcloud als Admin eine OAuth2-App anlegen oder die vorhandene OAuth2-Funktion nutzen.',
-    'Die Callback-URL in der Nextcloud-App muss exakt auf die unten angezeigte Redirect-URI zeigen.',
-    'Danach Client ID und Client Secret hier eintragen und speichern.'
+    'MYND öffnet die offizielle Nextcloud-Anmeldeseite in einem neuen Fenster.',
+    'Bestätige dort den Zugriff; Nextcloud erstellt ein widerrufbares App-Passwort.',
+    'Das Passwort wird ausschließlich im lokalen verschlüsselten MYND-Tresor gespeichert.'
   ];
 
   const stepTitles = {
     choose: 'Start wählen', admin: 'Benutzer anlegen',
-    nextcloud: 'Nextcloud OAuth', ai: 'KI konfigurieren', review: 'Einstellungen überprüfen'
+    nextcloud: 'Nextcloud verbinden', ai: 'KI konfigurieren', review: 'Einstellungen überprüfen'
   };
 
   const desc = {
-    choose: 'Die Einrichtung läuft in zwei Wegen. Du kannst entweder mit einem lokalen Benutzer starten oder direkt Nextcloud als Login einrichten.',
+    choose: 'Du kannst mit einem lokalen Administrator starten oder zuerst deine Nextcloud als Datenquelle verbinden.',
     admin: 'Lege den Admin-Benutzer an.',
-    nextcloud: 'Trage die Nextcloud-Zugangsdaten für die OAuth-Anmeldung ein.',
+    nextcloud: 'Verbinde MYND über den offiziellen Nextcloud Login Flow. Es ist keine manuell angelegte OAuth-App nötig.',
     ai: 'Wähle ein KI-Modell für die Chat-Funktion aus. Dies kann später in den Einstellungen geändert werden.',
     review: 'Überprüfe deine Einstellungen bevor du die Einrichtung abschließt.',
   };
@@ -291,8 +281,8 @@ export default function SetupWizard() {
                       </button>
                       <button type="button" className="setup-choice-card" onClick={startNextcloudFlow}>
                         <div className="setup-choice-icon"><i className="fas fa-cloud"></i></div>
-                        <div className="setup-choice-title">Direkt mit Nextcloud starten</div>
-                        <p>Geeignet, wenn du den Login über Nextcloud machen möchtest.</p>
+                        <div className="setup-choice-title">Nextcloud verbinden</div>
+                        <p>Verbindet Kalender, Aufgaben und Dokumente; der MYND-Login bleibt ein lokales Administratorkonto.</p>
                       </button>
                     </div>
                   )}
@@ -328,31 +318,14 @@ export default function SetupWizard() {
                           <span>Nextcloud URL</span>
                           <input value={nextcloudForm.nextcloudUrl} onChange={(e) => setNextcloudForm((cur) => ({ ...cur, nextcloudUrl: e.target.value }))} placeholder="https://cloud.example.org" autoFocus />
                         </label>
-                        <label className="setup-field">
-                          <span>Client ID</span>
-                          <input value={nextcloudForm.clientId} onChange={(e) => setNextcloudForm((cur) => ({ ...cur, clientId: e.target.value }))} placeholder="Client ID" />
-                        </label>
-                        <label className="setup-field">
-                          <span>Client Secret</span>
-                          <input value={nextcloudForm.clientSecret} onChange={(e) => setNextcloudForm((cur) => ({ ...cur, clientSecret: e.target.value }))} placeholder="Client Secret" />
-                        </label>
                       </div>
                       <div className="setup-hints">
                         {nextcloudHint.map((item) => <div key={item} className="setup-hint-item">{item}</div>)}
                       </div>
-                      <div className="setup-redirect">
-                        <span className="setup-redirect-label">Redirect-URI</span>
-                        <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
-                          <code className="setup-redirect-code" style={{flex:1}}>{redirectUri}</code>
-                          <button type="button" onClick={copyRedirectUri} style={{padding:'10px 14px', borderRadius:'10px', border:'1px solid #d7e0eb', background:'#fff', cursor:'pointer', color:'#64748b', fontSize:'14px', lineHeight:1, flexShrink:0}}>
-                            {copyOk ? '✓' : '📋'}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="setup-note">Speichern aktiviert die Nextcloud-Anmeldung.</div>
+                      <div className="setup-note">Beim Klick auf „Verbinden“ öffnet sich Nextcloud. Dieses Fenster wartet anschließend auf deine Bestätigung.</div>
                       <div className="setup-footer">
                         <button type="button" className="btn" onClick={() => setMode('choose')}>Zurück</button>
-                        <button type="submit" className="btn btn-nc" disabled={setupSubmitting}>Weiter</button>
+                        <button type="submit" className="btn btn-nc" disabled={setupSubmitting || !nextcloudForm.nextcloudUrl}>{setupSubmitting ? 'Warte auf Nextcloud…' : 'Verbinden'}</button>
                       </div>
                     </form>
                   )}
@@ -361,34 +334,50 @@ export default function SetupWizard() {
                     <div className="setup-form" style={{marginTop:'24px'}}>
                       <div className="setup-grid">
                         <label className="setup-field setup-wide">
-                          <span>Ollama Base URL</span>
-                          <input type="url" value={aiForm.baseUrl} onChange={(e) => setAiForm(cur => ({ ...cur, baseUrl: e.target.value }))} placeholder="http://127.0.0.1:11434" autoFocus />
-                        </label>
-                        <label className="setup-field setup-wide">
-                          <span>Chat-Modell</span>
-                          <select value={aiForm.model} onChange={(e) => setAiForm(cur => ({ ...cur, model: e.target.value }))}>
-                            <option value="">— Auswählen —</option>
-                            <option value="" disabled>── Modelle ──</option>
-                            {aiModels.filter(m => !isEmbed(m.name || m)).map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
+                          <span>KI-Anbieter</span>
+                          <select value={aiForm.provider} onChange={(e) => {
+                            const provider = e.target.value;
+                            setAiForm(cur => ({ ...cur, provider, baseUrl: provider === 'openai' ? 'https://api.openai.com/v1' : 'http://127.0.0.1:11434', model: '', embeddingModel: '', apiKey: '' }));
+                          }}>
+                            <option value="ollama">Ollama (lokal)</option>
+                            <option value="openai">OpenAI-kompatibel</option>
                           </select>
                         </label>
                         <label className="setup-field setup-wide">
+                          <span>{aiForm.provider === 'ollama' ? 'Ollama Base URL' : 'API Base URL'}</span>
+                          <input type="url" value={aiForm.baseUrl} onChange={(e) => setAiForm(cur => ({ ...cur, baseUrl: e.target.value }))} placeholder="http://127.0.0.1:11434" autoFocus />
+                        </label>
+                        {aiForm.provider === 'openai' && (
+                          <label className="setup-field setup-wide">
+                            <span>API-Key</span>
+                            <input type="password" autoComplete="off" value={aiForm.apiKey} onChange={(e) => setAiForm(cur => ({ ...cur, apiKey: e.target.value }))} placeholder="Wird verschlüsselt im lokalen Tresor gespeichert" />
+                          </label>
+                        )}
+                        <label className="setup-field setup-wide">
+                          <span>Chat-Modell</span>
+                          {aiForm.provider === 'ollama' ? <select value={aiForm.model} onChange={(e) => setAiForm(cur => ({ ...cur, model: e.target.value }))}>
+                            <option value="">— Auswählen —</option>
+                            <option value="" disabled>── Modelle ──</option>
+                            {aiModels.filter(m => !isEmbed(m?.name || m)).map((m) => { const name = typeof m === 'string' ? m : m.name; return <option key={name} value={name}>{name}</option>; })}
+                          </select> : <input value={aiForm.model} onChange={(e) => setAiForm(cur => ({ ...cur, model: e.target.value }))} placeholder="z. B. gpt-5.4" />}
+                        </label>
+                        {aiForm.provider === 'ollama' && <label className="setup-field setup-wide">
                           <span>Embedding-Modell</span>
                           <select value={aiForm.embeddingModel} onChange={(e) => setAiForm(cur => ({ ...cur, embeddingModel: e.target.value }))}>
                             <option value="">— Keins (optional) —</option>
                             <option value="" disabled>── Modelle ──</option>
-                            {aiModels.filter(m => isEmbed(m.name || m)).map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
+                            {aiModels.filter(m => isEmbed(m?.name || m)).map((m) => { const name = typeof m === 'string' ? m : m.name; return <option key={name} value={name}>{name}</option>; })}
                           </select>
-                        </label>
+                        </label>}
                       </div>
-                      {aiModels.length === 0 && (
+                      {aiForm.provider === 'ollama' && aiModels.length === 0 && (
                         <div className="setup-note">
                           Keine Ollama-Modelle gefunden. Stelle sicher, dass Ollama unter <strong>{aiForm.baseUrl}</strong> läuft.
                         </div>
                       )}
                       <div className="setup-footer">
                         <button type="button" className="btn" onClick={goBack}>Zurück</button>
-                        <button type="button" className="btn btn-success" onClick={() => setMode('review')} disabled={!aiForm.model}>Weiter</button>
+                        <button type="button" className="btn btn-success" onClick={() => setMode('review')}>Weiter</button>
                       </div>
                     </div>
                   )}
@@ -408,7 +397,7 @@ export default function SetupWizard() {
                         )}
                         <div className="setup-review-item">
                           <span className="setup-review-label">KI-Modell</span>
-                          <span className="setup-review-value">{aiForm.model || 'Nicht konfiguriert'}</span>
+                          <span className="setup-review-value">{aiForm.model ? `${aiForm.provider}: ${aiForm.model}` : 'Nicht konfiguriert'}</span>
                         </div>
                         {aiForm.embeddingModel && (
                           <div className="setup-review-item">

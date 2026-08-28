@@ -128,4 +128,4 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm audit --omit=dev --prefix frontend
+      - run: npm --prefix frontend audit --omit=dev

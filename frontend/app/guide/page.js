@@ -152,14 +152,13 @@ export default function GuidePage() {
               'MYND is your local personal AI platform. Ask questions about your files, devices and services — everything runs on your own infrastructure.'
             )}</p>
             <h3>{t('1. Systemvoraussetzungen', '1. System requirements')}</h3>
-            <p>{t('Python 3.10+, Node.js 18+, 4 GB RAM (8+ empfohlen), 20+ GB Speicher.', 'Python 3.10+, Node.js 18+, 4 GB RAM (8+ recommended), 20+ GB storage.')}</p>
+            <p>{t('Python 3.12+, Node.js 20+, 4 GB RAM (8+ empfohlen), 20+ GB Speicher.', 'Python 3.12+, Node.js 20+, 4 GB RAM (8+ recommended), 20+ GB storage.')}</p>
             <h3>{t('2. Backend installieren & starten', '2. Install & start the backend')}</h3>
             <pre className="lp-guide-code"><code>{`git clone https://github.com/SchBenedikt/mynd.git
 cd mynd
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+uv sync --extra dev
 python app.py`}</code></pre>
-            <p>{t('Der Server läuft auf http://0.0.0.0:5001.', 'The server runs on http://0.0.0.0:5001.')}</p>
+            <p>{t('Der Server läuft standardmäßig nur lokal auf http://127.0.0.1:5001.', 'By default, the server is available locally at http://127.0.0.1:5001.')}</p>
             <h3>{t('3. Frontend starten', '3. Start the frontend')}</h3>
             <pre className="lp-guide-code"><code>{`cd frontend
 npm install
@@ -321,9 +320,9 @@ curl -fsSL https://ollama.com/install.sh | sh
             <h3>{t('Sicherheitsmodi (Settings → AI)', 'Security Modes (Settings → AI)')}</h3>
             <div className="lp-guide-table">
               <div className="lp-guide-tr lp-guide-th"><span>{t('Modus', 'Mode')}</span><span>{t('Beschreibung', 'Description')}</span></div>
-              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Restricted', 'Restricted')}</span><span>{t('Nur Dokumentsuche + Gedächtnis. Keine externen Tools.', 'Only document search + memory. No external tools.')}</span></div>
-              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Standard', 'Standard')}</span><span>{t('Vault + Tools, kein SSH/Admin.', 'Vault + tools, no SSH/admin.')}</span></div>
-              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Admin', 'Admin')}</span><span>{t('Voller Zugriff inkl. SSH – vollautonom.', 'Full access including SSH – fully autonomous.')}</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Restricted', 'Restricted')}</span><span>{t('Nur sichere Suche, Lesen und Gedächtnis. Keine verändernden Tools.', 'Safe search, read, and memory tools only. No mutating tools.')}</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Standard', 'Standard')}</span><span>{t('Lesende Tools ohne Geheimniszugriff oder Systemänderungen.', 'Read-only tools without secret access or system changes.')}</span></div>
+              <div className="lp-guide-tr"><span className="lp-guide-mono">{t('Admin', 'Admin')}</span><span>{t('Voller Tool-Katalog; riskante Aktionen bleiben zusätzlich durch den Berechtigungsmodus geschützt.', 'Full tool catalogue; risky actions remain protected by the permission policy.')}</span></div>
             </div>
             <h3>{t('Berechtigungsmodus (Bash/SSH)', 'Permission Mode (Bash/SSH)')}</h3>
             <p>{t(

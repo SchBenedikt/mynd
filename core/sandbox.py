@@ -47,10 +47,12 @@ def _macos_command(argv, cwd, allow_network):
         f'(allow file-read* (literal "{_sandbox_quote(Path(sys.executable).resolve())}"))',
         f'(allow file-read* (subpath "{_sandbox_quote(cwd)}"))',
     ]
-    profile.extend([
-        f'(allow file-write* (subpath "{_sandbox_quote(cwd)}"))',
-        '(allow file-write* (literal "/dev/null"))',
-    ])
+    profile.extend(
+        [
+            f'(allow file-write* (subpath "{_sandbox_quote(cwd)}"))',
+            '(allow file-write* (literal "/dev/null"))',
+        ]
+    )
     if allow_network:
         profile.append('(allow network*)')
     return [executable, '-p', '\n'.join(profile), *argv]
@@ -61,9 +63,20 @@ def _linux_command(argv, cwd, allow_network):
     if not executable:
         raise SandboxUnavailableError('bubblewrap is unavailable')
     command = [
-        executable, '--die-with-parent', '--new-session', '--proc', '/proc', '--dev', '/dev',
-        '--tmpfs', '/tmp',  # nosec B108
-        '--bind', str(cwd), str(cwd), '--chdir', str(cwd),
+        executable,
+        '--die-with-parent',
+        '--new-session',
+        '--proc',
+        '/proc',
+        '--dev',
+        '/dev',
+        '--tmpfs',
+        '/tmp',  # nosec B108
+        '--bind',
+        str(cwd),
+        str(cwd),
+        '--chdir',
+        str(cwd),
     ]
     # Hosted Python installations (including GitHub Actions) live below /opt.
     # Bind it read-only so the sandbox can execute the current interpreter.

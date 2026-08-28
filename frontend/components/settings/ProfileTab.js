@@ -4,23 +4,17 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
 
-function getAuthHeaders() {
-  try {
-    const token = localStorage.getItem('mynd_token_v1');
-    return token ? { 'Authorization': `Bearer ${token}` } : {};
-  } catch { return {}; }
-}
-
 export default function ProfileTab({ tr, language }) {
   const router = useRouter();
   const [profile, setProfile] = useState({ name: '', username: '' });
   const [password, setPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    apiFetch('/api/auth/profile', { headers: getAuthHeaders() })
+    apiFetch('/api/auth/profile')
       .then(r => r.json())
       .then(data => {
         if (data?.success) setProfile({ name: data.user.name || '', username: data.user.username });
@@ -34,19 +28,28 @@ export default function ProfileTab({ tr, language }) {
     setError('');
     const body = {};
     if (profile.name.trim()) body.name = profile.name.trim();
-    if (password.trim()) body.password = password.trim();
+    if (password.trim()) {
+      body.password = password.trim();
+      body.current_password = currentPassword;
+    }
     if (Object.keys(body).length === 0) return;
     setSaving(true);
     try {
       const res = await apiFetch('/api/auth/profile', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
       const data = await res.json();
       if (res.ok && data?.success) {
+        if (data.reauthenticate) {
+          try { localStorage.removeItem('mynd_user_v1'); } catch {}
+          router.replace('/login');
+          return;
+        }
         setMsg(tr('Gespeichert', 'Saved'));
         setPassword('');
+        setCurrentPassword('');
         if (data.user) setProfile({ name: data.user.name || '', username: data.user.username });
         setTimeout(() => setMsg(''), 3000);
       } else {
@@ -63,6 +66,7 @@ export default function ProfileTab({ tr, language }) {
     setError('');
     setMsg('');
     setPassword('');
+    setCurrentPassword('');
   };
 
   return (
@@ -106,6 +110,17 @@ export default function ProfileTab({ tr, language }) {
           </div>
 
           <div className="profile-field">
+            <label className="profile-label">{tr('Aktuelles Passwort', 'Current password')}</label>
+            <div className="profile-input-wrap">
+              <i className="fas fa-key"></i>
+              <input type="password" value={currentPassword}
+                onChange={(e) => { setCurrentPassword(e.target.value); setError(''); setMsg(''); }}
+                autoComplete="current-password"
+                placeholder={tr('Erforderlich bei Passwortänderung', 'Required to change password')} />
+            </div>
+          </div>
+
+          <div className="profile-field">
             <label className="profile-label">{tr('Neues Passwort', 'New password')}</label>
             <div className="profile-input-wrap">
               <i className="fas fa-lock"></i>
@@ -132,6 +147,7 @@ export default function ProfileTab({ tr, language }) {
 
       <div className="panel-section" style={{marginTop:'2rem',borderTop:'1px solid var(--line)',paddingTop:'1.5rem'}}>
         <button className="btn danger" onClick={() => {
+          apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
           try { localStorage.removeItem('mynd_token_v1'); } catch (e) {}
           try { localStorage.removeItem('mynd_user_v1'); } catch (e) {}
           router.push('/');

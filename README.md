@@ -20,18 +20,18 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 
 | | |
 |---|---|
-| **💬 Agentic Chat** | Streaming AI chat with tool-calling, multi-round planning, sub-agent delegation |
-| **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings) |
+| **💬 Agentic Chat** | Streaming AI chat with tool-calling, multi-round planning, sub-agent delegation, source panels, and contextual follow-up suggestions |
+| **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings); indexing can be stopped cooperatively |
 | **🌐 Web Research** | DuckDuckGo search, news aggregation, multi-source research |
 | **🗺️ Browser Automation** | Headless Playwright + agent-browser CLI — [128 tools total](FEATURES.md) |
 | **📷 Photo Search** | Semantic photo search via Immich |
 | **🏠 Smart Home** | Home Assistant — lights, switches, sensors, cameras, scenes, scripts |
-| **📅 Productivity** | CalDAV calendars & tasks (Nextcloud), timer reminders |
+| **📅 Productivity** | CalDAV calendars & tasks (Nextcloud), task status/due-date filters, timer reminders |
 | **📧 Email** | IMAP/SMTP integration for reading & sending |
 | **🤖 Automations** | Cron-based automations, daily briefing, scheduled actions |
 | **🔌 Plugin System** | Extensible registry for repository-reviewed local plugins, toggle at runtime |
-| **🔐 Vault** | Local credential storage for API keys, passwords, and integration configuration |
-| **🛡️ Auth** | Password-based login, configurable registration, role-based access |
+| **🔐 Vault** | Local credential storage for API keys, passwords, and integration configuration; provider checks reject unsafe private URLs |
+| **🛡️ Auth** | Password-based login, configurable registration, role-based access, hashed expiring bearer sessions |
 | **🎨 Themes** | 7 color themes × light/dark/modes |
 | **🌐 Multi-language** | UI in 12 languages: DE, EN, FR, ES, IT, PT, NL, PL, TR, RU, JA, ZH |
 
@@ -57,7 +57,7 @@ make dev
 
 Open **http://localhost:3000**. The API runs at `http://127.0.0.1:5001`.
 
-On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log.
+On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log. Bearer sessions are stored as hashes, expire automatically, and rotate on refresh. Indexing runs expose a cancellation-aware stop operation and reject duplicate starts while a run is active.
 
 ---
 
@@ -137,9 +137,11 @@ make dev
 
 | Variable | Purpose | Default |
 |---|---|---|
+| `MYND_PORT` | Backend API port | `5001` |
+| `MYND_FRONTEND_PORT` | Development frontend port | `3000` |
 | `OLLAMA_BASE_URL` | Ollama API endpoint | `http://127.0.0.1:11434` |
 | `OLLAMA_MODEL` | Default chat model | `gemma3:latest` |
-| `CORS_ALLOWED_ORIGINS` | Allowed frontend origins | `http://localhost:3000` |
+| `CORS_ALLOWED_ORIGINS` | Allowed frontend origins | `http://localhost:3000,http://127.0.0.1:3000` |
 | `NEXTCLOUD_URL` | Nextcloud instance URL | — |
 | `NEXTCLOUD_USERNAME` | Nextcloud username | — |
 | `NEXTCLOUD_PASSWORD` | Nextcloud app password | — |
@@ -160,6 +162,7 @@ Most configuration is available from the web UI:
 - **Theme** — 7 color themes, light/dark/auto
 - **Users** — Registration toggle, role management
 - **Indexing** — Document sync & embedding
+- **Projects** — Organize chats with validated local project data
 - **Language** — 12 languages available
 
 ---
@@ -201,6 +204,7 @@ MYND is **local-first** in the sense that application state, credentials, files,
 | **AI Model** | Conversations | Configurable Ollama / OpenAI endpoint |
 | **Email** | Credentials + messages | Your IMAP/SMTP server |
 | **Smart Home** | API commands | Your Home Assistant instance |
+| **Uploads** | Uploaded file contents | Local per-user storage only |
 | **Immich** | Search queries | Your Immich server |
 
 > ⚠️ When using cloud-based AI providers (OpenAI, etc.), your conversation text is sent to their API. For full local operation, use Ollama with a local model.
@@ -214,6 +218,7 @@ MYND is **local-first** in the sense that application state, credentials, files,
 - All `/api/` routes authenticated by default
 - Configurable confirmation modes for privileged tools
 - Workspace-restricted file access and optional bubblewrap sandboxing on Linux
+- Chat uploads use random object IDs and per-user storage isolation
 - Audit log for all privileged tool calls (`data/audit.jsonl`)
 
 > Existing plaintext vaults are encrypted automatically on first access. Back up the external vault key separately; losing it makes the encrypted vault unrecoverable.

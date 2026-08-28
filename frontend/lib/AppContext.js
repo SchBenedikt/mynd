@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { apiFetch } from './api';
+import { userStorageKey } from './userStorage';
 
 const CHAT_STORAGE_KEY = 'mynd_chat_history_v1';
 const ACTIVE_CHAT_STORAGE_KEY = 'mynd_active_chat_v1';
@@ -21,20 +22,27 @@ function createEmptyChat(project = null) {
 
 function loadChats() {
   try {
-    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    const raw = localStorage.getItem(userStorageKey(CHAT_STORAGE_KEY));
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch { return []; }
 }
 
 function loadActiveChatId() {
-  try { return localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY); } catch { return null; }
+  try { return localStorage.getItem(userStorageKey(ACTIVE_CHAT_STORAGE_KEY)); } catch { return null; }
 }
 
 function loadProjects() {
   try {
-    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const raw = localStorage.getItem(userStorageKey(PROJECTS_STORAGE_KEY));
+    if (!raw || raw.length > 100000) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((project) => (
+      project && typeof project === 'object' &&
+      typeof project.id === 'string' && project.id.length > 0 && project.id.length <= 200 &&
+      typeof project.name === 'string' && project.name.trim().length > 0 && project.name.length <= 200
+    ));
   } catch { return []; }
 }
 
@@ -49,9 +57,7 @@ export function AppProvider({ children }) {
   const [capabilities, setCapabilities] = useState(null);
 
   useEffect(() => {
-    const token = (() => { try { return localStorage.getItem('mynd_token_v1'); } catch(e) { return null; } })();
-    if (!token) return;
-    apiFetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${token}` } })
+    apiFetch('/api/auth/me')
       .then(r => r.json())
       .then(data => { if (data?.authenticated && data.user) setUser(data.user); })
       .catch(() => setUser(null));
@@ -68,15 +74,20 @@ export function AppProvider({ children }) {
     const nonEmpty = chats.filter(c => (c.messages?.length || 0) > 0 || c.title !== 'Neuer Chat');
     if (nonEmpty.length > 0) {
       try {
-        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(nonEmpty));
-        localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, activeChatId || '');
+        localStorage.setItem(userStorageKey(CHAT_STORAGE_KEY), JSON.stringify(nonEmpty));
+        localStorage.setItem(userStorageKey(ACTIVE_CHAT_STORAGE_KEY), activeChatId || '');
+      } catch {}
+    } else {
+      try {
+        localStorage.removeItem(userStorageKey(CHAT_STORAGE_KEY));
+        localStorage.removeItem(userStorageKey(ACTIVE_CHAT_STORAGE_KEY));
       } catch {}
     }
   }, [chats, activeChatId]);
 
   useEffect(() => {
     try {
-      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+      localStorage.setItem(userStorageKey(PROJECTS_STORAGE_KEY), JSON.stringify(projects));
     } catch {}
   }, [projects]);
 

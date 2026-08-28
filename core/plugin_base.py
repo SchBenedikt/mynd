@@ -2,23 +2,26 @@ import hashlib
 import importlib
 import json
 import logging
+import os
 import re
+import secrets
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+TOOL_NAME_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 
 PLUGIN_DIR = Path(__file__).resolve().parents[1] / 'data' / 'plugins'
 PLUGIN_INSTALL_DIR = PLUGIN_DIR  # same dir for now
 
 
 class Plugin:
-    name = ""
-    description = ""
-    version = "0.1.0"
+    name = ''
+    description = ''
+    version = '0.1.0'
     config_schema = {}  # {key: {"label": str, "type": "text|password|select", "options": [], "default": ""}}
     tools = []
     tool_map = {}
@@ -36,63 +39,63 @@ class Plugin:
 def normalize_tool_schema(tool):
     """Return one canonical OpenAI-compatible function-tool definition."""
     if not isinstance(tool, dict):
-        raise ValueError("Tool definition must be an object")
+        raise ValueError('Tool definition must be an object')
 
-    if tool.get("type") == "function" and isinstance(tool.get("function"), dict):
-        function = dict(tool["function"])
+    if tool.get('type') == 'function' and isinstance(tool.get('function'), dict):
+        function = dict(tool['function'])
     else:
         function = {
-            "name": tool.get("name"),
-            "description": tool.get("description", ""),
-            "parameters": {
-                "type": "object",
-                "properties": tool.get("parameters", {}),
-                "required": tool.get("required", []),
+            'name': tool.get('name'),
+            'description': tool.get('description', ''),
+            'parameters': {
+                'type': 'object',
+                'properties': tool.get('parameters', {}),
+                'required': tool.get('required', []),
             },
         }
 
-    name = function.get("name")
+    name = function.get('name')
     if not isinstance(name, str) or not TOOL_NAME_RE.fullmatch(name):
-        raise ValueError(f"Invalid tool name: {name!r}")
-    if not isinstance(function.get("description", ""), str):
-        raise ValueError(f"Tool {name!r} has an invalid description")
+        raise ValueError(f'Invalid tool name: {name!r}')
+    if not isinstance(function.get('description', ''), str):
+        raise ValueError(f'Tool {name!r} has an invalid description')
 
-    parameters = function.get("parameters") or {}
+    parameters = function.get('parameters') or {}
     if not isinstance(parameters, dict):
-        raise ValueError(f"Tool {name!r} parameters must be an object")
-    if "type" not in parameters:
+        raise ValueError(f'Tool {name!r} parameters must be an object')
+    if 'type' not in parameters:
         parameters = {
-            "type": "object",
-            "properties": parameters,
-            "required": function.get("required", []),
+            'type': 'object',
+            'properties': parameters,
+            'required': function.get('required', []),
         }
-    if parameters.get("type") != "object":
+    if parameters.get('type') != 'object':
         raise ValueError(f"Tool {name!r} parameters.type must be 'object'")
-    if not isinstance(parameters.get("properties", {}), dict):
-        raise ValueError(f"Tool {name!r} parameters.properties must be an object")
-    required = parameters.get("required", [])
+    if not isinstance(parameters.get('properties', {}), dict):
+        raise ValueError(f'Tool {name!r} parameters.properties must be an object')
+    required = parameters.get('required', [])
     if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
-        raise ValueError(f"Tool {name!r} parameters.required must be a string array")
-    unknown_required = set(required) - set(parameters.get("properties", {}))
+        raise ValueError(f'Tool {name!r} parameters.required must be a string array')
+    unknown_required = set(required) - set(parameters.get('properties', {}))
     if unknown_required:
-        raise ValueError(f"Tool {name!r} requires unknown properties: {sorted(unknown_required)}")
+        raise ValueError(f'Tool {name!r} requires unknown properties: {sorted(unknown_required)}')
 
-    function["parameters"] = {
-        "type": "object",
-        "properties": parameters.get("properties", {}),
-        "required": required,
+    function['parameters'] = {
+        'type': 'object',
+        'properties': parameters.get('properties', {}),
+        'required': required,
     }
-    return {"type": "function", "function": function}
+    return {'type': 'function', 'function': function}
 
 
 def validate_plugin_tools(plugin):
     normalized = [normalize_tool_schema(tool) for tool in plugin.tools]
-    names = [tool["function"]["name"] for tool in normalized]
+    names = [tool['function']['name'] for tool in normalized]
     if len(names) != len(set(names)):
-        raise ValueError(f"Plugin {plugin.name!r} defines duplicate tool names")
+        raise ValueError(f'Plugin {plugin.name!r} defines duplicate tool names')
     missing = [name for name in names if not callable(plugin.tool_map.get(name))]
     if missing:
-        raise ValueError(f"Plugin {plugin.name!r} has no callable implementation for: {missing}")
+        raise ValueError(f'Plugin {plugin.name!r} has no callable implementation for: {missing}')
     plugin.tools = normalized
     plugin.tool_map = {name: plugin.tool_map[name] for name in names}
     return plugin
@@ -100,7 +103,21 @@ def validate_plugin_tools(plugin):
 
 _registry = {}
 _config_cache = {}
-_plugin_lock = threading.Lock()
+_plugin_lock = threading.RLock()
+
+
+def _atomic_json_write(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f'.{path.name}.', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
 
 
 def _plugin_sha256(filepath):
@@ -123,7 +140,7 @@ def get_plugin_config():
 def save_plugin_config(cfg):
     with _plugin_lock:
         cf = PLUGIN_DIR / 'plugin_config.json'
-        cf.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+        _atomic_json_write(cf, cfg)
         _config_cache.clear()
     return cfg
 
@@ -141,13 +158,17 @@ def load_plugins():
             continue
         mod_name = f'data.plugins.{f.stem}'
         try:
+            expected_sha = state.get(f.stem, {}).get('sha256')
+            current_sha = _plugin_sha256(f)
+            if expected_sha and current_sha and not secrets.compare_digest(expected_sha, current_sha):
+                logger.error('Plugin %s disabled because its integrity hash changed', f.stem)
+                registry[f.stem] = None
+                continue
             mod = importlib.import_module(mod_name)
             plugin_cls = None
             for attr_name in dir(mod):
                 obj = getattr(mod, attr_name, None)
-                if (isinstance(obj, type) and issubclass(obj, Plugin)
-                        and obj is not Plugin
-                        and getattr(obj, 'name', '')):
+                if isinstance(obj, type) and issubclass(obj, Plugin) and obj is not Plugin and getattr(obj, 'name', ''):
                     plugin_cls = obj
                     break
             if plugin_cls is None:
@@ -157,35 +178,39 @@ def load_plugins():
                     continue
                 name = getattr(mod, 'PLUGIN_NAME', f.stem)
                 if not _is_enabled(name, state):
-                    logger.info(f"Plugin deaktiviert: {name}")
+                    logger.info(f'Plugin deaktiviert: {name}')
                     registry[name] = None
                     continue
                 desc = getattr(mod, 'PLUGIN_DESC', '')
                 legacy_config_schema = getattr(mod, 'PLUGIN_CONFIG_SCHEMA', {})
-                plugin = type('LegacyPlugin', (Plugin,), {
-                    'name': name,
-                    'description': desc,
-                    'tools': legacy_tools,
-                    'tool_map': legacy_map,
-                    'config_schema': legacy_config_schema,
-                })
+                plugin = type(
+                    'LegacyPlugin',
+                    (Plugin,),
+                    {
+                        'name': name,
+                        'description': desc,
+                        'tools': legacy_tools,
+                        'tool_map': legacy_map,
+                        'config_schema': legacy_config_schema,
+                    },
+                )
                 instance = plugin(config=config_cache.get(name, {}))
                 validate_plugin_tools(instance)
                 registry[name] = instance
-                logger.info(f"Plugin geladen (Legacy): {name}")
+                logger.info(f'Plugin geladen (Legacy): {name}')
             else:
                 name = plugin_cls.name
                 if not _is_enabled(name, state):
-                    logger.info(f"Plugin deaktiviert: {name}")
+                    logger.info(f'Plugin deaktiviert: {name}')
                     registry[name] = None
                     continue
                 instance = plugin_cls(config=config_cache.get(name, {}))
                 validate_plugin_tools(instance)
                 instance.on_load()
                 registry[name] = instance
-                logger.info(f"Plugin geladen: {instance.name} v{instance.version}")
+                logger.info(f'Plugin geladen: {instance.name} v{instance.version}')
         except Exception as e:
-            logger.warning(f"Plugin {f.stem} nicht geladen: {e}")
+            logger.warning(f'Plugin {f.stem} nicht geladen: {e}')
     with _plugin_lock:
         _registry = registry
         _config_cache = config_cache
@@ -223,12 +248,15 @@ def get_plugin_state():
             pass
     return {}
 
+
 def save_plugin_state(state):
     with _plugin_lock:
-        (PLUGIN_DIR / 'plugin_state.json').write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        _atomic_json_write(PLUGIN_DIR / 'plugin_state.json', state)
+
 
 def _is_enabled(name, state):
     return state.get(name, {}).get('enabled', True)
+
 
 def get_all_plugins():
     state = get_plugin_state()
@@ -238,18 +266,31 @@ def get_all_plugins():
             s = state.get(name, {})
             sha = _plugin_sha256(PLUGIN_DIR / f'{name}.py') if (PLUGIN_DIR / f'{name}.py').exists() else None
             if plugin is None:
-                result.append({'name': name, 'description': '', 'version': '', 'tools': [], 'tool_count': 0, 'enabled': False, 'sha256': sha})
+                result.append(
+                    {
+                        'name': name,
+                        'description': '',
+                        'version': '',
+                        'tools': [],
+                        'tool_count': 0,
+                        'enabled': False,
+                        'sha256': sha,
+                    }
+                )
             else:
-                result.append({
-                    'name': name,
-                    'description': getattr(plugin, 'description', ''),
-                    'version': getattr(plugin, 'version', ''),
-                    'tools': [t.get('function', {}).get('name', '') for t in getattr(plugin, 'tools', [])],
-                    'tool_count': len(getattr(plugin, 'tools', [])),
-                    'enabled': s.get('enabled', True),
-                    'sha256': sha,
-                })
+                result.append(
+                    {
+                        'name': name,
+                        'description': getattr(plugin, 'description', ''),
+                        'version': getattr(plugin, 'version', ''),
+                        'tools': [t.get('function', {}).get('name', '') for t in getattr(plugin, 'tools', [])],
+                        'tool_count': len(getattr(plugin, 'tools', [])),
+                        'enabled': s.get('enabled', True),
+                        'sha256': sha,
+                    }
+                )
         return result
+
 
 def set_plugin_enabled(name, enabled):
     with _plugin_lock:
@@ -260,12 +301,15 @@ def set_plugin_enabled(name, enabled):
         if sha:
             entry['sha256'] = sha
         state[name] = entry
-        (PLUGIN_DIR / 'plugin_state.json').write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        _atomic_json_write(PLUGIN_DIR / 'plugin_state.json', state)
     reload_plugins()
+
 
 def uninstall_plugin(name):
     with _plugin_lock:
         state = get_plugin_state()
+        if not state.get(name, {}).get('installed_by_user', False):
+            raise ValueError('Repository-managed plugins cannot be deleted at runtime')
         state.pop(name, None)
         save_plugin_state(state)
     f = PLUGIN_DIR / f'{name}.py'
@@ -273,12 +317,14 @@ def uninstall_plugin(name):
         f.unlink()
     reload_plugins()
 
+
 def install_from_github(url):
     raise RuntimeError(
         'Remote plugin installation is disabled. Review plugin source locally '
         'and add it through the trusted repository workflow. '
         'Once installed, plugin integrity is tracked via SHA-256 in the plugin listing.'
     )
+
 
 def reload_plugins():
     with _plugin_lock:

@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -8,6 +9,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from .config import VAULT_FILE, C
 
 _VAULT_HEADER = b'MYND_VAULT_V1\n'
+_VAULT_LOCK = threading.RLock()
 
 
 def _key_file() -> Path:
@@ -54,7 +56,7 @@ def load_vault(path: Path | None = None, *, migrate: bool = True) -> dict:
     raw = target.read_bytes()
     if raw.startswith(_VAULT_HEADER):
         try:
-            plaintext = Fernet(_vault_key()).decrypt(raw[len(_VAULT_HEADER):])
+            plaintext = Fernet(_vault_key()).decrypt(raw[len(_VAULT_HEADER) :])
         except InvalidToken as exc:
             raise ValueError('Vault decryption failed; check MYND_VAULT_KEY or MYND_VAULT_KEY_FILE') from exc
         data = json.loads(plaintext.decode('utf-8'))
@@ -110,9 +112,10 @@ def vault_get(key=''):
 
 def vault_set(key, value):
     try:
-        values = load_vault()
-        values[key] = value
-        save_vault(values)
+        with _VAULT_LOCK:
+            values = load_vault()
+            values[key] = value
+            save_vault(values)
         return f'✅ `{key}` gespeichert'
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         return f'❌ Vault write failed: {exc}'
@@ -120,11 +123,12 @@ def vault_set(key, value):
 
 def vault_delete(key):
     try:
-        values = load_vault()
-        if key not in values:
-            return f'❌ `{key}` nicht gefunden'
-        del values[key]
-        save_vault(values)
+        with _VAULT_LOCK:
+            values = load_vault()
+            if key not in values:
+                return f'❌ `{key}` nicht gefunden'
+            del values[key]
+            save_vault(values)
         return f'🗑 `{key}` gelöscht'
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         return f'❌ Vault delete failed: {exc}'

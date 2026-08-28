@@ -212,7 +212,7 @@ export default function IntegrationsTab({ tr, language }) {
               <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: 'var(--muted)' }}>
                 <i className="fas fa-puzzle-piece" style={{ fontSize: 40, opacity: 0.2, marginBottom: 12, display: 'block' }}></i>
                 <p>{t('Keine Plugins installiert.', 'No plugins installed.')}</p>
-                <p style={{ fontSize: '0.85rem' }}>{t('Installiere eines via GitHub-URL oben.', 'Install one via the GitHub URL above.')}</p>
+                <p style={{ fontSize: '0.85rem' }}>{t('Geprüfte Plugins werden über das Repository installiert.', 'Reviewed plugins are installed through the repository.')}</p>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -263,7 +263,7 @@ export default function IntegrationsTab({ tr, language }) {
     );
   }
 
-  const hasTest = ['immich', 'nextcloud', 'homeassistant', 'truenas', 'spotify', 'discord', 'composio', 'affine'].includes(activeInt);
+  const hasTest = ['immich', 'nextcloud', 'composio', 'affine'].includes(activeInt);
 
   return (
     <div className="settings-panel" style={{ padding: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>

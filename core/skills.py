@@ -79,7 +79,7 @@ def recall_skills(context, max_results=5):
     scored = []
     for name, skill in skills.items():
         score = 0
-        text = f"{name} {skill.get('description', '')} {skill.get('context', '')} {' '.join(skill.get('tags', []))}".lower()
+        text = f'{name} {skill.get("description", "")} {skill.get("context", "")} {" ".join(skill.get("tags", []))}'.lower()
         text_words = set(re.findall(r'\w+', text))
         common = query_words & text_words
         score += len(common) * 2
@@ -94,15 +94,17 @@ def recall_skills(context, max_results=5):
     scored.sort(key=lambda x: x[0], reverse=True)
     results = []
     for score, name, skill in scored[:max_results]:
-        results.append({
-            'name': name,
-            'description': skill.get('description', ''),
-            'tags': skill.get('tags', []),
-            'pattern': skill.get('pattern', []),
-            'context': skill.get('context', ''),
-            'relevance': score,
-            'used_count': skill.get('used_count', 0),
-        })
+        results.append(
+            {
+                'name': name,
+                'description': skill.get('description', ''),
+                'tags': skill.get('tags', []),
+                'pattern': skill.get('pattern', []),
+                'context': skill.get('context', ''),
+                'relevance': score,
+                'used_count': skill.get('used_count', 0),
+            }
+        )
     return results
 
 
@@ -115,14 +117,16 @@ def skill_list(tag=''):
     for name, skill in sorted(skills.items()):
         if tag and tag not in skill.get('tags', []):
             continue
-        result.append({
-            'name': name,
-            'description': skill.get('description', '')[:200],
-            'tags': skill.get('tags', []),
-            'step_count': len(skill.get('pattern', [])),
-            'used_count': skill.get('used_count', 0),
-            'created': skill.get('created', ''),
-        })
+        result.append(
+            {
+                'name': name,
+                'description': skill.get('description', '')[:200],
+                'tags': skill.get('tags', []),
+                'step_count': len(skill.get('pattern', [])),
+                'used_count': skill.get('used_count', 0),
+                'created': skill.get('created', ''),
+            }
+        )
     return result
 
 
@@ -165,15 +169,39 @@ def _reset_cache():
 
 def _auto_extract_tags(text):
     common_tags = {
-        'nextcloud', 'calendar', 'tasks', 'contacts', 'files',
-        'email', 'immich', 'foto', 'photos',
-        'homeassistant', 'smart home', 'automation',
-        'truenas', 'nas', 'server', 'ssh', 'docker',
-        'search', 'web', 'news', 'document',
-        'calendar', 'termin', 'event',
-        'monitoring', 'backup', 'config',
-        'python', 'bash', 'script',
-        'vault', 'memory', 'knowledge',
+        'nextcloud',
+        'calendar',
+        'tasks',
+        'contacts',
+        'files',
+        'email',
+        'immich',
+        'foto',
+        'photos',
+        'homeassistant',
+        'smart home',
+        'automation',
+        'truenas',
+        'nas',
+        'server',
+        'ssh',
+        'docker',
+        'search',
+        'web',
+        'news',
+        'document',
+        'calendar',
+        'termin',
+        'event',
+        'monitoring',
+        'backup',
+        'config',
+        'python',
+        'bash',
+        'script',
+        'vault',
+        'memory',
+        'knowledge',
     }
     found = set()
     text_lower = text.lower()
