@@ -30,7 +30,7 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 | **📧 Email** | IMAP/SMTP integration for reading & sending |
 | **🤖 Automations** | Cron-based automations, daily briefing, scheduled actions |
 | **🔌 Plugin System** | Extensible registry for repository-reviewed local plugins, toggle at runtime |
-| **🔐 Vault** | Local credential storage for API keys, passwords, and integration configuration |
+| **🔐 Vault** | Local credential storage for API keys, passwords, and integration configuration; provider checks reject unsafe private URLs |
 | **🛡️ Auth** | Password-based login, configurable registration, role-based access |
 | **🎨 Themes** | 7 color themes × light/dark/modes |
 | **🌐 Multi-language** | UI in 12 languages: DE, EN, FR, ES, IT, PT, NL, PL, TR, RU, JA, ZH |

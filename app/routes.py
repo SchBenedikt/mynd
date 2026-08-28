@@ -7,6 +7,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from flask import Response, jsonify, request, send_from_directory, stream_with_context
@@ -908,12 +909,21 @@ def api_ai_check_models():
     base_url = str(data.get('base_url', ollama_client.base_url)).rstrip('/')
     if not (base_url.startswith('http://') or base_url.startswith('https://')):
         return jsonify({'error': 'Invalid base_url'}), 400
+    parsed = urlparse(base_url)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.hostname:
+        return jsonify({'error': 'Invalid model provider URL'}), 400
     try:
-        r = requests.get(f"{base_url}/api/tags", timeout=8)
+        from core.tools import _validate_http_url
+        _validate_http_url(base_url)
+    except ValueError as exc:
+        logger.warning('Blocked unsafe model check URL %r: %s', base_url, exc)
+        return jsonify({'error': 'Model provider URL is not allowed'}), 400
+    try:
+        r = requests.get(f"{base_url}/api/tags", timeout=8, allow_redirects=False)
         r.raise_for_status()
         all_models = sorted(set(m['name'] for m in r.json().get('models', [])))
     except Exception:
-        return jsonify({'error': 'Cannot fetch models from ' + base_url}), 502
+        return jsonify({'error': 'Cannot fetch models from configured provider'}), 502
     results = []
     for model in all_models:
         supported = _cached_tool_support(model, base_url)
