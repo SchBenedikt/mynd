@@ -380,8 +380,20 @@ def _detect_generated_files(age_seconds=5):
 
 
 def _language_from_prompt(system_prompt):
-    match = re.search(r'selected language \(([^)]+)\)', str(system_prompt or ''))
-    return match.group(1).strip().lower() if match else 'en'
+    # Avoid applying a backtracking regular expression to an untrusted prompt.
+    # Language identifiers are deliberately short and only used for selecting
+    # localized, deterministic UI suggestions.
+    prompt = str(system_prompt or '')[:16_384]
+    marker = 'selected language ('
+    start = prompt.find(marker)
+    if start < 0:
+        return 'en'
+    value = prompt[start + len(marker) :]
+    end = value.find(')')
+    if end < 0:
+        return 'en'
+    language = value[:end].strip().lower()
+    return language[:16] or 'en'
 
 
 def _suggest_follow_ups(content, language='en', max_items=4):

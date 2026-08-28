@@ -1040,18 +1040,34 @@ def upload_file():
     if request.content_length and request.content_length > _max_upload_size:
         return jsonify({'success': False, 'error': 'File exceeds 50 MB limit'}), 400
     try:
-        owner = re.sub(r'[^A-Za-z0-9_-]', '_', str(request.current_user))[:80] or 'user'
-        owner_dir = Path(UPLOAD_DIR) / owner
-        owner_dir.mkdir(parents=True, exist_ok=True)
         display_name = re.sub(r'[^\w\.\-]', '_', Path(f.filename).name)
         display_name = display_name[:180] or 'upload'
-        object_name = f'{secrets.token_hex(16)}_{display_name}'
-        dest = owner_dir / object_name
+        # The storage path contains server-generated data only.  The original
+        # filename and authenticated owner are metadata, never path segments.
+        object_name = secrets.token_hex(16)
+        upload_root = Path(UPLOAD_DIR)
+        upload_root.mkdir(parents=True, exist_ok=True)
+        dest = upload_root / object_name
         data = f.read(_max_upload_size + 1)
         if len(data) > _max_upload_size:
             return jsonify({'success': False, 'error': 'File exceeds 50 MB limit'}), 400
-        dest.write_bytes(data)
-        size = dest.stat().st_size
+        with _app_lock:
+            dest.write_bytes(data)
+            metadata_path = upload_root / '.owners.json'
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding='utf-8')) if metadata_path.exists() else {}
+            except (OSError, json.JSONDecodeError):
+                metadata = {}
+            metadata[object_name] = {
+                'owner': str(request.current_user),
+                'filename': display_name,
+            }
+            try:
+                _atomic_json_write(metadata_path, metadata)
+            except Exception:
+                dest.unlink(missing_ok=True)
+                raise
+        size = len(data)
         return jsonify(
             {
                 'success': True,
@@ -1068,12 +1084,19 @@ def upload_file():
 @app.route('/api/uploads/<path:filename>')
 @require_auth
 def serve_upload(filename):
-    owner = re.sub(r'[^A-Za-z0-9_-]', '_', str(request.current_user))[:80] or 'user'
-    owner_dir = Path(UPLOAD_DIR) / owner
-    safe_filename = Path(filename).name
-    if safe_filename != filename or not re.fullmatch(r'[0-9a-f]{32}_[\w.\-]{1,180}', safe_filename):
+    if not re.fullmatch(r'[0-9a-f]{32}', filename):
         return jsonify({'success': False, 'error': 'Invalid upload id'}), 400
-    return send_from_directory(owner_dir, safe_filename)
+    upload_root = Path(UPLOAD_DIR)
+    metadata_path = upload_root / '.owners.json'
+    try:
+        with _app_lock:
+            metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+            owner = metadata.get(filename, {}).get('owner')
+    except (OSError, json.JSONDecodeError):
+        owner = None
+    if not owner or not secrets.compare_digest(str(owner), str(request.current_user)):
+        return jsonify({'success': False, 'error': 'Upload not found'}), 404
+    return send_from_directory(upload_root, filename)
 
 
 # ── /api/ollama/* / /api/ai/* ──────────────────────────────
@@ -2188,16 +2211,16 @@ def registry_api_test(api_name):
             client = Composio(api_key=api_key)
             client.toolkits.list(limit=1)
             return jsonify({'success': True, 'message': 'Verbindung zu Composio erfolgreich!'})
-        except Exception as e:
-            msg = str(e)
-            if '401' in msg or 'Invalid API key' in msg or 'ApiKeyError' in type(e).__name__:
+        except Exception as exc:
+            logger.warning('Composio connection test failed: %s', type(exc).__name__)
+            if 'ApiKeyError' in type(exc).__name__:
                 return jsonify(
                     {
                         'success': False,
                         'error': 'Composio API-Key ungültig. Bitte neuen API-Key von composio.dev holen.',
                     }
                 )
-            return jsonify({'success': False, 'error': f'Composio-Fehler: {msg[:200]}'})
+            return jsonify({'success': False, 'error': 'Composio-Verbindung fehlgeschlagen.'}), 502
     if api_name == 'affine':
         domain = _vg('affine/domain')
         email = _vg('affine/email')
@@ -2217,14 +2240,10 @@ def registry_api_test(api_name):
             )
             if r.status_code == 200:
                 return jsonify({'success': True, 'message': 'AFFiNE-Verbindung erfolgreich!'})
-            return jsonify(
-                {
-                    'success': False,
-                    'error': f'AFFiNE-Login fehlgeschlagen ({r.status_code}): {r.json().get("message", r.text[:200])}',
-                }
-            )
-        except Exception as e:
-            return jsonify({'success': False, 'error': f'AFFiNE nicht erreichbar: {e}'})
+            return jsonify({'success': False, 'error': f'AFFiNE-Login fehlgeschlagen ({r.status_code}).'}), 502
+        except Exception as exc:
+            logger.warning('AFFiNE connection test failed: %s', type(exc).__name__)
+            return jsonify({'success': False, 'error': 'AFFiNE nicht erreichbar.'}), 502
     return jsonify({'success': False, 'error': 'Not implemented'}), 501
 
 
@@ -3043,8 +3062,8 @@ def create_automation():
     }
     try:
         automation_engine.add_automation(auto)
-    except (TypeError, ValueError) as exc:
-        return jsonify({'success': False, 'error': str(exc)}), 400
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Invalid automation configuration'}), 400
     return jsonify({'success': True, 'automation': auto})
 
 

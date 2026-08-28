@@ -18,174 +18,196 @@ def engine(tmp_path):
 
 @pytest.fixture
 def client():
-    app.config["TESTING"] = True
-    app_module.AUTH_USERS["test-client"] = {
-        "name": "Test Client",
-        "role": "admin",
-        "token_hash": app_state.token_hash("test-client-token"),
-        "token_expires_at": time.time() + 3600,
+    app.config['TESTING'] = True
+    app_module.AUTH_USERS['test-client'] = {
+        'name': 'Test Client',
+        'role': 'admin',
+        'token_hash': app_state.token_hash('test-client-token'),
+        'token_expires_at': time.time() + 3600,
     }
     with app.test_client() as client:
-        client.environ_base["HTTP_AUTHORIZATION"] = "Bearer test-client-token"
+        client.environ_base['HTTP_AUTHORIZATION'] = 'Bearer test-client-token'
         yield client
-    app_module.AUTH_USERS.pop("test-client", None)
+    app_module.AUTH_USERS.pop('test-client', None)
 
 
-def _auto(name="test", trigger=None, steps=None, notify=False):
+def _auto(name='test', trigger=None, steps=None, notify=False):
     return {
-        "id": "auto1",
-        "name": name,
-        "enabled": True,
-        "trigger": trigger or {"type": "cron", "hour": "6", "minute": "0"},
-        "steps": steps or [{"tool": "echo_tool", "params": {"text": "hello"}}],
-        "notify": notify,
+        'id': 'auto1',
+        'name': name,
+        'enabled': True,
+        'trigger': trigger or {'type': 'cron', 'hour': '6', 'minute': '0'},
+        'steps': steps or [{'tool': 'echo_tool', 'params': {'text': 'hello'}}],
+        'notify': notify,
     }
 
 
 class TestEngineSteps:
     def test_unknown_tool_raises(self, engine):
-        with pytest.raises(ValueError, match="Unbekanntes Tool"):
-            engine.execute_steps([{"tool": "does_not_exist", "params": {}}])
+        with pytest.raises(ValueError, match='Unbekanntes Tool'):
+            engine.execute_steps([{'tool': 'does_not_exist', 'params': {}}])
 
     def test_ai_task_without_prompt_fails(self, engine):
-        result = engine.execute_steps([{"tool": "ai_task", "params": {}}])
-        assert result[0]["status"] == "error"
-        assert "prompt" in result[0]["result"]
+        result = engine.execute_steps([{'tool': 'ai_task', 'params': {}}])
+        assert result[0]['status'] == 'error'
+        assert 'prompt' in result[0]['result']
 
     def test_ai_task_runs_llm_with_context(self, engine, monkeypatch):
         calls = {}
+
         def fake_chat(model, messages, tools):
-            calls["model"] = model
-            calls["prompt"] = messages[0]["content"]
-            return {"message": {"content": "ZUSAMMENFASSUNG"}}
-        monkeypatch.setattr("core.llm.chat_with_tools", fake_chat)
-        engine.tool_map["step1_tool"] = lambda **kw: "ROH-DATEN"
+            calls['model'] = model
+            calls['prompt'] = messages[0]['content']
+            return {'message': {'content': 'ZUSAMMENFASSUNG'}}
+
+        monkeypatch.setattr('core.llm.chat_with_tools', fake_chat)
+        engine.tool_map['step1_tool'] = lambda **kw: 'ROH-DATEN'
         steps = [
-            {"tool": "step1_tool", "params": {}},
-            {"tool": "ai_task", "params": {"prompt": "Fasse zusammen"}},
+            {'tool': 'step1_tool', 'params': {}},
+            {'tool': 'ai_task', 'params': {'prompt': 'Fasse zusammen'}},
         ]
         results = engine.execute_steps(steps)
-        assert results[0]["status"] == "success"
-        assert results[1]["status"] == "success"
-        assert "ZUSAMMENFASSUNG" in results[1]["result"]
-        assert "ROH-DATEN" in calls["prompt"]
+        assert results[0]['status'] == 'success'
+        assert results[1]['status'] == 'success'
+        assert 'ZUSAMMENFASSUNG' in results[1]['result']
+        assert 'ROH-DATEN' in calls['prompt']
 
     def test_notify_step_creates_notification(self, engine):
-        results = engine.execute_steps([
-            {"tool": "notify", "params": {"title": "Titel X", "content": "Inhalt Y"}},
-        ])
-        assert results[0]["status"] == "success"
+        results = engine.execute_steps(
+            [
+                {'tool': 'notify', 'params': {'title': 'Titel X', 'content': 'Inhalt Y'}},
+            ]
+        )
+        assert results[0]['status'] == 'success'
         notifications = engine.load_notifications()
         assert len(notifications) == 1
-        assert notifications[0]["title"] == "Titel X"
-        assert notifications[0]["content"] == "Inhalt Y"
-        assert notifications[0]["read"] is False
+        assert notifications[0]['title'] == 'Titel X'
+        assert notifications[0]['content'] == 'Inhalt Y'
+        assert notifications[0]['read'] is False
 
     def test_step_conditions_skip(self, engine):
-        engine.tool_map["t"] = lambda **kw: "ran"
+        engine.tool_map['t'] = lambda **kw: 'ran'
         results = engine.execute_steps(
-            [{"tool": "t", "params": {}, "conditions": [{"type": "equals", "field": "hour", "value": "99"}]}]
+            [{'tool': 't', 'params': {}, 'conditions': [{'type': 'equals', 'field': 'hour', 'value': '99'}]}]
         )
-        assert results[0]["status"] == "skipped"
+        assert results[0]['status'] == 'skipped'
+
+    def test_step_exception_does_not_leak_details(self, engine):
+        def broken_tool(**kwargs):
+            raise RuntimeError('secret stack detail')
+
+        engine.tool_map['broken'] = broken_tool
+        results = engine.execute_steps([{'tool': 'broken', 'params': {}}])
+        assert results[0]['status'] == 'error'
+        assert results[0]['result'] == '❌ Automation step failed'
+        assert 'secret' not in results[0]['result']
 
 
 class TestEngineNotifications:
     def test_notify_flag_on_run(self, engine):
-        engine.tool_map["t"] = lambda **kw: "ok"
-        engine.add_automation(_auto(steps=[{"tool": "t", "params": {}}], notify=True))
-        result = engine.run_automation("auto1")
-        assert result["success"] is True
+        engine.tool_map['t'] = lambda **kw: 'ok'
+        engine.add_automation(_auto(steps=[{'tool': 't', 'params': {}}], notify=True))
+        result = engine.run_automation('auto1')
+        assert result['success'] is True
         notifications = engine.load_notifications()
         assert len(notifications) == 1
-        assert "Automation" in notifications[0]["title"]
+        assert 'Automation' in notifications[0]['title']
 
     def test_no_notification_without_flag(self, engine):
-        engine.tool_map["t"] = lambda **kw: "ok"
-        engine.add_automation(_auto(steps=[{"tool": "t", "params": {}}], notify=False))
-        engine.run_automation("auto1")
+        engine.tool_map['t'] = lambda **kw: 'ok'
+        engine.add_automation(_auto(steps=[{'tool': 't', 'params': {}}], notify=False))
+        engine.run_automation('auto1')
         assert engine.load_notifications() == []
 
     def test_notifications_capped_at_100(self, engine):
         for i in range(110):
-            engine.add_notification(f"n{i}")
+            engine.add_notification(f'n{i}')
         assert len(engine.load_notifications()) == 100
 
 
 class TestWebhookTrigger:
     def test_webhook_token_autogenerated(self, engine):
-        engine.add_automation(_auto(trigger={"type": "webhook"}))
-        auto = engine.get_automation("auto1")
-        assert auto["webhook_token"]
-        assert len(auto["webhook_token"]) >= 16
+        engine.add_automation(_auto(trigger={'type': 'webhook'}))
+        auto = engine.get_automation('auto1')
+        assert auto['webhook_token']
+        assert len(auto['webhook_token']) >= 16
 
     def test_trigger_by_token_runs(self, engine):
-        engine.tool_map["t"] = lambda **kw: "webhook-ok"
-        engine.add_automation(_auto(
-            trigger={"type": "webhook"},
-            steps=[{"tool": "t", "params": {}}],
-        ))
-        auto = engine.get_automation("auto1")
-        result = engine.trigger_by_token("auto1", auto["webhook_token"])
-        assert result["success"] is True
-        assert result["results"][0]["result"] == "webhook-ok"
+        engine.tool_map['t'] = lambda **kw: 'webhook-ok'
+        engine.add_automation(
+            _auto(
+                trigger={'type': 'webhook'},
+                steps=[{'tool': 't', 'params': {}}],
+            )
+        )
+        auto = engine.get_automation('auto1')
+        result = engine.trigger_by_token('auto1', auto['webhook_token'])
+        assert result['success'] is True
+        assert result['results'][0]['result'] == 'webhook-ok'
 
     def test_trigger_by_token_rejects_wrong_token(self, engine):
-        engine.add_automation(_auto(trigger={"type": "webhook"}))
-        result = engine.trigger_by_token("auto1", "wrong-token")
-        assert result["success"] is False
-        assert "Token" in result["error"]
+        engine.add_automation(_auto(trigger={'type': 'webhook'}))
+        result = engine.trigger_by_token('auto1', 'wrong-token')
+        assert result['success'] is False
+        assert 'Token' in result['error']
 
     def test_trigger_by_token_rejects_non_webhook(self, engine):
-        engine.add_automation(_auto(trigger={"type": "cron"}))
-        result = engine.trigger_by_token("auto1", "whatever")
-        assert result["success"] is False
+        engine.add_automation(_auto(trigger={'type': 'cron'}))
+        result = engine.trigger_by_token('auto1', 'whatever')
+        assert result['success'] is False
 
 
 class TestNotificationsAPI:
     def test_notifications_roundtrip(self, client):
-        resp = client.post("/api/automations", json={
-            "name": "api-test",
-            "trigger": {"type": "webhook"},
-            "steps": [{"tool": "notify", "params": {"title": "API-Titel", "content": "API-Inhalt"}}],
-        })
+        resp = client.post(
+            '/api/automations',
+            json={
+                'name': 'api-test',
+                'trigger': {'type': 'webhook'},
+                'steps': [{'tool': 'notify', 'params': {'title': 'API-Titel', 'content': 'API-Inhalt'}}],
+            },
+        )
         assert resp.status_code == 200
-        auto = resp.get_json()["automation"]
-        token = auto["webhook_token"]
+        auto = resp.get_json()['automation']
+        token = auto['webhook_token']
         assert token
 
-        resp = client.post(f"/api/automations/webhook/{auto['id']}/{token}")
+        resp = client.post(f'/api/automations/webhook/{auto["id"]}/{token}')
         assert resp.status_code == 200
-        assert resp.get_json()["results"][0]["result"].startswith("✅")
+        assert resp.get_json()['results'][0]['result'].startswith('✅')
 
-        resp = client.get("/api/notifications/latest")
+        resp = client.get('/api/notifications/latest')
         data = resp.get_json()
-        assert data["success"] is True
-        assert any(n["title"] == "API-Titel" for n in data["notifications"])
+        assert data['success'] is True
+        assert any(n['title'] == 'API-Titel' for n in data['notifications'])
 
-        nid = next(n["id"] for n in data["notifications"] if n["title"] == "API-Titel")
-        resp = client.post("/api/notifications/read", json={"ids": [nid]})
+        nid = next(n['id'] for n in data['notifications'] if n['title'] == 'API-Titel')
+        resp = client.post('/api/notifications/read', json={'ids': [nid]})
         assert resp.status_code == 200
-        resp = client.get("/api/notifications/latest")
-        assert next(n for n in resp.get_json()["notifications"] if n["id"] == nid)["read"] is True
+        resp = client.get('/api/notifications/latest')
+        assert next(n for n in resp.get_json()['notifications'] if n['id'] == nid)['read'] is True
 
     def test_webhook_requires_valid_token(self, client):
-        resp = client.post("/api/automations", json={
-            "name": "hook-test",
-            "trigger": {"type": "webhook"},
-            "steps": [{"tool": "notify", "params": {"title": "x", "content": "y"}}],
-        })
-        auto = resp.get_json()["automation"]
-        resp = client.post(f"/api/automations/webhook/{auto['id']}/bad-token")
+        resp = client.post(
+            '/api/automations',
+            json={
+                'name': 'hook-test',
+                'trigger': {'type': 'webhook'},
+                'steps': [{'tool': 'notify', 'params': {'title': 'x', 'content': 'y'}}],
+            },
+        )
+        auto = resp.get_json()['automation']
+        resp = client.post(f'/api/automations/webhook/{auto["id"]}/bad-token')
         assert resp.status_code == 403
 
     def test_clear_notifications(self, client):
-        client.post("/api/notifications/clear")
-        resp = client.get("/api/notifications/latest")
-        assert resp.get_json()["notifications"] == []
+        client.post('/api/notifications/clear')
+        resp = client.get('/api/notifications/latest')
+        assert resp.get_json()['notifications'] == []
 
     def test_automations_schema_has_trigger_types(self, client):
-        resp = client.get("/api/automations/schema")
+        resp = client.get('/api/automations/schema')
         data = resp.get_json()
-        assert data["success"] is True
-        assert "webhook" in data["trigger_types"]
-        assert "cron" in data["trigger_types"]
+        assert data['success'] is True
+        assert 'webhook' in data['trigger_types']
+        assert 'cron' in data['trigger_types']

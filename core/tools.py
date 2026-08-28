@@ -325,8 +325,8 @@ def _confirm_cmd(cmd):
 def execute_bash(command):
     try:
         _validate_str(command, 'command', max_len=10000)
-    except ValueError as e:
-        return f'❌ {e}'
+    except ValueError:
+        return '❌ Command input is invalid or exceeds the maximum length'
     if len(command) < 1:
         return '❌ Empty command'
     _bash_dangerous = ['$(', '`', '${']
@@ -601,8 +601,8 @@ def execute_python(code):
 def think(thought, auto_plan=False):
     try:
         _validate_str(thought, 'thought')
-    except ValueError as e:
-        return f'❌ {e}'
+    except ValueError:
+        return '❌ Invalid thought input'
     complex_keywords = [
         'recherchiere',
         'vergleiche',

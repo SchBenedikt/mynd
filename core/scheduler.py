@@ -257,8 +257,9 @@ class AutomationEngine:
                 results.append({'step': tool_name, 'status': 'success', 'result': _redact_result(result)})
                 env[f'step_{len(results) - 1}'] = str(result)
                 env[tool_name + '_result'] = str(result)
-            except Exception as e:
-                err = f'\u274c {e}'
+            except Exception:
+                logger.exception('Automation tool %s failed', tool_name)
+                err = '\u274c Automation step failed'
                 results.append({'step': tool_name, 'status': 'error', 'result': err})
                 env[f'step_{len(results) - 1}'] = err
                 break
