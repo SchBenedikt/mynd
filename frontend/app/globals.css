@@ -559,6 +559,14 @@ body {
   background: #f59e0b;
 }
 
+.status-dot.empty {
+  background: #f59e0b;
+}
+
+.status-dot.idle {
+  background: #94a3b8;
+}
+
 .status-dot.unknown {
   background: #a0a0a0;
 }

@@ -22,6 +22,9 @@ flask_app = Flask(__name__)
 flask_app.config['MAX_CONTENT_LENGTH'] = 55 * 1024 * 1024
 # Backwards-compatible public name used by tests and WSGI servers.
 app = flask_app
+DEFAULT_CORS_ORIGINS = ','.join(
+    ('http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001', 'http://127.0.0.1:3001')
+)
 
 
 def create_app(test_config=None):
@@ -33,7 +36,7 @@ def create_app(test_config=None):
 @flask_app.after_request
 def add_cors_headers(response):
     origin = request.headers.get('Origin', '')
-    raw = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000')
+    raw = os.getenv('CORS_ALLOWED_ORIGINS', DEFAULT_CORS_ORIGINS)
     allowed_origins = {v.strip() for v in raw.split(',') if v.strip()}
     if origin and ('*' in allowed_origins):
         response.headers['Access-Control-Allow-Origin'] = '*'
@@ -169,7 +172,7 @@ def protect_api_by_default():
     ):
         origin = request.headers.get('Origin')
         if origin:
-            raw = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000')
+            raw = os.getenv('CORS_ALLOWED_ORIGINS', DEFAULT_CORS_ORIGINS)
             allowed = {item.strip() for item in raw.split(',') if item.strip()}
             if origin not in allowed:
                 return jsonify({'success': False, 'error': 'Origin not allowed'}), 403

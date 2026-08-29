@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api';
 
 const INTEGRATIONS = [
@@ -19,11 +19,11 @@ const INTEGRATIONS = [
 
 const FIELD_DEFS = {
   email: [
-    { key: 'email/imap_host',     labelDe: 'IMAP Host',         labelEn: 'IMAP Host',         type: 'text' },
+    { key: 'email/imap_server',   labelDe: 'IMAP Server',       labelEn: 'IMAP Server',       type: 'text' },
     { key: 'email/imap_port',     labelDe: 'IMAP Port',         labelEn: 'IMAP Port',         type: 'text', default: '993' },
     { key: 'email/imap_user',     labelDe: 'IMAP Benutzer',     labelEn: 'IMAP User',         type: 'text' },
     { key: 'email/imap_password', labelDe: 'IMAP Passwort',     labelEn: 'IMAP Password',     type: 'password' },
-    { key: 'email/smtp_host',     labelDe: 'SMTP Host',         labelEn: 'SMTP Host',         type: 'text' },
+    { key: 'email/smtp_server',   labelDe: 'SMTP Server',       labelEn: 'SMTP Server',       type: 'text' },
     { key: 'email/smtp_port',     labelDe: 'SMTP Port',         labelEn: 'SMTP Port',         type: 'text', default: '587' },
     { key: 'email/smtp_user',     labelDe: 'SMTP Benutzer',     labelEn: 'SMTP User',         type: 'text' },
     { key: 'email/smtp_password', labelDe: 'SMTP Passwort',     labelEn: 'SMTP Password',     type: 'password' },
@@ -47,10 +47,10 @@ const FIELD_DEFS = {
     { key: 'truenas/password', labelDe: 'TrueNAS Passwort',  labelEn: 'TrueNAS Password',  type: 'password' },
   ],
   server: [
-    { key: 'server/ip', labelDe: 'Server IP', labelEn: 'Server IP', type: 'text', placeholder: '192.168.178.44' },
-    { key: 'server/user', labelDe: 'Server Benutzer', labelEn: 'Server User', type: 'text', placeholder: 'root' },
-    { key: 'server/password', labelDe: 'Server Passwort', labelEn: 'Server Password', type: 'password' },
-    { key: 'server/port', labelDe: 'Server Port', labelEn: 'Server Port', type: 'text', default: '22' },
+    { key: 'vm/ip', labelDe: 'Server IP', labelEn: 'Server IP', type: 'text', placeholder: '192.168.178.44' },
+    { key: 'vm/user', labelDe: 'Server Benutzer', labelEn: 'Server User', type: 'text', placeholder: 'root' },
+    { key: 'vm/password', labelDe: 'Server Passwort', labelEn: 'Server Password', type: 'password' },
+    { key: 'vm/port', labelDe: 'Server Port', labelEn: 'Server Port', type: 'text', default: '22' },
   ],
   affine: [
     { key: 'affine/domain', labelDe: 'AFFiNE Domain', labelEn: 'AFFiNE Domain', type: 'text', placeholder: 'https://affine.example.com' },
@@ -80,6 +80,7 @@ export default function IntegrationsTab({ tr, language }) {
   const [err, setErr] = useState('');
   const [plugins, setPlugins] = useState([]);
   const [pluginsLoaded, setPluginsLoaded] = useState(false);
+  const [registry, setRegistry] = useState({});
 
   const t = (de, en) => language === 'de' ? de : en;
 
@@ -106,7 +107,17 @@ export default function IntegrationsTab({ tr, language }) {
     } catch (e) { console.error('Plugin load failed:', e); }
   };
 
-  useEffect(() => { loadAll(); }, []);
+  const loadRegistry = async () => {
+    try {
+      const r = await apiFetch('/api/registry/apis');
+      const d = await r.json();
+      if (r.ok && d.success) {
+        setRegistry(Object.fromEntries((d.integrations || []).map(item => [item.id, item])));
+      }
+    } catch (e) { console.error('Integration status load failed:', e); }
+  };
+
+  useEffect(() => { loadAll(); loadRegistry(); }, []);
   useEffect(() => { if (activeInt === 'plugins' && !pluginsLoaded) loadPlugins(); }, [activeInt, pluginsLoaded]);
 
   const setVal = (key, val) => setValues(p => ({ ...p, [key]: val }));
@@ -134,7 +145,10 @@ export default function IntegrationsTab({ tr, language }) {
         } catch (ex) { ok = false; setErr(ex.message); break; }
       }
     }
-    if (ok) setMsg(tr('Gespeichert im Tresor.', 'Saved to vault.'));
+    if (ok) {
+      setMsg(tr('Gespeichert im Tresor.', 'Saved to vault.'));
+      await loadRegistry();
+    }
     setSaving(false);
   };
 
@@ -167,7 +181,10 @@ export default function IntegrationsTab({ tr, language }) {
     try {
       const r = await apiFetch(`/api/registry/${integrationId}/test`, { method: 'POST' });
       const d = await r.json();
-      if (d.success) setMsg(t('Verbindung erfolgreich!', 'Connection successful!'));
+      if (d.success) {
+        setMsg(t('Verbindung erfolgreich!', 'Connection successful!'));
+        await loadRegistry();
+      }
       else setErr(d.error || t('Verbindung fehlgeschlagen', 'Connection failed'));
     } catch (e) { setErr(e.message); }
   };
@@ -263,7 +280,7 @@ export default function IntegrationsTab({ tr, language }) {
     );
   }
 
-  const hasTest = ['immich', 'nextcloud', 'composio', 'affine'].includes(activeInt);
+  const hasTest = Boolean(registry[activeInt]?.test_supported);
 
   return (
     <div className="settings-panel" style={{ padding: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -276,6 +293,13 @@ export default function IntegrationsTab({ tr, language }) {
                 className={`integrations-nav-item ${activeInt === int.id ? 'active' : ''}`}
                 onClick={() => setActiveInt(int.id)}>
                 <i className={int.icon}></i>{t(int.labelDe, int.labelEn)}
+                {registry[int.id] && (
+                  <span
+                    title={registry[int.id].configured ? t('Konfiguriert', 'Configured') : t('Nicht vollständig konfiguriert', 'Not fully configured')}
+                    aria-label={registry[int.id].configured ? t('Konfiguriert', 'Configured') : t('Nicht konfiguriert', 'Not configured')}
+                    style={{ marginLeft: 'auto', width: 8, height: 8, borderRadius: '50%', background: registry[int.id].configured ? 'var(--success)' : 'var(--muted)', opacity: registry[int.id].configured ? 1 : 0.45 }}
+                  />
+                )}
               </button>
             ))}
           </div>
@@ -303,7 +327,17 @@ export default function IntegrationsTab({ tr, language }) {
                  'All values are stored locally in the vault. Existing passwords are preserved when left empty.')}
           </p>
 
-          {activeInt === 'email' ? <EmailAccountsSection tr={tr} language={language} values={values} setVal={setVal} isSet={isSet} /> : (
+          {activeInt === 'email' ? <>
+            <EmailAccountsSection tr={tr} language={language} values={values} setVal={setVal} isSet={isSet} />
+            {msg && <div className="status-text" style={{ color: 'var(--success)', marginBottom: '0.75rem' }}>{msg}</div>}
+            {err && <div className="status-text" style={{ color: '#ef4444', marginBottom: '0.75rem' }}>{err}</div>}
+            {hasTest && (
+              <button className="btn" onClick={() => testConnection(activeInt)}>
+                <i className="fas fa-plug" style={{ marginRight: 6 }}></i>
+                {t('Verbindung testen', 'Test Connection')}
+              </button>
+            )}
+          </> : (
           <>  
           <div className="input-group" style={{ marginBottom: '0.75rem', fontSize: '0.8rem', color: 'var(--muted)', background: 'var(--chip-bg)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem' }}>
             <i className="fas fa-shield-alt" style={{ marginRight: 6 }}></i>
@@ -366,7 +400,7 @@ const EMAIL_FIELDS = [
 ];
 
 function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
-  const t = (de, en) => language === 'de' ? de : en;
+  const t = useCallback((de, en) => language === 'de' ? de : en, [language]);
   const [accounts, setAccounts] = useState([]);
   const [editing, setEditing] = useState(null);
   const [newName, setNewName] = useState('');
@@ -374,36 +408,28 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const loadAccounts = async () => {
+  const loadAccounts = useCallback(async () => {
     try {
       const r = await apiFetch('/api/email/accounts');
       const d = await r.json();
-      if (d.success) setAccounts(Object.entries(d.accounts || {}).map(([k,v]) => ({ name: k, ...v })));
-    } catch(e) { console.error(e); }
-  };
+      if (!r.ok || !d.success) throw new Error(d.error || t('Konten konnten nicht geladen werden.', 'Could not load accounts.'));
+      setAccounts(Object.entries(d.accounts || {}).map(([k,v]) => ({ name: k, ...v })));
+    } catch(e) { setMsg(`❌ ${e.message}`); }
+  }, [t]);
 
-  useEffect(() => { loadAccounts(); }, []);
+  useEffect(() => { loadAccounts(); }, [loadAccounts]);
 
   const saveAccount = async (name) => {
     setSaving(true); setMsg('');
     try {
       const payload = { name, ...form };
-      await apiFetch('/api/email/accounts', {
+      const response = await apiFetch('/api/email/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (name === 'default') {
-        for (const f of EMAIL_FIELDS) {
-          if (form[f.key]) {
-            await apiFetch('/api/vault/entries', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ key: `email/${f.key}`, value: form[f.key] }),
-            });
-          }
-        }
-      }
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || t('Speichern fehlgeschlagen.', 'Save failed.'));
       setMsg(t('Konto gespeichert!', 'Account saved!'));
       await loadAccounts();
       setEditing(null);
@@ -414,9 +440,12 @@ function EmailAccountsSection({ tr, language, values, setVal, isSet }) {
   const deleteAccount = async (name) => {
     if (!window.confirm(t(`Konto "${name}" löschen?`, `Delete account "${name}"?`))) return;
     try {
-      await apiFetch(`/api/email/accounts/${name}`, { method: 'DELETE' });
+      setMsg('');
+      const response = await apiFetch(`/api/email/accounts/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || t('Löschen fehlgeschlagen.', 'Delete failed.'));
       await loadAccounts();
-    } catch(e) { console.error(e); }
+    } catch(e) { setMsg(`❌ ${e.message}`); }
   };
 
   const startEdit = (acct) => {

@@ -570,7 +570,9 @@ export default function HomePage() {
       const generatedEmbeddings = Number(kb.generated_embeddings ?? kb.embeddings_count ?? 0);
       const missingEmbeddings = Number(kb.missing_embeddings ?? Math.max(totalChunks - generatedEmbeddings, 0));
       const embeddingsComplete = Boolean(kb.embeddings_complete ?? (totalChunks > 0 && missingEmbeddings === 0));
-      setHealth({ ollama: ollama.connected ? 'ok' : 'error', kb: kb.database_path ? 'ok' : 'error', embeddings: kb.semantic_search_available ? (embeddingsComplete ? 'ok' : 'loading') : 'error' });
+      const kbStatus = !kb.database_path ? 'error' : totalChunks > 0 ? 'ok' : 'empty';
+      const embeddingStatus = totalChunks === 0 ? 'idle' : kb.semantic_search_available ? (embeddingsComplete ? 'ok' : 'loading') : 'error';
+      setHealth({ ollama: ollama.connected ? 'ok' : 'error', kb: kbStatus, embeddings: embeddingStatus });
     } catch (err) { setHealth({ ollama: 'error', kb: 'error', embeddings: 'error' }); }
     try {
       const meRes = await apiFetch('/api/auth/me');

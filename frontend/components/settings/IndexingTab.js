@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { apiFetch } from '../../lib/api';
 const EMAIL_INDEXING_ENABLED = false;
 
@@ -17,6 +17,12 @@ export default function IndexingTab({ tr, language }) {
   const [indexingPath, setIndexingPath] = useState('');
   const [indexingPathStatus, setIndexingPathStatus] = useState('');
   const [persistentIndexStats, setPersistentIndexStats] = useState({ db_stats: {}, indexing_runs: [] });
+  const progressIntervalRef = useRef(null);
+
+  const stopProgressPolling = () => {
+    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    progressIntervalRef.current = null;
+  };
 
   const loadNcConfig = async () => {
     try {
@@ -46,7 +52,8 @@ export default function IndexingTab({ tr, language }) {
         })
       });
       if (res.ok) {
-        setNcPasswordSet(Boolean(ncPassword));
+        const data = await res.json();
+        setNcPasswordSet(Boolean(data.password_set));
         setNcPassword('');
         setNcConfigStatus(tr('✓ Konfiguration gespeichert', '✓ Configuration saved'));
       } else {
@@ -101,18 +108,21 @@ export default function IndexingTab({ tr, language }) {
   const startIndexing = async () => {
     try {
       const configRes = await apiFetch('/api/indexing/config');
-      if (configRes.ok) {
-        const config = await configRes.json();
-        if (!config.url || !config.username) {
-          setIndexingStatus('error: Nextcloud configuration required. Please configure your Nextcloud connection first.');
-          return;
-        }
+      if (!configRes.ok) {
+        setIndexingStatus('error: ' + tr('Die Nextcloud-Konfiguration konnte nicht geladen werden.', 'Could not load the Nextcloud configuration.'));
+        return;
+      }
+      const config = await configRes.json();
+      if (!config.url || !config.username || config.password !== '***') {
+        setIndexingStatus('error: ' + tr('Nextcloud-URL, Benutzername und App-Passwort werden benötigt.', 'Nextcloud URL, username and app password are required.'));
+        return;
       }
       const res = await apiFetch('/api/indexing/start', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: indexingPath || undefined })
       });
       if (res.ok) {
         setIndexingStatus('running');
+        stopProgressPolling();
         const progressInterval = setInterval(async () => {
           try {
             const res = await apiFetch('/api/indexing/progress');
@@ -129,8 +139,8 @@ export default function IndexingTab({ tr, language }) {
                 totalFiles: data.total_files || 0,
                 elapsedTime: Math.round(data.elapsed_time) || 0,
                 errors: data.errors || [],
-                chunksCreated: 0,
-                documentsProcessed: data.processed_files || 0,
+                chunksCreated: data.chunks_created || 0,
+                documentsProcessed: data.documents_processed ?? data.processed_files ?? 0,
                 processingSpeed: parseFloat(processingSpeed),
                 estimatedTimeRemaining: timeRemaining,
                 lastIndexingStart: data.last_indexing_start || 0,
@@ -138,29 +148,29 @@ export default function IndexingTab({ tr, language }) {
                 lastIndexingDuration: data.last_indexing_duration || 0
               });
               setIndexingStats(
-                `${data.processed_files || 0}/${data.total_files || 0} files | ${Math.round(data.elapsed_time || 0)}s elapsed | ${processingSpeed} files/s | ${timeRemaining > 0 ? `~${timeRemaining}s remaining` : 'calculating...'}`
+                tr(
+                  `${data.processed_files || 0}/${data.total_files || 0} Dateien | ${Math.round(data.elapsed_time || 0)} s vergangen | ${processingSpeed} Dateien/s${timeRemaining > 0 ? ` | ca. ${timeRemaining} s verbleibend` : ''}`,
+                  `${data.processed_files || 0}/${data.total_files || 0} files | ${Math.round(data.elapsed_time || 0)}s elapsed | ${processingSpeed} files/s${timeRemaining > 0 ? ` | ~${timeRemaining}s remaining` : ''}`
+                )
               );
-              if (data.status === 'completed' || data.status === 'error') {
+              if (['completed', 'error', 'stopped'].includes(data.status)) {
                 setIndexingStatus(data.status);
-                if (data.status === 'completed') {
-                  setIndexingDetails(prev => ({ ...prev, chunksCreated: data.processed_files * 10 }));
-                }
-                clearInterval(progressInterval);
+                stopProgressPolling();
+                loadIndexingStats();
               }
             } else if (res.status === 500) {
               setIndexingStatus('error: Server error');
-              clearInterval(progressInterval);
+              stopProgressPolling();
             } else {
               setIndexingStatus(`error: ${res.status}`);
-              clearInterval(progressInterval);
+              stopProgressPolling();
             }
           } catch (err) {
-            if (err.message.includes('JSON')) {
-              setIndexingStatus('error: Invalid response from server');
-              clearInterval(progressInterval);
-            }
+            setIndexingStatus('error: ' + (err.message || 'Invalid response from server'));
+            stopProgressPolling();
           }
-        }, 500);
+        }, 1000);
+        progressIntervalRef.current = progressInterval;
       } else {
         const data = await res.json();
         setIndexingStatus('error: ' + data.error);
@@ -177,7 +187,10 @@ export default function IndexingTab({ tr, language }) {
     const statsInterval = setInterval(() => {
       loadIndexingStats();
     }, 10000);
-    return () => clearInterval(statsInterval);
+    return () => {
+      clearInterval(statsInterval);
+      stopProgressPolling();
+    };
   }, []);
 
   return (
@@ -296,12 +309,18 @@ export default function IndexingTab({ tr, language }) {
                 fontSize: '0.8rem', padding: '0.25rem 0.75rem', borderRadius: 'var(--radius-full)',
                 background: indexingStatus === 'running' ? 'var(--primary)' :
                   indexingStatus === 'completed' ? 'var(--success)' :
-                  indexingStatus === 'error' ? 'var(--error)' : 'var(--muted)',
+                  indexingStatus.startsWith('error') ? 'var(--error)' : 'var(--muted)',
                 color: 'white', fontWeight: '500'
               }}>
-                {indexingStatus.toUpperCase()}
+                {indexingStatus.startsWith('error') ? tr('FEHLER', 'ERROR') : indexingStatus.toUpperCase()}
               </span>
             </div>
+
+            {indexingStatus.startsWith('error:') && (
+              <div className="status-text" style={{color: 'var(--error)', marginBottom: '1rem'}} role="alert">
+                {indexingStatus.slice('error:'.length).trim()}
+              </div>
+            )}
 
             {indexingStatus === 'running' && (
               <div className="progress-bar-wrapper" style={{marginBottom: '1rem'}}>
@@ -355,7 +374,7 @@ export default function IndexingTab({ tr, language }) {
               {indexingStats && <div style={{marginBottom: '0.5rem', fontWeight: '500'}}>{indexingStats}</div>}
               <div style={{display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem'}}>
                 <span><strong>{tr('Dokumente', 'Documents')}:</strong> {indexingDetails.documentsProcessed}</span>
-                <span><strong>{tr('Chunks erstellt', 'Chunks Created')}:</strong> ~{indexingDetails.chunksCreated}</span>
+                <span><strong>{tr('Chunks erstellt', 'Chunks Created')}:</strong> {indexingDetails.chunksCreated}</span>
                 {indexingDetails.errors.length > 0 && (
                   <span style={{color: 'var(--error)'}}><strong>{tr('Fehler', 'Errors')}:</strong> {indexingDetails.errors.length}</span>
                 )}

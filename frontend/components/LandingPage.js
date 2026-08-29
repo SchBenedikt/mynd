@@ -82,7 +82,7 @@ const METHOD_STEPS = [
   { icon: 'fa-message', title_de: 'Du stellst eine Frage', title_en: 'You ask a question', desc_de: 'MYND ermittelt selbstständig, welcher deiner Dienste die Antwort kennt.', desc_en: 'MYND independently determines which of your services has the answer.' },
   { icon: 'fa-puzzle-piece', title_de: 'MYND durchsucht deine Dienste', title_en: 'MYND searches your services', desc_de: 'Nextcloud, Home Assistant, Immich, E-Mail, Spotify, Discord — alles aus einer Hand.', desc_en: 'Nextcloud, Home Assistant, Immich, Email, Spotify, Discord — all in one place.' },
   { icon: 'fa-list-check', title_de: 'Antworten mit Quellennachweis', title_en: 'Answers with source proof', desc_de: 'Jede Antwort zeigt transparent, woher die Information stammt.', desc_en: 'Every answer transparently shows where the information came from.' },
-  { icon: 'fa-shield-halved', title_de: 'Du behältst die Kontrolle', title_en: 'You stay in control', desc_de: 'Wähle zwischen drei Betriebsmodi — von voll autonom bis reiner Vorschlagsmodus.', desc_en: 'Choose from three operating modes — fully autonomous to suggestions only.' },
+  { icon: 'fa-shield-halved', title_de: 'Du behältst die Kontrolle', title_en: 'You stay in control', desc_de: 'Wähle zwischen drei Betriebsmodi — von berechtigungsgesteuert autonom bis zum reinen Vorschlagsmodus.', desc_en: 'Choose from three operating modes — permission-controlled autonomy to suggestions only.' },
 ];
 
 const INTEGRATIONS = [
@@ -131,12 +131,12 @@ const INTEGRATIONS = [
 const MODES = [
   {
     tier: 'A', icon: 'fa-robot',
-    title_de: 'Voll autonom',
-    title_en: 'Fully autonomous',
-    desc_de: 'MYND entscheidet selbstständig, führt Aktionen aus, schreibt Nachrichten, schaltet Geräte und löscht Dateien — ohne vorherige Rückfrage. Maximale Geschwindigkeit, minimale Kontrolle.',
-    desc_en: 'MYND decides independently, executes actions, sends messages, toggles devices and deletes files — without asking first. Maximum speed, minimum oversight.',
-    tag_de: 'Unbeaufsichtigt',
-    tag_en: 'Unsupervised',
+    title_de: 'Autonom im erlaubten Rahmen',
+    title_en: 'Autonomous within permissions',
+    desc_de: 'MYND erledigt freigegebene Abläufe selbstständig. Schreibende, externe oder destruktive Aktionen bleiben durch Rollen, Tool-Rechte und Sicherheitsregeln begrenzt.',
+    desc_en: 'MYND handles approved workflows independently. Write, external, and destructive actions remain constrained by roles, tool permissions, and security rules.',
+    tag_de: 'Berechtigungsgesteuert',
+    tag_en: 'Permission-controlled',
   },
   {
     tier: 'B', icon: 'fa-shield-halved',
@@ -337,7 +337,7 @@ export default function LandingPage() {
       <aside className="lp-ticker" aria-label={t('Systemprinzipien', 'System principles')}>
         <div className="lp-shell lp-ticker-track">
           <p><span>01</span><strong>{t('Lokal & privat', 'Local & private')}</strong><small>{t('Deine Daten bleiben auf deiner Infrastruktur', 'Your data stays on your infrastructure')}</small></p>
-          <p><span>02</span><strong>{t('Alle Dienste vernetzt', 'All services connected')}</strong><small>{t('Nextcloud, Home Assistant, Immich, E-Mail und mehr', 'Nextcloud, Home Assistant, Immich, Email and more')}</small></p>
+          <p><span>02</span><strong>{t('Deine Dienste verbinden', 'Connect your services')}</strong><small>{t('Nextcloud, Home Assistant, Immich, E-Mail und mehr', 'Nextcloud, Home Assistant, Immich, Email and more')}</small></p>
           <p><span>03</span><strong>{t('Volle Transparenz', 'Full transparency')}</strong><small>{t('Jede Antwort zeigt ihre Quellen', 'Every answer shows its sources')}</small></p>
         </div>
       </aside>
@@ -437,7 +437,7 @@ export default function LandingPage() {
               <p className="lp-kicker">{t('Betriebsmodi', 'Operating modes')}</p>
               <h2>{t('So viel Kontrolle, wie du willst.', 'As much control as you want.')}</h2>
             </div>
-            <p>{t('MYND kann in drei Stufen arbeiten. Du entscheidest, wie viel Eigenständigkeit die KI bekommt — von völlig frei bis jede Aktion manuell.', 'MYND can operate at three levels. You decide how much autonomy the AI has — from completely free to every action manual.')}</p>
+            <p>{t('MYND kann in drei Stufen arbeiten. Du entscheidest, wie viel Eigenständigkeit die KI innerhalb ihrer Berechtigungen bekommt — bis hin zum reinen Vorschlagsmodus.', 'MYND can operate at three levels. You decide how much autonomy the AI has within its permissions — down to suggestions only.')}</p>
           </header>
           <div className="lp-modes-grid">
             {MODES.map((mode) => (

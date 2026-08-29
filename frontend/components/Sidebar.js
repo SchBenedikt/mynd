@@ -22,6 +22,17 @@ export default function Sidebar() {
   const { isSidebarCollapsed, toggleSidebar } = useSidebar();
   const { language, t } = useLanguage();
   const tr = (deText, enText) => (language === 'de' ? deText : enText);
+  const healthLabel = (name, status) => {
+    const labels = {
+      ok: tr('bereit', 'ready'),
+      error: tr('Fehler', 'error'),
+      loading: tr('wird vorbereitet', 'preparing'),
+      empty: tr('leer', 'empty'),
+      idle: tr('inaktiv', 'inactive'),
+      unknown: tr('unbekannt', 'unknown'),
+    };
+    return `${name}: ${labels[status] || labels.unknown}`;
+  };
   const router = useRouter();
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuChat, setMenuChat] = useState(null);
@@ -223,9 +234,9 @@ export default function Sidebar() {
         )}
         {!isSidebarCollapsed && (
           <div className="status-dots">
-            <div className="status-dot-group"><div className={`status-dot ${health.ollama}`} /><span>Ollama</span></div>
-            <div className="status-dot-group"><div className={`status-dot ${health.kb}`} /><span>KB</span></div>
-            <div className="status-dot-group"><div className={`status-dot ${health.embeddings}`} /><span>Embed</span></div>
+            <div className="status-dot-group" title={healthLabel('Ollama', health.ollama)}><div className={`status-dot ${health.ollama}`} /><span>Ollama</span></div>
+            <div className="status-dot-group" title={healthLabel('KB', health.kb)}><div className={`status-dot ${health.kb}`} /><span>KB</span></div>
+            <div className="status-dot-group" title={healthLabel('Embed', health.embeddings)}><div className={`status-dot ${health.embeddings}`} /><span>Embed</span></div>
           </div>
         )}
       </div>

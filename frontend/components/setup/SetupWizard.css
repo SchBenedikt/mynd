@@ -491,6 +491,10 @@
   margin-bottom: 16px;
 }
 
+.setup-status-loading {
+  background: linear-gradient(135deg, #d97706, #b45309);
+}
+
 .setup-complete-actions {
   display: flex;
   justify-content: center;

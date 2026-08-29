@@ -120,7 +120,7 @@ export default function GuidePage() {
       <aside className="lp-guide-ticker" aria-label={t('Übersicht', 'Overview')}>
         <div className="lp-guide-shell lp-guide-ticker-track">
           <p><span>01</span><strong>{t('Lokal & privat', 'Local & private')}</strong><small>{t('Alles läuft auf deiner Infrastruktur', 'Everything runs on your infrastructure')}</small></p>
-          <p><span>02</span><strong>{t('Alle Dienste vernetzt', 'All services connected')}</strong><small>{t('Nextcloud, Home Assistant, Immich, E-Mail und mehr', 'Nextcloud, Home Assistant, Immich, Email and more')}</small></p>
+          <p><span>02</span><strong>{t('Deine Dienste verbinden', 'Connect your services')}</strong><small>{t('Nextcloud, Home Assistant, Immich, E-Mail und mehr', 'Nextcloud, Home Assistant, Immich, Email and more')}</small></p>
           <p><span>03</span><strong>{t('Volle Kontrolle', 'Full control')}</strong><small>{t('Sicherheitsmodi, Tool-Bestätigung, Admin-Rechte', 'Security modes, tool confirmation, admin privileges')}</small></p>
         </div>
       </aside>

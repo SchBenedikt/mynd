@@ -21,7 +21,7 @@ MYND combines a conversational AI agent with personal knowledge retrieval, file 
 | | |
 |---|---|
 | **💬 Agentic Chat** | Streaming AI chat with tool-calling, multi-round planning, sub-agent delegation, source panels, and contextual follow-up suggestions |
-| **🧠 Knowledge Base** | Semantic search across your documents (Ollama embeddings); indexing can be stopped cooperatively |
+| **🧠 Knowledge Base** | Nextcloud WebDAV sync, document parsing, and semantic search with real embedding/index metrics; indexing can be stopped cooperatively |
 | **🌐 Web Research** | DuckDuckGo search, news aggregation, multi-source research |
 | **🗺️ Browser Automation** | Headless Playwright + agent-browser CLI — [128 tools total](FEATURES.md) |
 | **📷 Photo Search** | Semantic photo search via Immich |
@@ -57,7 +57,7 @@ make dev
 
 Open **http://localhost:3000**. The API runs at `http://127.0.0.1:5001`.
 
-On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log. Bearer sessions are stored as hashes, expire automatically, and rotate on refresh. Indexing runs expose a cancellation-aware stop operation and reject duplicate starts while a run is active.
+On first launch, the setup wizard lets you create the initial admin password. MYND does not print or generate that password in the backend log. Bearer sessions are stored as hashes, expire automatically, and rotate on refresh. Indexing runs expose a cancellation-aware stop operation, reject duplicate starts, and keep the previous index when a Nextcloud listing or embedding run fails.
 
 ---
 
@@ -79,6 +79,7 @@ mynd/
 ├── app.py                  ← Backend entry point
 ├── app/                    ← Flask application, routes, auth, agent loop, scheduling
 │   ├── routes.py           ← HTTP and SSE API routes
+│   ├── indexing_pipeline.py ← Nextcloud sync, parsing, chunking, and embeddings
 │   ├── agent_loop.py       ← Agent orchestration and tool execution loop
 │   └── ollama_client.py    ← Ollama / OpenAI-compatible model client
 ├── core/                   ← Retrieval, model helpers, tools, vault, scheduler, plugins
@@ -141,7 +142,7 @@ make dev
 | `MYND_FRONTEND_PORT` | Development frontend port | `3000` |
 | `OLLAMA_BASE_URL` | Ollama API endpoint | `http://127.0.0.1:11434` |
 | `OLLAMA_MODEL` | Default chat model | `gemma3:latest` |
-| `CORS_ALLOWED_ORIGINS` | Allowed frontend origins | `http://localhost:3000,http://127.0.0.1:3000` |
+| `CORS_ALLOWED_ORIGINS` | Allowed frontend origins | localhost/127.0.0.1 on ports `3000` and `3001` |
 | `NEXTCLOUD_URL` | Nextcloud instance URL | — |
 | `NEXTCLOUD_USERNAME` | Nextcloud username | — |
 | `NEXTCLOUD_PASSWORD` | Nextcloud app password | — |
@@ -158,12 +159,16 @@ Copy [.env.example](.env.example) to `.env` for the complete, commented configur
 Most configuration is available from the web UI:
 
 - **AI Provider** — Ollama, OpenAI-compatible
-- **Integrations** — Nextcloud, Home Assistant, Immich, Reolink, TrueNAS, Email
+- **Integrations** — status, encrypted configuration, and connection tests for Nextcloud, Home Assistant, Immich, TrueNAS, Email, AFFiNE, Composio, Spotify, Discord, and SSH servers
 - **Theme** — 7 color themes, light/dark/auto
 - **Users** — Registration toggle, role management
 - **Indexing** — Document sync & embedding
 - **Projects** — Organize chats with validated local project data
 - **Language** — 12 languages available
+
+### Nextcloud indexing
+
+In **Settings → Indexing**, save the Nextcloud URL, username, and an app password, then optionally select a folder. MYND synchronizes supported files (`.md`, `.txt`, `.docx`, `.pdf`), parses them, creates heading-aware chunks, and writes chunks and embeddings through staged replacement. A failed or incomplete WebDAV listing does not remove local files or replace the current knowledge index.
 
 ---
 
