@@ -5,6 +5,7 @@ import time
 import pytest
 
 import app as app_module
+import app.routes as app_routes
 import app.state as app_state
 from app import app
 from core.scheduler import AutomationEngine
@@ -17,8 +18,9 @@ def engine(tmp_path):
 
 
 @pytest.fixture
-def client():
+def client(tmp_path, monkeypatch):
     app.config['TESTING'] = True
+    monkeypatch.setattr(app_routes, 'automation_engine', AutomationEngine({}, data_dir=tmp_path))
     app_module.AUTH_USERS['test-client'] = {
         'name': 'Test Client',
         'role': 'admin',

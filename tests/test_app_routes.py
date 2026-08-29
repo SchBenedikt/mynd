@@ -184,6 +184,22 @@ class TestSecurityAPI:
         payload = response.get_json()
         assert payload['status'] == 'ok'
         assert payload['knowledge_base']['chunks'] == len(app_routes.knowledge_base.chunks)
+        assert payload['knowledge_base']['documents'] >= 0
+        assert payload['knowledge_base']['embeddings'] >= 0
+
+    def test_knowledge_status_requires_embeddings_for_semantic_search(self, client, monkeypatch):
+        import numpy as np
+
+        monkeypatch.setattr(app_routes.knowledge_base, 'chunks', [{'source': 'one.md', 'text': 'hello'}])
+        monkeypatch.setattr(app_routes.knowledge_base, 'embs', np.array([]).reshape(0, 0))
+
+        payload = client.get('/api/knowledge/status').get_json()
+
+        assert payload['chunks_loaded'] == 1
+        assert payload['generated_embeddings'] == 0
+        assert payload['missing_embeddings'] == 1
+        assert payload['embeddings_complete'] is False
+        assert payload['semantic_search_available'] is False
 
     def test_security_status(self, client):
         resp = client.get('/api/security/status')
@@ -200,6 +216,14 @@ class TestSecurityAPI:
         assert response.headers['Access-Control-Allow-Origin'] == '*'
         assert 'Access-Control-Allow-Credentials' not in response.headers
         assert "default-src 'self'" in response.headers['Content-Security-Policy']
+
+    def test_api_allows_next_dev_fallback_port_by_default(self, client, monkeypatch):
+        monkeypatch.delenv('CORS_ALLOWED_ORIGINS', raising=False)
+
+        response = client.get('/api/capabilities', headers={'Origin': 'http://127.0.0.1:3001'})
+
+        assert response.headers['Access-Control-Allow-Origin'] == 'http://127.0.0.1:3001'
+        assert response.headers['Access-Control-Allow-Credentials'] == 'true'
 
     def test_sensitive_routes_require_authentication(self, client):
         response = client.get('/api/vault/entries', headers={'Authorization': ''})

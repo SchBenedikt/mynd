@@ -590,7 +590,7 @@ def _get_capabilities():
         'vault': True,
         'tts_server_side': False,
         'training': False,
-        'registry': False,
+        'registry': True,
         'nina': False,
         'projects': True,
     }
@@ -602,6 +602,24 @@ def api_capabilities():
 
 
 # ── /api/health ────────────────────────────────────────────
+def _knowledge_index_metrics():
+    chunks = len(knowledge_base.chunks)
+    try:
+        embeddings = int(knowledge_base.embs.shape[0]) if knowledge_base.embs.ndim == 2 else 0
+    except (AttributeError, IndexError, TypeError, ValueError):
+        embeddings = 0
+    documents = len({str(chunk.get('source') or 'Unknown') for chunk in knowledge_base.chunks})
+    missing_embeddings = max(chunks - embeddings, 0)
+    return {
+        'chunks': chunks,
+        'documents': documents,
+        'embeddings': embeddings,
+        'missing_embeddings': missing_embeddings,
+        'embeddings_complete': chunks > 0 and missing_embeddings == 0,
+        'semantic_search_available': chunks > 0 and embeddings > 0,
+    }
+
+
 @app.route('/api/health', methods=['GET'])
 def api_health():
     cfg = load_ai_config()
@@ -609,11 +627,12 @@ def api_health():
     provider_configured = bool(cfg.get('base_url') and cfg.get('model'))
     if provider == 'openai':
         provider_configured = provider_configured and bool(cfg.get('api_key'))
+    index_metrics = _knowledge_index_metrics()
     return jsonify(
         {
             'status': 'ok',
             'provider': {'name': provider, 'configured': provider_configured},
-            'knowledge_base': {'loaded': knowledge_base is not None, 'chunks': len(knowledge_base.chunks)},
+            'knowledge_base': {'loaded': knowledge_base is not None, **index_metrics},
         }
     )
 
@@ -1319,11 +1338,15 @@ def api_vault_delete(key):
 # ── /api/knowledge/* ───────────────────────────────────────
 @app.route('/api/knowledge/status', methods=['GET'])
 def knowledge_status():
+    metrics = _knowledge_index_metrics()
     return jsonify(
         {
-            'chunks_loaded': len(knowledge_base.chunks),
-            'documents_count': len(set(c.get('source', '') for c in knowledge_base.chunks)),
-            'semantic_search_available': len(knowledge_base.chunks) > 0,
+            'chunks_loaded': metrics['chunks'],
+            'documents_count': metrics['documents'],
+            'generated_embeddings': metrics['embeddings'],
+            'missing_embeddings': metrics['missing_embeddings'],
+            'embeddings_complete': metrics['embeddings_complete'],
+            'semantic_search_available': metrics['semantic_search_available'],
             'database_path': str(CHUNKS),
         }
     )
@@ -1600,8 +1623,30 @@ def indexing_start():
     with _app_lock:
         if INDEXING_STATUS.get('status') in ('running', 'stopping'):
             return jsonify({'success': False, 'error': 'Indexing is already running'}), 409
+
+    cfg_file = DATA_DIR / 'indexing_config.json'
+    try:
+        indexing_cfg = json.loads(cfg_file.read_text()) if cfg_file.exists() else {}
+    except (OSError, TypeError, json.JSONDecodeError):
+        indexing_cfg = {}
+    indexing_password = _vg('indexing/password') or ''
+    if not indexing_cfg.get('url') or not indexing_cfg.get('username') or not indexing_password:
+        return jsonify({'success': False, 'error': 'Nextcloud URL, username and app password are required'}), 400
+
+    request_data = request.get_json(silent=True) or {}
+    path_file = DATA_DIR / 'indexing_path.json'
+    try:
+        configured_path = str(json.loads(path_file.read_text()).get('path') or '') if path_file.exists() else ''
+    except (OSError, TypeError, json.JSONDecodeError):
+        configured_path = ''
+    remote_path = str(request_data.get('path') or configured_path).strip()
+
+    with _app_lock:
+        if INDEXING_STATUS.get('status') in ('running', 'stopping'):
+            return jsonify({'success': False, 'error': 'Indexing is already running'}), 409
         INDEXING_CANCEL.clear()
         run_id = secrets.token_hex(16)
+        started_at = time.time()
         INDEXING_STATUS.clear()
         INDEXING_STATUS.update(
             {
@@ -1612,40 +1657,71 @@ def indexing_start():
                 'total_files': 0,
                 'errors': [],
                 'elapsed_time': 0,
-                'started_at': time.time(),
+                'started_at': started_at,
+                'last_indexing_start': started_at,
+                'last_indexing_end': 0,
+                'last_indexing_duration': 0,
+                'chunks_created': 0,
+                'documents_processed': 0,
                 'run_id': run_id,
             }
         )
 
     def run_index(active_run_id):
         try:
-            from scripts.sync_nextcloud import main as sync_main
+            from app.indexing_pipeline import index_nextcloud_documents
+
+            def update_progress(**values):
+                with _app_lock:
+                    if INDEXING_STATUS.get('run_id') == active_run_id:
+                        values.setdefault('elapsed_time', time.time() - INDEXING_STATUS.get('started_at', time.time()))
+                        INDEXING_STATUS.update(values)
 
             logger.info('Starting Nextcloud sync...')
-            with _app_lock:
-                if INDEXING_STATUS.get('run_id') != active_run_id or INDEXING_CANCEL.is_set():
-                    return
-                INDEXING_STATUS['current_file'] = 'Syncing from Nextcloud...'
-            sync_main(cancel_event=INDEXING_CANCEL)
+            update_progress(current_file='Syncing from Nextcloud...')
+            ai_cfg = load_ai_config()
+            result = index_nextcloud_documents(
+                url=str(indexing_cfg['url']),
+                username=str(indexing_cfg['username']),
+                password=indexing_password,
+                remote_path=remote_path,
+                data_dir=DATA_DIR,
+                chunks_path=CHUNKS,
+                embeddings_path=EMBS,
+                embedding_model=str(ai_cfg.get('embedding_model') or '') or None,
+                cancel_event=INDEXING_CANCEL,
+                progress_callback=update_progress,
+            )
             with _app_lock:
                 if INDEXING_STATUS.get('run_id') != active_run_id:
                     return
-                if INDEXING_CANCEL.is_set() or INDEXING_STATUS.get('status') == 'stopping':
+                ended_at = time.time()
+                INDEXING_STATUS['last_indexing_end'] = ended_at
+                INDEXING_STATUS['last_indexing_duration'] = ended_at - INDEXING_STATUS.get('started_at', ended_at)
+                INDEXING_STATUS['elapsed_time'] = INDEXING_STATUS['last_indexing_duration']
+                INDEXING_STATUS['processed_files'] = int(result.get('files', 0))
+                INDEXING_STATUS['total_files'] = int(result.get('files', 0))
+                INDEXING_STATUS['documents_processed'] = int(result.get('documents', 0))
+                INDEXING_STATUS['chunks_created'] = int(result.get('chunks', 0))
+                if result.get('cancelled') or INDEXING_CANCEL.is_set() or INDEXING_STATUS.get('status') == 'stopping':
                     INDEXING_STATUS['status'] = 'stopped'
                     INDEXING_STATUS['current_file'] = 'Indexing stopped'
                 else:
                     INDEXING_STATUS['current_file'] = 'Indexing complete'
                     INDEXING_STATUS['status'] = 'completed'
                     INDEXING_STATUS['progress'] = 100
-                INDEXING_STATUS['elapsed_time'] = time.time() - INDEXING_STATUS.get('started_at', time.time())
             if not INDEXING_CANCEL.is_set():
                 knowledge_base._load()
         except Exception as e:
             with _app_lock:
                 if INDEXING_STATUS.get('run_id') == active_run_id:
+                    ended_at = time.time()
+                    INDEXING_STATUS['last_indexing_end'] = ended_at
+                    INDEXING_STATUS['last_indexing_duration'] = ended_at - INDEXING_STATUS.get('started_at', ended_at)
+                    INDEXING_STATUS['elapsed_time'] = INDEXING_STATUS['last_indexing_duration']
                     INDEXING_STATUS['status'] = 'stopped' if INDEXING_CANCEL.is_set() else 'error'
                     if not INDEXING_CANCEL.is_set():
-                        INDEXING_STATUS['errors'].append('Indexing failed; check the backend log')
+                        INDEXING_STATUS['errors'].append(str(e) or 'Indexing failed; check the backend log')
             logger.error(f'Indexing error: {e}')
 
     threading.Thread(target=run_index, args=(run_id,), daemon=True).start()
@@ -1675,6 +1751,11 @@ def indexing_progress():
                 'total_files': INDEXING_STATUS.get('total_files', 0),
                 'elapsed_time': INDEXING_STATUS.get('elapsed_time', 0),
                 'errors': INDEXING_STATUS.get('errors', []),
+                'chunks_created': INDEXING_STATUS.get('chunks_created', 0),
+                'documents_processed': INDEXING_STATUS.get('documents_processed', 0),
+                'last_indexing_start': INDEXING_STATUS.get('last_indexing_start', 0),
+                'last_indexing_end': INDEXING_STATUS.get('last_indexing_end', 0),
+                'last_indexing_duration': INDEXING_STATUS.get('last_indexing_duration', 0),
             }
         )
 
@@ -1684,22 +1765,31 @@ def indexing_config():
     if request.method == 'GET':
         cfg_file = DATA_DIR / 'indexing_config.json'
         if cfg_file.exists():
-            cfg = json.loads(cfg_file.read_text())
+            try:
+                cfg = json.loads(cfg_file.read_text())
+            except (OSError, TypeError, json.JSONDecodeError):
+                return jsonify({'url': '', 'username': '', 'password': '', 'error': 'Stored configuration is invalid'}), 500
             return jsonify(
                 {
                     'url': cfg.get('url', ''),
                     'username': cfg.get('username', ''),
-                    'password': '***' if cfg.get('password') else '',
+                    'password': '***' if _vg('indexing/password') else '',
                 }
             )
         return jsonify({'url': '', 'username': '', 'password': ''})
     data = request.json or {}
-    pw = data.get('password', '')
+    url = str(data.get('url') or '').strip().rstrip('/')
+    username = str(data.get('username') or '').strip()
+    pw = str(data.get('password') or '')
     if pw:
         vault_set('indexing/password', pw)
-    cfg = {'url': data.get('url', ''), 'username': data.get('username', ''), 'password': '***' if pw else ''}
-    (DATA_DIR / 'indexing_config.json').write_text(json.dumps(cfg, indent=2))
-    return jsonify({'status': 'saved'})
+    if not url or not username or not (_vg('indexing/password') or pw):
+        return jsonify({'success': False, 'error': 'URL, username and app password are required'}), 400
+    if not _valid_service_url(url, allow_local_http=True):
+        return jsonify({'success': False, 'error': 'A valid HTTPS Nextcloud URL is required'}), 400
+    cfg = {'url': url, 'username': username, 'password': '***'}
+    _atomic_json_write(DATA_DIR / 'indexing_config.json', cfg)
+    return jsonify({'status': 'saved', 'password_set': True})
 
 
 @app.route('/api/indexing/path', methods=['GET', 'POST'])
@@ -2162,23 +2252,218 @@ def training_stats():
     return jsonify({'success': False, 'error': 'Not implemented'}), 501
 
 
+_INTEGRATION_REGISTRY = {
+    'email': {
+        'label': 'Email',
+        'fields': {
+            'imap_server': 'email/imap_server',
+            'imap_port': 'email/imap_port',
+            'imap_user': 'email/imap_user',
+            'imap_password': 'email/imap_password',
+            'smtp_server': 'email/smtp_server',
+            'smtp_port': 'email/smtp_port',
+            'smtp_user': 'email/smtp_user',
+            'smtp_password': 'email/smtp_password',
+        },
+        'required_any': (
+            ('imap_server', 'imap_user', 'imap_password'),
+            ('smtp_server', 'smtp_user', 'smtp_password'),
+        ),
+        'secrets': {'imap_password', 'smtp_password'},
+        'test_supported': True,
+    },
+    'immich': {
+        'label': 'Immich',
+        'fields': {'url': 'immich/url', 'api_key': 'immich/api_key'},
+        'required': ('url', 'api_key'),
+        'secrets': {'api_key'},
+        'test_supported': True,
+    },
+    'nextcloud': {
+        'label': 'Nextcloud',
+        'fields': {'url': 'nextcloud/url', 'user': 'nextcloud/user', 'password': 'nextcloud/password'},
+        'required': ('url', 'user', 'password'),
+        'secrets': {'password'},
+        'test_supported': True,
+    },
+    'homeassistant': {
+        'label': 'Home Assistant',
+        'fields': {'url': 'homeassistant/url', 'token': 'homeassistant/token'},
+        'required': ('url', 'token'),
+        'secrets': {'token'},
+        'test_supported': True,
+    },
+    'truenas': {
+        'label': 'TrueNAS',
+        'fields': {'ip': 'truenas/ip', 'user': 'truenas/user', 'password': 'truenas/password'},
+        'required': ('ip',),
+        'secrets': {'password'},
+        'test_supported': True,
+    },
+    'server': {
+        'label': 'Server (SSH)',
+        'fields': {'ip': 'vm/ip', 'user': 'vm/user', 'password': 'vm/password', 'port': 'vm/port'},
+        'required': ('ip',),
+        'secrets': {'password'},
+        'test_supported': True,
+    },
+    'affine': {
+        'label': 'AFFiNE',
+        'fields': {'domain': 'affine/domain', 'email': 'affine/email', 'password': 'affine/password'},
+        'required': ('domain', 'email', 'password'),
+        'secrets': {'password'},
+        'test_supported': True,
+    },
+    'composio': {
+        'label': 'Composio',
+        'fields': {'api_key': 'composio/api_key', 'user_id': 'composio/user_id'},
+        'required': ('api_key',),
+        'secrets': {'api_key'},
+        'test_supported': True,
+    },
+    'spotify': {
+        'label': 'Spotify',
+        'fields': {
+            'client_id': 'spotify/client_id',
+            'client_secret': 'spotify/client_secret',
+            'refresh_token': 'spotify/refresh_token',
+        },
+        'required': ('client_id', 'client_secret', 'refresh_token'),
+        'secrets': {'client_secret', 'refresh_token'},
+        'test_supported': True,
+    },
+    'discord': {
+        'label': 'Discord',
+        'fields': {'bot_token': 'discord/bot_token', 'guild_id': 'discord/guild_id'},
+        'required': ('bot_token',),
+        'secrets': {'bot_token'},
+        'test_supported': True,
+    },
+}
+
+
+def _integration_status(api_name):
+    spec = _INTEGRATION_REGISTRY[api_name]
+    values = {name: _vg(key) or '' for name, key in spec['fields'].items()}
+    if spec.get('required_any'):
+        configured = any(all(values.get(name) for name in group) for group in spec['required_any'])
+        missing = [] if configured else sorted({name for group in spec['required_any'] for name in group})
+    else:
+        required = spec.get('required', ())
+        missing = [name for name in required if not values.get(name)]
+        configured = not missing
+    return values, configured, missing
+
+
 @app.route('/api/registry/apis', methods=['GET'])
 def registry_apis():
-    return jsonify({'success': False, 'error': 'Not implemented'}), 501
+    integrations = []
+    for api_name, spec in _INTEGRATION_REGISTRY.items():
+        _, configured, missing = _integration_status(api_name)
+        integrations.append(
+            {
+                'id': api_name,
+                'label': spec['label'],
+                'configured': configured,
+                'missing_fields': missing,
+                'test_supported': bool(spec.get('test_supported')),
+            }
+        )
+    return jsonify({'success': True, 'integrations': integrations})
 
 
 @app.route('/api/registry/health', methods=['GET'])
 def registry_health():
-    return jsonify({'success': False, 'error': 'Not implemented'}), 501
+    integrations = []
+    configured_count = 0
+    for api_name, spec in _INTEGRATION_REGISTRY.items():
+        _, configured, missing = _integration_status(api_name)
+        configured_count += int(configured)
+        integrations.append({'id': api_name, 'configured': configured, 'missing_fields': missing})
+    return jsonify(
+        {
+            'success': True,
+            'status': 'ready' if configured_count else 'unconfigured',
+            'configured': configured_count,
+            'total': len(integrations),
+            'integrations': integrations,
+        }
+    )
 
 
 @app.route('/api/registry/<api_name>/config', methods=['GET', 'POST', 'DELETE'])
 def registry_api_config(api_name):
-    return jsonify({'success': False, 'error': 'Registry configuration is not implemented'}), 501
+    spec = _INTEGRATION_REGISTRY.get(api_name)
+    if not spec:
+        return jsonify({'success': False, 'error': 'Unknown integration'}), 404
+    fields = spec['fields']
+    secrets_fields = spec.get('secrets', set())
+    if request.method == 'GET':
+        values, configured, missing = _integration_status(api_name)
+        safe_values = {
+            name: ('***' if name in secrets_fields and value else value) for name, value in values.items()
+        }
+        return jsonify(
+            {
+                'success': True,
+                'id': api_name,
+                'configured': configured,
+                'missing_fields': missing,
+                'values': safe_values,
+            }
+        )
+    if request.method == 'DELETE':
+        for key in fields.values():
+            vault_delete(key)
+        return jsonify({'success': True, 'configured': False})
+
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error': 'Request body must be an object'}), 400
+    values = data.get('values', data)
+    if not isinstance(values, dict):
+        return jsonify({'success': False, 'error': 'values must be an object'}), 400
+    unknown = sorted(set(values) - set(fields))
+    if unknown:
+        return jsonify({'success': False, 'error': f'Unknown fields: {", ".join(unknown)}'}), 400
+    normalized_values = {}
+    for name, value in values.items():
+        if isinstance(value, (dict, list, tuple, set)):
+            return jsonify({'success': False, 'error': f'Invalid value for {name}'}), 400
+        string_value = str(value or '').strip()
+        if name in secrets_fields and string_value in {'', '***', '__SET__'}:
+            continue
+        if string_value:
+            if name in {'url', 'domain'} and not _valid_service_url(string_value, allow_local_http=True):
+                return jsonify({'success': False, 'error': f'Invalid URL for {name}'}), 400
+            if name == 'port':
+                try:
+                    port = int(string_value)
+                except ValueError:
+                    return jsonify({'success': False, 'error': 'Invalid port'}), 400
+                if not 1 <= port <= 65535:
+                    return jsonify({'success': False, 'error': 'Invalid port'}), 400
+            normalized_values[name] = string_value
+        elif name not in secrets_fields:
+            normalized_values[name] = ''
+
+    for name, string_value in normalized_values.items():
+        if string_value:
+            result = vault_set(fields[name], string_value)
+            if isinstance(result, str) and result.startswith('❌'):
+                return jsonify({'success': False, 'error': 'Vault write failed'}), 500
+        else:
+            vault_delete(fields[name])
+    _, configured, missing = _integration_status(api_name)
+    return jsonify({'success': True, 'configured': configured, 'missing_fields': missing})
 
 
 @app.route('/api/registry/<api_name>/test', methods=['POST'])
 def registry_api_test(api_name):
+    if api_name not in _INTEGRATION_REGISTRY:
+        return jsonify({'success': False, 'error': 'Unknown integration'}), 404
+    if api_name == 'email':
+        return email_test()
     if api_name == 'nextcloud':
         ok, info = _nextcloud_status()
         return jsonify(
@@ -2199,6 +2484,44 @@ def registry_api_test(api_name):
             return jsonify({'success': True, 'message': 'Immich connection successful'})
         except requests.RequestException:
             return jsonify({'success': False, 'error': 'Immich connection failed'}), 502
+    if api_name == 'homeassistant':
+        url = str(_vg('homeassistant/url') or '').rstrip('/')
+        token = _vg('homeassistant/token')
+        if not url or not token:
+            return jsonify({'success': False, 'error': 'Home Assistant URL and token are required'}), 400
+        if not _valid_service_url(url, allow_local_http=True):
+            return jsonify({'success': False, 'error': 'Invalid Home Assistant URL'}), 400
+        try:
+            response = requests.get(
+                f'{url}/api/config',
+                headers={'Authorization': f'Bearer {token}'},
+                timeout=10,
+                allow_redirects=False,
+            )
+            response.raise_for_status()
+            return jsonify({'success': True, 'message': 'Home Assistant connection successful'})
+        except requests.RequestException:
+            return jsonify({'success': False, 'error': 'Home Assistant connection failed'}), 502
+    if api_name in {'truenas', 'server'}:
+        import socket
+
+        prefix = 'truenas' if api_name == 'truenas' else 'vm'
+        host = str(_vg(f'{prefix}/ip') or '').strip()
+        default_port = 80 if api_name == 'truenas' else 22
+        try:
+            port = int(_vg(f'{prefix}/port') or default_port)
+            parsed_ip = ipaddress.ip_address(host)
+            if not (parsed_ip.is_private or parsed_ip.is_loopback) or not 1 <= port <= 65535:
+                raise ValueError
+        except ValueError:
+            return jsonify({'success': False, 'error': 'A private IP address and valid port are required'}), 400
+        try:
+            with socket.create_connection((host, port), timeout=5):
+                pass
+            label = 'TrueNAS' if api_name == 'truenas' else 'SSH server'
+            return jsonify({'success': True, 'message': f'{label} is reachable'})
+        except OSError:
+            return jsonify({'success': False, 'error': f'{api_name} connection failed'}), 502
     if api_name == 'composio':
         try:
             from composio import Composio
@@ -2227,6 +2550,8 @@ def registry_api_test(api_name):
         pw = _vg('affine/password')
         if not domain or not email or not pw:
             return jsonify({'success': False, 'error': 'Domain, E-Mail und Passwort eintragen.'})
+        if not _valid_service_url(domain, allow_local_http=True):
+            return jsonify({'success': False, 'error': 'Ungültige AFFiNE-URL.'}), 400
         try:
             s = requests.Session()
             r = s.post(
@@ -2237,6 +2562,7 @@ def registry_api_test(api_name):
                 },
                 headers={'Content-Type': 'application/json'},
                 timeout=15,
+                allow_redirects=False,
             )
             if r.status_code == 200:
                 return jsonify({'success': True, 'message': 'AFFiNE-Verbindung erfolgreich!'})
@@ -2244,7 +2570,51 @@ def registry_api_test(api_name):
         except Exception as exc:
             logger.warning('AFFiNE connection test failed: %s', type(exc).__name__)
             return jsonify({'success': False, 'error': 'AFFiNE nicht erreichbar.'}), 502
-    return jsonify({'success': False, 'error': 'Not implemented'}), 501
+    if api_name == 'spotify':
+        client_id = _vg('spotify/client_id')
+        client_secret = _vg('spotify/client_secret')
+        refresh_token = _vg('spotify/refresh_token')
+        if not client_id or not client_secret or not refresh_token:
+            return jsonify({'success': False, 'error': 'Spotify credentials are required'}), 400
+        auth_header = base64.b64encode(f'{client_id}:{client_secret}'.encode()).decode()
+        try:
+            token_response = requests.post(
+                'https://accounts.spotify.com/api/token',
+                data={'grant_type': 'refresh_token', 'refresh_token': refresh_token},
+                headers={'Authorization': f'Basic {auth_header}'},
+                timeout=10,
+                allow_redirects=False,
+            )
+            token_response.raise_for_status()
+            access_token = str(token_response.json().get('access_token') or '')
+            if not access_token:
+                raise ValueError('missing access token')
+            profile_response = requests.get(
+                'https://api.spotify.com/v1/me',
+                headers={'Authorization': f'Bearer {access_token}'},
+                timeout=10,
+                allow_redirects=False,
+            )
+            profile_response.raise_for_status()
+            return jsonify({'success': True, 'message': 'Spotify connection successful'})
+        except (requests.RequestException, ValueError, json.JSONDecodeError):
+            return jsonify({'success': False, 'error': 'Spotify connection failed'}), 502
+    if api_name == 'discord':
+        bot_token = _vg('discord/bot_token')
+        if not bot_token:
+            return jsonify({'success': False, 'error': 'Discord bot token is required'}), 400
+        try:
+            response = requests.get(
+                'https://discord.com/api/v10/users/@me',
+                headers={'Authorization': f'Bot {bot_token}'},
+                timeout=10,
+                allow_redirects=False,
+            )
+            response.raise_for_status()
+            return jsonify({'success': True, 'message': 'Discord connection successful'})
+        except requests.RequestException:
+            return jsonify({'success': False, 'error': 'Discord connection failed'}), 502
+    return jsonify({'success': False, 'error': 'Connection test is not available'}), 501
 
 
 @app.route('/api/email-indexing/start', methods=['POST'])
@@ -2602,22 +2972,42 @@ def email_folders():
 
 
 # ── /api/email/accounts ──────────────────────────────────
+_EMAIL_ACCOUNT_FIELDS = (
+    'imap_server',
+    'imap_port',
+    'imap_user',
+    'imap_password',
+    'smtp_server',
+    'smtp_port',
+    'smtp_user',
+    'smtp_password',
+)
+_EMAIL_ACCOUNT_SECRET_FIELDS = {'imap_password', 'smtp_password'}
+_EMAIL_ACCOUNT_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$')
+
+
+def _email_account_prefix(name: str) -> str:
+    return 'email' if name == 'default' else f'email/accounts/{name}'
+
+
 @app.route('/api/email/accounts', methods=['GET', 'POST'])
 def api_email_accounts():
     if request.method == 'GET':
         try:
             default = {
                 'imap_server': _vg('email/imap_server') or '',
+                'imap_port': _vg('email/imap_port') or '993',
                 'imap_user': _vg('email/imap_user') or '',
                 'smtp_server': _vg('email/smtp_server') or '',
+                'smtp_port': _vg('email/smtp_port') or '587',
                 'smtp_user': _vg('email/smtp_user') or '',
             }
-            result = {'default': default} if default.get('imap_server') else {}
+            result = {'default': default} if default.get('imap_server') or default.get('smtp_server') else {}
             v = load_vault(VAULT_FILE) if VAULT_FILE.exists() else {}
             for k in v:
                 if k.startswith('email/accounts/') and k.endswith('/imap_server'):
                     name = k.split('/')[2]
-                    if name not in result:
+                    if _EMAIL_ACCOUNT_NAME_RE.fullmatch(name) and name not in result:
                         pref = f'email/accounts/{name}'
                         result[name] = {
                             'imap_server': v.get(f'{pref}/imap_server', ''),
@@ -2630,39 +3020,47 @@ def api_email_accounts():
             return jsonify({'success': True, 'accounts': result})
         except Exception:
             return jsonify({'success': False, 'error': 'Request failed'})
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error': 'Request body must be an object'}), 400
     name = (data.get('name') or '').strip()
-    if not name:
-        return jsonify({'success': False, 'error': 'Konto-Name erforderlich'}), 400
-    for key in [
-        'imap_server',
-        'imap_port',
-        'imap_user',
-        'imap_password',
-        'smtp_server',
-        'smtp_port',
-        'smtp_user',
-        'smtp_password',
-    ]:
-        if key in data and data[key]:
-            _vs(f'email/accounts/{name}/{key}', str(data[key]))
+    if not _EMAIL_ACCOUNT_NAME_RE.fullmatch(name):
+        return jsonify({'success': False, 'error': 'Ungültiger Konto-Name'}), 400
+    unknown = sorted(set(data) - {'name', *_EMAIL_ACCOUNT_FIELDS})
+    if unknown:
+        return jsonify({'success': False, 'error': f'Unknown fields: {", ".join(unknown)}'}), 400
+    for port_field in ('imap_port', 'smtp_port'):
+        if data.get(port_field) not in (None, ''):
+            try:
+                port = int(data[port_field])
+            except (TypeError, ValueError):
+                return jsonify({'success': False, 'error': f'Invalid {port_field}'}), 400
+            if not 1 <= port <= 65535:
+                return jsonify({'success': False, 'error': f'Invalid {port_field}'}), 400
+
+    prefix = _email_account_prefix(name)
+    for key in _EMAIL_ACCOUNT_FIELDS:
+        if key not in data:
+            continue
+        value = str(data[key] or '').strip()
+        if key in _EMAIL_ACCOUNT_SECRET_FIELDS and not value:
+            continue
+        vault_key = f'{prefix}/{key}'
+        if value:
+            vault_set(vault_key, value)
+        else:
+            vault_delete(vault_key)
     return jsonify({'success': True, 'account': name})
 
 
 @app.route('/api/email/accounts/<name>', methods=['DELETE'])
 def api_email_account_delete(name):
+    if not _EMAIL_ACCOUNT_NAME_RE.fullmatch(name):
+        return jsonify({'success': False, 'error': 'Ungültiger Konto-Name'}), 400
     try:
-        for key in [
-            'imap_server',
-            'imap_port',
-            'imap_user',
-            'imap_password',
-            'smtp_server',
-            'smtp_port',
-            'smtp_user',
-            'smtp_password',
-        ]:
-            vault_delete(f'email/accounts/{name}/{key}')
+        prefix = _email_account_prefix(name)
+        for key in _EMAIL_ACCOUNT_FIELDS:
+            vault_delete(f'{prefix}/{key}')
         return jsonify({'success': True})
     except Exception:
         return jsonify({'success': False, 'error': 'Request failed'})

@@ -225,7 +225,7 @@ def parse_text(filepath: Path) -> ParsedDocument:
     )
 
 
-def parse_document(filepath: Path, output_dir: Path | None = None) -> Path:
+def parse_document(filepath: Path, output_dir: Path | None = None, relative_base: Path | None = None) -> Path:
     """
     Parse a document and save as Markdown.
     Returns path to the parsed Markdown file.
@@ -245,7 +245,10 @@ def parse_document(filepath: Path, output_dir: Path | None = None) -> Path:
 
     # Determine output path
     if output_dir:
-        rel_path = filepath.relative_to(filepath.anchor) if filepath.is_absolute() else filepath
+        if relative_base is not None:
+            rel_path = filepath.relative_to(relative_base)
+        else:
+            rel_path = filepath.relative_to(filepath.anchor) if filepath.is_absolute() else filepath
         output_path = output_dir / rel_path.with_suffix('.md')
     else:
         output_path = filepath.with_suffix('.md')

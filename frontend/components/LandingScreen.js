@@ -132,7 +132,7 @@ export default function LandingScreen({
               <div><strong>{t('files')}:</strong> {indexingDetails.processedFiles}/{indexingDetails.totalFiles}</div>
               <div><strong>{t('speed')}:</strong> {indexingDetails.processingSpeed} files/s</div>
               <div><strong>{t('elapsed')}:</strong> {indexingDetails.elapsedTime}s</div>
-              <div><strong>{t('chunks')}:</strong> ~{indexingDetails.chunksCreated}</div>
+              <div><strong>{t('chunks')}:</strong> {indexingDetails.chunksCreated}</div>
             </div>
             {indexingDetails.lastIndexingEnd > 0 && (
               <div style={{marginTop: '0.5rem', padding: '0.5rem', background: 'var(--background)', borderRadius: '4px', fontSize: '0.7rem'}}>

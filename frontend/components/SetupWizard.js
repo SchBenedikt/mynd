@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import './setup/SetupWizard.css';
 import { apiFetch } from '../lib/api';
@@ -17,6 +17,8 @@ export default function SetupWizard() {
   const [setupSubmitting, setSetupSubmitting] = useState(false);
   const [setupMessage, setSetupMessage] = useState('');
   const [setupError, setSetupError] = useState('');
+  const [setupStatusLoading, setSetupStatusLoading] = useState(true);
+  const [setupStatusError, setSetupStatusError] = useState('');
   const [setupComplete, setSetupComplete] = useState(false);
   const [setupFlowStarted, setSetupFlowStarted] = useState(false);
   const [animDir, setAnimDir] = useState('next');
@@ -37,24 +39,36 @@ export default function SetupWizard() {
 
   const isEmbed = (m) => ['embed','embedding','all-minilm','bge','mxbai','snowflake-arctic-embed','nomic-embed','gte','e5','jina-embeddings','paraphrase-multilingual'].some((h) => String(m||'').toLowerCase().includes(h));
 
-  useEffect(() => {
-    apiFetch('/api/setup/status')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data && data.success) {
-          setSetupStatus(data);
-          if (data.needs_setup) {
-            setSetupFlowStarted(true);
-            try { setSetupPath(sessionStorage.getItem(SETUP_FLOW_KEY) || ''); } catch (e) {}
-            setSetupForm((cur) => ({ ...cur, adminName: cur.adminName || data.admin_user || 'admin' }));
-            setNextcloudForm((cur) => ({ ...cur, nextcloudUrl: cur.nextcloudUrl || data.nextcloud_url || '' }));
-          } else {
-            setSetupComplete(true);
-          }
-        }
-      })
-      .catch((e) => { console.warn('Setup status:', e?.message); setSetupComplete(true); });
+  const loadSetupStatus = useCallback(async () => {
+    setSetupStatusLoading(true);
+    setSetupStatusError('');
+    try {
+      const response = await apiFetch('/api/setup/status');
+      const data = await response.json();
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Status konnte nicht geladen werden');
+      setSetupStatus(data);
+      if (data.needs_setup) {
+        setSetupComplete(false);
+        setSetupFlowStarted(true);
+        try { setSetupPath(sessionStorage.getItem(SETUP_FLOW_KEY) || ''); } catch (e) {}
+        setSetupForm((cur) => ({ ...cur, adminName: cur.adminName || data.admin_user || 'admin' }));
+        setNextcloudForm((cur) => ({ ...cur, nextcloudUrl: cur.nextcloudUrl || data.nextcloud_url || '' }));
+      } else {
+        setSetupFlowStarted(false);
+        setSetupComplete(true);
+        try { sessionStorage.removeItem(SETUP_FLOW_KEY); } catch (e) {}
+      }
+    } catch (error) {
+      console.warn('Setup status:', error?.message);
+      setSetupStatus(null);
+      setSetupComplete(false);
+      setSetupStatusError('Der Einrichtungsstatus ist nicht erreichbar. Prüfe, ob das MYND-Backend läuft, und versuche es erneut.');
+    } finally {
+      setSetupStatusLoading(false);
+    }
   }, []);
+
+  useEffect(() => { loadSetupStatus(); }, [loadSetupStatus]);
 
   useEffect(() => {
     if (setupMode === 'ai' && aiForm.provider === 'ollama' && aiModels.length === 0) {
@@ -220,7 +234,7 @@ export default function SetupWizard() {
     review: 'Überprüfe deine Einstellungen bevor du die Einrichtung abschließt.',
   };
 
-  const setupPanelVisible = !setupAlreadyFinished && !setupComplete && Boolean(setupMode);
+  const setupPanelVisible = !setupStatusLoading && !setupStatusError && !setupAlreadyFinished && !setupComplete && Boolean(setupMode);
 
   const stepIndex = { choose: 0, admin: 1, nextcloud: 1, ai: 2, review: 3 }[setupMode] || 0;
   const isPrevStep = (idx) => idx < stepIndex;
@@ -249,7 +263,21 @@ export default function SetupWizard() {
             </div>
 
             <div className={`setup-anim-wrap ${animDir}`} key={setupMode}>
-              {setupComplete ? (
+              {setupStatusLoading ? (
+                <div style={{textAlign:'center',padding:'36px 0'}} role="status" aria-live="polite">
+                  <div className="setup-complete-badge setup-status-loading">Prüfe Systemstatus</div>
+                  <h2 className="setup-title" style={{marginBottom:'8px'}}>MYND wird vorbereitet</h2>
+                  <p className="setup-subtitle">Die vorhandene Konfiguration wird geladen.</p>
+                </div>
+              ) : setupStatusError ? (
+                <div style={{textAlign:'center',padding:'36px 0'}} role="alert">
+                  <h2 className="setup-title" style={{marginBottom:'8px'}}>Backend nicht erreichbar</h2>
+                  <div className="setup-message error">{setupStatusError}</div>
+                  <div className="setup-complete-actions">
+                    <button type="button" className="btn btn-primary" onClick={loadSetupStatus}>Erneut prüfen</button>
+                  </div>
+                </div>
+              ) : setupComplete ? (
                 <div style={{textAlign:'center',padding:'24px 0'}}>
                   <div className="setup-complete-badge">Abgeschlossen</div>
                   <h2 className="setup-title" style={{marginBottom:'8px'}}>MYND ist jetzt eingerichtet</h2>
@@ -264,7 +292,7 @@ export default function SetupWizard() {
                     </p>
                   </div>
                   <div className="setup-complete-actions" style={{marginTop:'24px'}}>
-                    <button type="button" className="btn btn-primary" onClick={() => window.location.href = '/'}>Startseite öffnen</button>
+                    <button type="button" className="btn btn-primary" onClick={() => router.replace('/')}>Startseite öffnen</button>
                   </div>
                 </div>
               ) : setupPanelVisible ? (

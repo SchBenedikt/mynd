@@ -14,9 +14,11 @@ import sys
 import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import quote, unquote, urlparse
 
 import requests
+from defusedxml import ElementTree
 from requests.auth import HTTPBasicAuth
 
 # Add project root to path
@@ -71,7 +73,7 @@ class NextcloudWebDAVClient:
         self.session.headers.update({'Depth': '1'})
 
     def _get_webdav_url(self, path: str = "") -> str:
-        path = path.lstrip('/')
+        path = quote(path.lstrip('/'), safe='/')
         if self.webdav_path:
             return f"{self.base_url}{self.webdav_path}/{path}"
         return f"{self.base_url}/{path}"
@@ -81,12 +83,11 @@ class NextcloudWebDAVClient:
         url = self._get_webdav_url(path)
         headers = {'Depth': '1'}
 
-        response = self.session.request('PROPFIND', url, headers=headers)
+        response = self.session.request('PROPFIND', url, headers=headers, timeout=60)
         response.raise_for_status()
 
         # Parse XML response
-        import xml.etree.ElementTree as ET
-        root = ET.fromstring(response.content)
+        root = ElementTree.fromstring(response.content)
 
         files = []
         ns = {'d': 'DAV:'}
@@ -96,16 +97,22 @@ class NextcloudWebDAVClient:
             if href_elem is None:
                 continue
 
-            href = href_elem.text
+            href = href_elem.text or ''
+            href_path = unquote(urlparse(href).path)
             # Extract relative path from href
             if self.webdav_path:
-                prefix = f"{self.webdav_path}/"
-                if href.startswith(prefix):
-                    rel_path = href[len(prefix):]
+                prefix = f"{unquote(self.webdav_path)}/"
+                if href_path.startswith(prefix):
+                    rel_path = href_path[len(prefix):]
                 else:
                     continue
             else:
-                rel_path = href.lstrip('/')
+                rel_path = href_path.lstrip('/')
+
+            relative_parts = PurePosixPath(rel_path).parts
+            if not relative_parts or any(part in ('', '.', '..') for part in relative_parts):
+                continue
+            rel_path = PurePosixPath(*relative_parts).as_posix()
 
             # Skip the folder itself
             if not rel_path or rel_path == path:
@@ -137,7 +144,7 @@ class NextcloudWebDAVClient:
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            with self.session.get(url, stream=True) as response:
+            with self.session.get(url, stream=True, timeout=120) as response:
                 response.raise_for_status()
                 with open(local_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
@@ -152,7 +159,7 @@ class NextcloudWebDAVClient:
         url = self._get_webdav_url(rel_path)
         try:
             # Try to get ETag first (often contains hash)
-            response = self.session.head(url)
+            response = self.session.head(url, timeout=30)
             response.raise_for_status()
             etag = response.headers.get('ETag', '').strip('"')
             if etag and len(etag) >= 32:  # Likely a hash
@@ -181,31 +188,50 @@ class NextcloudSyncer:
         state_file: Path,
         allowed_extensions: set[str],
         sync_folders: list[str],
+        parsed_dir: Path | None = None,
     ):
         self.client = client
         self.local_dir = local_dir
         self.state_file = state_file
         self.allowed_extensions = allowed_extensions
         self.sync_folders = sync_folders
+        self.parsed_dir = parsed_dir
         self.state = SyncState.load(state_file)
         self.stats = {'downloaded': 0, 'skipped': 0, 'errors': 0, 'parsed': 0}
 
+    def _safe_local_path(self, rel_path: str) -> Path:
+        root = self.local_dir.resolve()
+        candidate = (root / rel_path).resolve()
+        if not candidate.is_relative_to(root):
+            raise ValueError('Remote path escapes the local synchronization directory')
+        return candidate
+
     def _should_sync(self, rel_path: str) -> bool:
         """Check if file should be synced based on extension and folder."""
-        path = Path(rel_path)
+        path = PurePosixPath(rel_path)
         if path.suffix.lower() not in self.allowed_extensions:
             return False
 
         if self.sync_folders:
-            folder = path.parts[0] if path.parts else ""
-            if folder not in self.sync_folders:
+            normalized_path = path.as_posix().strip('/')
+            normalized_folders = [
+                PurePosixPath(folder).as_posix().strip('/') if str(folder).strip('/') else ''
+                for folder in self.sync_folders
+            ]
+            if not any(
+                not folder or normalized_path == folder or normalized_path.startswith(f'{folder}/')
+                for folder in normalized_folders
+            ):
                 return False
 
         return True
 
     def _is_file_changed(self, rel_path: str, remote_info: dict) -> bool:
         """Check if file has changed since last sync."""
-        local_path = self.local_dir / rel_path
+        try:
+            local_path = self._safe_local_path(rel_path)
+        except ValueError:
+            return True
         if not local_path.exists():
             return True
 
@@ -252,7 +278,11 @@ class NextcloudSyncer:
                 synced_files.extend(self.sync_folder(rel_path, cancel_event))
             elif self._should_sync(rel_path):
                 if self._is_file_changed(rel_path, item):
-                    local_path = self.local_dir / rel_path
+                    try:
+                        local_path = self._safe_local_path(rel_path)
+                    except ValueError:
+                        self.stats['errors'] += 1
+                        continue
                     if self.client.download_file(rel_path, local_path):
                         file_hash = compute_sha256(local_path)
                         self.state.update_file_state(rel_path, {
@@ -275,6 +305,13 @@ class NextcloudSyncer:
                 else:
                     self.stats['skipped'] += 1
                     logger.debug(f"Skipped (unchanged): {rel_path}")
+                    state_entry = self.state.get_file_state(rel_path) or {}
+                    synced_files.append({
+                        'path': rel_path,
+                        'local_path': str(self._safe_local_path(rel_path)),
+                        'hash': state_entry.get('hash'),
+                        'action': 'skipped',
+                    })
 
         return synced_files
 
@@ -295,10 +332,11 @@ class NextcloudSyncer:
         if cancel_event and cancel_event.is_set():
             return {'stats': self.stats, 'files': all_synced}
 
-        # Clean up deleted files
-        self._cleanup_deleted(all_synced)
+        # Never interpret a partial/failed listing as remote deletion.
+        if self.stats['errors'] == 0:
+            self._cleanup_deleted(all_synced)
 
-        self.state.last_full_sync = datetime.now().isoformat()
+        self.state.last_full_sync = datetime.now().isoformat() if self.stats['errors'] == 0 else self.state.last_full_sync
         self.state.save(self.state_file)
 
         logger.info(f"Sync complete: {self.stats}")
@@ -314,8 +352,14 @@ class NextcloudSyncer:
 
         for deleted_path in tracked_paths - current_paths:
             if self._should_sync(deleted_path):
-                local_path = self.local_dir / deleted_path
-                parsed_path = Path(str(local_path).replace(str(self.local_dir), str(self.local_dir.parent / 'parsed_docs'))).with_suffix('.md')
+                try:
+                    local_path = self._safe_local_path(deleted_path)
+                except ValueError:
+                    logger.warning('Ignored unsafe path in sync state: %s', deleted_path)
+                    self.state.remove_file_state(deleted_path)
+                    continue
+                parsed_root = self.parsed_dir or (self.local_dir.parent / 'parsed_docs')
+                parsed_path = (parsed_root / Path(deleted_path)).with_suffix('.md')
 
                 if local_path.exists():
                     local_path.unlink()

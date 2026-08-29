@@ -18,8 +18,8 @@ def _find_ip():
     for k, val in v.items():
         if k.endswith('/ip') and 'truenas' in k.lower():
             ip = val.strip()
-            user = v.get(f'truenas/{ip}/user', 'root')
-            pw = v.get(f'truenas/{ip}/password', '')
+            user = v.get(f'truenas/{ip}/user') or v.get('truenas/user') or 'root'
+            pw = v.get(f'truenas/{ip}/password') or v.get('truenas/password') or ''
             return ip, user, pw
     return None, None, None
 
